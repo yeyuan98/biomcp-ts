@@ -279,53 +279,77 @@ Axum server at `/mcp` (Streamable HTTP). Health probes: `GET /health`, `GET /rea
 - `GET /api/v2/expression/medianGeneExpression?gencodeId=...&datasetId=gtex_v8` - Median expression
 
 #### GWAS Catalog
-- `GET /singleNucleotidePolymorphisms/{rsid}/associations?projection=associationByStudy&page=0&size=<n>` - Associations by rsID
-- `GET /studies/{study_id}` - Study details
+- `GET /singleNucleotidePolymorphisms/{rsid}/associations?projection=associationByStudy&page=0&size=<n>` - Associations by rsID (limit 1-200)
+- `GET /singleNucleotidePolymorphisms/search/findByGene?geneName=<GENE>&page=0&size=<n>` - SNPs by gene symbol
+- `GET /singleNucleotidePolymorphisms/search/findByDiseaseTrait?diseaseTrait=<query>&page=0&size=<n>` - SNPs by trait
+- `GET /studies/search/findByDiseaseTrait?diseaseTrait=<query>&page=0&size=<n>` - Studies by trait
+- `GET /associations/search/findByStudyAccessionId?studyAccessionId=<GCST_ID>&projection=associationByStudy&page=0&size=<n>` - Associations by study (with fallback to `GET /studies/{study_id}/associations`)
+- **Note**: All requests use `CacheMode::NoStore` due to cache decode failures on stale bodies
 
 #### HPA
-- `GET /{ensembl_id}.xml` - Protein expression data (XML)
+- `GET /{ensembl_id}.xml` - Protein expression data (XML, requires ENSG* Ensembl gene ID)
+- Parses: tissueExpression (IHC), cellExpression (ICC/IF), rnaExpression (RNAseq consensusTissue)
+- Extracts: tissue levels, subcellular locations (main/additional), reliability, protein/RNA summaries
+- Rejects HTML content-type responses
 
 #### HPO
 - `GET /terms/{hpo_id}` - Term lookup (e.g., HP:0001653)
-- `GET /search?q=<query>` - Search terms
+- `GET /search?q=<query>` - Search terms (max 20 results)
+- `resolve_terms(ids)` - Batch term resolution (concurrent, deduped, max 20)
+- IDs normalized: uppercase, underscores replaced with colons, must start with `HP:`
 
 #### InterPro
-- `GET /entry/interpro/{accession}` - Entry details
-- `GET /entry/interpro/{accession}/protein?taxonomy=human&page_size=...` - Proteins
+- `GET /entry/interpro/protein/uniprot/{accession}/?page_size=<n>` - Domains by UniProt accession (limit 1-25)
 
 #### KEGG
-- `GET /list/pathway/hsa` - Human pathways
-- `GET /find/{query}` - Search
-- `GET /conv/genes/ncbi-geneid:{id}` - ID conversion
+- `GET /find/pathway/{query}` - Search pathways (returns TSV, filters to human `hsa*` IDs only, dedupes with reference map `map*` normalization)
+- `GET /get/{pathway_id}` - Get pathway record (flat text format: ENTRY, NAME, DESCRIPTION, GENE fields, terminated by `///`)
+- **Note**: Responses are plain text (not JSON), parsed with custom flat-file parser
 
 #### LitSense2
-- `GET /search?q=<query>&limit=...` - Semantic article search
+- `GET /sentences/?query=<query>&rerank=true` - Sentence-level semantic search (max 4096 char query)
+- `GET /passages/?query=<query>&rerank=true` - Paragraph-level semantic search
+- Response: JSON array of hits with pmid, pmcid, text, score, section, annotations
 
 #### MedlinePlus
-- `GET /medlineplus/search?query=<query>&count=...` - Consumer health topic search
-- `GET /medlineplus/connect/{code}` - Topic by code
+- `GET /ws/query?db=healthTopics&term=<query>&retmax=<n>` - Search consumer health topics (retmax 1-50)
+- Response: XML with `<document url="..."><content name="title">...<content name="FullSummary">...`
+- Strips HTML tags, decodes HTML entities from response
 
 #### Monarch Initiative
-- `GET /api/v3/entity/{id}` - Entity lookup
-- `GET /api/v3/disease/{id}` - Disease details
-- `GET /api/v3/gene/{id}` - Gene details
+- `GET /v3/api/association?object=<disease_id>&subject_category=biolink:Gene&limit=<n>` - Disease-gene associations (MONDO/DOID IDs)
+- `GET /v3/api/association?subject=<disease_id>&object_category=biolink:PhenotypicFeature&limit=<n>` - Disease-phenotype associations (filters to HP:* IDs)
+- `GET /v3/api/association?object=<disease_id>&subject_category=biolink:Genotype&limit=<n>` - Disease models
+- `GET /v3/api/semsim/search/{hpo_terms}/Human%20Diseases?limit=<n>` - Phenotype similarity search (comma-separated HPO terms, max 50)
+- Response: JSON with `total` and `items[]` array, each item has subject/object/predicate/primary_knowledge_source
 
 #### MyChem.info
-- `GET /query?q=<query>&fields=...&size=...` - Drug search
-- `GET /drug/{id}` - Drug by ID
+- `GET /query?q=<query>&fields=...&size=1..50&from=<offset>&` - Drug search (BioThings, 10k result window)
+- Field sets: `MYCHEM_FIELDS_SEARCH` (DrugBank, ChEMBL, GtoPDB, UNII, NDC, ChEBI, OpenFDA)
+- Field sets: `MYCHEM_FIELDS_GET` (adds DrugCentral approval/indication, DrugBank synonyms/interactions)
+- Aggregates: DrugBank (id, name, synonyms, drug_interactions), ChEMBL (mechanisms, ATC), DrugCentral (approval, indication), GtoPDB (targets), NDC (pharm_classes), UNII, ChEBI, OpenFDA (generic/brand names)
 
 #### MyDisease.info
-- `GET /query?q=<query>&fields=...&size=...` - Disease search
-- `GET /query?q={name}&fields=...` - Disease by name
-- `GET /disease/{id}` - Disease by ID
+- `GET /query?q=<query>&fields=...&size=...&from=...` - Disease search (BioThings, 10k result window)
+  - Scoped filters: `--source` (mondo/doid/mesh), `--inheritance`, `--phenotype`, `--onset`
+  - Crosswalk lookup: `lookup_disease_by_xref(kind, value)` for mesh/omim/icd10cm
+- `GET /disease/{id}?fields=...` - Disease by ID (MONDO/DOID)
+- Field sets: `MYDISEASE_SEARCH_FIELDS` (mondo, disease_ontology, hpo), `MYDISEASE_GET_FIELDS` (adds umls, disgenet)
+- HPO fields: phenotype_related_to_disease (hpo_id, evidence, hp_freq), inheritance (hpo_id, hpo_name), clinical_course (hpo_name)
 
 #### MyGene.info
-- `GET /query?q=<query>&fields=...&size=...&from=...` - Gene search
-- `GET /gene/{id}` - Gene by ID
+- `GET /query?q=<query>&species=human&fields=...&size=...&from=...&chr=<chr>` - Gene search (10k result window, optional chromosome filter)
+- `GET /query?q=symbol:"<SYMBOL>"&species=human&fields=...&size=1` - Gene by symbol (single hit)
+- `POST /gene` (form: ids, fields=symbol, species=human) - Batch Entrez ID to symbol lookup (max 200 IDs)
+- Fields: symbol, name, summary, alias, type_of_gene, ensembl (gene/transcript/protein), entrezgene, genomic_pos (chr/start/end/strand), MIM, uniprot (prefers Swiss-Prot over TrEMBL), pathway.kegg
+- `resolve_uniprot_accession(symbol)` - Resolves gene symbol to UniProt accession
 
 #### MyVariant.info
-- `GET /query?q=<query>&fields=...&size=...` - Variant search
-- `GET /variant/{id}` - Variant by ID
+- `GET /query?q=<query>&fields=...&size=...&from=...` - Variant search (BioThings, 10k result window)
+- `GET /variant/{id}?fields=...` - Variant by ID (hgvs, rsid, chr:pos)
+- **Rich search params** (`VariantSearchParams`): gene, hgvsp, hgvsc, rsid, protein_alias (residue+position), significance, max_frequency, min_cadd, consequence, review_status, population, revel_min, gerp_min, tumor_site, condition, impact, lof, has, missing, therapy
+- **Filter normalizations**: significance (11 values + aliases like "VUS"->"uncertain_significance"), consequence (15 SO terms + aliases like "non-synonymous"->"missense_variant"), population (8 gnomad groups), impact (SnpEff: HIGH/MODERATE/LOW/MODIFIER), review_status (0-4 stars)
+- **Extensive fields** (`MYVARIANT_FIELDS_GET`): cadd, clinvar (rcv), dbnsfp (genename/hgvsp/hgvsc/sift/polyphen2/revel/alphamissense/clinpred/metarnn/bayesdel/phylop/phastcons/gerp), dbsnp, gnomad_exome (af + 19 subpopulations), gnomad (exomes/genomes), exac, cosmic (cosmic_id/mut_freq/tumor_site/mut_nt), cgi, civic
 
 #### NCBI E-utilities (efetch)
 - `GET /efetch?db=pubmed&id=...&rettype=xml&retmode=` - Fetch article XML
@@ -335,8 +359,10 @@ Axum server at `/mcp` (Streamable HTTP). Health probes: `GET /health`, `GET /rea
 - `GET /?ids=<pmid>&format=json` - PMID to PMCID conversion
 
 #### NCI CTS
-- `GET /trials?...` - Search trials
+- `GET /trials?...` - Search trials (NCI API v2)
 - `GET /trials/{nct_id}` - Get trial by NCT ID
+- **Auth**: Optional `NCI_API_KEY` via `X-API-KEY` header; if missing, returns `ApiKeyRequired` error
+- Note: Source is referred to as "nci" internally
 
 #### NIH Reporter
 - `GET /projects?query.term=...&...` - Search projects
@@ -348,7 +374,7 @@ Axum server at `/mcp` (Streamable HTTP). Health probes: `GET /health`, `GET /rea
 
 #### OncoKB
 - `GET /annotate/mutations/byProteinChange` - Variant annotation
-- **Auth**: `oncokb_token` -> Authorization header
+- **Auth**: `ONCOKB_TOKEN` env var -> `Authorization: Bearer` header; if missing, returns `ApiKeyRequired` error
 
 #### OpenFDA FAERS
 - `GET /drug/event.json?search=<query>&limit=...&skip=...` - Adverse event search
@@ -430,8 +456,9 @@ Axum server at `/mcp` (Streamable HTTP). Health probes: `GET /health`, `GET /rea
 | `ALPHAGENOME_API_KEY` | AlphaGenome | Required for variant prediction |
 | `DISGENET_API_KEY` | DisGeNET | Required for gene-disease associations |
 | `UMLS_API_KEY` | UMLS | Required for concept search |
-| `oncokb_token` | OncoKB | Optional, enables oncology evidence |
-| `NCBI_API_KEY` | NCBI (PubMed, PubTator) | Optional, increases rate limit (3->10 req/s) |
+| `ONCOKB_TOKEN` | OncoKB | Optional, enables oncology evidence |
+| `NCI_API_KEY` | NCI CTS | Optional, via `X-API-KEY` header |
+| `NCBI_API_KEY` | NCBI (PubMed, PubTator, efetch, ID Conv, PMC OA) | Optional, increases rate limit (3->10 req/s) |
 | `S2_API_KEY` | Semantic Scholar | Optional, increases rate limit |
 | `OPENFDA_API_KEY` | OpenFDA | Optional, increases rate limit |
 
