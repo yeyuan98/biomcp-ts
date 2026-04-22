@@ -99,13 +99,19 @@ export function registerUtilityTools(server: McpServer): void {
       };
       
       const toolList = [
-        'gene_search', 'gene_get', 'gene_pathways', 'gene_diseases',
+        'gene_search', 'gene_get', 'gene_pathways', 'gene_diseases', 'gene_go_enrichment',
+        'gene_interactions', 'gene_expression', 'gene_constraint', 'gene_druggability', 'gene_clingen',
         'variant_search', 'variant_get',
         'drug_search', 'drug_get',
         'disease_search', 'disease_get',
         'article_search', 'article_get',
         'trial_search', 'trial_get',
         'pathway_search', 'pathway_get',
+        'gene_drugs', 'gene_trials', 'gene_pathways', 'gene_articles',
+        'variant_trials',
+        'drug_genes', 'drug_trials', 'drug_adverse_events',
+        'disease_drugs', 'disease_genes', 'disease_trials',
+        'gene_enrich', 'discover', 'search_all', 'batch_get',
         'biomcp_health', 'biomcp_list', 'version',
       ];
       
