@@ -40,13 +40,15 @@ export interface ConnectionOptions {
   handling?: ConnectionHandling;
 }
 
-export interface IConnection<TRequest, TResponse> {
+export interface IConnection<TRequest = string, TResponse = unknown> {
   readonly sourceId: string;
   readonly protocol: ProtocolType;
   effectiveRateLimitMs: number;
   
-  request(req: TRequest): Promise<TResponse>;
-  batch(requests: TRequest[]): Promise<TResponse[]>;
+  request(req: TRequest, variables?: Record<string, unknown>): Promise<TResponse>;
+  batch?(requests: TRequest[]): Promise<TResponse[]>;
   healthCheck(): Promise<boolean>;
   close(): void;
 }
+
+export type AnyConnection = IConnection;

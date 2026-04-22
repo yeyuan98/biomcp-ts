@@ -28,13 +28,18 @@ export class GraphQLConnection implements IConnection<string, unknown> {
     );
   }
   
-  async request(query: string): Promise<unknown> {
+  async request(query: string, variables?: Record<string, unknown>): Promise<unknown> {
     await this.rateLimiter.acquire();
+    
+    const body: Record<string, unknown> = { query };
+    if (variables) {
+      body.variables = variables;
+    }
     
     const response = await fetch(this.options.baseUrl, {
       method: 'POST',
       headers: this.buildHeaders(),
-      body: JSON.stringify({ query }),
+      body: JSON.stringify(body),
     });
     
     if (!response.ok) {

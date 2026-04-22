@@ -1,12 +1,13 @@
 import { IConnection, ConnectionOptions, ProtocolType } from './base.js';
 import { RestConnection } from './rest.js';
 import { GraphQLConnection } from './graphql.js';
+import { GrpcConnection } from './grpc.js';
 import { getSourceConfig } from './registry.js';
 
 export class ConnectionManager {
-  private connections = new Map<string, IConnection<string, unknown>>();
+  private connections = new Map<string, IConnection<any, any>>();
   
-  getConnection(sourceId: string): IConnection<string, unknown> {
+  getConnection(sourceId: string): IConnection<any, any> {
     if (this.connections.has(sourceId)) {
       return this.connections.get(sourceId)!;
     }
@@ -18,7 +19,7 @@ export class ConnectionManager {
     return connection;
   }
   
-  createConnection(config: ConnectionOptions): IConnection<string, unknown> {
+  createConnection(config: ConnectionOptions): IConnection<any, any> {
     switch (config.protocol) {
       case 'rest':
         return new RestConnection(config);
@@ -27,7 +28,7 @@ export class ConnectionManager {
         return new GraphQLConnection(config, config.auth);
       
       case 'grpc':
-        throw new Error('gRPC connection not yet implemented');
+        return new GrpcConnection(config);
       
       case 'local-file':
         throw new Error('Local file connection not yet implemented');
