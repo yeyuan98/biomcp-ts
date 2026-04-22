@@ -1,4 +1,5 @@
 import { connectionManager } from '../connections/manager.js';
+import { fetchWithTimeout } from '../connections/fetch-utils.js';
 
 const SECTION_TIMEOUT_MS = 8000;
 
@@ -111,23 +112,6 @@ const VARIANT_SEARCH_FILTERS = [
 ] as const;
 
 const VARIANT_GET_SECTIONS = ['core', 'frequency', 'predictions', 'clinical', 'alphagenome'] as const;
-
-async function fetchWithTimeout<T>(fn: () => Promise<T>, timeoutMs: number): Promise<{ data?: T; error?: string }> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const data = await fn();
-    return { data };
-  } catch (e) {
-    const error = e instanceof Error ? e.message : String(e);
-    if (error.includes('abort') || error.includes('canceled')) {
-      return { error: `Timeout after ${timeoutMs}ms` };
-    }
-    return { error };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
 
 export async function variantSearch(
   options: VariantSearchOptions
@@ -575,7 +559,7 @@ interface OncoKbResponse {
   }>;
 }
 
-function transformMyVariantHit(hit: MyVariantSearchResponse['hits'][0]): VariantSearchResult {
+export function transformMyVariantHit(hit: MyVariantSearchResponse['hits'][0]): VariantSearchResult {
   return {
     id: hit.dbsnp?.rsid || hit.rsid || hit._id,
     gene: hit.gene?.symbol,

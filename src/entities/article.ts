@@ -162,7 +162,7 @@ async function searchLitSense(query: string, limit: number, offset: number): Pro
   }
 }
 
-function deduplicateAndRank(articles: Article[], limit: number): Article[] {
+export function deduplicateAndRank(articles: Article[], limit: number): Article[] {
   const seen = new Map<string, Article>();
   
   for (const article of articles) {
@@ -420,7 +420,7 @@ interface PubMedLinkResponse {
   }>;
 }
 
-function transformPubMedArticle(a: PubMedSummaryItem): Article {
+export function transformPubMedArticle(a: PubMedSummaryItem): Article {
   return {
     pmid: a.uid,
     title: a.title,
@@ -430,7 +430,7 @@ function transformPubMedArticle(a: PubMedSummaryItem): Article {
   };
 }
 
-function transformEuropePMC(a: EuropePMCResult): Article {
+export function transformEuropePMC(a: EuropePMCResult): Article {
   return {
     pmid: a.pubmedId,
     pmcid: a.pmcId,
@@ -445,7 +445,7 @@ function transformEuropePMC(a: EuropePMCResult): Article {
   };
 }
 
-function transformSemanticScholar(a: SemanticScholarPaper): Article {
+export function transformSemanticScholar(a: SemanticScholarPaper): Article {
   return {
     pmid: a.externalIds?.PMID,
     pmcid: a.externalIds?.PMCID,
@@ -461,7 +461,7 @@ function transformSemanticScholar(a: SemanticScholarPaper): Article {
   };
 }
 
-function transformPubTator(a: PubTatorResult): Article {
+export function transformPubTator(a: PubTatorResult): Article {
   return {
     pmid: a.pmid,
     pmcid: a.pmcid,
@@ -471,7 +471,7 @@ function transformPubTator(a: PubTatorResult): Article {
   };
 }
 
-function transformLitSense(a: LitSenseResult): Article {
+export function transformLitSense(a: LitSenseResult): Article {
   return {
     pmid: a.pmid,
     title: a.title,

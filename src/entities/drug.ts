@@ -1,4 +1,5 @@
 import { connectionManager } from '../connections/manager.js';
+import { fetchWithTimeout } from '../connections/fetch-utils.js';
 
 const SECTION_TIMEOUT_MS = 8000;
 
@@ -36,23 +37,6 @@ export interface DrugResult {
 
 export interface DrugSearchResult extends DrugResult {
   _score?: number;
-}
-
-async function fetchWithTimeout<T>(fn: () => Promise<T>, timeoutMs: number): Promise<{ data?: T; error?: string }> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const data = await fn();
-    return { data };
-  } catch (e) {
-    const error = e instanceof Error ? e.message : String(e);
-    if (error.includes('abort') || error.includes('timeout')) {
-      return { error: `Timeout after ${timeoutMs}ms` };
-    }
-    return { error };
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 export async function drugSearch(
@@ -304,7 +288,7 @@ interface ChemblMechanismResponse {
   }>;
 }
 
-function transformMyChemHit(hit: MyChemSearchResponse['hits'][0]): DrugSearchResult {
+export function transformMyChemHit(hit: MyChemSearchResponse['hits'][0]): DrugSearchResult {
   return {
     name: hit.name,
     uichem_id: hit.uichem,

@@ -1,4 +1,5 @@
 import { connectionManager } from '../connections/manager.js';
+import { fetchWithTimeout } from '../connections/fetch-utils.js';
 import { geneSearch, GeneSearchResult } from './gene.js';
 import { variantSearch, VariantSearchResult } from './variant.js';
 import { drugSearch, DrugSearchResult } from './drug.js';
@@ -7,23 +8,6 @@ import { trialSearch, TrialSearchResult } from './trial.js';
 import { articleSearch, Article } from './article.js';
 
 const SECTION_TIMEOUT_MS = 8000;
-
-async function fetchWithTimeout<T>(fn: () => Promise<T>, timeoutMs: number): Promise<{ data?: T; error?: string }> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const data = await fn();
-    return { data };
-  } catch (e) {
-    const error = e instanceof Error ? e.message : String(e);
-    if (error.includes('abort') || error.includes('timeout')) {
-      return { error: `Timeout after ${timeoutMs}ms` };
-    }
-    return { error };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
 
 export async function geneToDrugs(geneSymbol: string): Promise<Array<{ drug_name: string; source: string; action_type?: string }>> {
   try {

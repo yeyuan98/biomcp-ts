@@ -1,4 +1,5 @@
 import { connectionManager } from '../connections/manager.js';
+import { fetchWithTimeout } from '../connections/fetch-utils.js';
 
 const SECTION_TIMEOUT_MS = 8000;
 
@@ -25,23 +26,6 @@ export interface DiseaseResult {
   description?: string;
   ontology?: string;
   sections?: Record<string, unknown>;
-}
-
-async function fetchWithTimeout<T>(fn: () => Promise<T>, timeoutMs: number): Promise<{ data?: T; error?: string }> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const data = await fn();
-    return { data };
-  } catch (e) {
-    const error = e instanceof Error ? e.message : String(e);
-    if (error.includes('abort') || error.includes('timeout')) {
-      return { error: `Timeout after ${timeoutMs}ms` };
-    }
-    return { error };
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 export async function diseaseSearch(
@@ -248,7 +232,7 @@ interface SEERResponse {
   median_progression?: number;
 }
 
-function transformMyDiseaseHit(hit: MyDiseaseSearchResponse['hits'][0]): DiseaseSearchResult {
+export function transformMyDiseaseHit(hit: MyDiseaseSearchResponse['hits'][0]): DiseaseSearchResult {
   return {
     name: hit.name,
     disease_id: hit.diseaseid,

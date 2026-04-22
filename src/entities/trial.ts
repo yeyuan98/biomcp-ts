@@ -1,4 +1,5 @@
 import { connectionManager } from '../connections/manager.js';
+import { fetchWithTimeout } from '../connections/fetch-utils.js';
 
 const SECTION_TIMEOUT_MS = 8000;
 
@@ -36,23 +37,6 @@ export interface TrialResult {
   collaborator?: string;
   contacts?: Array<{ role: string; name: string; phone?: string; email?: string }>;
   sections?: Record<string, unknown>;
-}
-
-async function fetchWithTimeout<T>(fn: () => Promise<T>, timeoutMs: number): Promise<{ data?: T; error?: string }> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const data = await fn();
-    return { data };
-  } catch (e) {
-    const error = e instanceof Error ? e.message : String(e);
-    if (error.includes('abort') || error.includes('timeout')) {
-      return { error: `Timeout after ${timeoutMs}ms` };
-    }
-    return { error };
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 export async function trialSearch(
@@ -308,7 +292,7 @@ interface ClinicalTrialsDetailResponse {
   }>;
 }
 
-function transformTrialSearchResult(trial: ClinicalTrialsSearchStudy): TrialSearchResult {
+export function transformTrialSearchResult(trial: ClinicalTrialsSearchStudy): TrialSearchResult {
   const identModule = trial.protocolSection?.identModule;
   const statusModule = trial.protocolSection?.statusModule;
   const descModule = trial.protocolSection?.descModule;

@@ -1,4 +1,6 @@
 import { connectionManager } from '../connections/manager.js';
+import { fetchWithTimeout } from '../connections/fetch-utils.js';
+import { transformMyGeneHit } from '../transform/gene.js';
 
 const SECTION_TIMEOUT_MS = 8000;
 
@@ -33,23 +35,6 @@ export interface GeneResult {
   chromosome?: string;
   position?: string;
   sections?: Record<string, unknown>;
-}
-
-async function fetchWithTimeout<T>(fn: () => Promise<T>, timeoutMs: number): Promise<{ data?: T; error?: string }> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const data = await fn();
-    return { data };
-  } catch (e) {
-    const error = e instanceof Error ? e.message : String(e);
-    if (error.includes('abort') || error.includes('timeout')) {
-      return { error: `Timeout after ${timeoutMs}ms` };
-    }
-    return { error };
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 export async function geneSearch(
@@ -568,21 +553,6 @@ interface NIHReporterResponse {
     agency: string;
     totalCostAmount: number;
   }>;
-}
-
-function transformMyGeneHit(hit: MyGeneSearchResponse['hits'][0]): GeneSearchResult {
-  return {
-    symbol: hit.symbol,
-    name: hit.name,
-    entrez_id: hit.entrezgene,
-    genomic_coordinates: hit.genomic_pos?.[0] ? {
-      chromosome: hit.genomic_pos[0].chr,
-      start: hit.genomic_pos[0].start,
-      end: hit.genomic_pos[0].end,
-    } : undefined,
-    uniprot_id: hit.uniprot?.[0],
-    omim_id: hit.omim?.[0] ? String(hit.omim[0]) : undefined,
-  };
 }
 
 export function transformMyGeneResponse(data: MyGeneGetResponse['hits'][0]): GeneResult {
