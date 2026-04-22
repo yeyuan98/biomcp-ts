@@ -9,6 +9,7 @@ export default {
     '^.+\\.ts$': ['ts-jest', {
       useESM: true,
       tsconfig: 'tsconfig.json',
+      diagnostics: false,
     }],
   },
   testMatch: ['**/src/__tests__/**/*.test.ts'],
