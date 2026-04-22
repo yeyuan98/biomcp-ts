@@ -11,7 +11,8 @@
     "build": "tsc",
     "start": "node dist/server/index.js",
     "dev": "tsx watch src/server/index.ts",
-    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest",
+    "test:coverage": "node --experimental-vm-modules node_modules/.bin/jest --coverage",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -19,7 +20,10 @@
     "zod": "^3.25.0"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.11.0",
+    "jest": "^30.3.0",
+    "ts-jest": "^29.4.9",
     "tsx": "^4.7.0",
     "typescript": "^5.3.0"
   },
