@@ -99,4 +99,122 @@ export function registerGeneTools(server: McpServer): void {
       }
     }
   );
+
+  server.registerTool(
+    'gene_go_enrichment',
+    {
+      description: 'Get GO term enrichment for a gene via QuickGO',
+      inputSchema: {
+        symbol: z.string().describe('HGNC gene symbol'),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true }
+    },
+    async ({ symbol }) => {
+      try {
+        const result = await geneGet(symbol, ['ontology']);
+        return { content: [{ type: 'text', text: JSON.stringify(result.sections?.ontology) }] };
+      } catch (error) {
+        return { content: [{ type: 'text', text: String(error) }], isError: true };
+      }
+    }
+  );
+
+  server.registerTool(
+    'gene_interactions',
+    {
+      description: 'Get protein interactions for a gene via STRING',
+      inputSchema: {
+        symbol: z.string().describe('HGNC gene symbol'),
+        limit: z.number().int().min(1).max(50).default(20),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true }
+    },
+    async ({ symbol, limit }) => {
+      try {
+        const result = await geneGet(symbol, ['interactions']);
+        const interactions = (result as { interactions?: Array<{ symbol: string; score: number }> }).interactions?.slice(0, limit) || [];
+        return { content: [{ type: 'text', text: JSON.stringify(interactions) }] };
+      } catch (error) {
+        return { content: [{ type: 'text', text: String(error) }], isError: true };
+      }
+    }
+  );
+
+  server.registerTool(
+    'gene_expression',
+    {
+      description: 'Get GTEx tissue expression for a gene',
+      inputSchema: {
+        symbol: z.string().describe('HGNC gene symbol'),
+        limit: z.number().int().min(1).max(50).default(20),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true }
+    },
+    async ({ symbol, limit }) => {
+      try {
+        const result = await geneGet(symbol, ['expression']);
+        const tissues = (result as { expression?: { tissues?: Array<{ tissue: string; tpm: number }> } }).expression?.tissues?.slice(0, limit) || [];
+        return { content: [{ type: 'text', text: JSON.stringify(tissues) }] };
+      } catch (error) {
+        return { content: [{ type: 'text', text: String(error) }], isError: true };
+      }
+    }
+  );
+
+  server.registerTool(
+    'gene_constraint',
+    {
+      description: 'Get gnomAD constraint metrics for a gene',
+      inputSchema: {
+        symbol: z.string().describe('HGNC gene symbol'),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true }
+    },
+    async ({ symbol }) => {
+      try {
+        const result = await geneGet(symbol, ['constraint']);
+        return { content: [{ type: 'text', text: JSON.stringify(result.sections?.constraint) }] };
+      } catch (error) {
+        return { content: [{ type: 'text', text: String(error) }], isError: true };
+      }
+    }
+  );
+
+  server.registerTool(
+    'gene_druggability',
+    {
+      description: 'Get druggability data for a gene via DGIdb and OpenTargets',
+      inputSchema: {
+        symbol: z.string().describe('HGNC gene symbol'),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true }
+    },
+    async ({ symbol }) => {
+      try {
+        const result = await geneGet(symbol, ['druggability']);
+        return { content: [{ type: 'text', text: JSON.stringify(result.sections?.druggability) }] };
+      } catch (error) {
+        return { content: [{ type: 'text', text: String(error) }], isError: true };
+      }
+    }
+  );
+
+  server.registerTool(
+    'gene_clingen',
+    {
+      description: 'Get ClinGen dosage sensitivity for a gene',
+      inputSchema: {
+        symbol: z.string().describe('HGNC gene symbol'),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true }
+    },
+    async ({ symbol }) => {
+      try {
+        const result = await geneGet(symbol, ['clingen']);
+        return { content: [{ type: 'text', text: JSON.stringify(result.sections?.clingen) }] };
+      } catch (error) {
+        return { content: [{ type: 'text', text: String(error) }], isError: true };
+      }
+    }
+  );
 }
