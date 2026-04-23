@@ -241,17 +241,6 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     protocol: 'rest',
     rateLimit: { intervalMs: 1000 },
   },
-  ncbi_efetch: {
-    sourceId: 'ncbi_efetch',
-    baseUrl: 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils',
-    protocol: 'rest',
-    auth: {
-      envVar: 'NCBI_API_KEY',
-      required: false,
-      delivery: { type: 'query-param', name: 'api_key' },
-    },
-    rateLimit: { intervalMs: 100 },
-  },
   ncbi_idconv: {
     sourceId: 'ncbi_idconv',
     baseUrl: 'https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles',
@@ -267,6 +256,7 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     sourceId: 'pmc_oa',
     baseUrl: 'https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi',
     protocol: 'rest',
+    handling: { contentType: 'xml' },
     auth: {
       envVar: 'NCBI_API_KEY',
       required: false,

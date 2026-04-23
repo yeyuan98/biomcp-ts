@@ -3,15 +3,10 @@ import { z } from 'zod';
 import {
   geneToDrugs,
   geneToTrials,
-  geneToPathways,
   geneToArticles,
   variantToTrials,
   drugToGenes,
   drugToTrials,
-  drugToAdverseEvents,
-  diseaseToDrugs,
-  diseaseToGenes,
-  diseaseToTrials,
   geneEnrichment,
   discover,
   searchAll,
@@ -45,21 +40,6 @@ export function registerPivotTools(server: McpServer): void {
     },
     async ({ symbol }) => {
       const results = await geneToTrials(symbol);
-      return { content: [{ type: 'text', text: JSON.stringify(results) }] };
-    }
-  );
-
-  server.registerTool(
-    'gene_pathways',
-    {
-      description: 'Find pathways containing a gene',
-      inputSchema: {
-        symbol: z.string().describe('HGNC gene symbol'),
-      },
-      annotations: { readOnlyHint: true }
-    },
-    async ({ symbol }) => {
-      const results = await geneToPathways(symbol);
       return { content: [{ type: 'text', text: JSON.stringify(results) }] };
     }
   );
@@ -120,66 +100,6 @@ export function registerPivotTools(server: McpServer): void {
     },
     async ({ drug }) => {
       const results = await drugToTrials(drug);
-      return { content: [{ type: 'text', text: JSON.stringify(results) }] };
-    }
-  );
-
-  server.registerTool(
-    'drug_adverse_events',
-    {
-      description: 'Find adverse events for a drug',
-      inputSchema: {
-        drug: z.string().describe('Drug name'),
-      },
-      annotations: { readOnlyHint: true }
-    },
-    async ({ drug }) => {
-      const results = await drugToAdverseEvents(drug);
-      return { content: [{ type: 'text', text: JSON.stringify(results) }] };
-    }
-  );
-
-  server.registerTool(
-    'disease_drugs',
-    {
-      description: 'Find drugs for a disease',
-      inputSchema: {
-        disease: z.string().describe('Disease name or ID'),
-      },
-      annotations: { readOnlyHint: true }
-    },
-    async ({ disease }) => {
-      const results = await diseaseToDrugs(disease);
-      return { content: [{ type: 'text', text: JSON.stringify(results) }] };
-    }
-  );
-
-  server.registerTool(
-    'disease_genes',
-    {
-      description: 'Find genes associated with a disease',
-      inputSchema: {
-        disease: z.string().describe('Disease ID (e.g., "C0012345", "MONDO:0000001")'),
-      },
-      annotations: { readOnlyHint: true }
-    },
-    async ({ disease }) => {
-      const results = await diseaseToGenes(disease);
-      return { content: [{ type: 'text', text: JSON.stringify(results) }] };
-    }
-  );
-
-  server.registerTool(
-    'disease_trials',
-    {
-      description: 'Find clinical trials for a disease',
-      inputSchema: {
-        disease: z.string().describe('Disease name'),
-      },
-      annotations: { readOnlyHint: true }
-    },
-    async ({ disease }) => {
-      const results = await diseaseToTrials(disease);
       return { content: [{ type: 'text', text: JSON.stringify(results) }] };
     }
   );

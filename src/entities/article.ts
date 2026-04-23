@@ -1,6 +1,5 @@
 import { connectionManager } from '../connections/manager.js';
-
-const SECTION_TIMEOUT_MS = 8000;
+import { parsePubMedXml } from '../transform/pubmed.js';
 
 export interface ArticleSearchOptions {
   source?: 'pubmed' | 'europepmc' | 'semantic_scholar' | 'pubtator' | 'litsense';
@@ -21,6 +20,10 @@ export interface Article {
   is_open_access?: boolean;
   source?: string;
   score?: number;
+  mesh_headings?: string[];
+  publication_types?: string[];
+  keywords?: string[];
+  chemicals?: string[];
 }
 
 export interface ArticleGetOptions {
@@ -36,11 +39,11 @@ export async function articleSearch(
   options: ArticleSearchOptions = {}
 ): Promise<Article[]> {
   const { source, limit = 10, offset = 0 } = options;
-  
+
   if (source) {
     return searchSingleSource(query, source, limit, offset);
   }
-  
+
   return federatedSearch(query, limit, offset);
 }
 
@@ -56,16 +59,16 @@ async function federatedSearch(
     searchPubTator(query, limit, offset),
     searchLitSense(query, limit, offset),
   ];
-  
+
   const results = await Promise.allSettled(backends);
   const allArticles: Article[] = [];
-  
+
   for (const result of results) {
     if (result.status === 'fulfilled') {
       allArticles.push(...result.value);
     }
   }
-  
+
   return deduplicateAndRank(allArticles, limit);
 }
 
@@ -88,32 +91,32 @@ async function searchSingleSource(
 async function searchPubMed(query: string, limit: number, offset: number): Promise<Article[]> {
   try {
     const conn = connectionManager.getConnection('pubmed');
-    
-    const response = await conn.request(
+
+    const searchResponse = await conn.request(
       `/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=${limit}&retstart=${offset}&retmode=json`
     ) as PubMedSearchResponse;
-    
-    if (!response.esearchresult?.idlist?.length) return [];
-    
-    const ids = response.esearchresult.idlist.join(',');
-    const summaryResponse = await conn.request(
-      `/esummary.fcgi?db=pubmed&id=${ids}&retmode=json`
-    ) as PubMedSummaryResponse;
-    
-    return (summaryResponse.result || []).map(transformPubMedArticle);
+
+    if (!searchResponse.esearchresult?.idlist?.length) return [];
+
+    const ids = searchResponse.esearchresult.idlist.join(',');
+    const xmlString = await conn.request(
+      `/efetch.fcgi?db=pubmed&id=${ids}&rettype=abstract`
+    ) as string;
+
+    return parsePubMedXml(xmlString);
   } catch {
     return [];
   }
 }
 
-async function searchEuropePMC(query: string, limit: number, offset: number): Promise<Article[]> {
+async function searchEuropePMC(query: string, limit: number, _offset: number): Promise<Article[]> {
   try {
     const conn = connectionManager.getConnection('europepmc');
-    
+
     const response = await conn.request(
-      `/search?query=${encodeURIComponent(query)}&resulttype=lite&format=json&pageSize=${limit}&cursorMark=${offset}`
+      `/search?query=${encodeURIComponent(query)}&resulttype=lite&format=json&pageSize=${limit}&cursorMark=*`
     ) as EuropePMCResponse;
-    
+
     return (response.resultList?.result || []).map(transformEuropePMC);
   } catch {
     return [];
@@ -123,11 +126,11 @@ async function searchEuropePMC(query: string, limit: number, offset: number): Pr
 async function searchSemanticScholar(query: string, limit: number, offset: number): Promise<Article[]> {
   try {
     const conn = connectionManager.getConnection('semantic_scholar');
-    
+
     const response = await conn.request(
       `/graph/v1/paper/search?query=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}&fields=title,abstract,authors,year,venue,citationCount,isOpenAccess,externalIds`
     ) as SemanticScholarResponse;
-    
+
     return (response.data || []).map(transformSemanticScholar);
   } catch {
     return [];
@@ -137,11 +140,11 @@ async function searchSemanticScholar(query: string, limit: number, offset: numbe
 async function searchPubTator(query: string, limit: number, offset: number): Promise<Article[]> {
   try {
     const conn = connectionManager.getConnection('pubtator');
-    
+
     const response = await conn.request(
       `/search?q=${encodeURIComponent(query)}&format=json&limit=${limit}&offset=${offset}`
     ) as PubTatorResponse;
-    
+
     return (response.results || []).map(transformPubTator);
   } catch {
     return [];
@@ -151,11 +154,11 @@ async function searchPubTator(query: string, limit: number, offset: number): Pro
 async function searchLitSense(query: string, limit: number, offset: number): Promise<Article[]> {
   try {
     const conn = connectionManager.getConnection('litsense');
-    
+
     const response = await conn.request(
       `/search?q=${encodeURIComponent(query)}&format=json&limit=${limit}`
     ) as LitSenseResponse;
-    
+
     return (response.results || []).map(transformLitSense);
   } catch {
     return [];
@@ -164,16 +167,16 @@ async function searchLitSense(query: string, limit: number, offset: number): Pro
 
 export function deduplicateAndRank(articles: Article[], limit: number): Article[] {
   const seen = new Map<string, Article>();
-  
+
   for (const article of articles) {
     const key = article.pmid || article.pmcid || article.doi || '';
     if (key && !seen.has(key)) {
       seen.set(key, article);
     }
   }
-  
+
   const unique = Array.from(seen.values());
-  
+
   return unique
     .sort((a, b) => (b.cited_by || 0) - (a.cited_by || 0))
     .slice(0, limit);
@@ -184,59 +187,49 @@ export async function articleGet(
   sections?: string[]
 ): Promise<ArticleResult> {
   const isPmid = /^\d+$/.test(identifier);
-  
+
   let article: Article;
-  
+
   if (isPmid) {
     article = await fetchPubMedArticle(identifier);
   } else {
     throw new Error(`Invalid identifier. Use PMID to fetch article details.`);
   }
-  
+
   const result: ArticleResult = {
     ...article,
   };
-  
+
   const sectionsToFetch = sections?.filter(s => s !== 'core') || [];
-  
+
   if (sectionsToFetch.includes('oa') || sectionsToFetch.includes('all')) {
     result.sections = result.sections || {};
     (result.sections as Record<string, unknown>)['open_access'] = await fetchOpenAccess(identifier);
   }
-  
+
   if (sectionsToFetch.includes('annotations') || sectionsToFetch.includes('all')) {
     result.sections = result.sections || {};
     (result.sections as Record<string, unknown>)['annotations'] = await fetchAnnotations(identifier);
   }
-  
+
   if (sectionsToFetch.includes('graph') || sectionsToFetch.includes('all')) {
     result.sections = result.sections || {};
     (result.sections as Record<string, unknown>)['citation_graph'] = await fetchCitationGraph(identifier);
   }
-  
+
   return result;
 }
 
 async function fetchPubMedArticle(pmid: string): Promise<Article> {
   try {
     const conn = connectionManager.getConnection('pubmed');
-    
-    const response = await conn.request(
-      `/efetch.fcgi?db=pubmed&id=${pmid}&retmode=json`
-    ) as PubMedFetchResponse;
-    
-    const article = response.result?.[0];
-    if (!article) return {};
-    
-    return {
-      pmid: article.uid,
-      title: article.title,
-      abstract: article.abstract,
-      authors: article.authors?.map((a: { name: string }) => a.name),
-      journal: article.source,
-      publication_date: article.pubdate,
-      source: 'pubmed',
-    };
+
+    const xmlString = await conn.request(
+      `/efetch.fcgi?db=pubmed&id=${pmid}&rettype=abstract`
+    ) as string;
+
+    const articles = parsePubMedXml(xmlString);
+    return articles[0] || {};
   } catch {
     return {};
   }
@@ -245,20 +238,21 @@ async function fetchPubMedArticle(pmid: string): Promise<Article> {
 async function fetchOpenAccess(pmid: string): Promise<{ pmcid?: string; pdf_url?: string }> {
   try {
     const conn = connectionManager.getConnection('ncbi_idconv');
-    
+
     const response = await conn.request(
       `?pmid=${pmid}&format=json`
     ) as IDConvResponse;
-    
+
     if (response.pmcid) {
       const pmcConn = connectionManager.getConnection('pmc_oa');
-      const oaResponse = await pmcConn.request(
-        `?tool=biomcp&format=json`
-      ) as OAResponse;
-      
+      const oaXml = await pmcConn.request(
+        `?id=${response.pmcid}`
+      ) as string;
+
+      const links = parseOaXml(oaXml);
       return {
         pmcid: response.pmcid,
-        pdf_url: oaResponse.uri,
+        pdf_url: links.pdfUrl,
       };
     }
   } catch {
@@ -267,14 +261,20 @@ async function fetchOpenAccess(pmid: string): Promise<{ pmcid?: string; pdf_url?
   return {};
 }
 
+function parseOaXml(xml: string): { pdfUrl?: string } {
+  const match = xml.match(/<link\s+[^>]*format="pdf"[^>]*>([^<]*)<\/link>/s)
+    || xml.match(/<link\s+[^>]*>([^<]*)<\/link>/s);
+  return { pdfUrl: match?.[1] || undefined };
+}
+
 async function fetchAnnotations(pmid: string): Promise<Array<{ type: string; text: string; start: number; end: number }>> {
   try {
     const conn = connectionManager.getConnection('pubtator');
-    
+
     const response = await conn.request(
       `/annotations?pmids=${pmid}&format=json`
     ) as PubTatorAnnotationsResponse;
-    
+
     return (response.result?.[0]?.annotations || []).map(a => ({
       type: a.annotation_type,
       text: a.text,
@@ -289,23 +289,23 @@ async function fetchAnnotations(pmid: string): Promise<Array<{ type: string; tex
 async function fetchCitationGraph(pmid: string): Promise<{ citations?: string[]; references?: string[] }> {
   try {
     const conn = connectionManager.getConnection('pubmed');
-    
+
     const response = await conn.request(
       `/elink.fcgi?dbfrom=pubmed&linkname=pubmed_pubmed_citedin&id=${pmid}&retmode=json`
     ) as PubMedLinkResponse;
-    
+
     const citations = response.linkset?.[0]?.linksetdb
       ?.find((l: { linkname: string }) => l.linkname === 'pubmed_pubmed_citedin')
       ?.link?.map((l: { id: string }) => l.id) || [];
-    
+
     const refsResponse = await conn.request(
       `/elink.fcgi?dbfrom=pubmed&linkname=pubmed_pubmed_refs&id=${pmid}&retmode=json`
     ) as PubMedLinkResponse;
-    
+
     const references = refsResponse.linkset?.[0]?.linksetdb
       ?.find((l: { linkname: string }) => l.linkname === 'pubmed_pubmed_refs')
       ?.link?.map((l: { id: string }) => l.id) || [];
-    
+
     return { citations, references };
   } catch {
     return {};
@@ -316,17 +316,6 @@ interface PubMedSearchResponse {
   esearchresult?: {
     idlist?: string[];
   };
-}
-
-interface PubMedSummaryResponse {
-  result?: Array<{
-    uid: string;
-    title?: string;
-    sortpubdate?: string;
-    sortfirstauthor?: string;
-    source?: string;
-    pubtype?: string[];
-  }>;
 }
 
 interface EuropePMCResponse {
@@ -381,23 +370,8 @@ interface LitSenseResponse {
   }>;
 }
 
-interface PubMedFetchResponse {
-  result?: Array<{
-    uid: string;
-    title?: string;
-    abstract?: string;
-    authors?: Array<{ name: string }>;
-    source?: string;
-    pubdate?: string;
-  }>;
-}
-
 interface IDConvResponse {
   pmcid?: string;
-}
-
-interface OAResponse {
-  uri?: string;
 }
 
 interface PubTatorAnnotationsResponse {
@@ -418,16 +392,6 @@ interface PubMedLinkResponse {
       link?: Array<{ id: string }>;
     }>;
   }>;
-}
-
-export function transformPubMedArticle(a: PubMedSummaryItem): Article {
-  return {
-    pmid: a.uid,
-    title: a.title,
-    journal: a.source,
-    publication_date: a.sortpubdate,
-    source: 'pubmed',
-  };
 }
 
 export function transformEuropePMC(a: EuropePMCResult): Article {
@@ -481,24 +445,6 @@ export function transformLitSense(a: LitSenseResult): Article {
   };
 }
 
-export function transformArticleResponse(data: PubMedFetchItem): Article {
-  return {
-    pmid: data.uid,
-    title: data.title,
-    abstract: data.abstract,
-    authors: data.authors?.map((a: { name: string }) => a.name),
-    journal: data.source,
-    publication_date: data.pubdate,
-  };
-}
-
-interface PubMedSummaryItem {
-  uid: string;
-  title?: string;
-  sortpubdate?: string;
-  source?: string;
-}
-
 interface EuropePMCResult {
   pubmedId?: string;
   pmcId?: string;
@@ -538,13 +484,4 @@ interface LitSenseResult {
   title: string;
   abstract: string;
   relevance_score: number;
-}
-
-interface PubMedFetchItem {
-  uid: string;
-  title?: string;
-  abstract?: string;
-  authors?: Array<{ name: string }>;
-  source?: string;
-  pubdate?: string;
 }

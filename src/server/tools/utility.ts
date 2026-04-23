@@ -106,11 +106,9 @@ export function registerUtilityTools(server: McpServer): void {
         'disease_search', 'disease_get',
         'article_search', 'article_get',
         'trial_search', 'trial_get',
-        'pathway_search', 'pathway_get',
-        'gene_drugs', 'gene_trials', 'gene_pathways', 'gene_articles',
+        'gene_drugs', 'gene_trials', 'gene_articles',
         'variant_trials',
-        'drug_genes', 'drug_trials', 'drug_adverse_events',
-        'disease_drugs', 'disease_genes', 'disease_trials',
+        'drug_genes', 'drug_trials',
         'gene_enrich', 'discover', 'search_all', 'batch_get',
         'biomcp_health', 'biomcp_list', 'version',
       ];

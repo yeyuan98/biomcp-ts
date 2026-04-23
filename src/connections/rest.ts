@@ -48,7 +48,11 @@ export class RestConnection implements IConnection<string, unknown> {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
     
-    return response.json();
+    const contentType = response.headers?.get?.('content-type') || '';
+    if (!contentType || contentType.includes('application/json')) {
+      return response.json();
+    }
+    return response.text();
   }
   
   async batch(paths: string[]): Promise<unknown[]> {
@@ -93,7 +97,17 @@ export class RestConnection implements IConnection<string, unknown> {
   
   private buildHeaders(): Headers {
     const headers = new Headers();
-    headers.set('Accept', 'application/json');
+    
+    const acceptMap: Record<string, string> = {
+      json: 'application/json',
+      xml: 'text/xml, application/xml',
+      text: 'text/plain',
+      binary: 'application/octet-stream',
+    };
+    const accept = this.handling.contentType
+      ? acceptMap[this.handling.contentType] || 'application/json'
+      : 'application/json';
+    headers.set('Accept', accept);
     
     if (!this.options.auth || !this.hasAuth) {
       return headers;

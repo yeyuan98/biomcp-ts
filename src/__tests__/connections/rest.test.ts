@@ -107,6 +107,47 @@ describe('RestConnection', () => {
     expect(result).toBe(true);
   });
 
+  test('request() returns text for XML content-type', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'text/xml; charset=utf-8' }),
+      text: () => Promise.resolve('<root><item>data</item></root>'),
+    }) as any;
+
+    const conn = new RestConnection(baseOptions);
+    const result = await conn.request('/test');
+
+    expect(typeof result).toBe('string');
+    expect(result).toContain('<root>');
+  });
+
+  test('request() returns text for application/xml content-type', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/xml' }),
+      text: () => Promise.resolve('<response>ok</response>'),
+    }) as any;
+
+    const conn = new RestConnection(baseOptions);
+    const result = await conn.request('/test');
+
+    expect(typeof result).toBe('string');
+    expect(result).toContain('<response>');
+  });
+
+  test('request() returns text for text/plain content-type', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'text/plain' }),
+      text: () => Promise.resolve('plain text response'),
+    }) as any;
+
+    const conn = new RestConnection(baseOptions);
+    const result = await conn.request('/test');
+
+    expect(result).toBe('plain text response');
+  });
+
   test('healthCheck() returns false on network error', async () => {
     global.fetch = jest.fn().mockRejectedValue(new Error('Network error')) as any;
 

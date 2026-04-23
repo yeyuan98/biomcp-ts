@@ -131,9 +131,9 @@ describe('Tool registration', () => {
     expect(mockRegisterTool).toHaveBeenCalledTimes(4);
   });
 
-  it('registerPivotTools calls registerTool 15 times', () => {
+  it('registerPivotTools calls registerTool 10 times', () => {
     registerPivotTools(mockServer);
-    expect(mockRegisterTool).toHaveBeenCalledTimes(15);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(10);
   });
 
   it('registerUtilityTools calls registerTool 3 times', () => {
@@ -141,7 +141,7 @@ describe('Tool registration', () => {
     expect(mockRegisterTool).toHaveBeenCalledTimes(3);
   });
 
-  it('total registerTool calls across all registrations = 55', () => {
+  it('total registerTool calls across all registrations = 50', () => {
     registerGeneTools(mockServer);
     registerDrugTools(mockServer);
     registerVariantTools(mockServer);
@@ -150,6 +150,21 @@ describe('Tool registration', () => {
     registerArticleTools(mockServer);
     registerPivotTools(mockServer);
     registerUtilityTools(mockServer);
-    expect(mockRegisterTool).toHaveBeenCalledTimes(55);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(50);
+  });
+
+  it('no duplicate tool names across all registrations', () => {
+    registerGeneTools(mockServer);
+    registerDrugTools(mockServer);
+    registerVariantTools(mockServer);
+    registerDiseaseTools(mockServer);
+    registerTrialTools(mockServer);
+    registerArticleTools(mockServer);
+    registerPivotTools(mockServer);
+    registerUtilityTools(mockServer);
+
+    const names = mockRegisterTool.mock.calls.map((call: any[]) => call[0]);
+    const uniqueNames = new Set(names);
+    expect(uniqueNames.size).toBe(names.length);
   });
 });
