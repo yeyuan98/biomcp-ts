@@ -1,10 +1,12 @@
 import { connectionManager } from '../connections/manager.js';
 import { parsePubMedXml } from '../transform/pubmed.js';
+import { XMLParser } from 'fast-xml-parser';
 
 export interface ArticleSearchOptions {
   source?: 'pubmed' | 'europepmc' | 'semantic_scholar' | 'pubtator' | 'litsense';
   limit?: number;
   offset?: number;
+  cursorMark?: string;
 }
 
 export interface Article {
@@ -41,7 +43,7 @@ export async function articleSearch(
   const { source, limit = 10, offset = 0 } = options;
 
   if (source) {
-    return searchSingleSource(query, source, limit, offset);
+    return searchSingleSource(query, source, limit, offset, options.cursorMark);
   }
 
   return federatedSearch(query, limit, offset);
@@ -76,11 +78,12 @@ async function searchSingleSource(
   query: string,
   source: string,
   limit: number,
-  offset: number
+  offset: number,
+  cursorMark?: string
 ): Promise<Article[]> {
   switch (source) {
     case 'pubmed': return searchPubMed(query, limit, offset);
-    case 'europepmc': return searchEuropePMC(query, limit, offset);
+    case 'europepmc': return searchEuropePMC(query, limit, offset, cursorMark);
     case 'semantic_scholar': return searchSemanticScholar(query, limit, offset);
     case 'pubtator': return searchPubTator(query, limit, offset);
     case 'litsense': return searchLitSense(query, limit, offset);
@@ -104,21 +107,24 @@ async function searchPubMed(query: string, limit: number, offset: number): Promi
     ) as string;
 
     return parsePubMedXml(xmlString);
-  } catch {
+  } catch (error) {
+    console.error('[searchPubMed] Error:', error);
     return [];
   }
 }
 
-async function searchEuropePMC(query: string, limit: number, _offset: number): Promise<Article[]> {
+async function searchEuropePMC(query: string, limit: number, _offset: number, cursorMark?: string): Promise<Article[]> {
   try {
     const conn = connectionManager.getConnection('europepmc');
 
+    const cursor = cursorMark || '*';
     const response = await conn.request(
-      `/search?query=${encodeURIComponent(query)}&resulttype=lite&format=json&pageSize=${limit}&cursorMark=*`
+      `/search?query=${encodeURIComponent(query)}&resulttype=lite&format=json&pageSize=${limit}&cursorMark=${encodeURIComponent(cursor)}`
     ) as EuropePMCResponse;
 
     return (response.resultList?.result || []).map(transformEuropePMC);
-  } catch {
+  } catch (error) {
+    console.error('[searchEuropePMC] Error:', error);
     return [];
   }
 }
@@ -132,7 +138,8 @@ async function searchSemanticScholar(query: string, limit: number, offset: numbe
     ) as SemanticScholarResponse;
 
     return (response.data || []).map(transformSemanticScholar);
-  } catch {
+  } catch (error) {
+    console.error('[searchSemanticScholar] Error:', error);
     return [];
   }
 }
@@ -142,25 +149,27 @@ async function searchPubTator(query: string, limit: number, offset: number): Pro
     const conn = connectionManager.getConnection('pubtator');
 
     const response = await conn.request(
-      `/search?q=${encodeURIComponent(query)}&format=json&limit=${limit}&offset=${offset}`
+      `/search/?text=${encodeURIComponent(query)}`
     ) as PubTatorResponse;
 
-    return (response.results || []).map(transformPubTator);
-  } catch {
+    return (response.results || []).slice(offset, offset + limit).map(transformPubTator);
+  } catch (error) {
+    console.error('[searchPubTator] Error:', error);
     return [];
   }
 }
 
-async function searchLitSense(query: string, limit: number, offset: number): Promise<Article[]> {
+async function searchLitSense(query: string, limit: number, _offset: number): Promise<Article[]> {
   try {
     const conn = connectionManager.getConnection('litsense');
 
     const response = await conn.request(
-      `/search?q=${encodeURIComponent(query)}&format=json&limit=${limit}`
+      `/sentences/?query=${encodeURIComponent(query)}&size=${limit}`
     ) as LitSenseResponse;
 
-    return (response.results || []).map(transformLitSense);
-  } catch {
+    return (Array.isArray(response) ? response : []).map(transformLitSense);
+  } catch (error) {
+    console.error('[searchLitSense] Error:', error);
     return [];
   }
 }
@@ -230,7 +239,8 @@ async function fetchPubMedArticle(pmid: string): Promise<Article> {
 
     const articles = parsePubMedXml(xmlString);
     return articles[0] || {};
-  } catch {
+  } catch (error) {
+    console.error('[fetchPubMedArticle] Error:', error);
     return {};
   }
 }
@@ -255,16 +265,44 @@ async function fetchOpenAccess(pmid: string): Promise<{ pmcid?: string; pdf_url?
         pdf_url: links.pdfUrl,
       };
     }
-  } catch {
+  } catch (error) {
+    console.error('[fetchOpenAccess] Error:', error);
     return {};
   }
   return {};
 }
 
 function parseOaXml(xml: string): { pdfUrl?: string } {
-  const match = xml.match(/<link\s+[^>]*format="pdf"[^>]*>([^<]*)<\/link>/s)
-    || xml.match(/<link\s+[^>]*>([^<]*)<\/link>/s);
-  return { pdfUrl: match?.[1] || undefined };
+  try {
+    const parser = new XMLParser({
+      ignoreAttributes: false,
+      attributeNamePrefix: '@_',
+    });
+    const parsed = parser.parse(xml);
+
+    const links = parsed?.OA?.records?.record?.[0]?.link
+      ?? parsed?.records?.record?.[0]?.link
+      ?? parsed?.link;
+
+    const linkArray = Array.isArray(links) ? links : links ? [links] : [];
+
+    for (const link of linkArray) {
+      if (link?.['@_format'] === 'pdf' && link?.['#text']) {
+        return { pdfUrl: link['#text'] };
+      }
+    }
+
+    for (const link of linkArray) {
+      if (link?.['#text']) {
+        return { pdfUrl: link['#text'] };
+      }
+    }
+
+    return {};
+  } catch (error) {
+    console.error('[parseOaXml] Error:', error);
+    return {};
+  }
 }
 
 async function fetchAnnotations(pmid: string): Promise<Array<{ type: string; text: string; start: number; end: number }>> {
@@ -272,16 +310,27 @@ async function fetchAnnotations(pmid: string): Promise<Array<{ type: string; tex
     const conn = connectionManager.getConnection('pubtator');
 
     const response = await conn.request(
-      `/annotations?pmids=${pmid}&format=json`
-    ) as PubTatorAnnotationsResponse;
+      `/publications/export/biocjson?pmids=${pmid}`
+    ) as BioCJSONArticle[];
 
-    return (response.result?.[0]?.annotations || []).map(a => ({
-      type: a.annotation_type,
-      text: a.text,
-      start: a.location.begin,
-      end: a.location.end,
-    }));
-  } catch {
+    const annotations: Array<{ type: string; text: string; start: number; end: number }> = [];
+
+    for (const article of (response || [])) {
+      for (const passage of (article.passages || [])) {
+        for (const ann of (passage.annotations || [])) {
+          annotations.push({
+            type: ann.infons?.type || 'unknown',
+            text: ann.text,
+            start: ann.locations?.[0]?.offset ?? 0,
+            end: (ann.locations?.[0]?.offset ?? 0) + (ann.locations?.[0]?.length ?? 0),
+          });
+        }
+      }
+    }
+
+    return annotations;
+  } catch (error) {
+    console.error('[fetchAnnotations] Error:', error);
     return [];
   }
 }
@@ -307,7 +356,8 @@ async function fetchCitationGraph(pmid: string): Promise<{ citations?: string[];
       ?.link?.map((l: { id: string }) => l.id) || [];
 
     return { citations, references };
-  } catch {
+  } catch (error) {
+    console.error('[fetchCitationGraph] Error:', error);
     return {};
   }
 }
@@ -354,33 +404,38 @@ interface SemanticScholarResponse {
 
 interface PubTatorResponse {
   results?: Array<{
-    pmid: string;
-    pmcid: string;
+    _id: string;
+    pmid: number;
+    pmcid?: string;
     title: string;
-    abstract: string;
+    journal?: string;
+    authors?: string[];
+    date?: string;
+    doi?: string;
+    score?: number;
   }>;
 }
 
 interface LitSenseResponse {
-  results?: Array<{
-    pmid: string;
-    title: string;
-    abstract: string;
-    relevance_score: number;
-  }>;
+  pmid: number;
+  pmcid?: string;
+  text: string;
+  score: number;
+  section: string;
+  annotations: string[];
 }
 
 interface IDConvResponse {
   pmcid?: string;
 }
 
-interface PubTatorAnnotationsResponse {
-  result?: Array<{
-    pmid: string;
+interface BioCJSONArticle {
+  passages?: Array<{
+    text?: string;
     annotations?: Array<{
-      annotation_type: string;
+      infons?: { type?: string; identifier?: string };
       text: string;
-      location: { begin: number; end: number };
+      locations?: Array<{ offset: number; length: number }>;
     }>;
   }>;
 }
@@ -427,20 +482,24 @@ export function transformSemanticScholar(a: SemanticScholarPaper): Article {
 
 export function transformPubTator(a: PubTatorResult): Article {
   return {
-    pmid: a.pmid,
+    pmid: String(a.pmid),
     pmcid: a.pmcid,
     title: a.title,
-    abstract: a.abstract,
+    authors: a.authors,
+    journal: a.journal,
+    doi: a.doi,
+    publication_date: a.date,
+    score: a.score,
     source: 'pubtator',
   };
 }
 
 export function transformLitSense(a: LitSenseResult): Article {
   return {
-    pmid: a.pmid,
-    title: a.title,
-    abstract: a.abstract,
-    score: a.relevance_score,
+    pmid: String(a.pmid),
+    pmcid: a.pmcid,
+    abstract: a.text,
+    score: a.score,
     source: 'litsense',
   };
 }
@@ -473,15 +532,22 @@ interface SemanticScholarPaper {
 }
 
 interface PubTatorResult {
-  pmid: string;
-  pmcid: string;
+  _id: string;
+  pmid: number;
+  pmcid?: string;
   title: string;
-  abstract: string;
+  journal?: string;
+  authors?: string[];
+  date?: string;
+  doi?: string;
+  score?: number;
 }
 
 interface LitSenseResult {
-  pmid: string;
-  title: string;
-  abstract: string;
-  relevance_score: number;
+  pmid: number;
+  pmcid?: string;
+  text: string;
+  score: number;
+  section: string;
+  annotations: string[];
 }

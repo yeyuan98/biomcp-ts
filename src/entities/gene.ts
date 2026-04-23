@@ -158,7 +158,8 @@ async function fetchPathways(geneSymbol: string): Promise<Array<{ id: string; na
       name: r.name,
       source: 'reactome',
     }));
-  } catch {
+  } catch (error) {
+    console.error('[fetchPathways] Error:', error);
     return [];
   }
 }
@@ -178,8 +179,8 @@ async function fetchProtein(geneSymbol: string): Promise<{ accession?: string; n
         name: r.proteinDescription?.recommendedName?.fullName?.value,
       };
     }
-  } catch {
-    // Fall through
+  } catch (error) {
+    console.error('[fetchProtein] Error:', error);
   }
   return {};
 }
@@ -199,7 +200,8 @@ async function fetchOntology(geneSymbol: string): Promise<{ go_enrichment?: Arra
     }));
     
     return { go_enrichment: enrichment };
-  } catch {
+  } catch (error) {
+    console.error('[fetchOntology] Error:', error);
     return {};
   }
 }
@@ -217,7 +219,8 @@ async function fetchGo(geneSymbol: string): Promise<Array<{ id: string; term: st
       term: r.goName,
       aspect: r.aspect,
     }));
-  } catch {
+  } catch (error) {
+    console.error('[fetchGo] Error:', error);
     return [];
   }
 }
@@ -235,7 +238,8 @@ async function fetchInteractions(geneSymbol: string): Promise<Array<{ symbol: st
       score: r.score,
       source: 'string',
     }));
-  } catch {
+  } catch (error) {
+    console.error('[fetchInteractions] Error:', error);
     return [];
   }
 }
@@ -246,7 +250,7 @@ async function fetchCivic(geneSymbol: string): Promise<{ variants?: Array<{ name
     
     const query = `query($symbol: String!) { genes(symbol: $symbol) { name variants { name clinicalSignificance } } }`;
     
-    const response = await conn.request(query) as unknown as { data?: { genes: Array<{ name: string; variants: Array<{ name: string; clinicalSignificance?: string }> }> } };
+    const response = await conn.request(query, { variables: { symbol: geneSymbol } }) as unknown as { data?: { genes: Array<{ name: string; variants: Array<{ name: string; clinicalSignificance?: string }> }> } };
     const parsed = JSON.parse(JSON.stringify(response));
     
     const variants = (parsed.data?.genes || []).slice(0, 20).map((g: { name: string; variants: Array<{ name: string; clinicalSignificance?: string }> }) => ({
@@ -255,7 +259,8 @@ async function fetchCivic(geneSymbol: string): Promise<{ variants?: Array<{ name
     }));
     
     return { variants };
-  } catch {
+  } catch (error) {
+    console.error('[fetchCivic] Error:', error);
     return {};
   }
 }
@@ -274,7 +279,8 @@ async function fetchExpression(geneSymbol: string): Promise<{ tissues?: Array<{ 
     }));
     
     return { tissues };
-  } catch {
+  } catch (error) {
+    console.error('[fetchExpression] Error:', error);
     return {};
   }
 }
@@ -293,7 +299,8 @@ async function fetchHpa(geneSymbol: string): Promise<{ subcellular?: Array<{ loc
     }));
     
     return { subcellular };
-  } catch {
+  } catch (error) {
+    console.error('[fetchHpa] Error:', error);
     return {};
   }
 }
@@ -304,7 +311,7 @@ async function fetchDruggability(geneSymbol: string): Promise<{ dgidb?: Array<{ 
     
     const dgidbQuery = `query($symbol: String!) { drugs(genes: $symbol) { drug sources } }`;
     
-    const rawDgidb = await dgidbConn.request(dgidbQuery) as unknown as { data?: { drugs: Array<{ drug: string; sources: string[] }> } };
+    const rawDgidb = await dgidbConn.request(dgidbQuery, { variables: { symbol: geneSymbol } }) as unknown as { data?: { drugs: Array<{ drug: string; sources: string[] }> } };
     const dgidbResponse = JSON.parse(JSON.stringify(rawDgidb));
     const dgidbData = (dgidbResponse.data?.drugs || []).slice(0, 20).map((d: { drug: string; sources: string[] }) => ({
       drug_name: d.drug,
@@ -316,7 +323,7 @@ async function fetchDruggability(geneSymbol: string): Promise<{ dgidb?: Array<{ 
       
       const otQuery = `query($symbol: String!) { target(ensembl: $symbol) { id approvedName tractability { value } } }`;
       
-      const rawOt = await otConn.request(otQuery) as unknown as { data?: Array<{ id: string; approvedName?: string; tractability?: { value: number } }> };
+      const rawOt = await otConn.request(otQuery, { variables: { symbol: geneSymbol } }) as unknown as { data?: Array<{ id: string; approvedName?: string; tractability?: { value: number } }> };
       const otResponse = JSON.parse(JSON.stringify(rawOt));
       const opentargetsData = (otResponse.data || []).slice(0, 20).map((t: { id: string; approvedName?: string; tractability?: { value: number } }) => ({
         id: t.id,
@@ -325,10 +332,12 @@ async function fetchDruggability(geneSymbol: string): Promise<{ dgidb?: Array<{ 
       }));
       
       return { dgidb: dgidbData, opentargets: opentargetsData };
-    } catch {
+    } catch (error) {
+      console.error('[fetchDruggability/opentargets] Error:', error);
       return { dgidb: dgidbData };
     }
-  } catch {
+  } catch (error) {
+    console.error('[fetchDruggability/dgidb] Error:', error);
     return {};
   }
 }
@@ -347,7 +356,8 @@ async function fetchClingen(geneSymbol: string): Promise<{ dosagem?: Array<{ hap
         triplosensitivity: response.triplosensitivityScore || 'unknown',
       }],
     };
-  } catch {
+  } catch (error) {
+    console.error('[fetchClingen] Error:', error);
     return {};
   }
 }
@@ -358,7 +368,7 @@ async function fetchConstraint(geneSymbol: string): Promise<{ lof?: { oe_score: 
     
     const query = `query($symbol: String!) { gene(gene_symbol: $symbol) { lof { oe_score mis_bad_loeoe } synonyms { oe_score } } }`;
     
-    const rawResponse = await conn.request(query) as unknown as { data?: { gene?: { lof?: { oe_score?: number; mis_bad_loeoe?: number }; synonyms?: { oe_score?: number } } } };
+    const rawResponse = await conn.request(query, { variables: { symbol: geneSymbol } }) as unknown as { data?: { gene?: { lof?: { oe_score?: number; mis_bad_loeoe?: number }; synonyms?: { oe_score?: number } } } };
     const response = JSON.parse(JSON.stringify(rawResponse));
     const data = response.data?.gene;
     
@@ -371,7 +381,8 @@ async function fetchConstraint(geneSymbol: string): Promise<{ lof?: { oe_score: 
         oe_score: data?.synonyms?.oe_score || 0,
       },
     };
-  } catch {
+  } catch (error) {
+    console.error('[fetchConstraint] Error:', error);
     return {};
   }
 }
@@ -391,7 +402,8 @@ async function fetchDisgenet(geneSymbol: string): Promise<{ associations?: Array
     }));
     
     return { associations };
-  } catch {
+  } catch (error) {
+    console.error('[fetchDisgenet] Error:', error);
     return {};
   }
 }
@@ -412,7 +424,8 @@ async function fetchFunding(geneSymbol: string): Promise<{ grants?: Array<{ nih_
     }));
     
     return { grants };
-  } catch {
+  } catch (error) {
+    console.error('[fetchFunding] Error:', error);
     return {};
   }
 }

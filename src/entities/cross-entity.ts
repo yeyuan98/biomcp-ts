@@ -15,7 +15,7 @@ export async function geneToDrugs(geneSymbol: string): Promise<Array<{ drug_name
     
     const query = `query($symbol: String!) { drugs(genes: $symbol) { drug sources } }`;
     
-    const rawResponse = await conn.request(query) as unknown as DGIdbGeneResponse;
+    const rawResponse = await conn.request(query, { variables: { symbol: geneSymbol } }) as unknown as DGIdbGeneResponse;
     const response = JSON.parse(JSON.stringify(rawResponse));
     const drugs = response?.data?.drugs || [];
     
@@ -24,7 +24,8 @@ export async function geneToDrugs(geneSymbol: string): Promise<Array<{ drug_name
       source: d.sources?.join(', ') || 'dgidb',
       action_type: undefined,
     }));
-  } catch {
+  } catch (error) {
+    console.error('[geneToDrugs] Error:', error);
     return [];
   }
 }
@@ -51,7 +52,8 @@ export async function geneToPathways(geneSymbol: string): Promise<Array<{ pathwa
       name: r.name,
       source: 'reactome',
     }));
-  } catch {
+  } catch (error) {
+    console.error('[geneToPathways] Error:', error);
     return [];
   }
 }
@@ -84,7 +86,8 @@ export async function drugToGenes(drugName: string): Promise<Array<{ gene_symbol
       source: 'chembl',
       action_type: t.action_type,
     }));
-  } catch {
+  } catch (error) {
+    console.error('[drugToGenes] Error:', error);
     return [];
   }
 }
@@ -111,7 +114,8 @@ export async function drugToAdverseEvents(drugName: string): Promise<Array<{ rea
       frequency: undefined,
       source: 'openfda',
     }));
-  } catch {
+  } catch (error) {
+    console.error('[drugToAdverseEvents] Error:', error);
     return [];
   }
 }
@@ -129,7 +133,8 @@ export async function diseaseToDrugs(diseaseQuery: string): Promise<Array<{ drug
       source: 'chembl',
       phase: m.trial_phase,
     }));
-  } catch {
+  } catch (error) {
+    console.error('[diseaseToDrugs] Error:', error);
     return [];
   }
 }
@@ -148,7 +153,8 @@ export async function diseaseToGenes(diseaseId: string): Promise<Array<{ gene_sy
       source: r.geneDatasource,
       score: r.score,
     }));
-  } catch {
+  } catch (error) {
+    console.error('[diseaseToGenes] Error:', error);
     return [];
   }
 }
@@ -195,7 +201,8 @@ export async function geneEnrichment(geneSymbols: string[]): Promise<PathwayEnri
       genes_total: p.total,
       source: 'reactome',
     }));
-  } catch {
+  } catch (error) {
+    console.error('[geneEnrichment] Error:', error);
     return [];
   }
 }
@@ -257,22 +264,23 @@ export async function discover(query: string): Promise<DiscoverResult[]> {
   
   if (results.length === 0) {
     try {
-      const conn = connectionManager.getConnection('ols3');
+      const conn = connectionManager.getConnection('ols4');
       const response = await conn.request(
-        `/search?q=${encodeURIComponent(query)}&format=json&rows=3`
+        `/api/search?q=${encodeURIComponent(query)}&size=3`
       ) as OLSResponse;
       
       if (response.response?.docs?.length) {
         for (const doc of response.response.docs) {
           results.push({
-            entity_type: doc.ontology_type || 'unknown',
+            entity_type: doc.type || 'unknown',
             identifier: doc.iri || doc.obo_id || '',
             name: doc.label || query,
-            source: doc.obo_namespace || 'ols',
+            source: doc.ontology_name || 'ols',
           });
         }
       }
-    } catch {
+    } catch (error) {
+      console.error('[discover/ols4] Error:', error);
     }
   }
   
@@ -476,8 +484,10 @@ interface OLSResponse {
       iri?: string;
       obo_id?: string;
       label?: string;
-      ontology_type?: string;
-      obo_namespace?: string;
+      type?: string;
+      ontology_name?: string;
+      description?: string[];
     }>;
+    numFound?: number;
   };
 }
