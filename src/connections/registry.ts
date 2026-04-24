@@ -43,7 +43,7 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   },
   string: {
     sourceId: 'string',
-    baseUrl: 'https://string-db.org/api',
+    baseUrl: 'https://version-12-0.string-db.org/api',
     protocol: 'rest',
     rateLimit: { intervalMs: 100 },
   },
@@ -73,6 +73,12 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   reactome: {
     sourceId: 'reactome',
     baseUrl: 'https://reactome.org/ContentService',
+    protocol: 'rest',
+    rateLimit: { intervalMs: 100 },
+  },
+  reactome_analysis: {
+    sourceId: 'reactome_analysis',
+    baseUrl: 'https://reactome.org/AnalysisService',
     protocol: 'rest',
     rateLimit: { intervalMs: 100 },
   },
@@ -430,13 +436,13 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   },
   dgidb: {
     sourceId: 'dgidb',
-    baseUrl: 'https://dgidb.org/api',
+    baseUrl: 'https://dgidb.org/api/graphql',
     protocol: 'graphql',
     rateLimit: { intervalMs: 100 },
   },
   opentargets: {
     sourceId: 'opentargets',
-    baseUrl: 'https://api.platform.opentargets.org/api/v4',
+    baseUrl: 'https://api.platform.opentargets.org/api/v4/graphql',
     protocol: 'graphql',
     rateLimit: { intervalMs: 500 },
   },

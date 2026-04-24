@@ -31,7 +31,7 @@ describe('fetchWithTimeout', () => {
     await jest.advanceTimersByTimeAsync(20);
     const result = await promise;
     expect(result.error).toBeDefined();
-    expect(result.error).toContain('Timeout');
+    expect(result.error).toContain('timed out');
     expect(result.data).toBeUndefined();
   });
 

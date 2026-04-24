@@ -3,10 +3,15 @@ import { fetchWithTimeout } from '../connections/fetch-utils.js';
 
 const SECTION_TIMEOUT_MS = 8000;
 
+function extractTrial(response: any): any {
+  return response?.studies?.[0] || (response?.protocolSection ? response : null);
+}
+
 export interface TrialSearchOptions {
   status?: string;
   phase?: string;
   intervention_type?: string;
+  searchType?: 'condition' | 'intervention';
   limit?: number;
   offset?: number;
 }
@@ -43,22 +48,22 @@ export async function trialSearch(
   query: string,
   options: TrialSearchOptions = {}
 ): Promise<TrialSearchResult[]> {
-  const { status, phase, intervention_type, limit = 10, offset = 0 } = options;
+  const { status, phase, intervention_type, searchType, limit = 10, offset = 0 } = options;
   
   const conn = connectionManager.getConnection('clinicaltrials');
   
   const queryParams = new URLSearchParams({
-    'query.cond': query,
+    [searchType === 'intervention' ? 'query.intr' : 'query.cond']: query,
     pageSize: String(limit),
     format: 'json',
   });
   
   if (status) {
-    queryParams.set('query.status', status);
+    queryParams.set('filter.overallStatus', status.toUpperCase());
   }
   
   if (phase) {
-    queryParams.set('query.phase', phase);
+    queryParams.set('filter.phase', phase);
   }
   
   if (intervention_type) {
@@ -78,35 +83,37 @@ export async function trialGet(
   
   const conn = connectionManager.getConnection('clinicaltrials');
   
-  const response = await conn.request(
+  const rawResponse = await conn.request(
     `/studies/${encodeURIComponent(nctId)}?format=json`
-  ) as ClinicalTrialsDetailResponse;
+  );
   
-  if (!response.studies || response.studies.length === 0) {
+  const response = rawResponse as any;
+  const trial = response.studies?.[0] || (response.protocolSection ? response : null);
+  
+  if (!trial || !trial.protocolSection) {
     throw new Error(`Trial '${nctId}' not found. Try trial_search to find valid NCT IDs.`);
   }
   
-  const trial = response.studies[0];
-const identModule = trial.protocolSection?.identModule;
+  const identificationModule = trial.protocolSection?.identificationModule;
   const statusModule = trial.protocolSection?.statusModule;
-  const descModule = trial.protocolSection?.descModule;
-  const armsModule = trial.protocolSection?.armsModule;
-  const contactsModule = trial.protocolSection?.contactsModule;
+  const descriptionModule = trial.protocolSection?.descriptionModule;
+  const armsInterventionsModule = trial.protocolSection?.armsInterventionsModule;
+  const contactsLocationsModule = trial.protocolSection?.contactsLocationsModule;
   
   const result: TrialResult = {
-    nct_id: identModule?.nctId || nctId,
-    title: identModule?.briefTitle,
-    short_title: identModule?.shortTitle,
+    nct_id: identificationModule?.nctId || nctId,
+    title: identificationModule?.briefTitle,
+    short_title: identificationModule?.shortTitle,
     status: statusModule?.overallStatus,
     phase: statusModule?.phases?.[0],
-    conditions: descModule?.conditions,
-    interventions: armsModule?.interventions?.map((i: { type: string; name: string }) => `${i.type}: ${i.name}`),
-    sponsor: identModule?.sponsors?.[0]?.name,
-    collaborator: identModule?.collaborators?.[0]?.name,
+    conditions: descriptionModule?.conditions,
+    interventions: armsInterventionsModule?.interventions?.map((i: { type: string; name: string }) => `${i.type}: ${i.name}`),
+    sponsor: identificationModule?.sponsors?.[0]?.name,
+    collaborator: identificationModule?.collaborators?.[0]?.name,
   };
   
-  if (contactsModule?.contacts) {
-    result.contacts = contactsModule.contacts.map((c: { role?: string; name?: string; phone?: string; email?: string }) => ({
+  if (contactsLocationsModule?.contacts) {
+    result.contacts = contactsLocationsModule.contacts.map((c: { role?: string; name?: string; phone?: string; email?: string }) => ({
       role: c.role || 'contact',
       name: c.name || '',
       phone: c.phone,
@@ -133,14 +140,20 @@ const identModule = trial.protocolSection?.identModule;
     const settledResults = await Promise.allSettled(sectionPromises);
     
     result.sections = {};
-    for (const settled of settledResults) {
+    for (let si = 0; si < settledResults.length; si++) {
+      const settled = settledResults[si];
       if (settled.status === 'fulfilled' && settled.value.data) {
         const sectionData = settled.value.data as { section: string; data: unknown };
         (result.sections as Record<string, unknown>)[sectionData.section] = sectionData.data;
       } else if (settled.status === 'fulfilled' && settled.value.error) {
         const sectionResult = settled.value as { error?: string };
-        (result.sections as Record<string, unknown>)[sectionsToFetch[settledResults.indexOf(settled)]] = { 
+        (result.sections as Record<string, unknown>)[sectionsToFetch[si]] = { 
           error: sectionResult.error 
+        };
+      } else if (settled.status === 'rejected') {
+        const reason = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
+        (result.sections as Record<string, unknown>)[sectionsToFetch[si]] = {
+          error: `Section '${sectionsToFetch[si]}' fetch failed: ${reason}. The data source may be temporarily unavailable.`
         };
       }
     }
@@ -155,9 +168,10 @@ async function fetchEligibility(nctId: string): Promise<{ criteria?: string; min
     
     const response = await conn.request(
       `/studies/${encodeURIComponent(nctId)}?format=json`
-    ) as ClinicalTrialsDetailResponse;
+    ) as any;
     
-    const eligibilityModule = response.studies?.[0]?.protocolSection?.eligModule;
+    const trial = extractTrial(response);
+    const eligibilityModule = trial?.protocolSection?.eligibilityModule;
     
     if (!eligibilityModule) return {};
     
@@ -168,8 +182,9 @@ async function fetchEligibility(nctId: string): Promise<{ criteria?: string; min
       sex: eligibilityModule.sex,
       healthy_volunteers: eligibilityModule.healthyVolunteers,
     };
-  } catch {
-    return {};
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return { _error: `Eligibility lookup failed (source: clinicaltrials): ${msg}. The data source may be temporarily unavailable.` } as any;
   }
 }
 
@@ -179,9 +194,10 @@ async function fetchLocations(nctId: string): Promise<Array<{ facility?: string;
     
     const response = await conn.request(
       `/studies/${encodeURIComponent(nctId)}?format=json`
-    ) as ClinicalTrialsDetailResponse;
+    ) as any;
     
-    const locations = response.studies?.[0]?.protocolSection?.contactsModule?.locations;
+    const trial = extractTrial(response);
+    const locations = trial?.protocolSection?.contactsLocationsModule?.locations;
     
     if (!locations) return [];
     
@@ -193,8 +209,9 @@ async function fetchLocations(nctId: string): Promise<Array<{ facility?: string;
       zip: l.zip,
       status: l.status,
     }));
-  } catch {
-    return [];
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return [{ _error: `Location lookup failed (source: clinicaltrials): ${msg}. The data source may be temporarily unavailable.` } as any];
   }
 }
 
@@ -204,9 +221,10 @@ async function fetchOutcomes(nctId: string): Promise<{ primary?: Array<{ measure
     
     const response = await conn.request(
       `/studies/${encodeURIComponent(nctId)}?format=json`
-    ) as ClinicalTrialsDetailResponse;
+    ) as any;
     
-    const outcomesModule = response.studies?.[0]?.protocolSection?.outcomesModule;
+    const trial = extractTrial(response);
+    const outcomesModule = trial?.protocolSection?.outcomesModule;
     
     if (!outcomesModule) return {};
     
@@ -225,15 +243,16 @@ async function fetchOutcomes(nctId: string): Promise<{ primary?: Array<{ measure
     }
     
     return { primary: primaryArr, secondary: secondaryArr };
-  } catch {
-    return {};
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return { _error: `Outcome lookup failed (source: clinicaltrials): ${msg}. The data source may be temporarily unavailable.` } as any;
   }
 }
 
 interface ClinicalTrialsSearchResponse {
   studies?: Array<{
     protocolSection?: {
-      identModule?: {
+      identificationModule?: {
         nctId?: string;
         briefTitle?: string;
         sponsors?: Array<{ name: string }>;
@@ -242,10 +261,10 @@ interface ClinicalTrialsSearchResponse {
         overallStatus?: string;
         phases?: string[];
       };
-      descModule?: {
+      descriptionModule?: {
         conditions?: string[];
       };
-      armsModule?: {
+      armsInterventionsModule?: {
         interventions?: Array<{ type: string; name: string }>;
       };
     };
@@ -255,7 +274,7 @@ interface ClinicalTrialsSearchResponse {
 interface ClinicalTrialsDetailResponse {
   studies?: Array<{
     protocolSection?: {
-      identModule?: {
+      identificationModule?: {
         nctId?: string;
         briefTitle?: string;
         shortTitle?: string;
@@ -266,18 +285,18 @@ interface ClinicalTrialsDetailResponse {
         overallStatus?: string;
         phases?: string[];
       };
-      descModule?: {
+      descriptionModule?: {
         conditions?: string[];
         briefSummary?: string;
       };
-      armsModule?: {
+      armsInterventionsModule?: {
         interventions?: Array<{ type: string; name: string }>;
       };
-      contactsModule?: {
+      contactsLocationsModule?: {
         contacts?: Array<{ role?: string; name?: string; phone?: string; email?: string }>;
         locations?: Array<{ facility?: string; city?: string; state?: string; country?: string; zip?: string; status?: string }>;
       };
-      eligModule?: {
+      eligibilityModule?: {
         eligibilityCriteria?: string;
         minimumAge?: string;
         maximumAge?: string;
@@ -293,26 +312,26 @@ interface ClinicalTrialsDetailResponse {
 }
 
 export function transformTrialSearchResult(trial: ClinicalTrialsSearchStudy): TrialSearchResult {
-  const identModule = trial.protocolSection?.identModule;
+  const identificationModule = trial.protocolSection?.identificationModule;
   const statusModule = trial.protocolSection?.statusModule;
-  const descModule = trial.protocolSection?.descModule;
-  const armsModule = trial.protocolSection?.armsModule;
+  const descriptionModule = trial.protocolSection?.descriptionModule;
+  const armsInterventionsModule = trial.protocolSection?.armsInterventionsModule;
   
   return {
-    nct_id: identModule?.nctId || '',
-    title: identModule?.briefTitle,
+    nct_id: identificationModule?.nctId || '',
+    title: identificationModule?.briefTitle,
     status: statusModule?.overallStatus,
     phase: statusModule?.phases?.[0],
-    conditions: descModule?.conditions,
-    interventions: armsModule?.interventions?.map((i: { type: string; name: string }) => `${i.type}: ${i.name}`),
-    sponsor: identModule?.sponsors?.[0]?.name,
+    conditions: descriptionModule?.conditions,
+    interventions: armsInterventionsModule?.interventions?.map((i: { type: string; name: string }) => `${i.type}: ${i.name}`),
+    sponsor: identificationModule?.sponsors?.[0]?.name,
   };
 }
 
 export function transformTrialResponse(data: ClinicalTrialsDetailStudy): TrialResult {
   return {
-    nct_id: data.protocolSection?.identModule?.nctId || '',
-    title: data.protocolSection?.identModule?.briefTitle,
+    nct_id: data.protocolSection?.identificationModule?.nctId || '',
+    title: data.protocolSection?.identificationModule?.briefTitle,
     status: data.protocolSection?.statusModule?.overallStatus,
     phase: data.protocolSection?.statusModule?.phases?.[0],
   };
@@ -320,7 +339,7 @@ export function transformTrialResponse(data: ClinicalTrialsDetailStudy): TrialRe
 
 interface ClinicalTrialsSearchStudy {
   protocolSection?: {
-    identModule?: {
+    identificationModule?: {
       nctId?: string;
       briefTitle?: string;
       sponsors?: Array<{ name: string }>;
@@ -329,10 +348,10 @@ interface ClinicalTrialsSearchStudy {
       overallStatus?: string;
       phases?: string[];
     };
-    descModule?: {
+    descriptionModule?: {
       conditions?: string[];
     };
-    armsModule?: {
+    armsInterventionsModule?: {
       interventions?: Array<{ type: string; name: string }>;
     };
   };
@@ -340,7 +359,7 @@ interface ClinicalTrialsSearchStudy {
 
 interface ClinicalTrialsDetailStudy {
   protocolSection?: {
-    identModule?: {
+    identificationModule?: {
       nctId?: string;
       briefTitle?: string;
       shortTitle?: string;
@@ -351,18 +370,18 @@ interface ClinicalTrialsDetailStudy {
       overallStatus?: string;
       phases?: string[];
     };
-    descModule?: {
+    descriptionModule?: {
       conditions?: string[];
       briefSummary?: string;
     };
-    armsModule?: {
+    armsInterventionsModule?: {
       interventions?: Array<{ type: string; name: string }>;
     };
-    contactsModule?: {
+    contactsLocationsModule?: {
       contacts?: Array<{ role?: string; name?: string; phone?: string; email?: string }>;
       locations?: Array<{ facility?: string; city?: string; state?: string; country?: string; zip?: string; status?: string }>;
     };
-    eligModule?: {
+    eligibilityModule?: {
       eligibilityCriteria?: string;
       minimumAge?: string;
       maximumAge?: string;

@@ -73,7 +73,7 @@ export function registerDiseaseTools(server: McpServer): void {
   server.registerTool(
     'disease_genes',
     {
-      description: 'Get genes associated with a disease via DisGeNET',
+      description: 'Get genes associated with a disease via DisGeNET. Requires DISGENET_API_KEY environment variable. Obtain an API key at https://www.disgenet.org/.',
       inputSchema: {
         disease_id: z.string().describe('Disease ID'),
         limit: z.number().int().min(1).max(50).default(20),
@@ -83,7 +83,11 @@ export function registerDiseaseTools(server: McpServer): void {
     async ({ disease_id, limit }) => {
       try {
         const result = await diseaseGet(disease_id, ['gene_associations']);
-        const genes = (result as { sections?: { gene_associations?: Array<{ gene_symbol: string; name: string }> } }).sections?.gene_associations?.slice(0, limit) || [];
+        const section = result.sections?.gene_associations;
+        if (section && typeof section === 'object' && '_error' in section) {
+          return { content: [{ type: 'text', text: JSON.stringify(section) }], isError: true };
+        }
+        const genes = (Array.isArray(section) ? section : []).slice(0, limit) || [];
         return { content: [{ type: 'text', text: JSON.stringify(genes) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
@@ -104,7 +108,10 @@ export function registerDiseaseTools(server: McpServer): void {
     async ({ disease_id, limit }) => {
       try {
         const result = await diseaseGet(disease_id, ['phenotypes']);
-        const phenotypes = (result as { sections?: { phenotypes?: Array<{ hpo_id: string; name: string }> } }).sections?.phenotypes?.slice(0, limit) || [];
+        const phenotypesRaw = (result as { sections?: { phenotypes?: unknown } }).sections?.phenotypes;
+        const phenotypes = Array.isArray(phenotypesRaw)
+          ? (phenotypesRaw as Array<{ hpo_id: string; name: string }>).slice(0, limit)
+          : phenotypesRaw;
         return { content: [{ type: 'text', text: JSON.stringify(phenotypes) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
@@ -124,14 +131,9 @@ export function registerDiseaseTools(server: McpServer): void {
     },
     async ({ disease_id, limit }) => {
       try {
-        const conn = connectionManager.getConnection('opentargets');
-        const query = `query($disease: String!) { disease(efo: $disease) { associatedTargets { target { id approvedName } } } }`;
-        const response = await conn.request(query) as unknown as { data?: { disease?: { associatedTargets: Array<{ target: { id: string; approvedName: string } }> } } };
-        const drugs = (JSON.parse(JSON.stringify(response))?.data?.disease?.associatedTargets || []).slice(0, limit).map((t: { target: { id: string; approvedName: string } }) => ({
-          target_id: t.target.id,
-          name: t.target.approvedName,
-        }));
-        return { content: [{ type: 'text', text: JSON.stringify(drugs) }] };
+        const { diseaseToDrugs } = await import('../../entities/cross-entity.js');
+        const drugs = await diseaseToDrugs(disease_id);
+        return { content: [{ type: 'text', text: JSON.stringify(drugs.slice(0, limit)) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
       }
@@ -150,9 +152,37 @@ export function registerDiseaseTools(server: McpServer): void {
     },
     async ({ disease_id, limit }) => {
       try {
+        let searchName = disease_id;
+
+        if (disease_id.match(/^(DOID|MONDO|OMIM|OMOPS|ORPHA):/i)) {
+          try {
+            const { diseaseGet } = await import('../../entities/disease.js');
+            const resolved = await diseaseGet(disease_id, []);
+            if (resolved.name && resolved.name !== disease_id) {
+              searchName = resolved.name;
+            }
+          } catch {
+            return { 
+              content: [{ type: 'text', text: JSON.stringify({ 
+                _error: `Disease '${disease_id}' not found. Try disease_search to find valid disease IDs. Supported ID formats: MONDO:XXXXXXX, DOID:XXXXXXX, OMIM:XXXXXX.` 
+              }) }],
+              isError: true 
+            };
+          }
+        }
+
+        if (!searchName || searchName.trim() === '') {
+          return { 
+            content: [{ type: 'text', text: JSON.stringify({ 
+              _error: `Disease '${disease_id}' could not be resolved to a valid search term. Try disease_search to find valid disease IDs.` 
+            }) }],
+            isError: true 
+          };
+        }
+
         const conn = connectionManager.getConnection('clinicaltrials');
         const response = await conn.request(
-          `/studies?query.cond=${encodeURIComponent(disease_id)}&pageSize=${limit}&format=json`
+          `/studies?query.cond=${encodeURIComponent(searchName)}&pageSize=${limit}&format=json`
         ) as ClinicalTrialsDiseaseResponse;
         const trials = (response.studies || []).map(s => ({
           nct_id: s.protocolSection?.identificationModule?.nctId,

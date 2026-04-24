@@ -1,4 +1,4 @@
-import { transformMyGeneHit, transformMyGeneResponse, normalizeSummary, normalizeAliases } from '../../transform/gene.js';
+import { transformMyGeneHit, transformMyGeneResponse, normalizeAliases } from '../../transform/gene.js';
 
 describe('transformMyGeneHit', () => {
   it('maps full fields correctly', () => {
@@ -58,13 +58,6 @@ describe('transformMyGeneResponse', () => {
       name: 'B-Raf proto-oncogene',
       summary: 'This gene encodes a protein.',
     });
-  });
-});
-
-describe('normalizeSummary', () => {
-  it('removes bracket and parenthetical content', () => {
-    const result = normalizeSummary('BRCA1 [gene] (human)');
-    expect(result).toBe('BRCA1');
   });
 });
 

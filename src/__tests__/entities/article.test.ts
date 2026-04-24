@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { articleSearch, articleGet } from '../../entities/article.js';
+import { articleSearch, articleGet, deduplicateAndRank, transformPubTator, transformLitSense, transformEuropePMC, transformSemanticScholar } from '../../entities/article.js';
 import { parsePubMedXml } from '../../transform/pubmed.js';
 
 const SINGLE_ARTICLE_XML = `<?xml version="1.0"?>
@@ -192,5 +192,162 @@ describe('article', () => {
   test('parsePubMedXml returns empty for empty document', () => {
     const articles = parsePubMedXml('<?xml version="1.0"?><PubmedArticleSet></PubmedArticleSet>');
     expect(articles).toEqual([]);
+  });
+
+  test('articleSearch() with pubtator source uses /search/?text= endpoint', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({
+        results: [
+          { _id: '34083286', pmid: 34083286, pmcid: 'PMC999', title: 'BRCA1 article', journal: 'Nature', authors: ['Smith J'], date: '2021-06-01', doi: '10.1234/test', score: 250 },
+        ],
+      }),
+    }) as any;
+
+    const results = await articleSearch('brca1', { source: 'pubtator' });
+
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(callUrl).toContain('/search/?text=');
+    expect(callUrl).toContain('brca1');
+    expect(results).toHaveLength(1);
+    expect(results[0].pmid).toBe('34083286');
+    expect(results[0].pmcid).toBe('PMC999');
+    expect(results[0].authors).toEqual(['Smith J']);
+    expect(results[0].journal).toBe('Nature');
+    expect(results[0].doi).toBe('10.1234/test');
+    expect(results[0].source).toBe('pubtator');
+  });
+
+  test('articleSearch() with litsense source uses /sentences/?query= endpoint', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve([
+        { pmid: 12345, text: 'This is a relevant sentence.', score: 0.95, section: 'abstract', annotations: [] },
+      ]),
+    }) as any;
+
+    const results = await articleSearch('brca1', { source: 'litsense' });
+
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(callUrl).toContain('/sentences/?query=');
+    expect(callUrl).toContain('brca1');
+    expect(results).toHaveLength(1);
+    expect(results[0].pmid).toBe('12345');
+    expect(results[0].abstract).toBe('This is a relevant sentence.');
+    expect(results[0].score).toBe(0.95);
+    expect(results[0].source).toBe('litsense');
+  });
+
+  test('transformPubTator maps new PubTator3 fields correctly', () => {
+    const result = transformPubTator({
+      _id: '34083286',
+      pmid: 34083286,
+      pmcid: 'PMC8577473',
+      title: 'Test Title',
+      journal: 'Nature',
+      authors: ['Author A', 'Author B'],
+      date: '2021-06-01T00:00:00Z',
+      doi: '10.1234/test',
+      score: 250.5,
+    });
+
+    expect(result.pmid).toBe('34083286');
+    expect(result.pmcid).toBe('PMC8577473');
+    expect(result.title).toBe('Test Title');
+    expect(result.journal).toBe('Nature');
+    expect(result.authors).toEqual(['Author A', 'Author B']);
+    expect(result.publication_date).toBe('2021-06-01T00:00:00Z');
+    expect(result.doi).toBe('10.1234/test');
+    expect(result.score).toBe(250.5);
+    expect(result.source).toBe('pubtator');
+  });
+
+  test('transformLitSense maps LitSense fields correctly', () => {
+    const result = transformLitSense({
+      pmid: 12345,
+      pmcid: 'PMC999',
+      text: 'A sentence about BRCA1.',
+      score: 0.88,
+      section: 'abstract',
+      annotations: ['Gene:BRCA1'],
+    });
+
+    expect(result.pmid).toBe('12345');
+    expect(result.pmcid).toBe('PMC999');
+    expect(result.abstract).toBe('A sentence about BRCA1.');
+    expect(result.score).toBe(0.88);
+    expect(result.source).toBe('litsense');
+  });
+
+  test('transformEuropePMC maps fields correctly', () => {
+    const result = transformEuropePMC({
+      pubmedId: '12345',
+      pmcId: 'PMC999',
+      doi: '10.1234/test',
+      title: 'Europe PMC Article',
+      authorString: 'Smith J, Doe A',
+      journalTitle: 'Nature',
+      firstPublicationDate: '2023-01-15',
+      citedByCount: 42,
+      isOpenAccess: 'Y',
+    });
+
+    expect(result.pmid).toBe('12345');
+    expect(result.pmcid).toBe('PMC999');
+    expect(result.doi).toBe('10.1234/test');
+    expect(result.title).toBe('Europe PMC Article');
+    expect(result.authors).toEqual(['Smith J', 'Doe A']);
+    expect(result.journal).toBe('Nature');
+    expect(result.cited_by).toBe(42);
+    expect(result.is_open_access).toBe(true);
+    expect(result.source).toBe('europepmc');
+  });
+
+  test('transformSemanticScholar maps fields correctly', () => {
+    const result = transformSemanticScholar({
+      title: 'SS Paper',
+      abstract: 'Abstract text',
+      authors: [{ name: 'Alice' }, { name: 'Bob' }],
+      year: 2023,
+      venue: 'Science',
+      citationCount: 100,
+      isOpenAccess: false,
+      externalIds: { PMID: '99887', PMCID: 'PMC111', DOI: '10.1/ss' },
+    });
+
+    expect(result.pmid).toBe('99887');
+    expect(result.pmcid).toBe('PMC111');
+    expect(result.doi).toBe('10.1/ss');
+    expect(result.title).toBe('SS Paper');
+    expect(result.abstract).toBe('Abstract text');
+    expect(result.authors).toEqual(['Alice', 'Bob']);
+    expect(result.journal).toBe('Science');
+    expect(result.cited_by).toBe(100);
+    expect(result.is_open_access).toBe(false);
+    expect(result.source).toBe('semantic_scholar');
+  });
+
+  test('deduplicateAndRank deduplicates by pmid and sorts by cited_by', () => {
+    const articles = [
+      { pmid: '1', title: 'A', cited_by: 5, source: 'pubmed' as const },
+      { pmid: '2', title: 'B', cited_by: 20, source: 'pubmed' as const },
+      { pmid: '1', title: 'A dup', cited_by: 10, source: 'europepmc' as const },
+      { pmid: '3', title: 'C', cited_by: 15, source: 'pubmed' as const },
+    ];
+
+    const result = deduplicateAndRank(articles, 3);
+
+    expect(result).toHaveLength(3);
+    expect(result[0].pmid).toBe('2');
+    expect(result[1].pmid).toBe('3');
+    expect(result[2].pmid).toBe('1');
+    expect(result[2].title).toBe('A');
+  });
+
+  test('articleSearch() returns empty for unknown source', async () => {
+    const results = await articleSearch('brca1', { source: 'unknown' as any });
+    expect(results).toEqual([]);
   });
 });

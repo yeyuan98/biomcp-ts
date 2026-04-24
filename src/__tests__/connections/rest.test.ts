@@ -155,4 +155,95 @@ describe('RestConnection', () => {
     const result = await conn.healthCheck();
     expect(result).toBe(false);
   });
+
+  test('request() includes hint for HTTP 400 (bad request / not indexed)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      statusText: 'Bad Request',
+    }) as any;
+
+    const conn = new RestConnection(baseOptions);
+    await expect(conn.request('/test')).rejects.toThrow('The request was rejected by mygene');
+    await expect(conn.request('/test')).rejects.toThrow('may not be indexed yet');
+  });
+
+  test('request() includes hint for HTTP 404 (not found)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+    }) as any;
+
+    const conn = new RestConnection(baseOptions);
+    await expect(conn.request('/test')).rejects.toThrow('Resource not found at mygene');
+    await expect(conn.request('/test')).rejects.toThrow('Verify the ID');
+  });
+
+  test('request() includes hint for HTTP 429 (rate limited)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      statusText: 'Too Many Requests',
+    }) as any;
+
+    const conn = new RestConnection(baseOptions);
+    await expect(conn.request('/test')).rejects.toThrow('Rate limited by mygene');
+    await expect(conn.request('/test')).rejects.toThrow('Wait a few seconds and retry');
+    await expect(conn.request('/test')).rejects.toThrow('API key in environment variables');
+  });
+
+  test('request() includes hint for HTTP 401 (auth required)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+    }) as any;
+
+    const conn = new RestConnection(baseOptions);
+    await expect(conn.request('/test')).rejects.toThrow('Authentication required or forbidden by mygene');
+  });
+
+  test('request() includes hint for HTTP 403 (forbidden)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      statusText: 'Forbidden',
+    }) as any;
+
+    const conn = new RestConnection(baseOptions);
+    await expect(conn.request('/test')).rejects.toThrow('Authentication required or forbidden by mygene');
+  });
+
+  test('request() includes hint for HTTP 500 (server error)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error',
+    }) as any;
+
+    const conn = new RestConnection(baseOptions);
+    await expect(conn.request('/test')).rejects.toThrow('Server error from mygene');
+    await expect(conn.request('/test')).rejects.toThrow('temporarily unavailable');
+  });
+
+  test('request() includes no hint for other HTTP errors', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 418,
+      statusText: "I'm a Teapot",
+    }) as any;
+
+    const conn = new RestConnection(baseOptions);
+    try {
+      await conn.request('/test');
+      fail('Expected an error to be thrown');
+    } catch (error) {
+      const msg = (error as Error).message;
+      expect(msg).toContain('HTTP 418');
+      expect(msg).not.toContain('— The request');
+      expect(msg).not.toContain('Rate limited');
+      expect(msg).not.toContain('Server error');
+    }
+  });
 });

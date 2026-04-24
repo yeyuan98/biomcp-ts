@@ -93,4 +93,41 @@ describe('cross-entity', () => {
     expect(results[1].entity).toBe('drug');
     expect(results[1].id).toBe('Aspirin');
   });
+
+  test('discover() falls back to OLS4 when no other results found', async () => {
+    let callCount = 0;
+    global.fetch = jest.fn().mockImplementation((url: string) => {
+      callCount++;
+      if (url.includes('mygene.info') || url.includes('myvariant.info') || url.includes('mychem.info') || url.includes('mydisease.info')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ hits: [] }),
+        });
+      }
+      if (url.includes('ols4')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            response: {
+              docs: [
+                { iri: 'http://example.org/BRCA1', obo_id: 'hgnc:1100', label: 'BRCA1', type: 'class', ontology_name: 'hgnc' },
+              ],
+              numFound: 1,
+            },
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({}),
+      });
+    }) as any;
+
+    const results = await discover('BRCA1');
+
+    const urls = (global.fetch as any).mock.calls.map((c: any[]) => c[0] as string);
+    const hasOls4 = urls.some((u: string) => u.includes('ols4') && u.includes('/api/search'));
+    expect(hasOls4).toBe(true);
+    expect(results.some(r => r.name === 'BRCA1' && r.source === 'hgnc')).toBe(true);
+  });
 });
