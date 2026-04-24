@@ -26,7 +26,7 @@ describe('drug', () => {
     expect(global.fetch).toHaveBeenCalled();
     const callUrl = (global.fetch as any).mock.calls[0][0] as string;
     expect(callUrl).toContain('mychem.info');
-    expect(callUrl).toContain('/search?');
+    expect(callUrl).toContain('/query?');
     expect(callUrl).toContain('q=aspirin');
   });
 
@@ -35,7 +35,12 @@ describe('drug', () => {
       ok: true,
       json: () => Promise.resolve({
         hits: [
-          { name: 'Aspirin', uichem: 'CHEMBL25', inchi_key: 'BSIYZIXJDXWZKO', mw: 180.16, formula: 'C9H8O4' },
+          {
+            _id: 'BSIYZIXJDXWZKO-UHFFFAOYSA-N',
+            chebi: { name: 'Aspirin', formula: 'C9H8O4', mass: 180.16, inchikey: 'BSIYZIXJDXWZKO-UHFFFAOYSA-N' },
+            unii: { smiles: 'CC(=O)Oc1ccccc1C(=O)O', registry_number: 'R16CO5Y76E' },
+            unichem: { chembl: 'CHEMBL25' },
+          },
         ],
       }),
     }) as any;
@@ -44,7 +49,7 @@ describe('drug', () => {
 
     expect(results).toHaveLength(1);
     expect(results[0].name).toBe('Aspirin');
-    expect(results[0].uichem_id).toBe('CHEMBL25');
+    expect(results[0].chembl_id).toBe('CHEMBL25');
     expect(results[0].molecular_weight).toBe(180.16);
     expect(results[0].molecular_formula).toBe('C9H8O4');
   });
@@ -62,26 +67,32 @@ describe('drug', () => {
     expect(global.fetch).toHaveBeenCalled();
     const callUrl = (global.fetch as any).mock.calls[0][0] as string;
     expect(callUrl).toContain('mychem.info');
-    expect(callUrl).toContain('/get?');
+    expect(callUrl).toContain('/query?');
   });
 
   test('transformMyChemResponse() maps fields correctly', () => {
     const input = {
-      name: 'Aspirin',
-      uichem: 'CHEMBL25',
-      inchi: 'InChI=1S/C9H8O4',
-      inchi_key: 'BSIYZIXJDXWZKO-UHFFFAOYSA-N',
-      smiles: 'CC(=O)Oc1ccccc1C(=O)O',
-      mw: 180.16,
-      formula: 'C9H8O4',
+      chebi: {
+        name: 'Aspirin',
+        inchi: 'InChI=1S/C9H8O4',
+        inchikey: 'BSIYZIXJDXWZKO-UHFFFAOYSA-N',
+        mass: 180.16,
+        formula: 'C9H8O4',
+      },
+      unii: {
+        smiles: 'CC(=O)Oc1ccccc1C(=O)O',
+      },
+      unichem: {
+        chembl: 'CHEMBL25',
+      },
     };
 
     const result = transformMyChemResponse(input);
 
     expect(result).toEqual({
       name: 'Aspirin',
-      uichem_id: 'CHEMBL25',
-      inchi: input.inchi,
+      chembl_id: 'CHEMBL25',
+      inchi: 'InChI=1S/C9H8O4',
       inchi_key: 'BSIYZIXJDXWZKO-UHFFFAOYSA-N',
       smiles: 'CC(=O)Oc1ccccc1C(=O)O',
       molecular_weight: 180.16,

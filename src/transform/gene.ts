@@ -41,14 +41,6 @@ export function transformMyGeneResponse(data: MyGeneRecord): GeneResult {
   };
 }
 
-export function normalizeSummary(summary?: string): string {
-  if (!summary) return '';
-  return summary
-    .replace(/\[.*?\]/g, '')
-    .replace(/\(.*?\)/g, '')
-    .trim();
-}
-
 export function normalizeAliases(aliases?: string[]): string[] {
   if (!aliases) return [];
   return aliases.filter(a => a && a.length > 0);

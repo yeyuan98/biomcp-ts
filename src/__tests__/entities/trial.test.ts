@@ -19,10 +19,10 @@ describe('trial', () => {
       json: () => Promise.resolve({
         studies: [{
           protocolSection: {
-            identModule: { nctId: 'NCT00000001', briefTitle: 'Test Trial' },
+            identificationModule: { nctId: 'NCT00000001', briefTitle: 'Test Trial' },
             statusModule: {},
-            descModule: {},
-            armsModule: {},
+            descriptionModule: {},
+            armsInterventionsModule: {},
           },
         }],
       }),
@@ -43,10 +43,10 @@ describe('trial', () => {
       json: () => Promise.resolve({
         studies: [{
           protocolSection: {
-            identModule: { nctId: 'NCT00000001', briefTitle: 'Test Trial', sponsors: [{ name: 'NIH' }] },
+            identificationModule: { nctId: 'NCT00000001', briefTitle: 'Test Trial', sponsors: [{ name: 'NIH' }] },
             statusModule: { overallStatus: 'RECRUITING', phases: ['PHASE2'] },
-            descModule: { conditions: ['Breast Cancer'] },
-            armsModule: { interventions: [{ type: 'Drug', name: 'Aspirin' }] },
+            descriptionModule: { conditions: ['Breast Cancer'] },
+            armsInterventionsModule: { interventions: [{ type: 'Drug', name: 'Aspirin' }] },
           },
         }],
       }),
@@ -67,11 +67,11 @@ describe('trial', () => {
       json: () => Promise.resolve({
         studies: [{
           protocolSection: {
-            identModule: { nctId: 'NCT00000001', briefTitle: 'Test Trial', sponsors: [], collaborators: [] },
+            identificationModule: { nctId: 'NCT00000001', briefTitle: 'Test Trial', sponsors: [], collaborators: [] },
             statusModule: { overallStatus: 'RECRUITING', phases: [] },
-            descModule: {},
-            armsModule: {},
-            contactsModule: {},
+            descriptionModule: {},
+            armsInterventionsModule: {},
+            contactsLocationsModule: {},
           },
         }],
       }),
@@ -88,7 +88,7 @@ describe('trial', () => {
   test('transformTrialResponse() maps fields correctly', () => {
     const input = {
       protocolSection: {
-        identModule: { nctId: 'NCT00000001', briefTitle: 'Test Trial' },
+        identificationModule: { nctId: 'NCT00000001', briefTitle: 'Test Trial' },
         statusModule: { overallStatus: 'RECRUITING', phases: ['PHASE2'] },
       },
     };

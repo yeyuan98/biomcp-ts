@@ -87,7 +87,11 @@ export function registerTrialTools(server: McpServer): void {
     async ({ nct_id, limit }) => {
       try {
         const result = await trialGet(nct_id, ['locations']);
-        const locations = (result as { sections?: { locations?: Array<{ facility?: string; city?: string }> } }).sections?.locations?.slice(0, limit) || [];
+        const section = result.sections?.locations;
+        if (section && typeof section === 'object' && '_error' in section) {
+          return { content: [{ type: 'text', text: JSON.stringify(section) }], isError: true };
+        }
+        const locations = (Array.isArray(section) ? section : []).slice(0, limit) || [];
         return { content: [{ type: 'text', text: JSON.stringify(locations) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };

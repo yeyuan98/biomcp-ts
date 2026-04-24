@@ -6,6 +6,7 @@ const SECTION_TIMEOUT_MS = 8000;
 export interface VariantSearchOptions {
   query?: string;
   gene?: string;
+  hgvsp?: string;
   significance?: 'benign' | 'likely_benign' | 'pathogenic' | 'likely_pathogenic' | 'uncertain';
   max_frequency?: number;
   limit?: number;
@@ -39,7 +40,9 @@ export interface VariantResult {
 }
 
 export interface FrequencySection {
-  gnomad_af?: number;
+  gnomad_af?: number | null;
+  gnomad_exome_af?: number | null;
+  gnomad_genome_af?: number | null;
   exac_af?: number;
   popul_max?: string;
   population_breakdown?: Record<string, number>;
@@ -113,33 +116,57 @@ const VARIANT_SEARCH_FILTERS = [
 
 const VARIANT_GET_SECTIONS = ['core', 'frequency', 'predictions', 'clinical', 'alphagenome'] as const;
 
+function rewriteVariantQuery(rawQuery: string): string {
+  if (rawQuery.includes(':')) return rawQuery;
+  if (/^rs\d+$/i.test(rawQuery)) return `dbsnp.rsid:${rawQuery}`;
+  if (/^[NX]M_\d+\.\d+:[acgtnACGTN>]+/.test(rawQuery)) return rawQuery;
+  return rawQuery;
+}
+
 export async function variantSearch(
   options: VariantSearchOptions
 ): Promise<VariantSearchResult[]> {
-  const { query, gene, significance, max_frequency, limit = 10, offset = 0 } = options;
+  const { query, gene, hgvsp, significance, max_frequency, limit = 10, offset = 0 } = options;
   
   const conn = connectionManager.getConnection('myvariant');
   
   const queryParams = new URLSearchParams({
     size: String(limit),
     from: String(offset),
-    fields: 'gene,rsid,hgvs,significance,clinvar_stars,gnomad_af',
+    fields: 'dbsnp,snpeff,clinvar,gnomad,cadd,dbnsfp',
   });
   
+  const qParts: string[] = [];
+  
   if (query) {
-    queryParams.set('q', query);
+    qParts.push(rewriteVariantQuery(query));
   }
   
   if (gene) {
-    queryParams.set('gene', gene);
+    qParts.push(`gene:${gene}`);
+  }
+  
+  if (hgvsp) {
+    qParts.push(`hgvsp.p:${hgvsp}`);
   }
   
   if (significance) {
-    queryParams.set('significance', significance);
+    const sigMap: Record<string, string> = {
+      pathogenic: 'pathogenic',
+      likely_pathogenic: 'likely pathogenic',
+      benign: 'benign',
+      likely_benign: 'likely benign',
+      uncertain: 'uncertain significance',
+    };
+    qParts.push(`clinvar.significance:${sigMap[significance] || significance}`);
   }
   
   if (max_frequency !== undefined) {
-    queryParams.set('max_frequency', String(max_frequency));
+    qParts.push(`gnomad_af:[* TO ${max_frequency}]`);
+  }
+  
+  if (qParts.length > 0) {
+    queryParams.set('q', qParts.join(' AND '));
   }
   
   const response = await conn.request(`/query?${queryParams.toString()}`) as MyVariantSearchResponse;
@@ -155,20 +182,30 @@ export async function variantGet(
   
   const conn = connectionManager.getConnection('myvariant');
   
-  const response = await conn.request(
-    `/variant/${id}?fields=gene,rsid,hgvs,significance,clinvar,gnomad,cadd,sift,polyphen,dbsnp,cosmic`
-  ) as MyVariantGetResponse;
-  
-  if (!response) {
+  let rawResponse = await conn.request(
+    `/variant/${id}?fields=dbsnp,clinvar,gnomad_exome,gnomad_genome,cadd,dbnsfp,snpeff,cosmic`
+  ) as MyVariantGetResponse | MyVariantGetResponse[];
+
+  if (Array.isArray(rawResponse)) {
+    rawResponse = rawResponse[0];
+  }
+
+  if (!rawResponse) {
     throw new Error(`Variant '${id}' not found`);
   }
+
+  if ((rawResponse as any).error || (rawResponse as any).success === false) {
+    throw new Error(`Variant '${id}' not found in MyVariant.info`);
+  }
+
+  const response = rawResponse as MyVariantGetResponse;
   
   const variant: VariantResult = {
-    id: response.dbsnp?.rsid || response.rsid || id,
-    gene: response.gene?.symbol,
-    hgvs_p: response.hgvs?.p,
-    hgvs_c: response.hgvs?.c,
-    rsid: response.dbsnp?.rsid || response.rsid,
+    id: response.dbsnp?.rsid || response._id || id,
+    gene: response.dbsnp?.gene?.symbol || response.snpeff?.ann?.[0]?.genename || (response as any).dbnsfp?.gene?.genename,
+    hgvs_p: response.snpeff?.ann?.[0]?.hgvs_p,
+    hgvs_c: response.snpeff?.ann?.[0]?.hgvs_c,
+    rsid: response.dbsnp?.rsid,
     cosmic_id: response.cosmic?.cosmic_id,
   };
   
@@ -184,6 +221,20 @@ export async function variantGet(
   const sectionPromises = sectionsToFetch.map(section => {
     return fetchWithTimeout(async () => {
       switch (section) {
+        case 'core':
+          return { 
+            section: 'core', 
+            data: { 
+              id: variant.id, 
+              gene: variant.gene, 
+              hgvs_p: variant.hgvs_p, 
+              hgvs_c: variant.hgvs_c, 
+              rsid: variant.rsid, 
+              cosmic_id: variant.cosmic_id,
+              significance: variant.significance,
+              conditions: variant.conditions,
+            } 
+          };
         case 'frequency':
           return { section: 'frequency', data: await fetchFrequencySection(response) };
         case 'predictions':
@@ -212,6 +263,11 @@ export async function variantGet(
         (variant.sections as Record<string, unknown>)[sectionsToFetch[i]] = {
           error: sectionResult.error
         };
+      } else if (settled.status === 'rejected') {
+        const reason = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
+        (variant.sections as Record<string, unknown>)[sectionsToFetch[i]] = {
+          error: `Section '${sectionsToFetch[i]}' fetch failed: ${reason}. The data source may be temporarily unavailable.`
+        };
       }
     }
   }
@@ -220,106 +276,106 @@ export async function variantGet(
 }
 
 async function fetchFrequencySection(variant: MyVariantGetResponse): Promise<FrequencySection | null> {
-  try {
-    const conn = connectionManager.getConnection('gnomad');
-    
-    const query = `query($rsid: String!) {
-      snp(rsid: $rsid) {
-        genome {
-          af: alleleFrequencies {
-            population: population
-            af: alleleFrequency
-          }
-        }
+  const gnomadExome = (variant as any).gnomad_exome;
+  const gnomadGenome = (variant as any).gnomad_genome;
+
+  if (!gnomadExome && !gnomadGenome) return null;
+
+  const exomeAf = gnomadExome?.af?.af ?? null;
+  const genomeAf = gnomadGenome?.af?.af ?? null;
+  const populations: Record<string, number> = {};
+
+  if (gnomadExome?.af) {
+    for (const [key, val] of Object.entries(gnomadExome.af)) {
+      if (key.startsWith('af_') && typeof val === 'number') {
+        populations[key] = val;
       }
-    }`;
-    
-    const vars = { rsid: variant.dbsnp?.rsid || variant.rsid?.replace('rs', '') || '' };
-    const rawResponse = await conn.request(query, { variables: vars }) as GnomadFreqResponse;
-    const parsed = JSON.parse(JSON.stringify(rawResponse));
-    const freqs = parsed.data?.snp?.genome?.af || [];
-    
-    const breakdown: Record<string, number> = {};
-    let maxAf = 0;
-    let maxPop = 'nfe';
-    
-    for (const f of freqs) {
-      if (f.af > maxAf) {
-        maxAf = f.af;
-        maxPop = f.population;
-      }
-      breakdown[f.population] = f.af;
     }
-    
-    return {
-      gnomad_af: variant.gnomad?.af,
-      population_breakdown: breakdown,
-      popul_max: maxPop,
-    };
-  } catch {
-    if (variant.gnomad) {
-      return {
-        gnomad_af: variant.gnomad.af,
-      };
-    }
-    return null;
   }
+  if (gnomadGenome?.af) {
+    for (const [key, val] of Object.entries(gnomadGenome.af)) {
+      if (key.startsWith('af_') && typeof val === 'number') {
+        populations[`genome_${key}`] = val;
+      }
+    }
+  }
+
+  return {
+    gnomad_exome_af: exomeAf,
+    gnomad_genome_af: genomeAf,
+    gnomad_af: exomeAf ?? genomeAf,
+    population_breakdown: populations,
+  };
 }
 
 async function fetchPredictionsSection(variant: MyVariantGetResponse): Promise<PredictionsSection | null> {
   const result: PredictionsSection = {};
   
-  if (variant.cadd) {
-    result.cadd_score = variant.cadd.score;
-    result.cadd_phred = variant.cadd.phred;
+  const dbnsfp = (variant as any).dbnsfp;
+  
+  const cadd = variant.cadd || (dbnsfp?.cadd ? { score: dbnsfp.cadd.rawscore, phred: dbnsfp.cadd.phred } : undefined);
+  const sift = variant.sift || (dbnsfp?.sift ? { score: dbnsfp.sift.score, pred: dbnsfp.sift.pred } : undefined);
+  const polyphen = variant.polyphen || (dbnsfp?.polyphen2 ? { score: dbnsfp.polyphen2.score, pred: dbnsfp.polyphen2.pred } : undefined);
+  const revel = variant.revel || dbnsfp?.revel;
+  const vest = variant.vest || (dbnsfp?.vest3 ? { score: dbnsfp.vest3.score } : undefined);
+  const gerp = variant.gerp || dbnsfp?.gerp;
+  const phylop = variant.phylop || dbnsfp?.phylop;
+  const phastcons = variant.phastcons || dbnsfp?.phastcons100way;
+  const alphamissense = variant.alphamissense || dbnsfp?.alphamissense;
+  const clinpred = variant.clinpred || dbnsfp?.clinpred;
+  const metarnn = variant.metarnn || dbnsfp?.metarnn;
+  
+  if (cadd) {
+    result.cadd_score = cadd.score;
+    result.cadd_phred = cadd.phred;
   }
   
-  if (variant.sift) {
-    result.sift_score = variant.sift.score;
-    result.sift_pred = variant.sift.pred;
+  if (sift) {
+    result.sift_score = sift.score;
+    result.sift_pred = sift.pred;
   }
   
-  if (variant.polyphen) {
-    result.polyphen_score = variant.polyphen.score;
-    result.polyphen_pred = variant.polyphen.pred;
+  if (polyphen) {
+    result.polyphen_score = polyphen.score;
+    result.polyphen_pred = polyphen.pred;
   }
   
-  if (variant.revel) {
-    result.revel_score = variant.revel.score;
+  if (revel) {
+    result.revel_score = revel.score ?? revel;
   }
   
-  if (variant.vest) {
-    result.vest_score = variant.vest.score;
+  if (vest) {
+    result.vest_score = vest.score;
   }
   
-  if (variant.gerp) {
+  if (gerp) {
     result.conservation = {
-      gerp: variant.gerp.score,
+      gerp: gerp.score ?? gerp,
     };
   }
   
-  if (variant.phylop) {
+  if (phylop) {
     result.conservation = result.conservation || {};
-    result.conservation.phylop = variant.phylop.score;
+    result.conservation.phylop = phylop.score ?? phylop;
   }
   
-  if (variant.phastcons) {
+  if (phastcons) {
     result.conservation = result.conservation || {};
-    result.conservation.phastcons = variant.phastcons.score;
+    result.conservation.phastcons = phastcons.score ?? phastcons;
   }
   
-  if (variant.alphamissense) {
-    result.other = { alphamissense: variant.alphamissense.score };
+  if (alphamissense) {
+    result.other = { alphamissense: alphamissense.score ?? alphamissense };
   }
   
-  if (variant.clinpred) {
+  if (clinpred) {
     result.other = result.other || {};
-    result.other.clinpred = variant.clinpred.score;
+    result.other.clinpred = clinpred.score ?? clinpred;
   }
   
-  if (variant.metarnn) {
+  if (metarnn) {
     result.other = result.other || {};
-    result.other.metarnn = variant.metarnn.score;
+    result.other.metarnn = metarnn.score ?? metarnn;
   }
   
   if (variant.bayesdel) {
@@ -355,7 +411,7 @@ async function fetchClinicalSection(variant: MyVariantGetResponse, gene?: string
         }
       }`;
       const civicVars = { gene, hgvsp: variant.hgvs?.p || '' };
-      const civicRaw = await civicConn.request(civicQuery, { variables: civicVars }) as CivicVariantResponse;
+      const civicRaw = await civicConn.request(civicQuery, civicVars) as CivicVariantResponse;
       const civicParsed = JSON.parse(JSON.stringify(civicRaw));
       const civicData = civicParsed.data?.variants?.[0];
       if (civicData) {
@@ -390,6 +446,10 @@ async function fetchClinicalSection(variant: MyVariantGetResponse, gene?: string
 
 async function fetchAlphaGenomeSection(variant: VariantResult): Promise<AlphaGenomeSection | null> {
   try {
+    if (!process.env.ALPHAGENOME_API_KEY) {
+      throw new Error('ALPHAGENOME_API_KEY environment variable is not set. AlphaGenome requires an API key. Set it in your environment to enable AlphaGenome variant scoring.');
+    }
+
     const grpcConn = connectionManager.getConnection('alphagenome');
     
     const result: AlphaGenomeSection = {
@@ -428,13 +488,22 @@ async function fetchAlphaGenomeSection(variant: VariantResult): Promise<AlphaGen
     }
     
     return result;
-  } catch {
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes('ALPHAGENOME_API_KEY')) {
+      const section: AlphaGenomeSection = { scorers: [] };
+      throw new Error(msg);
+    }
     return null;
   }
 }
 
 export async function fetchOncoKbAnnotation(gene: string, proteinChange: string): Promise<OncoKbAnnotation | null> {
   try {
+    if (!process.env.ONCOKB_TOKEN) {
+      throw new Error('ONCOKB_TOKEN environment variable is not set. OncoKB requires an API token. Set it in your environment to enable OncoKB variant annotations.');
+    }
+
     const conn = connectionManager.getConnection('oncokb');
     
     const queryParams = new URLSearchParams({
@@ -466,7 +535,11 @@ export async function fetchOncoKbAnnotation(gene: string, proteinChange: string)
       effect: response.mutationEffect,
       therapies,
     };
-  } catch {
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes('ONCOKB_TOKEN')) {
+      throw error;
+    }
     return null;
   }
 }
@@ -484,7 +557,7 @@ interface MyVariantSearchResponse {
     _id: string;
     gene?: { symbol: string };
     rsid?: string;
-    dbsnp?: { rsid: string };
+  dbsnp?: { rsid: string; gene?: { symbol: string } };
     hgvs?: { p: string; c: string };
     clinical_significance?: string;
     clinvar?: { stars: number };
@@ -495,7 +568,7 @@ interface MyVariantSearchResponse {
 interface MyVariantGetResponse {
   _id: string;
   rsid?: string;
-  dbsnp?: { rsid: string };
+  dbsnp?: { rsid: string; gene?: { symbol: string } };
   cosmic?: { cosmic_id: string };
   gene?: { symbol: string };
   hgvs?: { p: string; c: string };
@@ -507,14 +580,37 @@ interface MyVariantGetResponse {
     submitters?: string[];
     stars?: number;
   };
-  gnomad?: {
-    af?: number;
-    exac_af?: number;
-    populations?: Record<string, number>;
+  gnomad_exome?: {
+    af?: Record<string, any>;
+  };
+  gnomad_genome?: {
+    af?: Record<string, any>;
   };
   cadd?: {
     score?: number;
     phred?: number;
+  };
+  dbnsfp?: {
+    gene?: { genename?: string };
+    cadd?: { rawscore?: number; phred?: number };
+    sift?: { score?: number; pred?: string };
+    polyphen2?: { score?: number; pred?: string };
+    revel?: { score?: number };
+    vest3?: { score?: number };
+    gerp?: { score?: number };
+    phylop?: { score?: number };
+    phastcons100way?: { score?: number };
+    alphamissense?: { score?: number };
+    clinpred?: { score?: number };
+    metarnn?: { score?: number };
+    clinvar?: { clnsig?: string };
+  };
+  snpeff?: {
+    ann?: Array<{
+      genename?: string;
+      hgvs_p?: string;
+      hgvs_c?: string;
+    }>;
   };
   sift?: { score?: number; pred?: string };
   polyphen?: { score?: number; pred?: string };
@@ -527,16 +623,6 @@ interface MyVariantGetResponse {
   clinpred?: { score?: number };
   metarnn?: { score?: number };
   bayesdel?: { score?: number };
-}
-
-interface GnomadFreqResponse {
-  data?: {
-    snp?: {
-      genome?: {
-        af?: Array<{ population: string; af: number }>;
-      };
-    };
-  };
 }
 
 interface CivicVariantResponse {
@@ -559,13 +645,13 @@ interface OncoKbResponse {
   }>;
 }
 
-export function transformMyVariantHit(hit: MyVariantSearchResponse['hits'][0]): VariantSearchResult {
+export function transformMyVariantHit(hit: any): VariantSearchResult {
   return {
-    id: hit.dbsnp?.rsid || hit.rsid || hit._id,
-    gene: hit.gene?.symbol,
-    hgvs_p: hit.hgvs?.p,
-    hgvs_c: hit.hgvs?.c,
-    significance: hit.clinical_significance,
+    id: hit.dbsnp?.rsid || hit._id,
+    gene: hit.dbsnp?.gene?.symbol || hit.snpeff?.ann?.[0]?.genename || (hit as any).dbnsfp?.gene?.genename,
+    hgvs_p: hit.snpeff?.ann?.[0]?.hgvs_p,
+    hgvs_c: hit.snpeff?.ann?.[0]?.hgvs_c,
+    significance: hit.clinvar?.significance || (hit as any).dbnsfp?.clinvar?.clnsig,
     clinvar_stars: hit.clinvar?.stars,
     gnomad_af: hit.gnomad?.af,
   };

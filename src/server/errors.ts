@@ -99,6 +99,38 @@ export function formatError(error: unknown): BioMCPError {
   );
 }
 
+export function getSectionError(sectionData: unknown): string | undefined {
+  if (!sectionData || typeof sectionData !== 'object') return undefined;
+  const obj = sectionData as Record<string, unknown>;
+  return typeof obj._error === 'string' ? obj._error : undefined;
+}
+
+export function extractSection<T>(
+  data: unknown,
+  ...paths: string[]
+): T | undefined {
+  if (!data || typeof data !== 'object') return undefined;
+  const obj = data as Record<string, unknown>;
+  if (obj._error) return undefined;
+  for (const path of paths) {
+    if (obj[path] !== undefined && obj[path] !== null) return obj[path] as T;
+  }
+  return undefined;
+}
+
+export function sectionResult<T>(
+  result: { sections?: Record<string, unknown> },
+  sectionName: string,
+  subPath?: string
+): T | { _error: string } | undefined {
+  const sectionData = result.sections?.[sectionName];
+  if (!sectionData) return undefined;
+  const err = getSectionError(sectionData);
+  if (err) return { _error: err };
+  if (!subPath) return sectionData as T;
+  return (sectionData as Record<string, unknown>)[subPath] as T ?? undefined;
+}
+
 export function withErrorHandling<T>(
   fn: () => Promise<T>,
   operationName?: string

@@ -69,7 +69,11 @@ export function registerDrugTools(server: McpServer): void {
     async ({ name, limit }) => {
       try {
         const result = await drugGet(name, ['targets']);
-        const targets = (result as { sections?: { targets?: Array<{ gene_symbol: string; name: string }> } }).sections?.targets?.slice(0, limit) || [];
+        const section = result.sections?.targets;
+        if (section && typeof section === 'object' && '_error' in section) {
+          return { content: [{ type: 'text', text: JSON.stringify(section) }], isError: true };
+        }
+        const targets = (Array.isArray(section) ? section : []).slice(0, limit) || [];
         return { content: [{ type: 'text', text: JSON.stringify(targets) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
@@ -90,7 +94,11 @@ export function registerDrugTools(server: McpServer): void {
     async ({ name, limit }) => {
       try {
         const result = await drugGet(name, ['indications']);
-        const indications = (result as { sections?: { indications?: Array<{ disease_name: string; phase: string }> } }).sections?.indications?.slice(0, limit) || [];
+        const section = result.sections?.indications;
+        if (section && typeof section === 'object' && '_error' in section) {
+          return { content: [{ type: 'text', text: JSON.stringify(section) }], isError: true };
+        }
+        const indications = (Array.isArray(section) ? section : []).slice(0, limit) || [];
         return { content: [{ type: 'text', text: JSON.stringify(indications) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };

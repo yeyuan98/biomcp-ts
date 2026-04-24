@@ -11,21 +11,42 @@ const SECTION_TIMEOUT_MS = 8000;
 
 export async function geneToDrugs(geneSymbol: string): Promise<Array<{ drug_name: string; source: string; action_type?: string }>> {
   try {
-    const conn = connectionManager.getConnection('dgidb');
+    const conn = connectionManager.getConnection('opentargets');
     
-    const query = `query($symbol: String!) { drugs(genes: $symbol) { drug sources } }`;
+    const searchQuery = `query($symbol: String!) {
+      search(queryString: $symbol, entityNames: ["target"], page: {index: 0, size: 1}) {
+        hits { id name entity }
+      }
+    }`;
     
-    const rawResponse = await conn.request(query) as unknown as DGIdbGeneResponse;
-    const response = JSON.parse(JSON.stringify(rawResponse));
-    const drugs = response?.data?.drugs || [];
+    const searchRaw = await conn.request(searchQuery, { symbol: geneSymbol }) as any;
+    const searchData = JSON.parse(JSON.stringify(searchRaw));
+    const targetId = searchData?.data?.search?.hits?.[0]?.id;
     
-    return drugs.map((d: { drug: string; sources: string[] }) => ({
-      drug_name: d.drug,
-      source: d.sources?.join(', ') || 'dgidb',
-      action_type: undefined,
+    if (!targetId) {
+      return [{ _error: `No OpenTargets entry found for gene '${geneSymbol}'. Verify the gene symbol using gene_search.` } as any];
+    }
+    
+    const drugQuery = `query($ensemblId: String!) {
+      target(ensemblId: $ensemblId) {
+        drugAndClinicalCandidates {
+          rows { maxClinicalStage drug { id name drugType } }
+        }
+      }
+    }`;
+    
+    const drugRaw = await conn.request(drugQuery, { ensemblId: targetId }) as any;
+    const drugData = JSON.parse(JSON.stringify(drugRaw));
+    const rows = drugData?.data?.target?.drugAndClinicalCandidates?.rows || [];
+    
+    return rows.slice(0, 20).map((r: { maxClinicalStage?: string; drug?: { name?: string; drugType?: string } }) => ({
+      drug_name: r.drug?.name || 'unknown',
+      source: 'opentargets',
+      action_type: r.drug?.drugType,
     }));
-  } catch {
-    return [];
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return [{ _error: `Drug lookup for gene failed (source: opentargets): ${msg}. Try gene_search first to verify the gene symbol, or try again later.` } as any];
   }
 }
 
@@ -43,16 +64,31 @@ export async function geneToPathways(geneSymbol: string): Promise<Array<{ pathwa
     const conn = connectionManager.getConnection('reactome');
     
     const response = await conn.request(
-      `/search/query?query=${encodeURIComponent(geneSymbol)}&species=Homo sapiens&limit=20`
+      `/search/query?query=${encodeURIComponent(geneSymbol)}&species=Homo sapiens&limit=20&types=Pathway`
     ) as ReactomeSearchResponse;
     
-    return (response.results || []).map(r => ({
-      pathway_id: r.stId,
-      name: r.name,
-      source: 'reactome',
-    }));
-  } catch {
-    return [];
+    const pathways: Array<{ pathway_id: string; name: string; source: string }> = [];
+    
+    for (const group of (response.results || [])) {
+      const entries = (group as Record<string, unknown>).entries as Array<Record<string, unknown>> | undefined;
+      if (!entries) continue;
+      for (const entry of entries) {
+        if (entry.type === 'Pathway' && entry.stId && entry.name) {
+          const name = typeof entry.name === 'string' ? entry.name : String(entry.name);
+          pathways.push({
+            pathway_id: entry.stId as string,
+            name: name.replace(/<[^>]+>/g, ''),
+            source: 'reactome',
+          });
+        }
+      }
+    }
+    
+    return pathways.slice(0, 20);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[geneToPathways] Error:', error);
+    return [{ _error: `Pathway lookup for gene failed (source: reactome): ${msg}. The data source may be temporarily unavailable.` } as any];
   }
 }
 
@@ -72,25 +108,59 @@ export async function variantToTrials(variantId: string): Promise<Array<{ nct_id
 
 export async function drugToGenes(drugName: string): Promise<Array<{ gene_symbol: string; name: string; source: string; action_type?: string }>> {
   try {
-    const conn = connectionManager.getConnection('chembl');
+    const conn = connectionManager.getConnection('opentargets');
     
-    const response = await conn.request(
-      `/target?molecule_synonym=${encodeURIComponent(drugName)}&format=json`
-    ) as ChemblTargetResponse;
+    const searchQuery = `query($name: String!) {
+      search(queryString: $name, entityNames: ["drug"], page: {index: 0, size: 1}) {
+        hits { id name }
+      }
+    }`;
     
-    return (response.targets || []).slice(0, 20).map(t => ({
-      gene_symbol: t.target_chembl_id,
-      name: t.target_name,
-      source: 'chembl',
-      action_type: t.action_type,
-    }));
-  } catch {
-    return [];
+    const searchRaw = await conn.request(searchQuery, { name: drugName }) as any;
+    const searchData = JSON.parse(JSON.stringify(searchRaw));
+    const chemblId = searchData?.data?.search?.hits?.[0]?.id;
+    
+    if (!chemblId) {
+      return [{ _error: `No OpenTargets entry found for drug '${drugName}'. Try drug_search to find valid drug names.` } as any];
+    }
+    
+    const drugQuery = `query($chemblId: String!) {
+      drug(chemblId: $chemblId) {
+        id name
+        mechanismsOfAction {
+          rows { actionType targets { id approvedSymbol } }
+        }
+      }
+    }`;
+    
+    const drugRaw = await conn.request(drugQuery, { chemblId }) as any;
+    const drugData = JSON.parse(JSON.stringify(drugRaw));
+    const rows = drugData?.data?.drug?.mechanismsOfAction?.rows || [];
+    
+    const seen = new Set<string>();
+    const results: Array<{ gene_symbol: string; name: string; action_type?: string; source: string }> = [];
+    for (const row of rows) {
+      for (const t of row.targets || []) {
+        if (t.approvedSymbol && !seen.has(t.approvedSymbol)) {
+          seen.add(t.approvedSymbol);
+          results.push({
+            gene_symbol: t.approvedSymbol,
+            name: t.approvedSymbol,
+            action_type: row.actionType || undefined,
+            source: 'opentargets',
+          });
+        }
+      }
+    }
+    return results.slice(0, 20);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return [{ _error: `Gene target lookup for drug failed (source: opentargets): ${msg}. Try drug_search to find valid drug names, or try again later.` } as any];
   }
 }
 
 export async function drugToTrials(drugName: string): Promise<Array<{ nct_id: string; title?: string; status?: string }>> {
-  const trials = await trialSearch(drugName, { limit: 10 });
+  const trials = await trialSearch(drugName, { limit: 10, searchType: 'intervention' });
   return trials.map(t => ({
     nct_id: t.nct_id,
     title: t.title,
@@ -111,26 +181,83 @@ export async function drugToAdverseEvents(drugName: string): Promise<Array<{ rea
       frequency: undefined,
       source: 'openfda',
     }));
-  } catch {
-    return [];
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[drugToAdverseEvents] Error:', error);
+    return [{ _error: `Adverse event lookup for drug failed (source: openfda): ${msg}. The data source may be temporarily unavailable or the drug name may not match.` } as any];
   }
 }
 
 export async function diseaseToDrugs(diseaseQuery: string): Promise<Array<{ drug_name: string; source: string; phase?: string }>> {
   try {
-    const conn = connectionManager.getConnection('chembl');
+    const conn = connectionManager.getConnection('opentargets');
     
-    const response = await conn.request(
-      `/mechanism?disease=${encodeURIComponent(diseaseQuery)}&format=json`
-    ) as ChemblMechanismResponse;
+    let searchTerm = diseaseQuery;
     
-    return (response.mechanisms || []).slice(0, 20).map(m => ({
-      drug_name: m.molecule_name || '',
-      source: 'chembl',
-      phase: m.trial_phase,
+    if (diseaseQuery.match(/^(DOID|MONDO|OMIM|OMOPS|ORPHA):/i)) {
+      try {
+        const mydiseaseConn = connectionManager.getConnection('mydisease');
+        const resolveResponse = await mydiseaseConn.request(
+          `/disease/${encodeURIComponent(diseaseQuery)}`
+        ) as any;
+        
+        if (resolveResponse) {
+          const mondo = resolveResponse.mondo || {};
+          const doData = resolveResponse.disease_ontology || {};
+          searchTerm = mondo.label || doData.name || diseaseQuery;
+        }
+      } catch {
+        searchTerm = diseaseQuery.replace(/^(DOID|MONDO):\d+$/, '');
+      }
+    }
+    
+    const searchQuery = `query($name: String!) {
+      search(queryString: $name, entityNames: ["disease"], page: {index: 0, size: 1}) {
+        hits { id name entity }
+      }
+    }`;
+    
+    const searchRaw = await conn.request(searchQuery, { name: searchTerm }) as any;
+    const searchData = JSON.parse(JSON.stringify(searchRaw));
+    let diseaseId = searchData?.data?.search?.hits?.[0]?.id;
+
+    if (!diseaseId && diseaseQuery.match(/^MONDO:/i)) {
+      const efoId = diseaseQuery.replace(':', '_');
+      const efoProbe = `query($efoId: String!) {
+        disease(efoId: $efoId) { id name }
+      }`;
+      const efoRaw = await conn.request(efoProbe, { efoId }) as any;
+      const efoData = JSON.parse(JSON.stringify(efoRaw));
+      if (efoData?.data?.disease?.id) {
+        diseaseId = efoData.data.disease.id;
+      }
+    }
+    
+    if (!diseaseId) {
+      return [{ _error: `No OpenTargets entry found for disease '${diseaseQuery}'. Try disease_search first to verify the disease name or ID.` } as any];
+    }
+    
+    const drugQuery = `query($efoId: String!) {
+      disease(efoId: $efoId) {
+        id name
+        drugAndClinicalCandidates {
+          rows { maxClinicalStage drug { id name drugType } }
+        }
+      }
+    }`;
+    
+    const drugRaw = await conn.request(drugQuery, { efoId: diseaseId }) as any;
+    const drugData = JSON.parse(JSON.stringify(drugRaw));
+    const rows = drugData?.data?.disease?.drugAndClinicalCandidates?.rows || [];
+    
+    return rows.slice(0, 20).map((r: { maxClinicalStage?: string; drug?: { name?: string } }) => ({
+      drug_name: r.drug?.name || '',
+      source: 'opentargets',
+      phase: r.maxClinicalStage || undefined,
     }));
-  } catch {
-    return [];
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return [{ _error: `Drug lookup for disease failed (source: opentargets): ${msg}. Try disease_search first to verify the disease name, or try again later.` } as any];
   }
 }
 
@@ -148,8 +275,10 @@ export async function diseaseToGenes(diseaseId: string): Promise<Array<{ gene_sy
       source: r.geneDatasource,
       score: r.score,
     }));
-  } catch {
-    return [];
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[diseaseToGenes] Error:', error);
+    return [{ _error: `Gene association lookup for disease failed (source: disgenet): ${msg}. Try disease_search first to verify the disease ID, or try again later.` } as any];
   }
 }
 
@@ -177,26 +306,37 @@ export async function geneEnrichment(geneSymbols: string[]): Promise<PathwayEnri
   }
   
   try {
-    const conn = connectionManager.getConnection('reactome');
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
     
-    const queryParams = new URLSearchParams({
-      query: geneSymbols.join(' '),
-      species: 'Homo sapiens',
-      limit: '50',
-    });
+    const response = await fetch('https://reactome.org/AnalysisService/identifiers/projection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: geneSymbols.join('\n'),
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeoutId));
     
-    const response = await conn.request(`/analysiseboost?${queryParams.toString()}`) as ReactomeEnrichResponse;
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
     
-    return (response.pathways || []).map(p => ({
-      pathway_id: p.pathwayId,
-      name: p.pathwayName,
-      p_value: p.pValue,
-      genes_overlap: p.overlap,
-      genes_total: p.total,
+    const data = await response.json() as ReactomeAnalysisResponse;
+    const pathways = data?.pathways || [];
+    
+    return pathways.slice(0, 30).map((p: { stId?: string; name?: string; entities?: { pValue?: number; found?: number; total?: number } }) => ({
+      pathway_id: p.stId || '',
+      name: p.name || '',
+      p_value: p.entities?.pValue,
+      genes_overlap: p.entities?.found,
+      genes_total: p.entities?.total,
       source: 'reactome',
     }));
-  } catch {
-    return [];
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes('abort') || msg.includes('timeout')) {
+      return [{ _error: `Gene enrichment analysis failed (source: reactome): Request timed out after 15s. The Reactome AnalysisService may be temporarily unavailable. Try again later.` } as any];
+    }
+    return [{ _error: `Gene enrichment analysis failed (source: reactome): ${msg}. Ensure at least 3 valid gene symbols are provided, or try again later.` } as any];
   }
 }
 
@@ -257,22 +397,23 @@ export async function discover(query: string): Promise<DiscoverResult[]> {
   
   if (results.length === 0) {
     try {
-      const conn = connectionManager.getConnection('ols3');
+      const conn = connectionManager.getConnection('ols4');
       const response = await conn.request(
-        `/search?q=${encodeURIComponent(query)}&format=json&rows=3`
+        `/api/search?q=${encodeURIComponent(query)}&size=3`
       ) as OLSResponse;
       
       if (response.response?.docs?.length) {
         for (const doc of response.response.docs) {
           results.push({
-            entity_type: doc.ontology_type || 'unknown',
+            entity_type: doc.type || 'unknown',
             identifier: doc.iri || doc.obo_id || '',
             name: doc.label || query,
-            source: doc.obo_namespace || 'ols',
+            source: doc.ontology_name || 'ols',
           });
         }
       }
-    } catch {
+    } catch (error) {
+      console.error('[discover/ols4] Error:', error);
     }
   }
   
@@ -326,7 +467,7 @@ export async function searchAll(
     } else {
       searchAllResults.push({
         entity_type: searches[i].entity,
-        results: [],
+        results: [{ _error: `${searches[i].entity} search failed: ${settled.reason instanceof Error ? settled.reason.message : String(settled.reason)}. This may be a temporary data source issue. Try again or search individually.` }],
       });
     }
   }
@@ -426,24 +567,18 @@ interface DGIdbGeneResponse {
 }
 
 interface ReactomeSearchResponse {
-  results?: Array<{ stId: string; name: string }>;
+  results?: Array<Record<string, unknown>>;
 }
 
-interface ReactomeEnrichResponse {
+interface ReactomeAnalysisResponse {
   pathways?: Array<{
-    pathwayId: string;
-    pathwayName: string;
-    pValue: number;
-    overlap: number;
-    total: number;
-  }>;
-}
-
-interface ChemblTargetResponse {
-  targets?: Array<{
-    target_chembl_id: string;
-    target_name: string;
-    action_type?: string;
+    stId: string;
+    name: string;
+    entities: {
+      pValue?: number;
+      found?: number;
+      total?: number;
+    };
   }>;
 }
 
@@ -476,8 +611,10 @@ interface OLSResponse {
       iri?: string;
       obo_id?: string;
       label?: string;
-      ontology_type?: string;
-      obo_namespace?: string;
+      type?: string;
+      ontology_name?: string;
+      description?: string[];
     }>;
+    numFound?: number;
   };
 }

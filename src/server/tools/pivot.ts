@@ -115,6 +115,9 @@ export function registerPivotTools(server: McpServer): void {
     },
     async ({ genes }) => {
       const results = await geneEnrichment(genes);
+      if (results.length === 1 && results[0] && '_error' in results[0]) {
+        return { content: [{ type: 'text', text: JSON.stringify(results[0]) }], isError: true };
+      }
       return { content: [{ type: 'text', text: JSON.stringify(results) }] };
     }
   );
