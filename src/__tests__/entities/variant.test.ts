@@ -34,11 +34,9 @@ describe('variant', () => {
       json: () => Promise.resolve({
         hits: [{
           _id: 'vcf123',
-          dbsnp: { rsid: 'rs123' },
-          gene: { symbol: 'BRCA1' },
-          hgvs: { p: 'p.Val600Glu', c: 'c.1799T>A' },
-          clinical_significance: 'pathogenic',
-          clinvar: { stars: 2 },
+          dbsnp: { rsid: 'rs123', gene: { symbol: 'BRCA1' } },
+          snpeff: { ann: [{ hgvs_p: 'p.Val600Glu', hgvs_c: 'c.1799T>A', genename: 'BRCA1' }] },
+          clinvar: { significance: 'pathogenic', stars: 2 },
           gnomad: { af: 0.001 },
         }],
       }),
@@ -75,11 +73,9 @@ describe('variant', () => {
   test('transformMyVariantHit() maps fields correctly', () => {
     const input = {
       _id: 'vcf123',
-      dbsnp: { rsid: 'rs123' },
-      gene: { symbol: 'BRCA1' },
-      hgvs: { p: 'p.Val600Glu', c: 'c.1799T>A' },
-      clinical_significance: 'pathogenic',
-      clinvar: { stars: 2 },
+      dbsnp: { rsid: 'rs123', gene: { symbol: 'BRCA1' } },
+      snpeff: { ann: [{ hgvs_p: 'p.Val600Glu', hgvs_c: 'c.1799T>A', genename: 'BRCA1' }] },
+      clinvar: { significance: 'pathogenic', stars: 2 },
       gnomad: { af: 0.001 },
     };
 

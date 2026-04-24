@@ -130,7 +130,7 @@ export class RestConnection implements IConnection<string, unknown> {
     }
     
     if (delivery.type === 'authorization') {
-      headers.set('Authorization', `${delivery.prefix || ''}${process.env[this.options.auth.envVar]}`);
+      headers.set('Authorization', `${delivery.prefix || 'app_key '}${process.env[this.options.auth.envVar]}`);
     }
     
     return headers;

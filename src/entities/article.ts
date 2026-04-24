@@ -319,11 +319,24 @@ async function fetchAnnotations(pmid: string): Promise<Array<{ type: string; tex
 
     const response = await conn.request(
       `/publications/export/biocjson?pmids=${pmid}`
-    ) as BioCJSONArticle[];
+    ) as BioCJSONResponse;
+
+    let items: BioCJSONArticle[] = [];
+    
+    const rawItems = response?.PubTator3 ?? response;
+    if (Array.isArray(rawItems)) {
+      items = rawItems;
+    } else if (rawItems && typeof rawItems === 'object') {
+      const wrapper = rawItems as Record<string, unknown>;
+      for (const key of Object.keys(wrapper)) {
+        if (Array.isArray(wrapper[key])) {
+          items = wrapper[key] as BioCJSONArticle[];
+          break;
+        }
+      }
+    }
 
     const annotations: Array<{ type: string; text: string; start: number; end: number }> = [];
-
-    const items = Array.isArray(response) ? response : [];
     for (const article of items) {
       for (const passage of (article.passages || [])) {
         for (const ann of (passage.annotations || [])) {
@@ -353,17 +366,17 @@ async function fetchCitationGraph(pmid: string): Promise<{ citations?: string[];
       `/elink.fcgi?dbfrom=pubmed&linkname=pubmed_pubmed_citedin&id=${pmid}&retmode=json`
     ) as PubMedLinkResponse;
 
-    const citations = response.linkset?.[0]?.linksetdb
+    const citations = response.linksets?.[0]?.linksetdbs
       ?.find((l: { linkname: string }) => l.linkname === 'pubmed_pubmed_citedin')
-      ?.link?.map((l: { id: string }) => l.id) || [];
+      ?.links?.map((l: string | { id: string }) => typeof l === 'string' ? l : l.id) || [];
 
     const refsResponse = await conn.request(
       `/elink.fcgi?dbfrom=pubmed&linkname=pubmed_pubmed_refs&id=${pmid}&retmode=json`
     ) as PubMedLinkResponse;
 
-    const references = refsResponse.linkset?.[0]?.linksetdb
+    const references = refsResponse.linksets?.[0]?.linksetdbs
       ?.find((l: { linkname: string }) => l.linkname === 'pubmed_pubmed_refs')
-      ?.link?.map((l: { id: string }) => l.id) || [];
+      ?.links?.map((l: string | { id: string }) => typeof l === 'string' ? l : l.id) || [];
 
     return { citations, references };
   } catch (error) {
@@ -440,6 +453,10 @@ interface IDConvResponse {
   pmcid?: string;
 }
 
+interface BioCJSONResponse {
+  PubTator3?: BioCJSONArticle[];
+}
+
 interface BioCJSONArticle {
   passages?: Array<{
     text?: string;
@@ -452,10 +469,10 @@ interface BioCJSONArticle {
 }
 
 interface PubMedLinkResponse {
-  linkset?: Array<{
-    linksetdb?: Array<{
+  linksets?: Array<{
+    linksetdbs?: Array<{
       linkname: string;
-      link?: Array<{ id: string }>;
+      links?: Array<string | { id: string }>;
     }>;
   }>;
 }

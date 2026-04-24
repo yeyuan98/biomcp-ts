@@ -12,8 +12,8 @@ export interface DiseaseSearchOptions {
 export interface DiseaseSearchResult {
   name: string;
   disease_id: string;
-  ontology?: string;
-  phenotype_ids?: string[];
+  mondo_id?: string;
+  doid?: string;
 }
 
 export interface DiseaseGetOptions {
@@ -38,7 +38,7 @@ export async function diseaseSearch(
   
   const queryParams = new URLSearchParams({
     q: query,
-    fields: 'name,diseaseid,ontology',
+    fields: 'mondo.label,mondo.id,disease_ontology.name,disease_ontology.doid',
     size: String(limit),
     from: String(offset),
   });
@@ -49,7 +49,13 @@ export async function diseaseSearch(
   
   const response = await conn.request(`/query?${queryParams.toString()}`) as MyDiseaseSearchResponse;
   
-  return (response.hits || []).map(transformMyDiseaseHit);
+  const hits = (response.hits || []).map(transformMyDiseaseHit);
+  
+  return hits.sort((a, b) => {
+    const aIsAnimal = /^MONDO:1010/.test(a.disease_id) ? 1 : 0;
+    const bIsAnimal = /^MONDO:1010/.test(b.disease_id) ? 1 : 0;
+    return aIsAnimal - bIsAnimal;
+  });
 }
 
 export async function diseaseGet(
@@ -66,11 +72,12 @@ export async function diseaseGet(
     const directResponse = await conn.request(`/disease/${encodeURIComponent(diseaseId)}`) as any;
     if (directResponse && directResponse._id) {
       const doData = directResponse.disease_ontology || {};
+      const mondoData = directResponse.mondo || {};
       disease = {
-        name: doData.name || directResponse.ctd?.name || diseaseId,
+        name: mondoData.label || doData.name || diseaseId,
         diseaseid: directResponse._id || diseaseId,
         description: doData.def || '',
-        ontology: 'disease_ontology',
+        ontology: mondoData.label ? 'mondo' : 'disease_ontology',
       };
     }
   } catch (error) {
@@ -81,7 +88,7 @@ export async function diseaseGet(
   if (!disease) {
     const queryParams = new URLSearchParams({
       q: diseaseId,
-      fields: '_id,name,diseaseid,description,ontology,disease_ontology',
+      fields: 'mondo.label,mondo.id,disease_ontology.name,disease_ontology.doid,disease_ontology.def',
       size: '1',
     });
     
@@ -92,11 +99,13 @@ export async function diseaseGet(
     }
     
     const hit = response.hits[0];
+    const hitMondo = hit.mondo as Record<string, unknown> | undefined;
+    const hitDo = hit.disease_ontology as Record<string, unknown> | undefined;
     disease = {
-      name: hit.name || (hit as any).disease_ontology?.name || diseaseId,
-      diseaseid: hit.diseaseid || hit._id || diseaseId,
-      description: hit.description || (hit as any).disease_ontology?.def || '',
-      ontology: hit.ontology,
+      name: (hitMondo?.label || hitDo?.name || diseaseId) as string,
+      diseaseid: (hit._id as string) || diseaseId,
+      description: (hitDo?.def as string) || '',
+      ontology: hitMondo ? 'mondo' : hitDo ? 'disease_ontology' : undefined,
     };
   }
   const result: DiseaseResult = {
@@ -150,6 +159,10 @@ export async function diseaseGet(
 
 async function fetchGeneAssociations(diseaseId: string): Promise<Array<{ gene_symbol: string; name: string; score: number; source: string }>> {
   try {
+    if (!process.env.DISGENET_API_KEY) {
+      return [{ _error: `Gene association lookup failed (source: disgenet): DISGENET_API_KEY environment variable is not set. DisGeNET requires an API key for gene-disease associations. Obtain one at https://www.disgenet.org/ and set it in your environment.` } as any];
+    }
+
     const conn = connectionManager.getConnection('disgenet');
     
     const response = await conn.request(
@@ -168,8 +181,33 @@ async function fetchGeneAssociations(diseaseId: string): Promise<Array<{ gene_sy
   }
 }
 
-async function fetchPhenotypes(diseaseId: string): Promise<{ _error?: string }> {
-  return { _error: 'Monarch phenotypes API is currently unavailable. The service has been reorganized.' };
+async function fetchPhenotypes(diseaseId: string): Promise<Array<{ hpo_id: string; name: string }> | { _error: string }> {
+  try {
+    const conn = connectionManager.getConnection('monarch');
+
+    const params = new URLSearchParams({
+      subject: diseaseId,
+      object_category: 'biolink:PhenotypicFeature',
+      limit: '20',
+    });
+
+    const response = await conn.request(
+      `/v3/api/association?${params.toString()}`
+    ) as any;
+
+    if (response?.items && Array.isArray(response.items)) {
+      return response.items
+        .filter((item: any) => item.object?.startsWith('HP:'))
+        .map((item: any) => ({
+          hpo_id: item.object,
+          name: item.object_label || '',
+        }));
+    }
+
+    return [];
+  } catch {
+    return { _error: 'Phenotype lookup failed (source: monarch). The Monarch Initiative API is currently unavailable. Try again later, or visit https://hpo.jax.org/app/browse/disease/DOID:1612 for manual lookup.' };
+  }
 }
 
 async function fetchPathways(diseaseId: string): Promise<Array<{ pathway_id: string; name: string; source: string }>> {
@@ -210,21 +248,11 @@ async function fetchSurvival(diseaseId: string): Promise<{ median_overall?: numb
 }
 
 interface MyDiseaseSearchResponse {
-  hits: Array<{
-    name: string;
-    diseaseid: string;
-    ontology?: string;
-  }>;
+  hits: Array<Record<string, unknown>>;
 }
 
 interface MyDiseaseGetResponse {
-  hits: Array<{
-    _id?: string;
-    name?: string;
-    diseaseid?: string;
-    description?: string;
-    ontology?: string;
-  }>;
+  hits: Array<Record<string, unknown>>;
 }
 
 interface MyDiseaseRecord {
@@ -262,19 +290,26 @@ interface SEERResponse {
   median_progression?: number;
 }
 
-export function transformMyDiseaseHit(hit: MyDiseaseSearchResponse['hits'][0]): DiseaseSearchResult {
+export function transformMyDiseaseHit(hit: Record<string, unknown>): DiseaseSearchResult {
+  const mondo = hit.mondo as Record<string, unknown> | undefined;
+  const diseaseOntology = hit.disease_ontology as Record<string, unknown> | undefined;
+  
   return {
-    name: hit.name,
-    disease_id: hit.diseaseid,
-    ontology: hit.ontology,
+    name: (mondo?.label || diseaseOntology?.name || '') as string,
+    disease_id: (hit._id as string) || '',
+    mondo_id: (mondo?.id as string) || undefined,
+    doid: (diseaseOntology?.doid as string) || undefined,
   };
 }
 
-export function transformMyDiseaseResponse(data: MyDiseaseGetResponse['hits'][0]): DiseaseResult {
+export function transformMyDiseaseResponse(data: Record<string, unknown>): DiseaseResult {
+  const mondo = data.mondo as Record<string, unknown> | undefined;
+  const diseaseOntology = data.disease_ontology as Record<string, unknown> | undefined;
+  
   return {
-    name: data.name || '',
-    disease_id: data.diseaseid || data._id || '',
-    description: data.description,
-    ontology: data.ontology,
+    name: (mondo?.label || diseaseOntology?.name || '') as string,
+    disease_id: (data._id as string) || '',
+    description: (diseaseOntology?.def as string) || '',
+    ontology: mondo ? 'mondo' : diseaseOntology ? 'disease_ontology' : undefined,
   };
 }

@@ -104,7 +104,10 @@ export function registerDiseaseTools(server: McpServer): void {
     async ({ disease_id, limit }) => {
       try {
         const result = await diseaseGet(disease_id, ['phenotypes']);
-        const phenotypes = (result as { sections?: { phenotypes?: Array<{ hpo_id: string; name: string }> } }).sections?.phenotypes?.slice(0, limit) || [];
+        const phenotypesRaw = (result as { sections?: { phenotypes?: unknown } }).sections?.phenotypes;
+        const phenotypes = Array.isArray(phenotypesRaw)
+          ? (phenotypesRaw as Array<{ hpo_id: string; name: string }>).slice(0, limit)
+          : phenotypesRaw;
         return { content: [{ type: 'text', text: JSON.stringify(phenotypes) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
@@ -145,9 +148,23 @@ export function registerDiseaseTools(server: McpServer): void {
     },
     async ({ disease_id, limit }) => {
       try {
+        let searchName = disease_id;
+
+        if (disease_id.match(/^(DOID|MONDO|OMIM|OMOPS|ORPHA):/i)) {
+          try {
+            const { diseaseGet } = await import('../../entities/disease.js');
+            const resolved = await diseaseGet(disease_id, []);
+            if (resolved.name && resolved.name !== disease_id) {
+              searchName = resolved.name;
+            }
+          } catch {
+            searchName = disease_id.replace(/^(DOID|MONDO|OMIM):\d+$/, '');
+          }
+        }
+
         const conn = connectionManager.getConnection('clinicaltrials');
         const response = await conn.request(
-          `/studies?query.cond=${encodeURIComponent(disease_id)}&pageSize=${limit}&format=json`
+          `/studies?query.cond=${encodeURIComponent(searchName)}&pageSize=${limit}&format=json`
         ) as ClinicalTrialsDiseaseResponse;
         const trials = (response.studies || []).map(s => ({
           nct_id: s.protocolSection?.identificationModule?.nctId,

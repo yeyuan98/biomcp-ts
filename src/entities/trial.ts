@@ -11,6 +11,7 @@ export interface TrialSearchOptions {
   status?: string;
   phase?: string;
   intervention_type?: string;
+  searchType?: 'condition' | 'intervention';
   limit?: number;
   offset?: number;
 }
@@ -47,12 +48,12 @@ export async function trialSearch(
   query: string,
   options: TrialSearchOptions = {}
 ): Promise<TrialSearchResult[]> {
-  const { status, phase, intervention_type, limit = 10, offset = 0 } = options;
+  const { status, phase, intervention_type, searchType, limit = 10, offset = 0 } = options;
   
   const conn = connectionManager.getConnection('clinicaltrials');
   
   const queryParams = new URLSearchParams({
-    'query.cond': query,
+    [searchType === 'intervention' ? 'query.intr' : 'query.cond']: query,
     pageSize: String(limit),
     format: 'json',
   });

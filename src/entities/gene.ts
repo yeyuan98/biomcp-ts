@@ -158,14 +158,27 @@ async function fetchPathways(geneSymbol: string): Promise<Array<{ id: string; na
     const conn = connectionManager.getConnection('reactome');
     
     const response = await conn.request(
-      `/search/query?query=${encodeURIComponent(geneSymbol)}&species=Homo sapiens&limit=10`
+      `/search/query?query=${encodeURIComponent(geneSymbol)}&species=Homo sapiens&limit=10&types=Pathway`
     ) as ReactomeResponse;
     
-    return (response.results || []).map((r) => ({
-      id: r.stId,
-      name: r.name,
-      source: 'reactome',
-    }));
+    const pathways: Array<{ id: string; name: string; source: string }> = [];
+    
+    for (const group of (response.results || [])) {
+      const entries = (group as Record<string, unknown>).entries as Array<Record<string, unknown>> | undefined;
+      if (!entries) continue;
+      for (const entry of entries) {
+        if (entry.type === 'Pathway' && entry.stId && entry.name) {
+          const name = typeof entry.name === 'string' ? entry.name : String(entry.name);
+          pathways.push({
+            id: entry.stId as string,
+            name: name.replace(/<[^>]+>/g, ''),
+            source: 'reactome',
+          });
+        }
+      }
+    }
+    
+    return pathways.slice(0, 20);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error('[fetchPathways] Error:', error);
@@ -207,11 +220,15 @@ async function fetchOntology(geneSymbol: string): Promise<{ go_enrichment?: Arra
     const goData = response.hits?.[0]?.go;
     if (!goData) return { go_enrichment: [] };
     
+    const seen = new Set<string>();
     const terms: Array<{ id: string; term: string; aspect: string }> = [];
     for (const category of ['BP', 'MF', 'CC'] as const) {
       const items = (goData as Record<string, Array<{ id: string; term: string; gocategory?: string }>>)[category] || [];
       for (const item of items) {
-        terms.push({ id: item.id, term: item.term, aspect: category });
+        if (!seen.has(item.id)) {
+          seen.add(item.id);
+          terms.push({ id: item.id, term: item.term, aspect: category });
+        }
       }
     }
     
@@ -257,7 +274,7 @@ async function fetchInteractions(geneSymbol: string): Promise<Array<{ symbol: st
     ) as StringInteractionsResponse;
     
     return (Array.isArray(response) ? response : []).slice(0, 20).map(r => ({
-      symbol: r.preferredNameB || r.preferredName || '',
+      symbol: (r as any).preferredName_B || r.preferredName_B || r.preferredName_A || '',
       score: r.score || 0,
       source: 'string',
     }));
@@ -299,10 +316,30 @@ async function fetchExpression(geneSymbol: string): Promise<{ tissues?: Array<{ 
     if (!ensemblId) return { _error: `Could not resolve Ensembl ID for '${geneSymbol}'` } as any;
 
     const conn = connectionManager.getConnection('gtex');
-    const response = await conn.request(
-      `/api/v2/expression/medianGeneExpression?gencodeId=${encodeURIComponent(ensemblId)}`
-    ) as any;
-    const tissues = (response.data || []).slice(0, 20).map((r: any) => ({
+    
+    let response: any = null;
+    const baseId = ensemblId.replace(/\.\d+$/, '');
+    
+    for (const version of ['.16', '.14', '.15', '.13', '.12', '']) {
+      const gencodeId = baseId + version;
+      try {
+        const attempt = await conn.request(
+          `/api/v2/expression/medianGeneExpression?gencodeId=${encodeURIComponent(gencodeId)}&datasetId=gtex_v8`
+        ) as any;
+        if (attempt?.data?.length > 0) {
+          response = attempt;
+          break;
+        }
+      } catch {
+        continue;
+      }
+    }
+    
+    if (!response || !response.data?.length) {
+      return { _error: `No GTEx expression data found for '${geneSymbol}' (${baseId}). The gene may not be in the GTEx dataset.` } as any;
+    }
+
+    const tissues = response.data.slice(0, 20).map((r: any) => ({
       tissue: r.tissueSiteDetailId,
       tpm: r.median,
     }));
@@ -444,6 +481,10 @@ async function fetchConstraint(geneSymbol: string): Promise<{ lof?: { oe_score: 
 
 async function fetchDisgenet(geneSymbol: string): Promise<{ associations?: Array<{ disease_name: string; score: number; source: string }> }> {
   try {
+    if (!process.env.DISGENET_API_KEY) {
+      return { _error: `Gene-disease association lookup failed (source: disgenet): DISGENET_API_KEY environment variable is not set. DisGeNET requires an API key. Obtain one at https://www.disgenet.org/ and set it in your environment.` } as any;
+    }
+
     const conn = connectionManager.getConnection('disgenet');
     
     const response = await conn.request(
@@ -511,7 +552,7 @@ interface MyGeneGetResponse {
 }
 
 interface ReactomeResponse {
-  results: Array<{ stId: string; name: string }>;
+  results?: Array<Record<string, unknown>>;
 }
 
 interface UniProtSearchResponse {
@@ -546,6 +587,8 @@ interface MyGeneGOResponse {
 }
 
 interface StringInteractionsResponse extends Array<{
+  preferredName_B?: string;
+  preferredName_A?: string;
   preferredNameB?: string;
   preferredName?: string;
   score?: number;

@@ -12,11 +12,13 @@ export interface DrugSearchOptions {
 
 export interface DrugSearchResult {
   name: string;
-  uichem_id: string;
+  chembl_id?: string;
   inchi_key?: string;
   synonyms?: string[];
   molecular_formula?: string;
   molecular_weight?: number;
+  chebi_id?: string;
+  unii?: string;
 }
 
 export interface DrugGetOptions {
@@ -25,7 +27,7 @@ export interface DrugGetOptions {
 
 export interface DrugResult {
   name: string;
-  uichem_id: string;
+  chembl_id?: string;
   aliases?: string[];
   molecular_formula?: string;
   molecular_weight?: number;
@@ -49,7 +51,7 @@ export async function drugSearch(
   
   const queryParams = new URLSearchParams({
     q: query,
-    fields: 'name,uichem,inchi,smiles,mw,rtb',
+    fields: 'chebi.name,chebi.id,chebi.formula,chebi.mass,chebi.inchikey,unii.smiles,unii.molecular_formula,unii.display_name,unii.registry_number,unichem.chembl,ndc.nonproprietaryname,ndc.substancename',
     size: String(limit),
     from: String(offset),
   });
@@ -72,8 +74,8 @@ export async function drugGet(
   const conn = connectionManager.getConnection('mychem');
   
   const queryParams = new URLSearchParams({
-    q: `name:"${name}" OR ${name}`,
-    fields: 'name,uichem,inchi,smiles,mw,rtb,xref,chiral,unii',
+    q: `chebi.name:"${name}" OR ${name}`,
+    fields: 'chebi.name,chebi.formula,chebi.mass,chebi.inchi,chebi.inchikey,chebi.id,unii.smiles,unii.molecular_formula,unii.display_name,unii.registry_number,unichem.chembl,ndc.nonproprietaryname,ndc.substancename',
     size: '1',
   });
   
@@ -83,19 +85,24 @@ export async function drugGet(
     throw new Error(`Drug '${name}' not found. Try drug_search to find valid drug names.`);
   }
   
-  const drug = response.hits[0];
+  const hit = response.hits[0];
+  const chebi = hit.chebi as Record<string, unknown> | undefined;
+  const unii = hit.unii as Record<string, unknown> | undefined;
+  const unichem = hit.unichem as Record<string, unknown> | undefined;
+  const ndc = hit.ndc as Record<string, unknown> | undefined;
+  
   const result: DrugResult = {
-    name: drug.name,
-    uichem_id: drug.uichem,
-    smiles: drug.smiles,
-    inchi: drug.inchi,
-    inchi_key: drug.inchi_key,
-    molecular_weight: drug.mw,
-    molecular_formula: drug.formula,
+    name: (chebi?.name || unii?.display_name || ndc?.nonproprietaryname || ndc?.substancename || unii?.registry_number || name) as string,
+    chembl_id: (unichem?.chembl as string) || undefined,
+    smiles: (unii?.smiles as string) || undefined,
+    inchi: (chebi?.inchi as string) || undefined,
+    inchi_key: (chebi?.inchikey as string) || undefined,
+    molecular_weight: (chebi?.mass as number) || undefined,
+    molecular_formula: (chebi?.formula as string) || (unii?.molecular_formula as string) || undefined,
   };
   
-  if (drug.unii) {
-    result.aliases = [drug.unii];
+  if (unii?.registry_number) {
+    result.aliases = [unii.registry_number as string];
   }
   
   const sectionsToFetch = sectionConfig.includes('all') 
@@ -299,28 +306,11 @@ async function fetchIndications(drugName: string): Promise<Array<{ disease_name:
 }
 
 interface MyChemSearchResponse {
-  hits: Array<{
-    name: string;
-    uichem: string;
-    inchi?: string;
-    inchi_key?: string;
-    smiles?: string;
-    mw?: number;
-    formula?: string;
-  }>;
+  hits: Array<Record<string, unknown>>;
 }
 
 interface MyChemGetResponse {
-  hits: Array<{
-    name: string;
-    uichem: string;
-    inchi?: string;
-    inchi_key?: string;
-    smiles?: string;
-    mw?: number;
-    formula?: string;
-    unii?: string;
-  }>;
+  hits: Array<Record<string, unknown>>;
 }
 
 interface OpenFDAResponse {
@@ -336,25 +326,35 @@ interface OpenFDAResponse {
   }>;
 }
 
-export function transformMyChemHit(hit: MyChemSearchResponse['hits'][0]): DrugSearchResult {
+export function transformMyChemHit(hit: Record<string, unknown>): DrugSearchResult {
+  const chebi = hit.chebi as Record<string, unknown> | undefined;
+  const unii = hit.unii as Record<string, unknown> | undefined;
+  const unichem = hit.unichem as Record<string, unknown> | undefined;
+  const ndc = hit.ndc as Record<string, unknown> | undefined;
+  
   return {
-    name: hit.name,
-    uichem_id: hit.uichem,
-    inchi_key: hit.inchi_key,
-    smiles: hit.smiles,
-    molecular_formula: hit.formula,
-    molecular_weight: hit.mw,
+    name: (chebi?.name || unii?.display_name || ndc?.nonproprietaryname || ndc?.substancename || unii?.registry_number || '') as string,
+    chembl_id: (unichem?.chembl as string) || undefined,
+    inchi_key: (chebi?.inchikey as string) || undefined,
+    molecular_formula: (chebi?.formula as string) || (unii?.molecular_formula as string) || undefined,
+    molecular_weight: (chebi?.mass as number) || undefined,
+    chebi_id: (chebi?.id as string) || undefined,
+    unii: (unii?.registry_number as string) || undefined,
   };
 }
 
-export function transformMyChemResponse(data: MyChemGetResponse['hits'][0]): DrugResult {
+export function transformMyChemResponse(data: Record<string, unknown>): DrugResult {
+  const chebi = data.chebi as Record<string, unknown> | undefined;
+  const unii = data.unii as Record<string, unknown> | undefined;
+  const unichem = data.unichem as Record<string, unknown> | undefined;
+  
   return {
-    name: data.name,
-    uichem_id: data.uichem,
-    inchi: data.inchi,
-    inchi_key: data.inchi_key,
-    smiles: data.smiles,
-    molecular_weight: data.mw,
-    molecular_formula: data.formula,
+    name: (chebi?.name || unii?.display_name || '') as string,
+    chembl_id: (unichem?.chembl as string) || undefined,
+    inchi: (chebi?.inchi as string) || undefined,
+    inchi_key: (chebi?.inchikey as string) || undefined,
+    smiles: (unii?.smiles as string) || undefined,
+    molecular_weight: (chebi?.mass as number) || undefined,
+    molecular_formula: (chebi?.formula as string) || undefined,
   };
 }

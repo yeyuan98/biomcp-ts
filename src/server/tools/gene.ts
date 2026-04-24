@@ -71,7 +71,7 @@ export function registerGeneTools(server: McpServer): void {
     async ({ symbol, limit }) => {
       try {
         const result = await geneGet(symbol, ['pathways']);
-        const pathways = (result as { pathways?: Array<{ id: string; name: string }> }).pathways?.slice(0, limit) || [];
+        const pathways = (result as any).sections?.pathways?.slice(0, limit) || [];
         return { content: [{ type: 'text', text: JSON.stringify(pathways) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
@@ -92,7 +92,8 @@ export function registerGeneTools(server: McpServer): void {
     async ({ symbol, limit }) => {
       try {
         const result = await geneGet(symbol, ['disgenet']);
-        const diseases = (result as { disgenet?: { associations: Array<{ disease_name: string }> } }).disgenet?.associations?.slice(0, limit).map(d => d.disease_name) || [];
+        const associations = (result as any).sections?.disgenet?.associations;
+        const diseases = (Array.isArray(associations) ? associations : []).slice(0, limit).map((d: any) => d.disease_name) || [];
         return { content: [{ type: 'text', text: JSON.stringify(diseases) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
@@ -132,7 +133,7 @@ export function registerGeneTools(server: McpServer): void {
     async ({ symbol, limit }) => {
       try {
         const result = await geneGet(symbol, ['interactions']);
-        const interactions = (result as { interactions?: Array<{ symbol: string; score: number }> }).interactions?.slice(0, limit) || [];
+        const interactions = (result as any).sections?.interactions?.slice(0, limit) || [];
         return { content: [{ type: 'text', text: JSON.stringify(interactions) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
@@ -153,7 +154,7 @@ export function registerGeneTools(server: McpServer): void {
     async ({ symbol, limit }) => {
       try {
         const result = await geneGet(symbol, ['expression']);
-        const tissues = (result as { expression?: { tissues?: Array<{ tissue: string; tpm: number }> } }).expression?.tissues?.slice(0, limit) || [];
+        const tissues = (result as any).sections?.expression?.tissues?.slice(0, limit) || [];
         return { content: [{ type: 'text', text: JSON.stringify(tissues) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };

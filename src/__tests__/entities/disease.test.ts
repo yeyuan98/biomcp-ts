@@ -32,7 +32,11 @@ describe('disease', () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
-        hits: [{ name: 'Breast Cancer', diseaseid: 'C0006142', ontology: 'DOID:1612' }],
+        hits: [{
+          _id: 'MONDO:0007254',
+          mondo: { label: 'Breast Cancer' },
+          disease_ontology: { doid: 'DOID:1612' },
+        }],
       }),
     }) as any;
 
@@ -40,8 +44,8 @@ describe('disease', () => {
 
     expect(results).toHaveLength(1);
     expect(results[0].name).toBe('Breast Cancer');
-    expect(results[0].disease_id).toBe('C0006142');
-    expect(results[0].ontology).toBe('DOID:1612');
+    expect(results[0].disease_id).toBe('MONDO:0007254');
+    expect(results[0].doid).toBe('DOID:1612');
   });
 
   test('diseaseGet() calls connection with correct endpoint', async () => {
@@ -63,19 +67,18 @@ describe('disease', () => {
 
   test('transformMyDiseaseResponse() maps fields correctly', () => {
     const input = {
-      name: 'Breast Cancer',
-      diseaseid: 'C0006142',
-      description: 'A malignant neoplasm of the breast.',
-      ontology: 'DOID:1612',
+      _id: 'MONDO:0007254',
+      mondo: { label: 'Breast Cancer' },
+      disease_ontology: { doid: 'DOID:1612', def: 'A malignant neoplasm of the breast.' },
     };
 
     const result = transformMyDiseaseResponse(input);
 
     expect(result).toEqual({
       name: 'Breast Cancer',
-      disease_id: 'C0006142',
+      disease_id: 'MONDO:0007254',
       description: 'A malignant neoplasm of the breast.',
-      ontology: 'DOID:1612',
+      ontology: 'mondo',
     });
   });
 });
