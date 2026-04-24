@@ -1,38 +1,41 @@
 # BioMCP
 
-Biomedical Model Context Protocol (MCP) Server - A TypeScript implementation providing MCP tools for biomedical data access.
+A high-performance MCP server that gives LLMs access to 50 biomedical tools federated across 40+ upstream APIs — genes, variants, drugs, diseases, literature, and clinical trials in a single integration.
 
-## Features
+## Highlights
 
-- **Comprehensive biomedical data coverage** from 50+ data sources
-- **Cross-entity navigation** - Navigate between related biomedical entities
-- **Federated search** - Search across multiple sources simultaneously
-- **Section-based enrichment** - Fetch detailed information with graceful degradation
+- **50 tools** across 7 domains — search, retrieve, and cross-reference biomedical entities
+- **40+ upstream sources** — MyGene, MyVariant, MyChem, MyDisease, ClinVar, gnomAD, UniProt, Reactome, OpenTargets, CIViC, OncoKB, DisGeNET, GTEx, STRING, DGIdb, ClinicalTrials.gov, PubMed, EuropePMC, Semantic Scholar, PubTator, LitSense, Monarch Initiative, OpenFDA, NIH Reporter, AlphaGenome, and more
+- **Section-based fetching** — `entityGet(id, sections)` with per-section timeouts and graceful degradation (failed sections return `{ _error }` instead of crashing)
+- **Federated article search** — queries 5 literature backends simultaneously with PMID/PMCID/DOI deduplication
+- **Zero-config startup** — works out of the box; optional API keys unlock higher rate limits and premium data
+- **Minimal dependencies** — only 3 runtime deps: `@modelcontextprotocol/sdk`, `zod`, `fast-xml-parser`
 
 ## Quick Start
 
-### Installation
+### Install and build
 
 ```bash
-npm install
-npm run build
+git clone <repo-url> && cd biomcp-ts
+npm install && npm run build
 ```
 
-### Running the Server
+### Configure with Claude Desktop
 
-```bash
-# Development mode
-npm run dev
+Add to your Claude Desktop `claude_desktop_config.json`:
 
-# Production
-npm start
+```json
+{
+  "mcpServers": {
+    "biomcp": {
+      "command": "npx",
+      "args": ["biomcp"]
+    }
+  }
+}
 ```
 
-The server uses stdio transport for MCP communication.
-
-### Using with Claude Desktop
-
-Add to your Claude Desktop config:
+Or from a local checkout:
 
 ```json
 {
@@ -45,195 +48,123 @@ Add to your Claude Desktop config:
 }
 ```
 
+### Direct stdio
+
+```bash
+npm start
+```
+
+### Any MCP-compatible client
+
+BioMCP speaks standard MCP over **stdio**. Point any MCP client at the `biomcp` binary or `node dist/server/index.js`.
+
 ## Available Tools
 
-### Gene Tools
+### Gene (10)
 
 | Tool | Description |
 |------|-------------|
-| `gene_search` | Search genes by symbol, name, or keyword |
-| `gene_get` | Get detailed gene information with sections |
+| `gene_search` | Search genes by symbol, name, or keyword with type/chromosome filters |
+| `gene_get` | Get detailed gene info by HGNC symbol with optional sections |
+| `gene_pathways` | Get Reactome pathways containing a gene |
+| `gene_diseases` | Get diseases associated with a gene (DisGeNET / OpenTargets) |
+| `gene_go_enrichment` | Get GO term enrichment via QuickGO |
+| `gene_interactions` | Get protein-protein interactions via STRING |
+| `gene_expression` | Get GTEx tissue expression levels |
+| `gene_constraint` | Get gnomAD constraint metrics (pLI, LOEUF, etc.) |
+| `gene_druggability` | Get druggability data via DGIdb and OpenTargets |
+| `gene_clingen` | Get ClinGen dosage sensitivity data |
+
+### Variant (6)
+
+| Tool | Description |
+|------|-------------|
+| `variant_search` | Search variants by rsid, HGVS, gene, ClinVar significance, frequency, CADD |
+| `variant_get` | Get detailed variant info with optional sections (core, frequency, predictions, clinical, alphagenome) |
+| `variant_frequency` | Get gnomAD population frequency data |
+| `variant_predictions` | Get pathogenicity predictions (CADD, SIFT, PolyPhen, conservation) |
+| `variant_oncokb` | Get OncoKB cancer variant annotations (requires `ONCOKB_TOKEN`) |
+| `variant_alphagenome` | Get AlphaGenome variant scores via gRPC (requires `ALPHAGENOME_API_KEY`) |
+
+### Drug (6)
+
+| Tool | Description |
+|------|-------------|
+| `drug_search` | Search drugs by name, mechanism, or keyword |
+| `drug_get` | Get detailed drug info with optional sections |
+| `drug_targets` | Get drug targets via ChEMBL |
+| `drug_indications` | Get drug indications via ChEMBL |
+| `drug_adverse_events` | Get adverse events via OpenFDA |
+| `drug_regulatory` | Get FDA regulatory information |
+
+### Disease (6)
+
+| Tool | Description |
+|------|-------------|
+| `disease_search` | Search diseases by name, phenotype, or keyword |
+| `disease_get` | Get detailed disease info by ID (DOID, MONDO, OMIM, etc.) with optional sections |
+| `disease_genes` | Get genes associated with a disease via DisGeNET (requires `DISGENET_API_KEY`) |
+| `disease_phenotypes` | Get HPO phenotypes for a disease |
+| `disease_drugs` | Get drugs for a disease via OpenTargets |
+| `disease_trials` | Get clinical trials for a disease via ClinicalTrials.gov |
+
+### Article (4)
+
+| Tool | Description |
+|------|-------------|
+| `article_search` | Federated literature search across PubMed, EuropePMC, Semantic Scholar, PubTator, and LitSense |
+| `article_get` | Get detailed article info by PMID with optional sections |
+| `article_annotations` | Get PubTator biomedical entity annotations for an article |
+| `article_citations` | Get citation graph for an article via Semantic Scholar |
+
+### Trial (5)
+
+| Tool | Description |
+|------|-------------|
+| `trial_search` | Search clinical trials by condition, intervention, status, or phase |
+| `trial_get` | Get detailed trial info by NCT ID with optional sections |
+| `trial_eligibility` | Get inclusion/exclusion eligibility criteria |
+| `trial_locations` | Get trial site locations |
+| `trial_outcomes` | Get primary and secondary outcomes |
+
+### Cross-Entity / Pivot (10)
+
+| Tool | Description |
+|------|-------------|
 | `gene_drugs` | Find drugs targeting a gene |
 | `gene_trials` | Find clinical trials for a gene |
-| `gene_pathways` | Find pathways containing a gene |
 | `gene_articles` | Find articles about a gene |
+| `variant_trials` | Find clinical trials for a variant |
+| `drug_genes` | Find genes targeted by a drug |
+| `drug_trials` | Find clinical trials for a drug |
+| `gene_enrich` | Pathway enrichment analysis for a gene list |
+| `discover` | Free-text concept resolution across all entity types |
+| `search_all` | Federated search across all entity types simultaneously |
+| `batch_get` | Retrieve multiple entities in parallel |
 
-### Variant Tools
-
-| Tool | Description |
-|------|-------------|
-| `variant_search` | Search variants |
-| `variant_get` | Get variant details |
-| `variant_trials` | Find trials for variant |
-
-### Drug Tools
-
-| Tool | Description |
-|------|-------------|
-| `drug_search` | Search drugs |
-| `drug_get` | Get drug details |
-| `drug_genes` | Find genes targeted by drug |
-| `drug_trials` | Find trials for drug |
-| `drug_adverse_events` | Find adverse events |
-
-### Disease Tools
+### Utility (3)
 
 | Tool | Description |
 |------|-------------|
-| `disease_search` | Search diseases |
-| `disease_get` | Get disease details |
-| `disease_drugs` | Find drugs for disease |
-| `disease_genes` | Find genes for disease |
-| `disease_trials` | Find trials for disease |
+| `biomcp_health` | Check connectivity to upstream data sources |
+| `biomcp_list` | List available entities, tools, and operations |
+| `version` | Get BioMCP server version |
 
-### Article Tools
+## Environment Variables
 
-| Tool | Description |
-|------|-------------|
-| `article_search` | Search literature (5 backends) |
-| `article_get` | Get article details |
+All keys are optional. BioMCP works without any keys — they unlock higher rate limits and additional data sources.
 
-### Trial Tools
-
-| Tool | Description |
-|------|-------------|
-| `trial_search` | Search clinical trials |
-| `trial_get` | Get trial details |
-
-### Utility Tools
-
-| Tool | Description |
-|------|-------------|
-| `discover` | Free-text concept resolution |
-| `search_all` | Federated cross-entity search |
-| `batch_get` | Get multiple entities in parallel |
-| `biomcp_health` | Check API connectivity |
-| `biomcp_list` | List available tools |
-| `version` | Get server version |
-
-## Development
-
-### Project Structure
-
-```
-src/
-├── server/
-│   ├── index.ts          # Entry point
-│   ├── tools/           # MCP tool definitions
-│   ├── errors.ts       # Error handling
-│   └── validation.ts   # Input validation
-├── entities/           # Entity orchestrators
-│   ├── gene.ts
-│   ├── variant.ts
-│   ├── drug.ts
-│   ├── disease.ts
-│   ├── article.ts
-│   ├── trial.ts
-│   └── cross-entity.ts # Cross-entity pivots
-├── connections/        # Connection abstraction
-└── transform/         # Response transforms
-```
-
-### Running Tests
-
-```bash
-npm test
-```
-
-### Building
-
-```bash
-npm run build
-npm run typecheck
-```
-
-## API Reference
-
-### Tool Input Schemas
-
-#### gene_search
-
-```typescript
-{
-  query: string,           // Gene symbol, name, or keyword
-  gene_type?: string,      // "protein-coding" | "ncRNA" | "pseudo"
-  chromosome?: string,    // Filter chromosome (e.g., "7", "X")
-  limit?: number,         // Default: 10, Max: 50
-  offset?: number        // Default: 0
-}
-```
-
-#### gene_get
-
-```typescript
-{
-  symbol: string,                    // HGNC gene symbol
-  sections?: string[]                // Optional sections to fetch
-}
-```
-
-Available sections: `pathways`, `ontology`, `diseases`, `protein`, `go`, `interactions`, `civic`, `expression`, `hpa`, `druggability`, `clingen`, `constraint`, `disgenet`, `funding`, `all`
-
-#### discover
-
-```typescript
-{
-  query: string  // Free-text query
-}
-```
-
-Returns entity matches across all types (gene, variant, drug, disease).
-
-#### search_all
-
-```typescript
-{
-  query: string,
-  limit?: number,                    // Default: 5
-  entities?: string[]              // Entities to search
-}
-```
-
-#### batch_get
-
-```typescript
-{
-  inputs: Array<{
-    entity: "gene" | "variant" | "drug" | "disease" | "trial" | "article",
-    id: string,
-    sections?: string[]
-  }>
-}
-```
-
-### Error Handling
-
-Errors include actionable suggestions. Example:
-
-```json
-{
-  "code": "ENTITY_NOT_FOUND",
-  "message": "Gene 'XYZ' not found",
-  "suggestion": "Use gene_search to find valid gene symbols"
-}
-```
-
-### Rate Limiting
-
-- Token bucket algorithm with smooth backpressure
-- Some APIs have dual-rate: faster with API key, slower without
-
-### Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|------------|
-| `NCBI_API_KEY` | No | Faster PubMed access |
-| `ALPHAGENOME_API_KEY` | Yes* | AlphaGenome API |
-| `DISGENET_API_KEY` | Yes* | DisGeNET API |
-| `UMLS_API_KEY` | Yes* | UMLS API |
-
-* Required if using specific endpoints.
+| Variable | Source | Benefit |
+|----------|--------|---------|
+| `NCBI_API_KEY` | [NCBI](https://www.ncbi.nlm.nih.gov/account/settings/) | Higher PubMed / NCBI rate limits |
+| `S2_API_KEY` | [Semantic Scholar](https://www.semanticscholar.org/product/api#api-key-form) | Semantic Scholar API access |
+| `OPENFDA_API_KEY` | [OpenFDA](https://open.fda.gov/apis/) | OpenFDA API access |
+| `NCI_API_KEY` | [NCI CTS](https://cts.nci.nih.gov/) | NCI Clinical Trials API |
+| `ONCOKB_TOKEN` | [OncoKB](https://www.oncokb.org/) | OncoKB cancer variant annotations |
+| `DISGENET_API_KEY` | [DisGeNET](https://www.disgenet.org/) | Disease-gene associations (required for `disease_genes`, `gene_diseases`) |
+| `UMLS_API_KEY` | [UMLS](https://www.nlm.nih.gov/research/umls/) | UMLS terminology services |
+| `ALPHAGENOME_API_KEY` | [AlphaGenome](https://www.alphagenome.com/) | AlphaGenome variant scores (required for `variant_alphagenome`) |
 
 ## License
 
-MIT License - see LICENSE file for details.
+[MIT](LICENSE)
