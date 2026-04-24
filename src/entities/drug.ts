@@ -106,10 +106,10 @@ export async function drugGet(
     const sectionPromises = sectionsToFetch.map(section => {
       return fetchWithTimeout(async () => {
         switch (section) {
-          case 'us_regulatory': return { section: 'us_regulatory', data: await fetchUSRegulatory(drug.uichem) };
-          case 'eu_regulatory': return { section: 'eu_regulatory', data: await fetchEURegulatory(drug.uichem) };
-          case 'who_regulatory': return { section: 'who_regulatory', data: await fetchWHORegulatory(drug.uichem) };
-          case 'safety': return { section: 'safety', data: await fetchSafety(drug.uichem) };
+          case 'us_regulatory': return { section: 'us_regulatory', data: await fetchUSRegulatory(name) };
+          case 'eu_regulatory': return { section: 'eu_regulatory', data: await fetchEURegulatory(name) };
+          case 'who_regulatory': return { section: 'who_regulatory', data: await fetchWHORegulatory(name) };
+          case 'safety': return { section: 'safety', data: await fetchSafety(name) };
           case 'targets': return { section: 'targets', data: await fetchTargets(name) };
           case 'indications': return { section: 'indications', data: await fetchIndications(name) };
           default: return { section, data: null };
@@ -142,12 +142,12 @@ export async function drugGet(
   return result;
 }
 
-async function fetchUSRegulatory(uichemId: string): Promise<{ fda_status?: string; ndc_codes?: string[]; label?: string }> {
+async function fetchUSRegulatory(drugName: string): Promise<{ fda_status?: string; ndc_codes?: string[]; label?: string }> {
   try {
     const conn = connectionManager.getConnection('openfda');
     
     const response = await conn.request(
-      `/drug/label.json?search=openfda.uichem.accession:${encodeURIComponent(uichemId)}&limit=1`
+      `/drug/label.json?search=openfda.generic_name:${encodeURIComponent(drugName)}&limit=1`
     ) as OpenFDAResponse;
     
     if (response.results && response.results.length > 0) {
@@ -155,7 +155,7 @@ async function fetchUSRegulatory(uichemId: string): Promise<{ fda_status?: strin
       return {
         fda_status: label.effective_time ? 'approved' : 'unknown',
         ndc_codes: label.openfda?.ndc_code,
-        label: label.brand_name?.[0],
+        label: label.openfda?.brand_name?.[0],
       };
     }
   } catch (error) {
@@ -181,12 +181,12 @@ async function fetchWHORegulatory(uichemId: string): Promise<{ prequalified?: bo
   }
 }
 
-async function fetchSafety(uichemId: string): Promise<{ box_warning?: string; warnings?: string[]; adverse_reactions?: string[] }> {
+async function fetchSafety(drugName: string): Promise<{ box_warning?: string; warnings?: string[]; adverse_reactions?: string[] }> {
   try {
     const conn = connectionManager.getConnection('openfda');
     
     const response = await conn.request(
-      `/drug/label.json?search=openfda.uichem.accession:${encodeURIComponent(uichemId)}&limit=1`
+      `/drug/label.json?search=openfda.generic_name:${encodeURIComponent(drugName)}&limit=1`
     ) as OpenFDAResponse;
     
     if (response.results && response.results.length > 0) {
@@ -328,8 +328,8 @@ interface OpenFDAResponse {
     effective_time?: number;
     openfda?: {
       ndc_code?: string[];
+      brand_name?: string[];
     };
-    brand_name?: string[];
     boxed_warning?: string[];
     warnings?: string[];
     adverse_reactions?: string[];

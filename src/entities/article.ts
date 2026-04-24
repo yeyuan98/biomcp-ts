@@ -323,7 +323,8 @@ async function fetchAnnotations(pmid: string): Promise<Array<{ type: string; tex
 
     const annotations: Array<{ type: string; text: string; start: number; end: number }> = [];
 
-    for (const article of (response || [])) {
+    const items = Array.isArray(response) ? response : [];
+    for (const article of items) {
       for (const passage of (article.passages || [])) {
         for (const ann of (passage.annotations || [])) {
           annotations.push({

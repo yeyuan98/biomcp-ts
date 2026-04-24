@@ -291,17 +291,21 @@ async function fetchCivic(geneSymbol: string): Promise<{ variants?: Array<{ name
 
 async function fetchExpression(geneSymbol: string): Promise<{ tissues?: Array<{ tissue: string; tpm: number }> }> {
   try {
+    const mygeneConn = connectionManager.getConnection('mygene');
+    const geneResponse = await mygeneConn.request(
+      `/query?q=symbol:${encodeURIComponent(geneSymbol)}&species=human&fields=ensembl.gene&size=1`
+    ) as any;
+    const ensemblId = geneResponse?.hits?.[0]?.ensembl?.gene;
+    if (!ensemblId) return { _error: `Could not resolve Ensembl ID for '${geneSymbol}'` } as any;
+
     const conn = connectionManager.getConnection('gtex');
-    
     const response = await conn.request(
-      `/v1/gene/${encodeURIComponent(geneSymbol)}?format=json`
-    ) as GTExResponse;
-    
-    const tissues = (response.data || []).slice(0, 20).map((r: { tissue: string; tpm: number }) => ({
-      tissue: r.tissue,
-      tpm: r.tpm,
+      `/api/v2/expression/medianGeneExpression?gencodeId=${encodeURIComponent(ensemblId)}`
+    ) as any;
+    const tissues = (response.data || []).slice(0, 20).map((r: any) => ({
+      tissue: r.tissueSiteDetailId,
+      tpm: r.median,
     }));
-    
     return { tissues };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -335,27 +339,54 @@ async function fetchDruggability(geneSymbol: string): Promise<{ dgidb?: Array<{ 
   try {
     const dgidbConn = connectionManager.getConnection('dgidb');
     
-    const dgidbQuery = `query($symbol: String!) { drugs(genes: $symbol) { drug sources } }`;
+    const dgidbQuery = `query($names: [String!]!) {
+      genes(names: $names) {
+        nodes {
+          interactions {
+            drug { name conceptId }
+            interactionTypes { type directionality }
+          }
+        }
+      }
+    }`;
     
-    const rawDgidb = await dgidbConn.request(dgidbQuery, { symbol: geneSymbol }) as unknown as { data?: { drugs: Array<{ drug: string; sources: string[] }> } };
+    const rawDgidb = await dgidbConn.request(dgidbQuery, { names: [geneSymbol] }) as any;
     const dgidbResponse = JSON.parse(JSON.stringify(rawDgidb));
-    const dgidbData = (dgidbResponse.data?.drugs || []).slice(0, 20).map((d: { drug: string; sources: string[] }) => ({
-      drug_name: d.drug,
-      sources: d.sources,
+    const dgidbInteractions = dgidbResponse.data?.genes?.nodes?.[0]?.interactions || [];
+    const dgidbData = dgidbInteractions.slice(0, 20).map((d: { drug?: { name?: string; conceptId?: string }; interactionTypes?: Array<{ type?: string; directionality?: string }> }) => ({
+      drug_name: d.drug?.name || '',
+      sources: d.interactionTypes?.map((t: { type?: string }) => t.type || '') || [],
     }));
     
     try {
       const otConn = connectionManager.getConnection('opentargets');
       
-      const otQuery = `query($symbol: String!) { target(ensembl: $symbol) { id approvedName tractability { value } } }`;
-      
-      const rawOt = await otConn.request(otQuery, { symbol: geneSymbol }) as unknown as { data?: Array<{ id: string; approvedName?: string; tractability?: { value: number } }> };
-      const otResponse = JSON.parse(JSON.stringify(rawOt));
-      const opentargetsData = (otResponse.data || []).slice(0, 20).map((t: { id: string; approvedName?: string; tractability?: { value: number } }) => ({
-        id: t.id,
-        name: t.approvedName || '',
-        tractability: t.tractability?.value || 0,
-      }));
+      const searchQuery = `query($symbol: String!) {
+        search(queryString: $symbol, entityNames: ["target"], page: {index: 0, size: 1}) {
+          hits { id name entity }
+        }
+      }`;
+      const searchRaw = await otConn.request(searchQuery, { symbol: geneSymbol }) as any;
+      const ensemblId = searchRaw?.data?.search?.hits?.[0]?.id;
+
+      let opentargetsData: any = null;
+      if (ensemblId) {
+        const targetQuery = `query($ensemblId: String!) {
+          target(ensemblId: $ensemblId) {
+            id approvedName
+            tractability { label value }
+          }
+        }`;
+        const targetRaw = await otConn.request(targetQuery, { ensemblId }) as any;
+        const t = targetRaw?.data?.target;
+        if (t) {
+          opentargetsData = {
+            druggability: t.tractability?.map((item: any) => `${item.label}: ${item.value}`),
+          };
+        }
+      } else {
+        opentargetsData = { _error: `Could not resolve Ensembl ID for '${geneSymbol}'` };
+      }
       
       return { dgidb: dgidbData, opentargets: opentargetsData };
     } catch (error) {
@@ -370,44 +401,38 @@ async function fetchDruggability(geneSymbol: string): Promise<{ dgidb?: Array<{ 
   }
 }
 
-async function fetchClingen(geneSymbol: string): Promise<{ dosagem?: Array<{ haploinsufficiency: string; triplosensitivity: string }> }> {
-  try {
-    const conn = connectionManager.getConnection('clingen');
-    
-    const response = await conn.request(
-      `/gene/${encodeURIComponent(geneSymbol)}?format=json`
-    ) as ClingenResponse;
-    
-    return {
-      dosagem: [{
-        haploinsufficiency: response.haploinsufficiencyScore || 'unknown',
-        triplosensitivity: response.triplosensitivityScore || 'unknown',
-      }],
-    };
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error('[fetchClingen] Error:', error);
-    return { _error: `ClinGen dosage sensitivity lookup failed (source: clingen): ${msg}. The data source may be temporarily unavailable.` } as any;
-  }
+async function fetchClingen(geneSymbol: string): Promise<{ _error?: string }> {
+  return { _error: `ClinGen dosage sensitivity data for '${geneSymbol}' is not available via public API. Visit https://search.clinicalgenome.org for manual lookup.` };
 }
 
-async function fetchConstraint(geneSymbol: string): Promise<{ lof?: { oe_score: number; mis_bad_loe: number }; syn?: { oe_score: number } }> {
+async function fetchConstraint(geneSymbol: string): Promise<{ lof?: { oe_score: number; oe_lof_upper?: number; mis_bad_loe: number }; syn?: { oe_score: number } }> {
   try {
     const conn = connectionManager.getConnection('gnomad');
     
-    const query = `query($symbol: String!) { gene(gene_symbol: $symbol) { lof { oe_score mis_bad_loeoe } synonyms { oe_score } } }`;
+    const query = `query($symbol: String!, $refGenome: ReferenceGenomeId!) {
+      gene(gene_symbol: $symbol, reference_genome: $refGenome) {
+        gnomad_constraint {
+          oe_lof
+          oe_lof_upper
+          oe_mis
+          oe_syn
+        }
+      }
+    }`;
+    const vars = { symbol: geneSymbol, refGenome: 'GRCh38' };
     
-    const rawResponse = await conn.request(query, { symbol: geneSymbol }) as unknown as { data?: { gene?: { lof?: { oe_score?: number; mis_bad_loeoe?: number }; synonyms?: { oe_score?: number } } } };
+    const rawResponse = await conn.request(query, vars) as any;
     const response = JSON.parse(JSON.stringify(rawResponse));
-    const data = response.data?.gene;
+    const data = response.data?.gene?.gnomad_constraint;
     
     return {
       lof: {
-        oe_score: data?.lof?.oe_score || 0,
-        mis_bad_loe: data?.lof?.mis_bad_loeoe || 0,
+        oe_score: data?.oe_lof || 0,
+        oe_lof_upper: data?.oe_lof_upper || 0,
+        mis_bad_loe: data?.oe_mis || 0,
       },
       syn: {
-        oe_score: data?.synonyms?.oe_score || 0,
+        oe_score: data?.oe_syn || 0,
       },
     };
   } catch (error) {
@@ -444,7 +469,7 @@ async function fetchFunding(geneSymbol: string): Promise<{ grants?: Array<{ nih_
     const conn = connectionManager.getConnection('nih_reporter');
     
     const response = await conn.request(
-      `/projects/search?criteria={"genes":[${encodeURIComponent(geneSymbol)}]}&format=json`
+      `/projects/search?criteria=${encodeURIComponent(`{"genes":["${geneSymbol}"]}`)}&format=json`
     ) as NIHReporterResponse;
     
     const grants = (response.results || []).slice(0, 20).map(r => ({

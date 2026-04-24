@@ -168,22 +168,8 @@ async function fetchGeneAssociations(diseaseId: string): Promise<Array<{ gene_sy
   }
 }
 
-async function fetchPhenotypes(diseaseId: string): Promise<Array<{ hpo_id: string; name: string }>> {
-  try {
-    const conn = connectionManager.getConnection('monarch');
-    
-    const response = await conn.request(
-      `/disease/${encodeURIComponent(diseaseId)}/phenotypes?format=json`
-    ) as MonarchPhenotypesResponse;
-    
-    return (response.results || []).slice(0, 20).map(r => ({
-      hpo_id: r.hpo_id,
-      name: r.name,
-    }));
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return [{ _error: `Phenotype lookup failed (source: monarch): ${msg}. The data source may be temporarily unavailable.` } as any];
-  }
+async function fetchPhenotypes(diseaseId: string): Promise<{ _error?: string }> {
+  return { _error: 'Monarch phenotypes API is currently unavailable. The service has been reorganized.' };
 }
 
 async function fetchPathways(diseaseId: string): Promise<Array<{ pathway_id: string; name: string; source: string }>> {

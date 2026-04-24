@@ -93,26 +93,26 @@ export async function trialGet(
     throw new Error(`Trial '${nctId}' not found. Try trial_search to find valid NCT IDs.`);
   }
   
-  const identModule = trial.protocolSection?.identModule;
+  const identificationModule = trial.protocolSection?.identificationModule;
   const statusModule = trial.protocolSection?.statusModule;
-  const descModule = trial.protocolSection?.descModule;
-  const armsModule = trial.protocolSection?.armsModule;
-  const contactsModule = trial.protocolSection?.contactsModule;
+  const descriptionModule = trial.protocolSection?.descriptionModule;
+  const armsInterventionsModule = trial.protocolSection?.armsInterventionsModule;
+  const contactsLocationsModule = trial.protocolSection?.contactsLocationsModule;
   
   const result: TrialResult = {
-    nct_id: identModule?.nctId || nctId,
-    title: identModule?.briefTitle,
-    short_title: identModule?.shortTitle,
+    nct_id: identificationModule?.nctId || nctId,
+    title: identificationModule?.briefTitle,
+    short_title: identificationModule?.shortTitle,
     status: statusModule?.overallStatus,
     phase: statusModule?.phases?.[0],
-    conditions: descModule?.conditions,
-    interventions: armsModule?.interventions?.map((i: { type: string; name: string }) => `${i.type}: ${i.name}`),
-    sponsor: identModule?.sponsors?.[0]?.name,
-    collaborator: identModule?.collaborators?.[0]?.name,
+    conditions: descriptionModule?.conditions,
+    interventions: armsInterventionsModule?.interventions?.map((i: { type: string; name: string }) => `${i.type}: ${i.name}`),
+    sponsor: identificationModule?.sponsors?.[0]?.name,
+    collaborator: identificationModule?.collaborators?.[0]?.name,
   };
   
-  if (contactsModule?.contacts) {
-    result.contacts = contactsModule.contacts.map((c: { role?: string; name?: string; phone?: string; email?: string }) => ({
+  if (contactsLocationsModule?.contacts) {
+    result.contacts = contactsLocationsModule.contacts.map((c: { role?: string; name?: string; phone?: string; email?: string }) => ({
       role: c.role || 'contact',
       name: c.name || '',
       phone: c.phone,
@@ -170,7 +170,7 @@ async function fetchEligibility(nctId: string): Promise<{ criteria?: string; min
     ) as any;
     
     const trial = extractTrial(response);
-    const eligibilityModule = trial?.protocolSection?.eligModule;
+    const eligibilityModule = trial?.protocolSection?.eligibilityModule;
     
     if (!eligibilityModule) return {};
     
@@ -196,7 +196,7 @@ async function fetchLocations(nctId: string): Promise<Array<{ facility?: string;
     ) as any;
     
     const trial = extractTrial(response);
-    const locations = trial?.protocolSection?.contactsModule?.locations;
+    const locations = trial?.protocolSection?.contactsLocationsModule?.locations;
     
     if (!locations) return [];
     
@@ -251,7 +251,7 @@ async function fetchOutcomes(nctId: string): Promise<{ primary?: Array<{ measure
 interface ClinicalTrialsSearchResponse {
   studies?: Array<{
     protocolSection?: {
-      identModule?: {
+      identificationModule?: {
         nctId?: string;
         briefTitle?: string;
         sponsors?: Array<{ name: string }>;
@@ -260,10 +260,10 @@ interface ClinicalTrialsSearchResponse {
         overallStatus?: string;
         phases?: string[];
       };
-      descModule?: {
+      descriptionModule?: {
         conditions?: string[];
       };
-      armsModule?: {
+      armsInterventionsModule?: {
         interventions?: Array<{ type: string; name: string }>;
       };
     };
@@ -273,7 +273,7 @@ interface ClinicalTrialsSearchResponse {
 interface ClinicalTrialsDetailResponse {
   studies?: Array<{
     protocolSection?: {
-      identModule?: {
+      identificationModule?: {
         nctId?: string;
         briefTitle?: string;
         shortTitle?: string;
@@ -284,18 +284,18 @@ interface ClinicalTrialsDetailResponse {
         overallStatus?: string;
         phases?: string[];
       };
-      descModule?: {
+      descriptionModule?: {
         conditions?: string[];
         briefSummary?: string;
       };
-      armsModule?: {
+      armsInterventionsModule?: {
         interventions?: Array<{ type: string; name: string }>;
       };
-      contactsModule?: {
+      contactsLocationsModule?: {
         contacts?: Array<{ role?: string; name?: string; phone?: string; email?: string }>;
         locations?: Array<{ facility?: string; city?: string; state?: string; country?: string; zip?: string; status?: string }>;
       };
-      eligModule?: {
+      eligibilityModule?: {
         eligibilityCriteria?: string;
         minimumAge?: string;
         maximumAge?: string;
@@ -311,26 +311,26 @@ interface ClinicalTrialsDetailResponse {
 }
 
 export function transformTrialSearchResult(trial: ClinicalTrialsSearchStudy): TrialSearchResult {
-  const identModule = trial.protocolSection?.identModule;
+  const identificationModule = trial.protocolSection?.identificationModule;
   const statusModule = trial.protocolSection?.statusModule;
-  const descModule = trial.protocolSection?.descModule;
-  const armsModule = trial.protocolSection?.armsModule;
+  const descriptionModule = trial.protocolSection?.descriptionModule;
+  const armsInterventionsModule = trial.protocolSection?.armsInterventionsModule;
   
   return {
-    nct_id: identModule?.nctId || '',
-    title: identModule?.briefTitle,
+    nct_id: identificationModule?.nctId || '',
+    title: identificationModule?.briefTitle,
     status: statusModule?.overallStatus,
     phase: statusModule?.phases?.[0],
-    conditions: descModule?.conditions,
-    interventions: armsModule?.interventions?.map((i: { type: string; name: string }) => `${i.type}: ${i.name}`),
-    sponsor: identModule?.sponsors?.[0]?.name,
+    conditions: descriptionModule?.conditions,
+    interventions: armsInterventionsModule?.interventions?.map((i: { type: string; name: string }) => `${i.type}: ${i.name}`),
+    sponsor: identificationModule?.sponsors?.[0]?.name,
   };
 }
 
 export function transformTrialResponse(data: ClinicalTrialsDetailStudy): TrialResult {
   return {
-    nct_id: data.protocolSection?.identModule?.nctId || '',
-    title: data.protocolSection?.identModule?.briefTitle,
+    nct_id: data.protocolSection?.identificationModule?.nctId || '',
+    title: data.protocolSection?.identificationModule?.briefTitle,
     status: data.protocolSection?.statusModule?.overallStatus,
     phase: data.protocolSection?.statusModule?.phases?.[0],
   };
@@ -338,7 +338,7 @@ export function transformTrialResponse(data: ClinicalTrialsDetailStudy): TrialRe
 
 interface ClinicalTrialsSearchStudy {
   protocolSection?: {
-    identModule?: {
+    identificationModule?: {
       nctId?: string;
       briefTitle?: string;
       sponsors?: Array<{ name: string }>;
@@ -347,10 +347,10 @@ interface ClinicalTrialsSearchStudy {
       overallStatus?: string;
       phases?: string[];
     };
-    descModule?: {
+    descriptionModule?: {
       conditions?: string[];
     };
-    armsModule?: {
+    armsInterventionsModule?: {
       interventions?: Array<{ type: string; name: string }>;
     };
   };
@@ -358,7 +358,7 @@ interface ClinicalTrialsSearchStudy {
 
 interface ClinicalTrialsDetailStudy {
   protocolSection?: {
-    identModule?: {
+    identificationModule?: {
       nctId?: string;
       briefTitle?: string;
       shortTitle?: string;
@@ -369,18 +369,18 @@ interface ClinicalTrialsDetailStudy {
       overallStatus?: string;
       phases?: string[];
     };
-    descModule?: {
+    descriptionModule?: {
       conditions?: string[];
       briefSummary?: string;
     };
-    armsModule?: {
+    armsInterventionsModule?: {
       interventions?: Array<{ type: string; name: string }>;
     };
-    contactsModule?: {
+    contactsLocationsModule?: {
       contacts?: Array<{ role?: string; name?: string; phone?: string; email?: string }>;
       locations?: Array<{ facility?: string; city?: string; state?: string; country?: string; zip?: string; status?: string }>;
     };
-    eligModule?: {
+    eligibilityModule?: {
       eligibilityCriteria?: string;
       minimumAge?: string;
       maximumAge?: string;

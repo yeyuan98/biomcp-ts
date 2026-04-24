@@ -49,7 +49,7 @@ export class RestConnection implements IConnection<string, unknown> {
     }
     
     const contentType = response.headers?.get?.('content-type') || '';
-    if (!contentType || contentType.includes('application/json')) {
+    if (!contentType || contentType.includes('json')) {
       return response.json();
     }
     return response.text();
@@ -65,8 +65,8 @@ export class RestConnection implements IConnection<string, unknown> {
   
   async healthCheck(): Promise<boolean> {
     try {
-      const response = await fetch(this.options.baseUrl, { method: 'HEAD' });
-      return response.ok || response.status === 405;
+      await fetch(this.options.baseUrl, { method: 'HEAD', signal: AbortSignal.timeout(5000) });
+      return true;
     } catch {
       return false;
     }

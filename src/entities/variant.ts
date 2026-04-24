@@ -113,6 +113,14 @@ const VARIANT_SEARCH_FILTERS = [
 
 const VARIANT_GET_SECTIONS = ['core', 'frequency', 'predictions', 'clinical', 'alphagenome'] as const;
 
+function rewriteVariantQuery(rawQuery: string): string {
+  if (rawQuery.includes(':')) return rawQuery;
+  if (/^rs\d+$/i.test(rawQuery)) return `dbsnp.rsid:${rawQuery}`;
+  const hgvsMatch = rawQuery.match(/^(\w+)\s+([A-Z]\d+[A-Z*])$/i);
+  if (hgvsMatch) return `gene:${hgvsMatch[1]} AND hgvs.p:${hgvsMatch[2]}`;
+  return rawQuery;
+}
+
 export async function variantSearch(
   options: VariantSearchOptions
 ): Promise<VariantSearchResult[]> {
@@ -127,7 +135,7 @@ export async function variantSearch(
   });
   
   if (query) {
-    queryParams.set('q', query);
+    queryParams.set('q', rewriteVariantQuery(query));
   }
   
   if (gene) {
@@ -225,106 +233,84 @@ export async function variantGet(
 }
 
 async function fetchFrequencySection(variant: MyVariantGetResponse): Promise<FrequencySection | null> {
-  try {
-    const conn = connectionManager.getConnection('gnomad');
-    
-    const query = `query($rsid: String!) {
-      snp(rsid: $rsid) {
-        genome {
-          af: alleleFrequencies {
-            population: population
-            af: alleleFrequency
-          }
-        }
-      }
-    }`;
-    
-    const vars = { rsid: variant.dbsnp?.rsid || variant.rsid?.replace('rs', '') || '' };
-    const rawResponse = await conn.request(query, vars) as GnomadFreqResponse;
-    const parsed = JSON.parse(JSON.stringify(rawResponse));
-    const freqs = parsed.data?.snp?.genome?.af || [];
-    
-    const breakdown: Record<string, number> = {};
-    let maxAf = 0;
-    let maxPop = 'nfe';
-    
-    for (const f of freqs) {
-      if (f.af > maxAf) {
-        maxAf = f.af;
-        maxPop = f.population;
-      }
-      breakdown[f.population] = f.af;
-    }
-    
+  if (variant.gnomad) {
     return {
-      gnomad_af: variant.gnomad?.af,
-      population_breakdown: breakdown,
-      popul_max: maxPop,
+      gnomad_af: variant.gnomad.af,
+      exac_af: variant.gnomad.exac_af,
+      population_breakdown: variant.gnomad.populations || {},
     };
-  } catch {
-    if (variant.gnomad) {
-      return {
-        gnomad_af: variant.gnomad.af,
-      };
-    }
-    return null;
   }
+  return null;
 }
 
 async function fetchPredictionsSection(variant: MyVariantGetResponse): Promise<PredictionsSection | null> {
   const result: PredictionsSection = {};
   
-  if (variant.cadd) {
-    result.cadd_score = variant.cadd.score;
-    result.cadd_phred = variant.cadd.phred;
+  const dbnsfp = (variant as any).dbnsfp;
+  
+  const cadd = variant.cadd || (dbnsfp?.cadd ? { score: dbnsfp.cadd.rawscore, phred: dbnsfp.cadd.phred } : undefined);
+  const sift = variant.sift || (dbnsfp?.sift ? { score: dbnsfp.sift.score, pred: dbnsfp.sift.pred } : undefined);
+  const polyphen = variant.polyphen || (dbnsfp?.polyphen2 ? { score: dbnsfp.polyphen2.score, pred: dbnsfp.polyphen2.pred } : undefined);
+  const revel = variant.revel || dbnsfp?.revel;
+  const vest = variant.vest || (dbnsfp?.vest3 ? { score: dbnsfp.vest3.score } : undefined);
+  const gerp = variant.gerp || dbnsfp?.gerp;
+  const phylop = variant.phylop || dbnsfp?.phylop;
+  const phastcons = variant.phastcons || dbnsfp?.phastcons100way;
+  const alphamissense = variant.alphamissense || dbnsfp?.alphamissense;
+  const clinpred = variant.clinpred || dbnsfp?.clinpred;
+  const metarnn = variant.metarnn || dbnsfp?.metarnn;
+  
+  if (cadd) {
+    result.cadd_score = cadd.score;
+    result.cadd_phred = cadd.phred;
   }
   
-  if (variant.sift) {
-    result.sift_score = variant.sift.score;
-    result.sift_pred = variant.sift.pred;
+  if (sift) {
+    result.sift_score = sift.score;
+    result.sift_pred = sift.pred;
   }
   
-  if (variant.polyphen) {
-    result.polyphen_score = variant.polyphen.score;
-    result.polyphen_pred = variant.polyphen.pred;
+  if (polyphen) {
+    result.polyphen_score = polyphen.score;
+    result.polyphen_pred = polyphen.pred;
   }
   
-  if (variant.revel) {
-    result.revel_score = variant.revel.score;
+  if (revel) {
+    result.revel_score = revel.score ?? revel;
   }
   
-  if (variant.vest) {
-    result.vest_score = variant.vest.score;
+  if (vest) {
+    result.vest_score = vest.score;
   }
   
-  if (variant.gerp) {
+  if (gerp) {
     result.conservation = {
-      gerp: variant.gerp.score,
+      gerp: gerp.score ?? gerp,
     };
   }
   
-  if (variant.phylop) {
+  if (phylop) {
     result.conservation = result.conservation || {};
-    result.conservation.phylop = variant.phylop.score;
+    result.conservation.phylop = phylop.score ?? phylop;
   }
   
-  if (variant.phastcons) {
+  if (phastcons) {
     result.conservation = result.conservation || {};
-    result.conservation.phastcons = variant.phastcons.score;
+    result.conservation.phastcons = phastcons.score ?? phastcons;
   }
   
-  if (variant.alphamissense) {
-    result.other = { alphamissense: variant.alphamissense.score };
+  if (alphamissense) {
+    result.other = { alphamissense: alphamissense.score ?? alphamissense };
   }
   
-  if (variant.clinpred) {
+  if (clinpred) {
     result.other = result.other || {};
-    result.other.clinpred = variant.clinpred.score;
+    result.other.clinpred = clinpred.score ?? clinpred;
   }
   
-  if (variant.metarnn) {
+  if (metarnn) {
     result.other = result.other || {};
-    result.other.metarnn = variant.metarnn.score;
+    result.other.metarnn = metarnn.score ?? metarnn;
   }
   
   if (variant.bayesdel) {

@@ -13,15 +13,15 @@ export async function geneToDrugs(geneSymbol: string): Promise<Array<{ drug_name
   try {
     const conn = connectionManager.getConnection('opentargets');
     
-    const query = `query($symbol: String!) {
+    const searchQuery = `query($symbol: String!) {
       search(queryString: $symbol, entityNames: ["target"], page: {index: 0, size: 1}) {
-        targets { id approvedSymbol }
+        hits { id name entity }
       }
     }`;
     
-    const searchRaw = await conn.request(query, { symbol: geneSymbol }) as any;
+    const searchRaw = await conn.request(searchQuery, { symbol: geneSymbol }) as any;
     const searchData = JSON.parse(JSON.stringify(searchRaw));
-    const targetId = searchData?.data?.search?.targets?.[0]?.id;
+    const targetId = searchData?.data?.search?.hits?.[0]?.id;
     
     if (!targetId) {
       return [{ _error: `No OpenTargets entry found for gene '${geneSymbol}'. Verify the gene symbol using gene_search.` } as any];
@@ -29,19 +29,20 @@ export async function geneToDrugs(geneSymbol: string): Promise<Array<{ drug_name
     
     const drugQuery = `query($ensemblId: String!) {
       target(ensemblId: $ensemblId) {
-        id approvedSymbol
-        knownDrugs { name drugType mechanismOfAction phase }
+        drugAndClinicalCandidates {
+          rows { maxClinicalStage drug { id name drugType } }
+        }
       }
     }`;
     
     const drugRaw = await conn.request(drugQuery, { ensemblId: targetId }) as any;
     const drugData = JSON.parse(JSON.stringify(drugRaw));
-    const drugs = drugData?.data?.target?.knownDrugs || [];
+    const rows = drugData?.data?.target?.drugAndClinicalCandidates?.rows || [];
     
-    return drugs.slice(0, 20).map((d: { name?: string; drugType?: string; mechanismOfAction?: string; phase?: number }) => ({
-      drug_name: d.name || 'unknown',
+    return rows.slice(0, 20).map((r: { maxClinicalStage?: string; drug?: { name?: string; drugType?: string } }) => ({
+      drug_name: r.drug?.name || 'unknown',
       source: 'opentargets',
-      action_type: d.mechanismOfAction,
+      action_type: r.drug?.drugType,
     }));
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);

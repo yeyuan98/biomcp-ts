@@ -436,7 +436,7 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   },
   dgidb: {
     sourceId: 'dgidb',
-    baseUrl: 'https://dgidb.org/api',
+    baseUrl: 'https://dgidb.org/api/graphql',
     protocol: 'graphql',
     rateLimit: { intervalMs: 100 },
   },
