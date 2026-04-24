@@ -73,7 +73,7 @@ export function registerDiseaseTools(server: McpServer): void {
   server.registerTool(
     'disease_genes',
     {
-      description: 'Get genes associated with a disease via DisGeNET',
+      description: 'Get genes associated with a disease via DisGeNET. Requires DISGENET_API_KEY environment variable. Obtain an API key at https://www.disgenet.org/.',
       inputSchema: {
         disease_id: z.string().describe('Disease ID'),
         limit: z.number().int().min(1).max(50).default(20),
@@ -83,7 +83,11 @@ export function registerDiseaseTools(server: McpServer): void {
     async ({ disease_id, limit }) => {
       try {
         const result = await diseaseGet(disease_id, ['gene_associations']);
-        const genes = (result as { sections?: { gene_associations?: Array<{ gene_symbol: string; name: string }> } }).sections?.gene_associations?.slice(0, limit) || [];
+        const section = result.sections?.gene_associations;
+        if (section && typeof section === 'object' && '_error' in section) {
+          return { content: [{ type: 'text', text: JSON.stringify(section) }], isError: true };
+        }
+        const genes = (Array.isArray(section) ? section : []).slice(0, limit) || [];
         return { content: [{ type: 'text', text: JSON.stringify(genes) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
@@ -158,8 +162,22 @@ export function registerDiseaseTools(server: McpServer): void {
               searchName = resolved.name;
             }
           } catch {
-            searchName = disease_id.replace(/^(DOID|MONDO|OMIM):\d+$/, '');
+            return { 
+              content: [{ type: 'text', text: JSON.stringify({ 
+                _error: `Disease '${disease_id}' not found. Try disease_search to find valid disease IDs. Supported ID formats: MONDO:XXXXXXX, DOID:XXXXXXX, OMIM:XXXXXX.` 
+              }) }],
+              isError: true 
+            };
           }
+        }
+
+        if (!searchName || searchName.trim() === '') {
+          return { 
+            content: [{ type: 'text', text: JSON.stringify({ 
+              _error: `Disease '${disease_id}' could not be resolved to a valid search term. Try disease_search to find valid disease IDs.` 
+            }) }],
+            isError: true 
+          };
         }
 
         const conn = connectionManager.getConnection('clinicaltrials');

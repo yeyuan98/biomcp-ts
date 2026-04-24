@@ -103,7 +103,7 @@ export async function geneGet(
   }
   
   const sectionsToFetch = sectionConfig.includes('all') 
-    ? ['pathways', 'protein', 'ontology', 'go', 'interactions', 'civic', 'expression', 'hpa', 'druggability', 'clingen', 'constraint', 'disgenet', 'funding']
+    ? ['pathways', 'protein', 'ontology', 'go', 'interactions', 'civic', 'expression', 'hpa', 'druggability', 'clingen', 'constraint', 'disgenet', 'diseases', 'funding']
     : sectionConfig.filter(s => s !== 'core');
 
   if (sectionsToFetch.length > 0) {
@@ -122,6 +122,7 @@ export async function geneGet(
           case 'clingen': return { section: 'clingen', data: await fetchClingen(symbol) };
           case 'constraint': return { section: 'constraint', data: await fetchConstraint(symbol) };
           case 'disgenet': return { section: 'disgenet', data: await fetchDisgenet(symbol) };
+          case 'diseases': return { section: 'diseases', data: await fetchDiseases(symbol) };
           case 'funding': return { section: 'funding', data: await fetchFunding(symbol) };
           default: return { section, data: null };
         }
@@ -320,7 +321,8 @@ async function fetchExpression(geneSymbol: string): Promise<{ tissues?: Array<{ 
     let response: any = null;
     const baseId = ensemblId.replace(/\.\d+$/, '');
     
-    for (const version of ['.16', '.14', '.15', '.13', '.12', '']) {
+    const versions = ['', '.13', '.12', '.14', '.15', '.16', '.11', '.10', '.09', '.08'];
+    for (const version of versions) {
       const gencodeId = baseId + version;
       try {
         const attempt = await conn.request(
@@ -502,6 +504,44 @@ async function fetchDisgenet(geneSymbol: string): Promise<{ associations?: Array
     const msg = error instanceof Error ? error.message : String(error);
     console.error('[fetchDisgenet] Error:', error);
     return { _error: `Disease association lookup failed (source: disgenet): ${msg}. The data source may be temporarily unavailable.` } as any;
+  }
+}
+
+async function fetchDiseases(geneSymbol: string): Promise<{ diseases?: Array<{ name: string; source: string }> }> {
+  try {
+    const otConn = connectionManager.getConnection('opentargets');
+    
+    const searchQuery = `query($symbol: String!) {
+      search(queryString: $symbol, entityNames: ["target"], page: {index: 0, size: 1}) {
+        hits { id name entity }
+      }
+    }`;
+    const searchRaw = await otConn.request(searchQuery, { symbol: geneSymbol }) as any;
+    const ensemblId = searchRaw?.data?.search?.hits?.[0]?.id;
+    if (!ensemblId) {
+      return { _error: `Could not resolve Ensembl ID for '${geneSymbol}' via OpenTargets. Gene symbol may be invalid.` } as any;
+    }
+
+    const targetQuery = `query($ensemblId: String!) {
+      target(ensemblId: $ensemblId) {
+        associatedDiseases(page: {index: 0, size: 20}) {
+          rows { disease { id name } score }
+        }
+      }
+    }`;
+    const targetRaw = await otConn.request(targetQuery, { ensemblId }) as any;
+    const rows = targetRaw?.data?.target?.associatedDiseases?.rows || [];
+    
+    const diseases = rows.map((r: any) => ({
+      name: r.disease?.name || '',
+      source: 'opentargets',
+    })).filter((d: any) => d.name);
+    
+    return { diseases };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[fetchDiseases] Error:', error);
+    return { _error: `Disease association lookup failed (source: opentargets): ${msg}. The data source may be temporarily unavailable.` } as any;
   }
 }
 

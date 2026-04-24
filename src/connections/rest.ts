@@ -6,6 +6,25 @@ import {
 } from './base.js';
 import { TokenBucketRateLimiter, RateLimiterFactory } from './rate-limiter.js';
 
+function getHttpStatusHint(status: number, sourceId: string): string {
+  if (status === 400) {
+    return ` — The request was rejected by ${sourceId}. The record may not exist or may not be indexed yet. Verify the ID is correct and try an older/established record.`;
+  }
+  if (status === 404) {
+    return ` — Resource not found at ${sourceId}. The record may not exist or has been removed. Verify the ID.`;
+  }
+  if (status === 429) {
+    return ` — Rate limited by ${sourceId}. Wait a few seconds and retry. If this persists, set the ${sourceId} API key in environment variables for higher rate limits.`;
+  }
+  if (status === 401 || status === 403) {
+    return ` — Authentication required or forbidden by ${sourceId}. Set the required API key in environment variables.`;
+  }
+  if (status >= 500) {
+    return ` — Server error from ${sourceId}. The service may be temporarily unavailable. Try again later.`;
+  }
+  return '';
+}
+
 export class RestConnection implements IConnection<string, unknown> {
   readonly sourceId: string;
   readonly protocol: ProtocolType = 'rest';
@@ -45,7 +64,8 @@ export class RestConnection implements IConnection<string, unknown> {
     });
     
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText} — URL: ${url} — Source: ${this.sourceId}`);
+      const hint = getHttpStatusHint(response.status, this.sourceId);
+      throw new Error(`HTTP ${response.status}: ${response.statusText} — URL: ${url} — Source: ${this.sourceId}${hint}`);
     }
     
     const contentType = response.headers?.get?.('content-type') || '';

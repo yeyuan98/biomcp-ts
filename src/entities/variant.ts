@@ -6,6 +6,7 @@ const SECTION_TIMEOUT_MS = 8000;
 export interface VariantSearchOptions {
   query?: string;
   gene?: string;
+  hgvsp?: string;
   significance?: 'benign' | 'likely_benign' | 'pathogenic' | 'likely_pathogenic' | 'uncertain';
   max_frequency?: number;
   limit?: number;
@@ -119,15 +120,13 @@ function rewriteVariantQuery(rawQuery: string): string {
   if (rawQuery.includes(':')) return rawQuery;
   if (/^rs\d+$/i.test(rawQuery)) return `dbsnp.rsid:${rawQuery}`;
   if (/^[NX]M_\d+\.\d+:[acgtnACGTN>]+/.test(rawQuery)) return rawQuery;
-  const hgvsMatch = rawQuery.match(/^(\w+)\s+([A-Z]\d+[A-Z*])$/i);
-  if (hgvsMatch) return `${hgvsMatch[1]} ${hgvsMatch[2]}`;
   return rawQuery;
 }
 
 export async function variantSearch(
   options: VariantSearchOptions
 ): Promise<VariantSearchResult[]> {
-  const { query, gene, significance, max_frequency, limit = 10, offset = 0 } = options;
+  const { query, gene, hgvsp, significance, max_frequency, limit = 10, offset = 0 } = options;
   
   const conn = connectionManager.getConnection('myvariant');
   
@@ -137,20 +136,37 @@ export async function variantSearch(
     fields: 'dbsnp,snpeff,clinvar,gnomad,cadd,dbnsfp',
   });
   
+  const qParts: string[] = [];
+  
   if (query) {
-    queryParams.set('q', rewriteVariantQuery(query));
+    qParts.push(rewriteVariantQuery(query));
   }
   
   if (gene) {
-    queryParams.set('gene', gene);
+    qParts.push(`gene:${gene}`);
+  }
+  
+  if (hgvsp) {
+    qParts.push(`hgvsp.p:${hgvsp}`);
   }
   
   if (significance) {
-    queryParams.set('significance', significance);
+    const sigMap: Record<string, string> = {
+      pathogenic: 'pathogenic',
+      likely_pathogenic: 'likely pathogenic',
+      benign: 'benign',
+      likely_benign: 'likely benign',
+      uncertain: 'uncertain significance',
+    };
+    qParts.push(`clinvar.significance:${sigMap[significance] || significance}`);
   }
   
   if (max_frequency !== undefined) {
-    queryParams.set('max_frequency', String(max_frequency));
+    qParts.push(`gnomad_af:[* TO ${max_frequency}]`);
+  }
+  
+  if (qParts.length > 0) {
+    queryParams.set('q', qParts.join(' AND '));
   }
   
   const response = await conn.request(`/query?${queryParams.toString()}`) as MyVariantSearchResponse;
@@ -205,6 +221,20 @@ export async function variantGet(
   const sectionPromises = sectionsToFetch.map(section => {
     return fetchWithTimeout(async () => {
       switch (section) {
+        case 'core':
+          return { 
+            section: 'core', 
+            data: { 
+              id: variant.id, 
+              gene: variant.gene, 
+              hgvs_p: variant.hgvs_p, 
+              hgvs_c: variant.hgvs_c, 
+              rsid: variant.rsid, 
+              cosmic_id: variant.cosmic_id,
+              significance: variant.significance,
+              conditions: variant.conditions,
+            } 
+          };
         case 'frequency':
           return { section: 'frequency', data: await fetchFrequencySection(response) };
         case 'predictions':

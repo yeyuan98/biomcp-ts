@@ -108,40 +108,55 @@ export async function variantToTrials(variantId: string): Promise<Array<{ nct_id
 
 export async function drugToGenes(drugName: string): Promise<Array<{ gene_symbol: string; name: string; source: string; action_type?: string }>> {
   try {
-    const conn = connectionManager.getConnection('chembl');
+    const conn = connectionManager.getConnection('opentargets');
     
-    const response = await conn.request(
-      `/target?molecule_synonym=${encodeURIComponent(drugName)}&format=json`
-    ) as ChemblTargetResponse;
+    const searchQuery = `query($name: String!) {
+      search(queryString: $name, entityNames: ["drug"], page: {index: 0, size: 1}) {
+        hits { id name }
+      }
+    }`;
     
-    return (response.targets || []).slice(0, 20).map(t => {
-      const geneSymbol = extractGeneSymbol(t);
-      return {
-        gene_symbol: geneSymbol || t.target_chembl_id,
-        name: geneSymbol || t.target_name,
-        source: 'chembl',
-        action_type: t.action_type,
-      };
-    });
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error('[drugToGenes] Error:', error);
-    return [{ _error: `Gene target lookup for drug failed (source: chembl): ${msg}. Try drug_search first to verify the drug name, or try again later.` } as any];
-  }
-}
-
-function extractGeneSymbol(target: { target_chembl_id: string; target_name: string; target_components?: Array<{ target_component_synonyms?: Array<{ syn_type: string; synonym?: string; component_synonym?: string }> }> }): string | null {
-  if (!target.target_components) return null;
-  for (const comp of target.target_components) {
-    if (!comp.target_component_synonyms) continue;
-    for (const syn of comp.target_component_synonyms) {
-      if (syn.syn_type === 'GENE_SYMBOL') {
-        const sym = (syn as any).component_synonym || syn.synonym;
-        if (sym) return sym;
+    const searchRaw = await conn.request(searchQuery, { name: drugName }) as any;
+    const searchData = JSON.parse(JSON.stringify(searchRaw));
+    const chemblId = searchData?.data?.search?.hits?.[0]?.id;
+    
+    if (!chemblId) {
+      return [{ _error: `No OpenTargets entry found for drug '${drugName}'. Try drug_search to find valid drug names.` } as any];
+    }
+    
+    const drugQuery = `query($chemblId: String!) {
+      drug(chemblId: $chemblId) {
+        id name
+        mechanismsOfAction {
+          rows { actionType targets { id approvedSymbol } }
+        }
+      }
+    }`;
+    
+    const drugRaw = await conn.request(drugQuery, { chemblId }) as any;
+    const drugData = JSON.parse(JSON.stringify(drugRaw));
+    const rows = drugData?.data?.drug?.mechanismsOfAction?.rows || [];
+    
+    const seen = new Set<string>();
+    const results: Array<{ gene_symbol: string; name: string; action_type?: string; source: string }> = [];
+    for (const row of rows) {
+      for (const t of row.targets || []) {
+        if (t.approvedSymbol && !seen.has(t.approvedSymbol)) {
+          seen.add(t.approvedSymbol);
+          results.push({
+            gene_symbol: t.approvedSymbol,
+            name: t.approvedSymbol,
+            action_type: row.actionType || undefined,
+            source: 'opentargets',
+          });
+        }
       }
     }
+    return results.slice(0, 20);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return [{ _error: `Gene target lookup for drug failed (source: opentargets): ${msg}. Try drug_search to find valid drug names, or try again later.` } as any];
   }
-  return null;
 }
 
 export async function drugToTrials(drugName: string): Promise<Array<{ nct_id: string; title?: string; status?: string }>> {
@@ -291,11 +306,15 @@ export async function geneEnrichment(geneSymbols: string[]): Promise<PathwayEnri
   }
   
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    
     const response = await fetch('https://reactome.org/AnalysisService/identifiers/projection', {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
       body: geneSymbols.join('\n'),
-    });
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeoutId));
     
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -314,6 +333,9 @@ export async function geneEnrichment(geneSymbols: string[]): Promise<PathwayEnri
     }));
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes('abort') || msg.includes('timeout')) {
+      return [{ _error: `Gene enrichment analysis failed (source: reactome): Request timed out after 15s. The Reactome AnalysisService may be temporarily unavailable. Try again later.` } as any];
+    }
     return [{ _error: `Gene enrichment analysis failed (source: reactome): ${msg}. Ensure at least 3 valid gene symbols are provided, or try again later.` } as any];
   }
 }
@@ -557,17 +579,6 @@ interface ReactomeAnalysisResponse {
       found?: number;
       total?: number;
     };
-  }>;
-}
-
-interface ChemblTargetResponse {
-  targets?: Array<{
-    target_chembl_id: string;
-    target_name: string;
-    action_type?: string;
-    target_components?: Array<{
-      target_component_synonyms?: Array<{ syn_type: string; synonym: string }>;
-    }>;
   }>;
 }
 

@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { variantSearch, variantGet, fetchOncoKbAnnotation, getVariantSearchFilters, getVariantGetSections } from '../../entities/variant.js';
+import { sectionResult } from '../errors.js';
 
 const VARIANT_GET_SECTIONS = getVariantGetSections();
 const VARIANT_SEARCH_FILTERS = getVariantSearchFilters();
@@ -9,16 +10,21 @@ export function registerVariantTools(server: McpServer): void {
   server.registerTool(
     'variant_search',
     {
-      description: 'Search for variants by gene, rsid, or HGVS notation',
+      description: `Search for variants. Use structured parameters for best results:
+- rsid: e.g. query="rs113488022"
+- HGVS: e.g. query="NM_004333.4:c.1799T>A"
+- Gene filter: e.g. gene="BRAF" with hgvsp="V600E" or consequence="missense"
+- ClinVar significance: e.g. significance="pathogenic"
+Do NOT use compound free-text like "BRAF V600E" — use separate gene and hgvsp parameters instead.`,
       inputSchema: {
-        query: z.string().optional().describe('Variant query (gene, rsid, or HGVS notation)'),
-        gene: z.string().optional().describe('Filter by gene symbol'),
+        query: z.string().optional().describe('Variant query (rsid or HGVS notation). Avoid compound queries like "BRAF V600E" — use gene + hgvsp parameters instead.'),
+        gene: z.string().optional().describe('Filter by gene symbol (e.g., "BRAF"). Use together with hgvsp for protein change queries.'),
         significance: z.enum(['benign', 'likely_benign', 'pathogenic', 'likely_pathogenic', 'uncertain']).optional(),
         max_frequency: z.number().optional().describe('Maximum allele frequency (0-1)'),
         min_cadd: z.number().optional().describe('Minimum CADD score'),
         consequence: z.string().optional().describe('Variant consequence (e.g., missense, synonymous)'),
         rsid: z.string().optional().describe('dbSNP rsID'),
-        hgvsp: z.string().optional().describe('Protein change (e.g., V600E)'),
+        hgvsp: z.string().optional().describe('Protein change (e.g., V600E). Use with gene parameter for compound queries.'),
         hgvsc: z.string().optional().describe('cDNA change'),
         limit: z.number().int().min(1).max(50).default(10).describe('Maximum results'),
         offset: z.number().int().min(0).default(0).describe('Result offset'),
@@ -28,14 +34,39 @@ export function registerVariantTools(server: McpServer): void {
     async ({ query, gene, significance, max_frequency, min_cadd, consequence, rsid, hgvsp, hgvsc, limit, offset }) => {
       try {
         let searchQuery = query;
-        if (!searchQuery && (rsid || hgvsp || hgvsc)) {
+        let searchGene = gene;
+        let searchHgvsp = hgvsp;
+
+        if (!searchQuery && !searchGene && (rsid || hgvsp || hgvsc)) {
           const parts: string[] = [];
-          if (rsid) parts.push(`rsid:${rsid}`);
-          if (hgvsp) parts.push(`hgvsp:${hgvsp}`);
+          if (rsid) parts.push(`dbsnp.rsid:${rsid}`);
+          if (hgvsp) parts.push(`hgvsp.p:${hgvsp}`);
           if (hgvsc) parts.push(`hgvsc:${hgvsc}`);
-          searchQuery = parts.join(' ');
+          searchQuery = parts.join(' AND ');
         }
-        const results = await variantSearch({ query: searchQuery, gene, significance, max_frequency, limit, offset });
+
+        if (!searchQuery && !rsid && !hgvsc && searchGene && searchHgvsp) {
+          searchQuery = `gene:${searchGene} AND hgvsp.p:${searchHgvsp}`;
+          searchGene = undefined;
+          searchHgvsp = undefined;
+        }
+
+        if (searchQuery && !searchGene && !searchHgvsp) {
+          const compoundMatch = searchQuery.match(/^([A-Za-z0-9_]+)\s+(V\d+[A-Z*])$/i);
+          if (compoundMatch) {
+            searchQuery = `gene:${compoundMatch[1].toUpperCase()} AND hgvsp.p:${compoundMatch[2]}`;
+          }
+        }
+
+        const results = await variantSearch({ 
+          query: searchQuery, 
+          gene: searchGene, 
+          hgvsp: searchHgvsp,
+          significance, 
+          max_frequency, 
+          limit, 
+          offset 
+        });
         return { content: [{ type: 'text', text: JSON.stringify(results) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
@@ -46,7 +77,7 @@ export function registerVariantTools(server: McpServer): void {
   server.registerTool(
     'variant_get',
     {
-      description: 'Get detailed variant information with optional sections',
+      description: 'Get detailed variant information with optional sections. Core data (id, gene, rsid, significance) is always returned at the top level. Use sections to request additional data.',
       inputSchema: {
         id: z.string().describe('Variant ID (rsid, HGVS, or ClinVar ID)'),
         sections: z.array(z.enum(['core', 'frequency', 'predictions', 'clinical', 'alphagenome', 'all'])).optional().describe('Sections to include: core, frequency, predictions, clinical, alphagenome'),
@@ -66,7 +97,7 @@ export function registerVariantTools(server: McpServer): void {
   server.registerTool(
     'variant_frequency',
     {
-      description: 'Get population frequency data for a variant from gnomAD',
+      description: 'Get population frequency data for a variant from gnomAD. Note: somatic/cancer variants (e.g., BRAF V600E) typically have no population frequency data since they are not present in healthy populations.',
       inputSchema: {
         id: z.string().describe('Variant ID (rsid or HGVS)'),
       },
@@ -75,7 +106,13 @@ export function registerVariantTools(server: McpServer): void {
     async ({ id }) => {
       try {
         const result = await variantGet(id, ['frequency']);
-        return { content: [{ type: 'text', text: JSON.stringify(result.sections?.frequency) }] };
+        const data = sectionResult(result, 'frequency');
+        if (data === null || data === undefined) {
+          return { content: [{ type: 'text', text: JSON.stringify({ 
+            _info: `No population frequency data found for variant '${id}'. This is expected for somatic/cancer variants that are absent from general population databases (gnomAD).`
+          }) }] };
+        }
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
       }
@@ -104,7 +141,7 @@ export function registerVariantTools(server: McpServer): void {
   server.registerTool(
     'variant_oncokb',
     {
-      description: 'Get OncoKB annotations for a variant in a cancer gene',
+      description: 'Get OncoKB annotations for a variant in a cancer gene. Requires ONCOKB_TOKEN environment variable.',
       inputSchema: {
         gene: z.string().describe('Gene symbol (e.g., BRAF, EGFR)'),
         protein_change: z.string().describe('Protein change (e.g., V600E, L858R)'),
@@ -127,7 +164,7 @@ export function registerVariantTools(server: McpServer): void {
   server.registerTool(
     'variant_alphagenome',
     {
-      description: 'Get AlphaGenome variant scores via gRPC',
+      description: 'Get AlphaGenome variant scores via gRPC. Requires ALPHAGENOME_API_KEY environment variable.',
       inputSchema: {
         id: z.string().describe('Variant ID (rsid or HGVS)'),
         gene: z.string().optional().describe('Gene symbol to focus scoring'),

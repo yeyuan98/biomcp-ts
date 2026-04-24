@@ -354,7 +354,13 @@ async function fetchAnnotations(pmid: string): Promise<Array<{ type: string; tex
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error('[fetchAnnotations] Error:', error);
-    return [{ _error: `Annotation lookup failed (source: pubtator): ${msg}. The data source may be temporarily unavailable.` } as any];
+    let hint = ' The data source may be temporarily unavailable.';
+    if (msg.includes('400')) {
+      hint = ' This article may not yet be indexed by PubTator. Try an older article with an established PMID.';
+    } else if (msg.includes('429')) {
+      hint = ' Rate limited by PubTator. Wait a few seconds and retry.';
+    }
+    return [{ _error: `Annotation lookup failed (source: pubtator): ${msg}.${hint}` } as any];
   }
 }
 
@@ -382,7 +388,13 @@ async function fetchCitationGraph(pmid: string): Promise<{ citations?: string[];
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error('[fetchCitationGraph] Error:', error);
-    return { _error: `Citation graph lookup failed (source: pubmed): ${msg}. The data source may be temporarily unavailable.` } as any;
+    let hint = ' The data source may be temporarily unavailable.';
+    if (msg.includes('429')) {
+      hint = ' Rate limited by PubMed E-utilities. Wait a few seconds and retry. If persistent, set NCBI_API_KEY for higher rate limits.';
+    } else if (msg.includes('400')) {
+      hint = ' The PMID may not be recognized by PubMed E-utilities. Verify the PMID is correct.';
+    }
+    return { _error: `Citation graph lookup failed (source: pubmed): ${msg}.${hint}` } as any;
   }
 }
 
