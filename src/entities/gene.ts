@@ -95,9 +95,11 @@ export async function geneGet(
   };
   
   if (gene.genomic_pos) {
-    const pos = gene.genomic_pos[0];
-    result.chromosome = pos.chr;
-    result.position = `${pos.start}-${pos.end}`;
+    const pos = Array.isArray(gene.genomic_pos) ? gene.genomic_pos[0] : gene.genomic_pos;
+    if (pos && pos.chr) {
+      result.chromosome = pos.chr;
+      result.position = `${pos.start}-${pos.end}`;
+    }
   }
   
   const sectionsToFetch = sectionConfig.includes('all') 
@@ -129,14 +131,20 @@ export async function geneGet(
     const settledResults = await Promise.allSettled(sectionPromises);
     
     result.sections = {};
-    for (const settled of settledResults) {
+    for (let si = 0; si < settledResults.length; si++) {
+      const settled = settledResults[si];
       if (settled.status === 'fulfilled' && settled.value.data) {
         const sectionData = settled.value.data as { section: string; data: unknown };
         (result.sections as Record<string, unknown>)[sectionData.section] = sectionData.data;
       } else if (settled.status === 'fulfilled' && settled.value.error) {
         const sectionResult = settled.value as { error?: string };
-        (result.sections as Record<string, unknown>)[sectionsToFetch[settledResults.indexOf(settled)]] = { 
+        (result.sections as Record<string, unknown>)[sectionsToFetch[si]] = { 
           error: sectionResult.error 
+        };
+      } else if (settled.status === 'rejected') {
+        const reason = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
+        (result.sections as Record<string, unknown>)[sectionsToFetch[si]] = {
+          error: `Section '${sectionsToFetch[si]}' fetch failed: ${reason}. The data source may be temporarily unavailable.`
         };
       }
     }
@@ -159,8 +167,9 @@ async function fetchPathways(geneSymbol: string): Promise<Array<{ id: string; na
       source: 'reactome',
     }));
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('[fetchPathways] Error:', error);
-    return [];
+    return [{ _error: `Pathway lookup failed (source: reactome): ${msg}. The data source may be temporarily unavailable.` } as any];
   }
 }
 
@@ -180,48 +189,62 @@ async function fetchProtein(geneSymbol: string): Promise<{ accession?: string; n
       };
     }
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('[fetchProtein] Error:', error);
+    return { _error: `Protein lookup failed (source: uniprot): ${msg}. The data source may be temporarily unavailable.` } as any;
   }
   return {};
 }
 
 async function fetchOntology(geneSymbol: string): Promise<{ go_enrichment?: Array<{ id: string; term: string; p_value?: number }> }> {
   try {
-    const conn = connectionManager.getConnection('quickgo');
+    const conn = connectionManager.getConnection('mygene');
     
     const response = await conn.request(
-      `/annotations?gene=${encodeURIComponent(geneSymbol)}&eco=1&format=json`
-    ) as QuickGOEnrichResponse;
+      `/query?q=symbol:${encodeURIComponent(geneSymbol)}&species=human&fields=go&size=1`
+    ) as MyGeneGOResponse;
     
-    const enrichment = (response.results || []).slice(0, 20).map(r => ({
-      id: r.goId,
-      term: r.goName,
-      p_value: r.qValue,
-    }));
+    const goData = response.hits?.[0]?.go;
+    if (!goData) return { go_enrichment: [] };
     
-    return { go_enrichment: enrichment };
+    const terms: Array<{ id: string; term: string; aspect: string }> = [];
+    for (const category of ['BP', 'MF', 'CC'] as const) {
+      const items = (goData as Record<string, Array<{ id: string; term: string; gocategory?: string }>>)[category] || [];
+      for (const item of items) {
+        terms.push({ id: item.id, term: item.term, aspect: category });
+      }
+    }
+    
+    return { go_enrichment: terms.slice(0, 20).map(t => ({ id: t.id, term: t.term })) };
   } catch (error) {
-    console.error('[fetchOntology] Error:', error);
-    return {};
+    const msg = error instanceof Error ? error.message : String(error);
+    return { _error: `Ontology lookup failed (source: mygene): ${msg}. The data source may be temporarily unavailable.` } as any;
   }
 }
 
 async function fetchGo(geneSymbol: string): Promise<Array<{ id: string; term: string; aspect: string }>> {
   try {
-    const conn = connectionManager.getConnection('quickgo');
+    const conn = connectionManager.getConnection('mygene');
     
     const response = await conn.request(
-      `/annotations?gene=${encodeURIComponent(geneSymbol)}&aspect=1&format=json`
-    ) as QuickGOTermsResponse;
+      `/query?q=symbol:${encodeURIComponent(geneSymbol)}&species=human&fields=go&size=1`
+    ) as MyGeneGOResponse;
     
-    return (response.results || []).slice(0, 50).map(r => ({
-      id: r.goId,
-      term: r.goName,
-      aspect: r.aspect,
-    }));
+    const goData = response.hits?.[0]?.go;
+    if (!goData) return [];
+    
+    const terms: Array<{ id: string; term: string; aspect: string }> = [];
+    for (const category of ['BP', 'MF', 'CC'] as const) {
+      const items = (goData as Record<string, Array<{ id: string; term: string; gocategory?: string }>>)[category] || [];
+      for (const item of items) {
+        terms.push({ id: item.id, term: item.term, aspect: category });
+      }
+    }
+    
+    return terms.slice(0, 50);
   } catch (error) {
-    console.error('[fetchGo] Error:', error);
-    return [];
+    const msg = error instanceof Error ? error.message : String(error);
+    return [{ _error: `GO term lookup failed (source: mygene): ${msg}. The data source may be temporarily unavailable.` } as any];
   }
 }
 
@@ -230,17 +253,17 @@ async function fetchInteractions(geneSymbol: string): Promise<Array<{ symbol: st
     const conn = connectionManager.getConnection('string');
     
     const response = await conn.request(
-      `/proteinquery?query=${encodeURIComponent(geneSymbol)}&format=json`
+      `/json/interaction_partners?identifiers=${encodeURIComponent(geneSymbol)}&species=9606&limit=20`
     ) as StringInteractionsResponse;
     
-    return (response.results || []).slice(0, 20).map(r => ({
-      symbol: r.preferredName,
-      score: r.score,
+    return (Array.isArray(response) ? response : []).slice(0, 20).map(r => ({
+      symbol: r.preferredNameB || r.preferredName || '',
+      score: r.score || 0,
       source: 'string',
     }));
   } catch (error) {
-    console.error('[fetchInteractions] Error:', error);
-    return [];
+    const msg = error instanceof Error ? error.message : String(error);
+    return [{ _error: `Interaction lookup failed (source: string-db): ${msg}. The data source may be temporarily unavailable.` } as any];
   }
 }
 
@@ -250,7 +273,7 @@ async function fetchCivic(geneSymbol: string): Promise<{ variants?: Array<{ name
     
     const query = `query($symbol: String!) { genes(symbol: $symbol) { name variants { name clinicalSignificance } } }`;
     
-    const response = await conn.request(query, { variables: { symbol: geneSymbol } }) as unknown as { data?: { genes: Array<{ name: string; variants: Array<{ name: string; clinicalSignificance?: string }> }> } };
+    const response = await conn.request(query, { symbol: geneSymbol }) as unknown as { data?: { genes: Array<{ name: string; variants: Array<{ name: string; clinicalSignificance?: string }> }> } };
     const parsed = JSON.parse(JSON.stringify(response));
     
     const variants = (parsed.data?.genes || []).slice(0, 20).map((g: { name: string; variants: Array<{ name: string; clinicalSignificance?: string }> }) => ({
@@ -260,8 +283,9 @@ async function fetchCivic(geneSymbol: string): Promise<{ variants?: Array<{ name
     
     return { variants };
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('[fetchCivic] Error:', error);
-    return {};
+    return { _error: `CIViC variant lookup failed (source: civic): ${msg}. The data source may be temporarily unavailable or the gene may not have clinical variants.` } as any;
   }
 }
 
@@ -280,8 +304,9 @@ async function fetchExpression(geneSymbol: string): Promise<{ tissues?: Array<{ 
     
     return { tissues };
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('[fetchExpression] Error:', error);
-    return {};
+    return { _error: `Expression lookup failed (source: gtex): ${msg}. The data source may be temporarily unavailable.` } as any;
   }
 }
 
@@ -300,8 +325,9 @@ async function fetchHpa(geneSymbol: string): Promise<{ subcellular?: Array<{ loc
     
     return { subcellular };
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('[fetchHpa] Error:', error);
-    return {};
+    return { _error: `Subcellular location lookup failed (source: hpa): ${msg}. The data source may be temporarily unavailable.` } as any;
   }
 }
 
@@ -311,7 +337,7 @@ async function fetchDruggability(geneSymbol: string): Promise<{ dgidb?: Array<{ 
     
     const dgidbQuery = `query($symbol: String!) { drugs(genes: $symbol) { drug sources } }`;
     
-    const rawDgidb = await dgidbConn.request(dgidbQuery, { variables: { symbol: geneSymbol } }) as unknown as { data?: { drugs: Array<{ drug: string; sources: string[] }> } };
+    const rawDgidb = await dgidbConn.request(dgidbQuery, { symbol: geneSymbol }) as unknown as { data?: { drugs: Array<{ drug: string; sources: string[] }> } };
     const dgidbResponse = JSON.parse(JSON.stringify(rawDgidb));
     const dgidbData = (dgidbResponse.data?.drugs || []).slice(0, 20).map((d: { drug: string; sources: string[] }) => ({
       drug_name: d.drug,
@@ -323,7 +349,7 @@ async function fetchDruggability(geneSymbol: string): Promise<{ dgidb?: Array<{ 
       
       const otQuery = `query($symbol: String!) { target(ensembl: $symbol) { id approvedName tractability { value } } }`;
       
-      const rawOt = await otConn.request(otQuery, { variables: { symbol: geneSymbol } }) as unknown as { data?: Array<{ id: string; approvedName?: string; tractability?: { value: number } }> };
+      const rawOt = await otConn.request(otQuery, { symbol: geneSymbol }) as unknown as { data?: Array<{ id: string; approvedName?: string; tractability?: { value: number } }> };
       const otResponse = JSON.parse(JSON.stringify(rawOt));
       const opentargetsData = (otResponse.data || []).slice(0, 20).map((t: { id: string; approvedName?: string; tractability?: { value: number } }) => ({
         id: t.id,
@@ -333,12 +359,14 @@ async function fetchDruggability(geneSymbol: string): Promise<{ dgidb?: Array<{ 
       
       return { dgidb: dgidbData, opentargets: opentargetsData };
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
       console.error('[fetchDruggability/opentargets] Error:', error);
-      return { dgidb: dgidbData };
+      return { dgidb: dgidbData, _error: `OpenTargets tractability lookup failed: ${msg}. DGIdb drug data was retrieved successfully.` } as any;
     }
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('[fetchDruggability/dgidb] Error:', error);
-    return {};
+    return { _error: `Druggability lookup failed (source: dgidb): ${msg}. The data source may be temporarily unavailable.` } as any;
   }
 }
 
@@ -357,8 +385,9 @@ async function fetchClingen(geneSymbol: string): Promise<{ dosagem?: Array<{ hap
       }],
     };
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('[fetchClingen] Error:', error);
-    return {};
+    return { _error: `ClinGen dosage sensitivity lookup failed (source: clingen): ${msg}. The data source may be temporarily unavailable.` } as any;
   }
 }
 
@@ -368,7 +397,7 @@ async function fetchConstraint(geneSymbol: string): Promise<{ lof?: { oe_score: 
     
     const query = `query($symbol: String!) { gene(gene_symbol: $symbol) { lof { oe_score mis_bad_loeoe } synonyms { oe_score } } }`;
     
-    const rawResponse = await conn.request(query, { variables: { symbol: geneSymbol } }) as unknown as { data?: { gene?: { lof?: { oe_score?: number; mis_bad_loeoe?: number }; synonyms?: { oe_score?: number } } } };
+    const rawResponse = await conn.request(query, { symbol: geneSymbol }) as unknown as { data?: { gene?: { lof?: { oe_score?: number; mis_bad_loeoe?: number }; synonyms?: { oe_score?: number } } } };
     const response = JSON.parse(JSON.stringify(rawResponse));
     const data = response.data?.gene;
     
@@ -382,8 +411,9 @@ async function fetchConstraint(geneSymbol: string): Promise<{ lof?: { oe_score: 
       },
     };
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('[fetchConstraint] Error:', error);
-    return {};
+    return { _error: `Constraint score lookup failed (source: gnomad): ${msg}. The data source may be temporarily unavailable.` } as any;
   }
 }
 
@@ -403,8 +433,9 @@ async function fetchDisgenet(geneSymbol: string): Promise<{ associations?: Array
     
     return { associations };
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('[fetchDisgenet] Error:', error);
-    return {};
+    return { _error: `Disease association lookup failed (source: disgenet): ${msg}. The data source may be temporarily unavailable.` } as any;
   }
 }
 
@@ -425,8 +456,9 @@ async function fetchFunding(geneSymbol: string): Promise<{ grants?: Array<{ nih_
     
     return { grants };
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('[fetchFunding] Error:', error);
-    return {};
+    return { _error: `Funding lookup failed (source: nih-reporter): ${msg}. The data source may be temporarily unavailable.` } as any;
   }
 }
 
@@ -482,12 +514,17 @@ interface QuickGOTermsResponse {
   }>;
 }
 
-interface StringInteractionsResponse {
-  results: Array<{
-    preferredName: string;
-    score: number;
+interface MyGeneGOResponse {
+  hits?: Array<{
+    go?: Record<string, Array<{ id: string; term: string; gocategory?: string }>>;
   }>;
 }
+
+interface StringInteractionsResponse extends Array<{
+  preferredNameB?: string;
+  preferredName?: string;
+  score?: number;
+}> {}
 
 interface CivicResponse {
   data?: {

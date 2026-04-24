@@ -45,7 +45,7 @@ export class RestConnection implements IConnection<string, unknown> {
     });
     
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      throw new Error(`HTTP ${response.status}: ${response.statusText} — URL: ${url} — Source: ${this.sourceId}`);
     }
     
     const contentType = response.headers?.get?.('content-type') || '';
@@ -77,7 +77,13 @@ export class RestConnection implements IConnection<string, unknown> {
   }
   
   private buildUrl(path: string, query?: Record<string, string>): string {
-    const url = new URL(path, this.options.baseUrl);
+    let base = this.options.baseUrl;
+    if (!base.endsWith('/')) {
+      base += '/';
+    }
+    const normalizedPath = path.startsWith('/') ? path.slice(1) : path;
+    const rawUrl = base + normalizedPath;
+    const url = new URL(rawUrl);
     
     if (query) {
       Object.entries(query).forEach(([k, v]) => {

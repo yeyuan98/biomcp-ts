@@ -108,8 +108,9 @@ async function searchPubMed(query: string, limit: number, offset: number): Promi
 
     return parsePubMedXml(xmlString);
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('[searchPubMed] Error:', error);
-    return [];
+    return [{ _error: `searchPubMed failed: ${msg}. This may be a temporary data source issue. Try again or use a different source.` } as any];
   }
 }
 
@@ -124,8 +125,9 @@ async function searchEuropePMC(query: string, limit: number, _offset: number, cu
 
     return (response.resultList?.result || []).map(transformEuropePMC);
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('[searchEuropePMC] Error:', error);
-    return [];
+    return [{ _error: `searchEuropePMC failed: ${msg}. This may be a temporary data source issue. Try again or use a different source.` } as any];
   }
 }
 
@@ -139,8 +141,9 @@ async function searchSemanticScholar(query: string, limit: number, offset: numbe
 
     return (response.data || []).map(transformSemanticScholar);
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('[searchSemanticScholar] Error:', error);
-    return [];
+    return [{ _error: `searchSemanticScholar failed: ${msg}. This may be a temporary data source issue. Try again or use a different source.` } as any];
   }
 }
 
@@ -154,8 +157,9 @@ async function searchPubTator(query: string, limit: number, offset: number): Pro
 
     return (response.results || []).slice(offset, offset + limit).map(transformPubTator);
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('[searchPubTator] Error:', error);
-    return [];
+    return [{ _error: `searchPubTator failed: ${msg}. This may be a temporary data source issue. Try again or use a different source.` } as any];
   }
 }
 
@@ -169,8 +173,9 @@ async function searchLitSense(query: string, limit: number, _offset: number): Pr
 
     return (Array.isArray(response) ? response : []).map(transformLitSense);
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('[searchLitSense] Error:', error);
-    return [];
+    return [{ _error: `searchLitSense failed: ${msg}. This may be a temporary data source issue. Try again or use a different source.` } as any];
   }
 }
 
@@ -240,8 +245,9 @@ async function fetchPubMedArticle(pmid: string): Promise<Article> {
     const articles = parsePubMedXml(xmlString);
     return articles[0] || {};
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('[fetchPubMedArticle] Error:', error);
-    return {};
+    return { _error: `PubMed article fetch failed (source: pubmed): ${msg}. The PMID may be invalid or the data source may be temporarily unavailable.` } as any;
   }
 }
 
@@ -266,8 +272,9 @@ async function fetchOpenAccess(pmid: string): Promise<{ pmcid?: string; pdf_url?
       };
     }
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('[fetchOpenAccess] Error:', error);
-    return {};
+    return { _error: `Open access lookup failed (source: ncbi_idconv/pmc_oa): ${msg}. The article may not have open access content, or the data source may be temporarily unavailable.` } as any;
   }
   return {};
 }
@@ -300,8 +307,9 @@ function parseOaXml(xml: string): { pdfUrl?: string } {
 
     return {};
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('[parseOaXml] Error:', error);
-    return {};
+    return { _error: `OA XML parsing failed: ${msg}. The response format may have changed.` } as any;
   }
 }
 
@@ -330,8 +338,9 @@ async function fetchAnnotations(pmid: string): Promise<Array<{ type: string; tex
 
     return annotations;
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('[fetchAnnotations] Error:', error);
-    return [];
+    return [{ _error: `Annotation lookup failed (source: pubtator): ${msg}. The data source may be temporarily unavailable.` } as any];
   }
 }
 
@@ -357,8 +366,9 @@ async function fetchCitationGraph(pmid: string): Promise<{ citations?: string[];
 
     return { citations, references };
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('[fetchCitationGraph] Error:', error);
-    return {};
+    return { _error: `Citation graph lookup failed (source: pubmed): ${msg}. The data source may be temporarily unavailable.` } as any;
   }
 }
 

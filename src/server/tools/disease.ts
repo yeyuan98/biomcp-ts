@@ -124,14 +124,9 @@ export function registerDiseaseTools(server: McpServer): void {
     },
     async ({ disease_id, limit }) => {
       try {
-        const conn = connectionManager.getConnection('opentargets');
-        const query = `query($disease: String!) { disease(efo: $disease) { associatedTargets { target { id approvedName } } } }`;
-        const response = await conn.request(query) as unknown as { data?: { disease?: { associatedTargets: Array<{ target: { id: string; approvedName: string } }> } } };
-        const drugs = (JSON.parse(JSON.stringify(response))?.data?.disease?.associatedTargets || []).slice(0, limit).map((t: { target: { id: string; approvedName: string } }) => ({
-          target_id: t.target.id,
-          name: t.target.approvedName,
-        }));
-        return { content: [{ type: 'text', text: JSON.stringify(drugs) }] };
+        const { diseaseToDrugs } = await import('../../entities/cross-entity.js');
+        const drugs = await diseaseToDrugs(disease_id);
+        return { content: [{ type: 'text', text: JSON.stringify(drugs.slice(0, limit)) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
       }

@@ -212,6 +212,11 @@ export async function variantGet(
         (variant.sections as Record<string, unknown>)[sectionsToFetch[i]] = {
           error: sectionResult.error
         };
+      } else if (settled.status === 'rejected') {
+        const reason = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
+        (variant.sections as Record<string, unknown>)[sectionsToFetch[i]] = {
+          error: `Section '${sectionsToFetch[i]}' fetch failed: ${reason}. The data source may be temporarily unavailable.`
+        };
       }
     }
   }
@@ -235,7 +240,7 @@ async function fetchFrequencySection(variant: MyVariantGetResponse): Promise<Fre
     }`;
     
     const vars = { rsid: variant.dbsnp?.rsid || variant.rsid?.replace('rs', '') || '' };
-    const rawResponse = await conn.request(query, { variables: vars }) as GnomadFreqResponse;
+    const rawResponse = await conn.request(query, vars) as GnomadFreqResponse;
     const parsed = JSON.parse(JSON.stringify(rawResponse));
     const freqs = parsed.data?.snp?.genome?.af || [];
     
@@ -355,7 +360,7 @@ async function fetchClinicalSection(variant: MyVariantGetResponse, gene?: string
         }
       }`;
       const civicVars = { gene, hgvsp: variant.hgvs?.p || '' };
-      const civicRaw = await civicConn.request(civicQuery, { variables: civicVars }) as CivicVariantResponse;
+      const civicRaw = await civicConn.request(civicQuery, civicVars) as CivicVariantResponse;
       const civicParsed = JSON.parse(JSON.stringify(civicRaw));
       const civicData = civicParsed.data?.variants?.[0];
       if (civicData) {

@@ -58,7 +58,7 @@ export async function drugSearch(
     queryParams.set('type', drug_type);
   }
   
-  const response = await conn.request(`/search?${queryParams.toString()}`) as MyChemSearchResponse;
+  const response = await conn.request(`/query?${queryParams.toString()}`) as MyChemSearchResponse;
   
   return (response.hits || []).map(transformMyChemHit);
 }
@@ -77,7 +77,7 @@ export async function drugGet(
     size: '1',
   });
   
-  const response = await conn.request(`/get?${queryParams.toString()}`) as MyChemGetResponse;
+  const response = await conn.request(`/query?${queryParams.toString()}`) as MyChemGetResponse;
   
   if (!response.hits || response.hits.length === 0) {
     throw new Error(`Drug '${name}' not found. Try drug_search to find valid drug names.`);
@@ -110,8 +110,8 @@ export async function drugGet(
           case 'eu_regulatory': return { section: 'eu_regulatory', data: await fetchEURegulatory(drug.uichem) };
           case 'who_regulatory': return { section: 'who_regulatory', data: await fetchWHORegulatory(drug.uichem) };
           case 'safety': return { section: 'safety', data: await fetchSafety(drug.uichem) };
-          case 'targets': return { section: 'targets', data: await fetchTargets(result.inchi_key || '') };
-          case 'indications': return { section: 'indications', data: await fetchIndications(result.inchi_key || '') };
+          case 'targets': return { section: 'targets', data: await fetchTargets(name) };
+          case 'indications': return { section: 'indications', data: await fetchIndications(name) };
           default: return { section, data: null };
         }
       }, SECTION_TIMEOUT_MS);
@@ -120,14 +120,20 @@ export async function drugGet(
     const settledResults = await Promise.allSettled(sectionPromises);
     
     result.sections = {};
-    for (const settled of settledResults) {
+    for (let si = 0; si < settledResults.length; si++) {
+      const settled = settledResults[si];
       if (settled.status === 'fulfilled' && settled.value.data) {
         const sectionData = settled.value.data as { section: string; data: unknown };
         (result.sections as Record<string, unknown>)[sectionData.section] = sectionData.data;
       } else if (settled.status === 'fulfilled' && settled.value.error) {
         const sectionResult = settled.value as { error?: string };
-        (result.sections as Record<string, unknown>)[sectionsToFetch[settledResults.indexOf(settled)]] = { 
+        (result.sections as Record<string, unknown>)[sectionsToFetch[si]] = { 
           error: sectionResult.error 
+        };
+      } else if (settled.status === 'rejected') {
+        const reason = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
+        (result.sections as Record<string, unknown>)[sectionsToFetch[si]] = {
+          error: `Section '${sectionsToFetch[si]}' fetch failed: ${reason}. The data source may be temporarily unavailable.`
         };
       }
     }
@@ -152,8 +158,9 @@ async function fetchUSRegulatory(uichemId: string): Promise<{ fda_status?: strin
         label: label.brand_name?.[0],
       };
     }
-  } catch {
-    return {};
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return { _error: `US regulatory lookup failed (source: openfda): ${msg}. The data source may be temporarily unavailable.` } as any;
   }
   return {};
 }
@@ -190,48 +197,104 @@ async function fetchSafety(uichemId: string): Promise<{ box_warning?: string; wa
         adverse_reactions: label.adverse_reactions,
       };
     }
-  } catch {
-    return {};
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return { _error: `Safety lookup failed (source: openfda): ${msg}. The data source may be temporarily unavailable.` } as any;
   }
   return {};
 }
 
-async function fetchTargets(inchiKey: string): Promise<Array<{ gene_symbol: string; name: string; action_type?: string; source: string }>> {
-  if (!inchiKey) return [];
+async function resolveDrugChemblId(drugName: string): Promise<string | null> {
   try {
-    const conn = connectionManager.getConnection('chembl');
-    
-    const response = await conn.request(
-      `/target?molecule_chembl_id=${encodeURIComponent(inchiKey)}&format=json`
-    ) as ChemblTargetResponse;
-    
-    return (response.targets || []).slice(0, 20).map(t => ({
-      gene_symbol: t.target_chembl_id,
-      name: t.target_name,
-      action_type: t.action_type,
-      source: 'chembl',
-    }));
+    const conn = connectionManager.getConnection('opentargets');
+    const query = `query($name: String!) {
+      search(queryString: $name, entityNames: ["drug"], page: {index: 0, size: 1}) {
+        hits { id name }
+      }
+    }`;
+    const raw = await conn.request(query, { name: drugName }) as any;
+    const data = JSON.parse(JSON.stringify(raw));
+    return data?.data?.search?.hits?.[0]?.id || null;
   } catch {
-    return [];
+    return null;
   }
 }
 
-async function fetchIndications(inchiKey: string): Promise<Array<{ disease_name: string; phase: string; source: string }>> {
-  if (!inchiKey) return [];
+async function fetchTargets(drugName: string): Promise<Array<{ gene_symbol: string; name: string; action_type?: string; source: string }>> {
+  if (!drugName) return [];
   try {
-    const conn = connectionManager.getConnection('chembl');
+    const chemblId = await resolveDrugChemblId(drugName);
+    if (!chemblId) {
+      return [{ _error: `No OpenTargets entry found for drug '${drugName}'. The drug may not be in the OpenTargets database.` } as any];
+    }
     
-    const response = await conn.request(
-      `/mechanism?molecule_chembl_id=${encodeURIComponent(inchiKey)}&format=json`
-    ) as ChemblMechanismResponse;
+    const conn = connectionManager.getConnection('opentargets');
+    const query = `query($chemblId: String!) {
+      drug(chemblId: $chemblId) {
+        id name
+        mechanismsOfAction {
+          rows { actionType targets { id approvedSymbol } }
+          uniqueActionTypes
+        }
+      }
+    }`;
     
-    return (response.mechanisms || []).slice(0, 20).map(m => ({
-      disease_name: m.disease_name || '',
-      phase: m.trial_phase || '',
-      source: 'chembl',
+    const raw = await conn.request(query, { chemblId }) as any;
+    const data = JSON.parse(JSON.stringify(raw));
+    const rows = data?.data?.drug?.mechanismsOfAction?.rows || [];
+    
+    const seen = new Set<string>();
+    const results: Array<{ gene_symbol: string; name: string; action_type?: string; source: string }> = [];
+    for (const row of rows) {
+      for (const t of row.targets || []) {
+        if (!seen.has(t.approvedSymbol)) {
+          seen.add(t.approvedSymbol);
+          results.push({
+            gene_symbol: t.approvedSymbol || '',
+            name: t.approvedSymbol || '',
+            action_type: row.actionType || undefined,
+            source: 'opentargets',
+          });
+        }
+      }
+    }
+    return results.slice(0, 20);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return [{ _error: `Target lookup failed (source: opentargets): ${msg}. The data source may be temporarily unavailable.` } as any];
+  }
+}
+
+async function fetchIndications(drugName: string): Promise<Array<{ disease_name: string; phase: string; source: string }>> {
+  if (!drugName) return [];
+  try {
+    const chemblId = await resolveDrugChemblId(drugName);
+    if (!chemblId) {
+      return [{ _error: `No OpenTargets entry found for drug '${drugName}'. The drug may not be in the OpenTargets database.` } as any];
+    }
+    
+    const conn = connectionManager.getConnection('opentargets');
+    const query = `query($chemblId: String!) {
+      drug(chemblId: $chemblId) {
+        id name
+        indications {
+          rows { maxClinicalStage disease { id name } }
+        }
+      }
+    }`;
+    
+    const raw = await conn.request(query, { chemblId }) as any;
+    const data = JSON.parse(JSON.stringify(raw));
+    const rows = data?.data?.drug?.indications?.rows || [];
+    
+    return rows.slice(0, 20).map((r: { maxClinicalStage?: string; disease?: { name?: string } }) => ({
+      disease_name: r.disease?.name || '',
+      phase: r.maxClinicalStage || '',
+      source: 'opentargets',
     }));
-  } catch {
-    return [];
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return [{ _error: `Indication lookup failed (source: opentargets): ${msg}. The data source may be temporarily unavailable.` } as any];
   }
 }
 
@@ -270,21 +333,6 @@ interface OpenFDAResponse {
     boxed_warning?: string[];
     warnings?: string[];
     adverse_reactions?: string[];
-  }>;
-}
-
-interface ChemblTargetResponse {
-  targets?: Array<{
-    target_chembl_id: string;
-    target_name: string;
-    action_type?: string;
-  }>;
-}
-
-interface ChemblMechanismResponse {
-  mechanisms?: Array<{
-    disease_name?: string;
-    trial_phase?: string;
   }>;
 }
 
