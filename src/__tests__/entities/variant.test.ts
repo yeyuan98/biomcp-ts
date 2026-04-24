@@ -25,7 +25,7 @@ describe('variant', () => {
     const callUrl = (global.fetch as any).mock.calls[0][0] as string;
     expect(callUrl).toContain('myvariant.info');
     expect(callUrl).toContain('/query?');
-    expect(callUrl).toContain('q=rs123');
+    expect(callUrl).toContain('q=dbsnp.rsid');
   });
 
   test('variantSearch() returns transformed results', async () => {

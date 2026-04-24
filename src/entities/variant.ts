@@ -520,16 +520,6 @@ interface MyVariantGetResponse {
   bayesdel?: { score?: number };
 }
 
-interface GnomadFreqResponse {
-  data?: {
-    snp?: {
-      genome?: {
-        af?: Array<{ population: string; af: number }>;
-      };
-    };
-  };
-}
-
 interface CivicVariantResponse {
   data?: {
     variants?: Array<{

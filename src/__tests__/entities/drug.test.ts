@@ -26,7 +26,7 @@ describe('drug', () => {
     expect(global.fetch).toHaveBeenCalled();
     const callUrl = (global.fetch as any).mock.calls[0][0] as string;
     expect(callUrl).toContain('mychem.info');
-    expect(callUrl).toContain('/search?');
+    expect(callUrl).toContain('/query?');
     expect(callUrl).toContain('q=aspirin');
   });
 
@@ -62,7 +62,7 @@ describe('drug', () => {
     expect(global.fetch).toHaveBeenCalled();
     const callUrl = (global.fetch as any).mock.calls[0][0] as string;
     expect(callUrl).toContain('mychem.info');
-    expect(callUrl).toContain('/get?');
+    expect(callUrl).toContain('/query?');
   });
 
   test('transformMyChemResponse() maps fields correctly', () => {

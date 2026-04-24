@@ -24,7 +24,7 @@ describe('disease', () => {
     expect(global.fetch).toHaveBeenCalled();
     const callUrl = (global.fetch as any).mock.calls[0][0] as string;
     expect(callUrl).toContain('mydisease.info');
-    expect(callUrl).toContain('/search?');
+    expect(callUrl).toContain('/query?');
     expect(callUrl).toContain('q=breast+cancer');
   });
 
@@ -57,7 +57,7 @@ describe('disease', () => {
     expect(global.fetch).toHaveBeenCalled();
     const callUrl = (global.fetch as any).mock.calls[0][0] as string;
     expect(callUrl).toContain('mydisease.info');
-    expect(callUrl).toContain('/get?');
+    expect(callUrl).toContain('/disease/');
     expect(callUrl).toContain('C0006142');
   });
 
