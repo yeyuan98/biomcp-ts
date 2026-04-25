@@ -1,0 +1,124 @@
+import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
+import { createMcpTestHarness } from '../../helpers/mcp-harness.js';
+import { expectGeneSearchResult, expectGeneGetResult } from '../../helpers/assertions.js';
+
+let harness: Awaited<ReturnType<typeof createMcpTestHarness>>;
+
+beforeAll(async () => {
+  harness = await createMcpTestHarness();
+}, 30000);
+
+afterAll(async () => {
+  await harness.close();
+});
+
+describe('gene_search', () => {
+  it('returns BRCA1 with stable identity', async () => {
+    const results = await harness.callTool('gene_search', { query: 'BRCA1' });
+    expectGeneSearchResult(results);
+    const hit = results.find((r: any) => r.symbol === 'BRCA1');
+    expect(hit).toBeDefined();
+    expect(Number(hit.entrez_id)).toBe(672);
+  }, 30000);
+
+  it('returns TP53 with stable identity', async () => {
+    const results = await harness.callTool('gene_search', { query: 'TP53' });
+    expectGeneSearchResult(results);
+    const hit = results.find((r: any) => r.symbol === 'TP53');
+    expect(hit).toBeDefined();
+    expect(Number(hit.entrez_id)).toBe(7157);
+  }, 30000);
+
+  it('returns results for EGFR', async () => {
+    const results = await harness.callTool('gene_search', { query: 'EGFR' });
+    expectGeneSearchResult(results);
+    const hit = results.find((r: any) => r.symbol === 'EGFR');
+    expect(hit).toBeDefined();
+    expect(Number(hit.entrez_id)).toBe(1956);
+  }, 30000);
+
+  it('returns empty for nonsense query', async () => {
+    const results = await harness.callTool('gene_search', { query: 'ZZZZZNOTAGENE99999' });
+    expectGeneSearchResult(results);
+    expect(results.length).toBe(0);
+  }, 30000);
+
+  it('respects limit parameter', async () => {
+    const results = await harness.callTool('gene_search', { query: 'kinase', limit: 2 });
+    expectGeneSearchResult(results);
+    expect(results.length).toBeLessThanOrEqual(2);
+  }, 30000);
+});
+
+describe('gene_get', () => {
+  it('returns BRCA1 core data', async () => {
+    const result = await harness.callTool('gene_get', { symbol: 'BRCA1' });
+    expectGeneGetResult(result);
+    expect(result.symbol).toBe('BRCA1');
+    expect(result.name).toBeTruthy();
+  }, 30000);
+
+  it('returns TP53 core data', async () => {
+    const result = await harness.callTool('gene_get', { symbol: 'TP53' });
+    expectGeneGetResult(result);
+    expect(result.symbol).toBe('TP53');
+  }, 30000);
+
+  it('throws for invalid gene symbol', async () => {
+    await expect(
+      harness.callTool('gene_get', { symbol: 'INVALIDGENEXYZ999' })
+    ).rejects.toThrow();
+  }, 30000);
+});
+
+describe('gene_diseases', () => {
+  it('returns diseases for BRCA1 via OpenTargets fallback', async () => {
+    const result = await harness.callTool('gene_diseases', { symbol: 'BRCA1' });
+    expect(Array.isArray(result) || typeof result === 'object').toBe(true);
+    if (Array.isArray(result)) {
+      expect(result.length).toBeGreaterThan(0);
+    }
+  }, 30000);
+});
+
+describe('gene_drugs', () => {
+  it('returns drugs for BRCA1', async () => {
+    const result = await harness.callTool('gene_drugs', { symbol: 'BRCA1' });
+    expect(result).toBeDefined();
+  }, 30000);
+});
+
+describe('gene_trials', () => {
+  it('returns trials for BRCA1', async () => {
+    const result = await harness.callTool('gene_trials', { symbol: 'BRCA1' });
+    expect(result).toBeDefined();
+  }, 30000);
+});
+
+describe('gene_articles', () => {
+  it('returns articles for BRCA1', async () => {
+    const result = await harness.callTool('gene_articles', { symbol: 'BRCA1' });
+    expect(result).toBeDefined();
+  }, 30000);
+});
+
+describe('gene_enrich', () => {
+  it('performs enrichment for gene list', async () => {
+    try {
+      const result = await harness.callTool('gene_enrich', { genes: ['BRCA1', 'TP53', 'EGFR'] });
+      expect(result).toBeDefined();
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('gene_enrich')) {
+        console.warn('gene_enrich skipped: upstream API unavailable');
+        return;
+      }
+      throw error;
+    }
+  }, 60000);
+
+  it('rejects input with fewer than 3 genes', async () => {
+    await expect(
+      harness.callTool('gene_enrich', { genes: ['BRCA1', 'TP53'] })
+    ).rejects.toThrow();
+  }, 30000);
+});

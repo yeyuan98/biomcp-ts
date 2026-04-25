@@ -20,8 +20,11 @@
     "build:bundle": "tsc && esbuild dist/server/index.js --bundle --platform=node --format=esm --minify --outfile=dist/bundle.js",
     "start": "node dist/bundle.js",
     "dev": "tsx watch src/server/index.ts",
-    "test": "node --experimental-vm-modules node_modules/.bin/jest",
-    "test:coverage": "node --experimental-vm-modules node_modules/.bin/jest --coverage",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest --testPathIgnorePatterns=integration",
+    "test:coverage": "node --experimental-vm-modules node_modules/.bin/jest --testPathIgnorePatterns=integration --coverage",
+    "test:integration": "node --experimental-vm-modules node_modules/.bin/jest --config jest.integration.config.ts --runInBand",
+    "test:all": "node --experimental-vm-modules node_modules/.bin/jest",
+    "test:update-fixtures": "UPDATE_FIXTURES=1 node --experimental-vm-modules node_modules/.bin/jest --config jest.integration.config.ts --runInBand",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

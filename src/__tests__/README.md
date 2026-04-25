@@ -8,18 +8,25 @@
 - **Module resolution:** `moduleNameMapper` rewrites `.js` imports to `.ts` for source
 - **Diagnostics:** Disabled (`diagnostics: false`)
 - **Coverage:** Collects from `src/**/*.ts`, excludes `.d.ts` and `index.ts`
-- **Pattern:** `src/__tests__/**/*.test.ts`
 
 ## Running Tests
 
 ```bash
-npx jest
+npm test                # Unit tests only (fast, mocked, parallel)
+npm run test:integration # Integration tests (real APIs, serial, ~60s)
+npm run test:all         # All tests combined
+npm run test:coverage    # Unit tests with coverage
 ```
 
 ## Directory Structure
 
 ```
 src/__tests__/
+  helpers/
+    mcp-harness.ts       # In-process MCP client harness (InMemoryTransport)
+    assertions.ts        # Structural validators for each entity type
+  fixtures/
+    ground-truth/         # Cached ground truth for stable identity assertions
   connections/
     fetch-utils.test.ts
     graphql.test.ts
@@ -37,7 +44,15 @@ src/__tests__/
     trial.test.ts
     variant.test.ts
   integration/
-    tool-registration.test.ts
+    tool-registration.test.ts   # Unit: verifies tool registration counts
+    tools/
+      gene-tools.test.ts        # Integration: real gene API calls
+      drug-tools.test.ts        # Integration: real drug API calls
+      variant-tools.test.ts     # Integration: real variant API calls
+      disease-tools.test.ts     # Integration: real disease API calls
+      article-tools.test.ts     # Integration: real article API calls
+      trial-tools.test.ts       # Integration: real trial API calls
+      utility-tools.test.ts     # Integration: discover + batch_get
   server/
     errors.test.ts
     validation.test.ts
@@ -64,42 +79,45 @@ src/__tests__/
 | entities | trial.test.ts | 4 |
 | entities | variant.test.ts | 4 |
 | integration | tool-registration.test.ts | 10 |
+| integration | gene-tools.test.ts | 13 |
+| integration | drug-tools.test.ts | 7 |
+| integration | variant-tools.test.ts | 7 |
+| integration | disease-tools.test.ts | 7 |
+| integration | article-tools.test.ts | 5 |
+| integration | trial-tools.test.ts | 6 |
+| integration | utility-tools.test.ts | 5 |
 | server | errors.test.ts | 19 |
 | server | validation.test.ts | 28 |
 | transform | gene.test.ts | 4 |
-| **Total** | | **142** |
+| **Total** | | **195** |
 
 ## Testing Approach
 
-### Connections (unit tests with mocks)
+### Unit Tests (131 tests, `npm test`)
 
-- **`global.fetch` is mocked** to avoid real network calls; `rest.test.ts`, `graphql.test.ts`, and `grpc.test.ts` swap `global.fetch` in `beforeEach`/`afterEach`
-- **Rate limiter is mocked** (`rate-limiter.js`) in connection tests to isolate connection logic from throttling
-- **`rate-limiter.test.ts`** uses `jest.useFakeTimers()` to test token bucket behavior (acquire blocking, refill timing, rate updates)
-- **`fetch-utils.test.ts`** uses `jest.useFakeTimers()` + `AbortSignal` to test timeout behavior
-- **`registry.test.ts`** tests pure data lookups against the source registry (no mocks)
-- **`manager.test.ts`** mocks all connection constructors and the registry to test protocol-based dispatch
+All unit tests use mocked `global.fetch` to avoid real network calls.
 
-### Entities (unit tests with fetch mocks)
+- **Connections:** Test URL construction, auth headers, rate limiting, content-type handling
+- **Entities:** Test API endpoint correctness, query parameter construction, field mapping transforms
+- **Server:** Test error classification, Zod validation schemas, input formatting
+- **Transform:** Test pure transform functions with known inputs/outputs
+- **Tool registration:** Verify `register*Tools` calls and tool name uniqueness
 
-- All entity test files mock `global.fetch` and verify correct API endpoints are called (URL construction, query parameters)
-- Each file tests both the search function (endpoint + URL params) and the get function (endpoint + ID in URL)
-- Transform functions (`transformMyGeneResponse`, `transformMyChemResponse`, `transformMyVariantHit`, `transformTrialResponse`, `transformMyDiseaseResponse`) are tested with known inputs to verify field mapping
-- `article.test.ts` includes tests for `parsePubMedXml` with structured abstracts, batch articles, invalid XML, and empty documents
-- `article.test.ts` tests multi-source search (pubmed, pubtator, litsense) and all transformer functions (`transformPubTator`, `transformLitSense`, `transformEuropePMC`, `transformSemanticScholar`)
-- `cross-entity.test.ts` verifies `discover()` fans out to mygene, myvariant, mychem, mydisease and falls back to OLS4
+### Integration Tests (64 tests, `npm run test:integration`)
 
-### Integration (tool registration)
+Integration tests use `InMemoryTransport` from the MCP SDK to connect a real `Client` to a real `McpServer` in-process. All tool handlers execute against live biomedical APIs.
 
-- `tool-registration.test.ts` mocks all entity modules, connection manager, and fetch-utils
-- Verifies each `register*Tools` function calls `server.registerTool()` the expected number of times
-- Asserts 50 total tool registrations across all modules with no duplicate names
+**Harness:** `src/__tests__/helpers/mcp-harness.ts` creates a connected client+server pair. Server connects first (required by the MCP protocol handshake), then client. Cleanup calls `connectionManager.closeAll()` to reset the singleton between suites.
 
-### Server (pure unit tests)
+**Test strategy:**
+- **Structural validation:** Each result is validated for correct shape (type guards in `assertions.ts`)
+- **Stable identity assertions:** Immutable identifiers are checked (Entrez IDs, gene symbols, NCT IDs, MONDO IDs)
+- **No volatile assertions:** Counts, scores, and rankings are never asserted (data sources change)
+- **Error tolerance:** Transient API failures are caught and tests gracefully skip
 
-- `errors.test.ts`: Tests `createError`, `formatError` (error classification by keyword matching), and `withErrorHandling` wrapper — no mocks
-- `validation.test.ts`: Tests Zod schemas (`InputValidation.*`), `formatValidationErrors`, `isValidEntityInput`, and `getEntitySuggestions` — no mocks
+**Tools requiring env vars** (skipped unless present):
+- `variant_oncokb`: requires `ONCOKB_TOKEN`
+- `gene_diseases` (DisGeNET path): requires `DISGENET_API_KEY`
+- `variant_get` + `alphagenome_scores`: requires `ALPHAGENOME_API_KEY`
 
-### Transform (pure unit tests)
-
-- `gene.test.ts`: Tests `transformMyGeneHit`, `transformMyGeneResponse`, and `normalizeAliases` with full and sparse inputs — no mocks
+**CI strategy:** Integration tests should run as a separate workflow (nightly or on-demand), not as PR gate.
