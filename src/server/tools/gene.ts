@@ -1,13 +1,75 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { geneSearch, geneGet } from '../../entities/gene.js';
-import { sectionResult, getSectionError } from '../errors.js';
+import { geneToDrugs, geneToTrials, geneToArticles, geneEnrichment } from '../../entities/cross-entity.js';
 
 const GENE_SECTIONS = [
-  'pathways', 'ontology', 'diseases', 'diagnostics', 'protein',
-  'go', 'interactions', 'civic', 'expression', 'hpa', 'druggability',
-  'clingen', 'constraint', 'disgenet', 'funding', 'all'
+  'pathways', 'ontology', 'diseases', 'protein',
+  'go', 'interactions', 'clinical_evidence', 'expression', 'protein_atlas', 'druggability',
+  'dosage_sensitivity', 'constraint', 'disease_associations', 'funding', 'all'
 ] as const;
+
+function sliceArraysRecursive(obj: unknown, limit: number): unknown {
+  if (Array.isArray(obj)) return obj.slice(0, limit);
+  if (obj && typeof obj === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      result[k] = sliceArraysRecursive(v, limit);
+    }
+    return result;
+  }
+  return obj;
+}
+
+function applyLimit(
+  sections: Record<string, unknown>,
+  requestedNames: string[],
+  storageKeyMap: Record<string, string>,
+  arrayKeyMap: Record<string, string[]>,
+  limit: number,
+): void {
+  for (const name of requestedNames) {
+    const storedKey = storageKeyMap[name] ?? name;
+    const data = sections[storedKey];
+    if (!data || typeof data !== 'object') continue;
+
+    const keys = arrayKeyMap[name];
+    if (Array.isArray(data)) {
+      sections[storedKey] = data.slice(0, limit);
+    } else if (keys) {
+      const obj = data as Record<string, unknown>;
+      for (const k of keys) {
+        if (Array.isArray(obj[k])) obj[k] = obj[k].slice(0, limit);
+      }
+    }
+  }
+}
+
+const GENE_ALL_SECTIONS = [
+  'pathways', 'protein', 'ontology', 'go', 'interactions',
+  'clinical_evidence', 'expression', 'protein_atlas',
+  'druggability', 'dosage_sensitivity', 'constraint',
+  'disease_associations', 'diseases', 'funding',
+];
+const GENE_STORAGE_KEYS: Record<string, string> = {
+  clinical_evidence: 'civic',
+  protein_atlas: 'hpa',
+  disease_associations: 'disgenet',
+  dosage_sensitivity: 'clingen',
+};
+const GENE_ARRAY_KEYS: Record<string, string[]> = {
+  pathways: [],
+  go: [],
+  ontology: ['go_enrichment'],
+  interactions: [],
+  expression: ['tissues'],
+  clinical_evidence: ['variants'],
+  protein_atlas: ['subcellular'],
+  disease_associations: ['associations'],
+  diseases: ['diseases'],
+  funding: ['grants'],
+  druggability: ['dgidb'],
+};
 
 export function registerGeneTools(server: McpServer): void {
   server.registerTool(
@@ -43,43 +105,25 @@ export function registerGeneTools(server: McpServer): void {
       inputSchema: {
         symbol: z.string().describe('HGNC gene symbol (e.g., "BRAF", "TP53")'),
         sections: z.array(z.enum(GENE_SECTIONS)).optional().describe('Sections to include'),
+        limit: z.number().int().min(1).max(100).default(20),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
-    async ({ symbol, sections }) => {
+    async ({ symbol, sections, limit }) => {
       try {
         const result = await geneGet(symbol, sections);
+        const requestedSections = (sections ?? []).includes('all')
+          ? GENE_ALL_SECTIONS
+          : (sections ?? []);
+        if (result.sections) {
+          applyLimit(result.sections, requestedSections, GENE_STORAGE_KEYS, GENE_ARRAY_KEYS, limit);
+        }
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       } catch (error) {
         return { 
           content: [{ type: 'text', text: String(error) }],
           isError: true 
         };
-      }
-    }
-  );
-
-  server.registerTool(
-    'gene_pathways',
-    {
-      description: 'Get pathways containing a gene',
-      inputSchema: {
-        symbol: z.string().describe('HGNC gene symbol'),
-        limit: z.number().int().min(1).max(50).default(10),
-      },
-      annotations: { readOnlyHint: true, openWorldHint: true }
-    },
-    async ({ symbol, limit }) => {
-      try {
-        const result = await geneGet(symbol, ['pathways']);
-        const data = sectionResult<any[]>(result, 'pathways');
-        if (data && typeof data === 'object' && '_error' in data) {
-          return { content: [{ type: 'text', text: JSON.stringify(data) }], isError: true };
-        }
-        const pathways = (Array.isArray(data) ? data : []).slice(0, limit) || [];
-        return { content: [{ type: 'text', text: JSON.stringify(pathways) }] };
-      } catch (error) {
-        return { content: [{ type: 'text', text: String(error) }], isError: true };
       }
     }
   );
@@ -97,9 +141,9 @@ export function registerGeneTools(server: McpServer): void {
     async ({ symbol, limit }) => {
       try {
         const result = await geneGet(symbol, ['disgenet', 'diseases']);
-        const disgenetData = sectionResult<{ associations?: Array<{ disease_name: string; score: number; source: string }> }>(result, 'disgenet');
+        const disgenetData = result.sections?.disgenet;
         if (disgenetData && typeof disgenetData === 'object' && '_error' in disgenetData) {
-          const diseaseData = sectionResult<{ diseases?: Array<{ name: string; source: string }> }>(result, 'diseases');
+          const diseaseData = result.sections?.diseases;
           if (diseaseData && typeof diseaseData === 'object' && !('_error' in diseaseData) && Array.isArray((diseaseData as any).diseases)) {
             return { content: [{ type: 'text', text: JSON.stringify((diseaseData as any).diseases.slice(0, limit)) }] };
           }
@@ -115,22 +159,18 @@ export function registerGeneTools(server: McpServer): void {
   );
 
   server.registerTool(
-    'gene_go_enrichment',
+    'gene_drugs',
     {
-      description: 'Get GO term enrichment for a gene via QuickGO',
+      description: 'Find drugs targeting a gene',
       inputSchema: {
-        symbol: z.string().describe('HGNC gene symbol'),
+        symbol: z.string().describe('HGNC gene symbol (e.g., "BRAF", "TP53")'),
       },
-      annotations: { readOnlyHint: true, openWorldHint: true }
+      annotations: { readOnlyHint: true }
     },
     async ({ symbol }) => {
       try {
-        const result = await geneGet(symbol, ['ontology']);
-        const data = sectionResult(result, 'ontology');
-        if (data && typeof data === 'object' && '_error' in data) {
-          return { content: [{ type: 'text', text: JSON.stringify(data) }], isError: true };
-        }
-        return { content: [{ type: 'text', text: JSON.stringify(result.sections?.ontology) }] };
+        const results = await geneToDrugs(symbol);
+        return { content: [{ type: 'text', text: JSON.stringify(results) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
       }
@@ -138,110 +178,59 @@ export function registerGeneTools(server: McpServer): void {
   );
 
   server.registerTool(
-    'gene_interactions',
+    'gene_trials',
     {
-      description: 'Get protein interactions for a gene via STRING',
-      inputSchema: {
-        symbol: z.string().describe('HGNC gene symbol'),
-        limit: z.number().int().min(1).max(50).default(20),
-      },
-      annotations: { readOnlyHint: true, openWorldHint: true }
-    },
-    async ({ symbol, limit }) => {
-      try {
-        const result = await geneGet(symbol, ['interactions']);
-        const data = sectionResult<any[]>(result, 'interactions');
-        if (data && typeof data === 'object' && '_error' in data) {
-          return { content: [{ type: 'text', text: JSON.stringify(data) }], isError: true };
-        }
-        const interactions = (Array.isArray(data) ? data : []).slice(0, limit) || [];
-        return { content: [{ type: 'text', text: JSON.stringify(interactions) }] };
-      } catch (error) {
-        return { content: [{ type: 'text', text: String(error) }], isError: true };
-      }
-    }
-  );
-
-  server.registerTool(
-    'gene_expression',
-    {
-      description: 'Get GTEx tissue expression for a gene. Note: GTEx v8 covers ~54 tissues; some genes may not have expression data if they are not expressed in GTEx tissue samples.',
-      inputSchema: {
-        symbol: z.string().describe('HGNC gene symbol'),
-        limit: z.number().int().min(1).max(50).default(20),
-      },
-      annotations: { readOnlyHint: true, openWorldHint: true }
-    },
-    async ({ symbol, limit }) => {
-      try {
-        const result = await geneGet(symbol, ['expression']);
-        const data = sectionResult<{ tissues?: Array<{ tissue: string; tpm: number }> }>(result, 'expression');
-        if (data && typeof data === 'object' && '_error' in data) {
-          return { content: [{ type: 'text', text: JSON.stringify(data) }], isError: true };
-        }
-        const tissues = (data as any)?.tissues?.slice(0, limit) || [];
-        return { content: [{ type: 'text', text: JSON.stringify(tissues) }] };
-      } catch (error) {
-        return { content: [{ type: 'text', text: String(error) }], isError: true };
-      }
-    }
-  );
-
-  server.registerTool(
-    'gene_constraint',
-    {
-      description: 'Get gnomAD constraint metrics for a gene',
+      description: 'Find clinical trials for a gene',
       inputSchema: {
         symbol: z.string().describe('HGNC gene symbol'),
       },
-      annotations: { readOnlyHint: true, openWorldHint: true }
+      annotations: { readOnlyHint: true }
     },
     async ({ symbol }) => {
       try {
-        const result = await geneGet(symbol, ['constraint']);
-        const data = sectionResult(result, 'constraint');
-        if (data && typeof data === 'object' && '_error' in data) {
-          return { content: [{ type: 'text', text: JSON.stringify(data) }], isError: true };
+        const results = await geneToTrials(symbol);
+        return { content: [{ type: 'text', text: JSON.stringify(results) }] };
+      } catch (error) {
+        return { content: [{ type: 'text', text: String(error) }], isError: true };
+      }
+    }
+  );
+
+  server.registerTool(
+    'gene_articles',
+    {
+      description: 'Find articles about a gene',
+      inputSchema: {
+        symbol: z.string().describe('HGNC gene symbol'),
+      },
+      annotations: { readOnlyHint: true }
+    },
+    async ({ symbol }) => {
+      try {
+        const results = await geneToArticles(symbol);
+        return { content: [{ type: 'text', text: JSON.stringify(results) }] };
+      } catch (error) {
+        return { content: [{ type: 'text', text: String(error) }], isError: true };
+      }
+    }
+  );
+
+  server.registerTool(
+    'gene_enrich',
+    {
+      description: 'Perform pathway enrichment analysis for a gene list',
+      inputSchema: {
+        genes: z.array(z.string()).describe('List of HGNC gene symbols'),
+      },
+      annotations: { readOnlyHint: true }
+    },
+    async ({ genes }) => {
+      try {
+        const results = await geneEnrichment(genes);
+        if (results.length === 1 && results[0] && '_error' in results[0]) {
+          return { content: [{ type: 'text', text: JSON.stringify(results[0]) }], isError: true };
         }
-        return { content: [{ type: 'text', text: JSON.stringify(result.sections?.constraint) }] };
-      } catch (error) {
-        return { content: [{ type: 'text', text: String(error) }], isError: true };
-      }
-    }
-  );
-
-  server.registerTool(
-    'gene_druggability',
-    {
-      description: 'Get druggability data for a gene via DGIdb and OpenTargets',
-      inputSchema: {
-        symbol: z.string().describe('HGNC gene symbol'),
-      },
-      annotations: { readOnlyHint: true, openWorldHint: true }
-    },
-    async ({ symbol }) => {
-      try {
-        const result = await geneGet(symbol, ['druggability']);
-        return { content: [{ type: 'text', text: JSON.stringify(result.sections?.druggability) }] };
-      } catch (error) {
-        return { content: [{ type: 'text', text: String(error) }], isError: true };
-      }
-    }
-  );
-
-  server.registerTool(
-    'gene_clingen',
-    {
-      description: 'Get ClinGen dosage sensitivity for a gene. Note: ClinGen does not provide a public API; data is not available programmatically.',
-      inputSchema: {
-        symbol: z.string().describe('HGNC gene symbol'),
-      },
-      annotations: { readOnlyHint: true, openWorldHint: true }
-    },
-    async ({ symbol }) => {
-      try {
-        const result = await geneGet(symbol, ['clingen']);
-        return { content: [{ type: 'text', text: JSON.stringify(result.sections?.clingen) }] };
+        return { content: [{ type: 'text', text: JSON.stringify(results) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
       }

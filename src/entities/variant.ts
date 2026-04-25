@@ -178,7 +178,11 @@ export async function variantGet(
   id: string,
   sections?: string[]
 ): Promise<VariantResult> {
-  const sectionConfig = sections || ['core'];
+  const SECTION_ALIASES: Record<string, string> = {
+    alphagenome_scores: 'alphagenome',
+  };
+  const normalizedSections = (sections || []).map(s => SECTION_ALIASES[s] || s);
+  const sectionConfig = normalizedSections.length > 0 ? normalizedSections : ['core'];
   
   const conn = connectionManager.getConnection('myvariant');
   
