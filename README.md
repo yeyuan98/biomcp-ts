@@ -2,6 +2,8 @@
 
 A high-performance MCP server that gives LLMs access to 50 biomedical tools federated across 40+ upstream APIs — genes, variants, drugs, diseases, literature, and clinical trials in a single integration.
 
+Adapted from the [BioMCP Rust](https://github.com/genomoncology/biomcp) with agent-first development approach and enhancements. Kudos to the original authors.
+
 ## Highlights
 
 - **50 tools** across 7 domains — search, retrieve, and cross-reference biomedical entities
@@ -9,7 +11,6 @@ A high-performance MCP server that gives LLMs access to 50 biomedical tools fede
 - **Section-based fetching** — `entityGet(id, sections)` with per-section timeouts and graceful degradation (failed sections return `{ _error }` instead of crashing)
 - **Federated article search** — queries 5 literature backends simultaneously with PMID/PMCID/DOI deduplication
 - **Zero-config startup** — works out of the box; optional API keys unlock higher rate limits and premium data
-- **Minimal dependencies** — only 3 runtime deps: `@modelcontextprotocol/sdk`, `zod`, `fast-xml-parser`
 
 ## Quick Start
 

@@ -186,8 +186,13 @@ export async function variantGet(
     `/variant/${id}?fields=dbsnp,clinvar,gnomad_exome,gnomad_genome,cadd,dbnsfp,snpeff,cosmic`
   ) as MyVariantGetResponse | MyVariantGetResponse[];
 
+  let allVariants: MyVariantGetResponse[] | undefined;
   if (Array.isArray(rawResponse)) {
-    rawResponse = rawResponse[0];
+    allVariants = rawResponse as MyVariantGetResponse[];
+    const bestWithGnomad = allVariants
+      .filter(v => (v as any).gnomad_exome || (v as any).gnomad_genome)
+      .sort((a, b) => (b as any)._version - (a as any)._version)[0];
+    rawResponse = bestWithGnomad || allVariants[0];
   }
 
   if (!rawResponse) {
@@ -236,7 +241,7 @@ export async function variantGet(
             } 
           };
         case 'frequency':
-          return { section: 'frequency', data: await fetchFrequencySection(response) };
+          return { section: 'frequency', data: await fetchFrequencySection(response, allVariants) };
         case 'predictions':
           return { section: 'predictions', data: await fetchPredictionsSection(response) };
         case 'clinical':
@@ -261,7 +266,7 @@ export async function variantGet(
       } else if (settled.status === 'fulfilled' && settled.value.error) {
         const sectionResult = settled.value as { error?: string };
         (variant.sections as Record<string, unknown>)[sectionsToFetch[i]] = {
-          error: sectionResult.error
+          _error: sectionResult.error
         };
       } else if (settled.status === 'rejected') {
         const reason = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
@@ -275,11 +280,23 @@ export async function variantGet(
   return variant;
 }
 
-async function fetchFrequencySection(variant: MyVariantGetResponse): Promise<FrequencySection | null> {
+async function fetchFrequencySection(
+  variant: MyVariantGetResponse,
+  allVariants?: MyVariantGetResponse[]
+): Promise<FrequencySection | null> {
   const gnomadExome = (variant as any).gnomad_exome;
   const gnomadGenome = (variant as any).gnomad_genome;
 
-  if (!gnomadExome && !gnomadGenome) return null;
+  if (!gnomadExome && !gnomadGenome) {
+    if (allVariants?.length) {
+      for (const v of allVariants) {
+        if ((v as any).gnomad_exome || (v as any).gnomad_genome) {
+          return fetchFrequencySection(v);
+        }
+      }
+    }
+    return null;
+  }
 
   const exomeAf = gnomadExome?.af?.af ?? null;
   const genomeAf = gnomadGenome?.af?.af ?? null;
