@@ -1,6 +1,6 @@
 # BioMCP TypeScript — Source Architecture
 
-ESM-only MCP server exposing 50 biomedical tools to LLMs. Federates queries across 40+ upstream APIs. Node.js >=18, targets ES2022, 3 runtime dependencies (`@modelcontextprotocol/sdk`, `zod`, `fast-xml-parser`).
+ESM-only MCP server exposing 24 biomedical tools to LLMs. Federates queries across 50+ upstream APIs. Node.js >=18, targets ES2022, 3 runtime dependencies (`@modelcontextprotocol/sdk`, `zod`, `fast-xml-parser`).
 
 ## Architecture
 
@@ -9,7 +9,7 @@ ESM-only MCP server exposing 50 biomedical tools to LLMs. Federates queries acro
 │  LLM  ──stdio──▶  server/index.ts  (McpServer bootstrap)   │
 │                          │                                   │
 │                   server/tools/*.ts                         │
-│                   (8 modules, 50 tools)                     │
+│                   (7 modules, 24 tools)                      │
 │                          │                                   │
 │              ┌───────────┼───────────┐                      │
 │              ▼           ▼           ▼                      │
@@ -28,7 +28,7 @@ ESM-only MCP server exposing 50 biomedical tools to LLMs. Federates queries acro
 │         │           │           │                           │
 │         └───────────┼───────────┘                           │
 │                     ▼                                       │
-│              registry.ts (40+ sources)                      │
+│              registry.ts (50+ sources)                      │
 │                     │                                       │
 │                     ▼                                       │
 │            transform/*.ts                                   │
@@ -46,22 +46,21 @@ Four layers, strict downward dependency. No upward references.
 Entry point. Converts MCP tool calls into entity-layer invocations. All tools declare `readOnlyHint: true`.
 
 ### `server/index.ts`
-Creates `McpServer` on `StdioServerTransport`. Imports and calls all 8 `register*Tools(server)` functions.
+Creates `McpServer` on `StdioServerTransport`. Imports and calls all 7 `register*Tools(server)` functions.
 
-### `server/tools/` — Tool Registration (8 modules, 50 tools)
+### `server/tools/` — Tool Registration (7 modules, 24 tools)
 
 Each module exports a single `register*Tools(server: McpServer): void` function that calls `server.registerTool()` for each tool. Tool handlers perform try/catch and delegate to entity-layer functions. Input schemas use Zod directly.
 
 | Module | Tools | Domain |
 |--------|-------|--------|
-| `gene.ts` | 10 | Gene search, get (14 sections) |
-| `variant.ts` | 6 | Variant search, get (5 sections), clinical significance |
-| `drug.ts` | 6 | Drug search, get (6 sections), targets, indications, adverse events, regulatory |
-| `disease.ts` | 6 | Disease search, get (4 sections), genes, phenotypes |
-| `article.ts` | 4 | Article search (federated/single-source), get |
-| `trial.ts` | 5 | Trial search, get (3 sections), eligibility, locations, outcomes |
-| `pivot.ts` | 10 | Cross-entity: gene→drugs, gene→trials, gene→articles, variant→trials, drug→genes, drug→trials, enrichment, discovery, batchGet, searchAll |
-| `utility.ts` | 3 | Health check, list entities/tools, version |
+| `gene.ts` | 7 | Gene search, get (14 sections), diseases, drugs, trials, articles, enrichment |
+| `variant.ts` | 4 | Variant search, get (5 sections), OncoKB annotations, trials |
+| `drug.ts` | 3 | Drug search, get (6 sections), trials |
+| `disease.ts` | 4 | Disease search, get (4 sections), drugs, trials |
+| `article.ts` | 2 | Article search (federated/single-source), get |
+| `trial.ts` | 2 | Trial search, get (3 sections) |
+| `utility.ts` | 2 | Free-text discovery, batch entity resolution |
 
 ### `server/errors.ts`
 - `BioMCPError` interface: `{ code, message, suggestion?, details? }`
@@ -93,22 +92,24 @@ entityGet(id, sections?)      → { ...core, sections: Record<string, unknown> }
 
 | Module | Lines | Sections | Primary Sources |
 |--------|-------|----------|-----------------|
-| `gene.ts` | 721 | 14 (pathways, ontology, diseases, diagnostics, protein, go, interactions, civic, expression, hpa, druggability, clingen, constraint, disgenet) | MyGene, UniProt, STRING, GTEx, ClinGen, GWAS, HPA |
-| `variant.ts` | 657 | 5 (core, frequency, predictions, clinical, alphagenome) | MyVariant, ClinVar, ClinGen, gnomAD, CADD |
-| `drug.ts` | 359 | 6 (us_regulatory, eu_regulatory, who_regulatory, safety, targets, indications) | MyChem, OpenTargets, ChEMBL, OpenFDA |
-| `disease.ts` | 314 | 4 (gene_associations, phenotypes, pathways, survival) | DisGeNET, OpenTargets, MyDisease |
-| `article.ts` | 593 | — | PubMed, Europe PMC, Semantic Scholar, PubTator, LitSense |
+| `gene.ts` | 728 | 14 (pathways, protein, ontology, go, interactions, clinical_evidence, expression, protein_atlas, druggability, dosage_sensitivity, constraint, disease_associations, diseases, funding) | MyGene.info, Reactome, UniProt, STRING-db, CIViC, GTEx, HPA, DGIdb, OpenTargets, gnomAD, DisGeNET, NIH Reporter |
+| `variant.ts` | 678 | 5 (core, frequency, predictions, clinical, alphagenome_scores) | MyVariant.info, CIViC, OncoKB, AlphaGenome |
+| `drug.ts` | 359 | 6 (us_regulatory, eu_regulatory, who_regulatory, safety, targets, indications) | MyChem.info, OpenFDA, OpenTargets |
+| `disease.ts` | 314 | 4 (gene_associations, phenotypes, pathways, survival) | MyDisease.info, DisGeNET, Monarch, Reactome, SEER |
+| `article.ts` | 593 | 3 (open_access, annotations, citation_graph) | PubMed, Europe PMC, Semantic Scholar, PubTator, LitSense, NCBI ID Converter, PMC OA |
 | `trial.ts` | 395 | 3 (eligibility, locations, outcomes) | ClinicalTrials.gov |
 
 ### `entities/cross-entity.ts` (619 lines)
 
 Cross-entity pivot functions and multi-entity operations:
 
-- **Pivots**: `geneToDrugs`, `geneToTrials`, `geneToArticles`, `variantToTrials`, `drugToGenes`, `drugToTrials` — each queries the appropriate upstream source (e.g., `geneToDrugs` hits OpenTargets GraphQL)
+- **Pivots**: `geneToDrugs`, `geneToTrials`, `geneToPathways`, `geneToArticles`, `variantToTrials`, `drugToGenes`, `drugToTrials`, `drugToAdverseEvents`, `diseaseToDrugs`, `diseaseToGenes`, `diseaseToTrials` — each queries the appropriate upstream source
 - **Enrichment**: `geneEnrichment(geneSymbols[])` — Reactome pathway enrichment
 - **Discovery**: `discover(query)` — multi-entity search across all domains
-- **Batch**: `batchGet(entity, ids[])` — parallel entity resolution
-- **Universal**: `searchAll(query)` — fans out to all entity search functions
+- **Batch**: `batchGet(inputs: BatchGetInput[])` — parallel entity resolution
+- **Universal**: `searchAll(query, options?)` — fans out to all entity search functions
+
+Functions not exposed as MCP tools: `geneToPathways`, `drugToGenes`, `drugToAdverseEvents`, `diseaseToGenes`, `diseaseToTrials`, `searchAll`.
 
 ### `entities/article.ts` — Federated Search
 
@@ -191,21 +192,22 @@ Error classification (`server/errors.ts`): `formatError()` inspects `Error.messa
 | Lazy Factory | `ConnectionManager.getConnection()` | Create connections on first use |
 | Section-based | `entityGet()` across all entities | LLMs request only needed data, 8s timeout per section |
 | Federated Aggregation | `articleSearch()`, `searchAll()` | Parallel multi-backend queries with dedup |
+| In-Process Testing | `__tests__/helpers/mcp-harness.ts` | `InMemoryTransport` client connected to real `McpServer` for integration tests |
 | Conditional Rate Limiting | `TokenBucketRateLimiter` | Faster throughput with API keys |
 | `{ _error }` Result | Entity section fetches | Partial results on failure, never throw |
 
 ## Build and Test
 
 ```
-npm run build       # tsc → dist/
-npm run start       # node dist/server/index.js (stdio transport)
-npm run dev         # tsx watch src/server/index.ts
-npm run test        # jest via ts-jest (experimental-vm-modules)
-npm run test:coverage
-npm run typecheck   # tsc --noEmit
+make                # Show available targets
+make install        # Install dependencies
+make build-bundle   # Compile and bundle into dist/bundle.js
+make typecheck      # tsc --noEmit
+make test           # Unit tests (fast, mocked, parallel)
+make test-integration # Integration tests (live APIs, serial, ~60s)
+make test-all        # All tests combined
+make clean          # Remove build artifacts
 ```
-
-Test directory mirrors source: `src/__tests__/{connections,entities,integration,server,transform}/`.
 
 ## Dependency Summary
 

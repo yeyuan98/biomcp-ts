@@ -14,7 +14,7 @@ const transport = new StdioServerTransport();
 await server.connect(transport);
 ```
 
-Entry point: `src/server/index.ts`. Calls eight registration functions in order: `registerGeneTools`, `registerVariantTools`, `registerDrugTools`, `registerDiseaseTools`, `registerArticleTools`, `registerTrialTools`, `registerUtilityTools`, `registerPivotTools`.
+Entry point: `src/server/index.ts`. Calls seven registration functions in order: `registerGeneTools`, `registerVariantTools`, `registerDrugTools`, `registerDiseaseTools`, `registerArticleTools`, `registerTrialTools`, `registerUtilityTools`.
 
 ## Tool Handler Pattern
 
@@ -25,101 +25,70 @@ Every tool handler follows the same contract:
 3. Return `{ content: [{ type: 'text', text: JSON.stringify(result) }] }`
 4. On error: return `{ content: [{ type: 'text', text: String(error) }], isError: true }`
 
-Section-specific tools (e.g. `gene_pathways`) use `sectionResult()` from `errors.ts` to extract a single section from the entity result. If the section contains a `_error` key, it is returned with `isError: true`.
+Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'diseases'])` and extract specific sections from the result.
 
 ## Complete Tool Registry
 
-### Gene Tools (`tools/gene.ts`)
+### Gene Tools (`tools/gene.ts`) — 7 tools
 
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
 | `gene_search` | `query: string`, `gene_type?: "protein-coding" \| "ncRNA" \| "pseudo"`, `chromosome?: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for genes by symbol, name, or keyword | readOnly, openWorld |
-| `gene_get` | `symbol: string`, `sections?: ("pathways" \| "ontology" \| "diseases" \| "diagnostics" \| "protein" \| "go" \| "interactions" \| "civic" \| "expression" \| "hpa" \| "druggability" \| "clingen" \| "constraint" \| "disgenet" \| "funding" \| "all")[]` | Get detailed gene information by symbol | readOnly, openWorld |
-| `gene_pathways` | `symbol: string`, `limit?: number (1-50, default 10)` | Get pathways containing a gene | readOnly, openWorld |
+| `gene_get` | `symbol: string`, `sections?: ("pathways" \| "ontology" \| "diseases" \| "protein" \| "go" \| "interactions" \| "clinical_evidence" \| "expression" \| "protein_atlas" \| "druggability" \| "dosage_sensitivity" \| "constraint" \| "disease_associations" \| "funding" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed gene information by symbol | readOnly, openWorld |
 | `gene_diseases` | `symbol: string`, `limit?: number (1-50, default 10)` | Get diseases associated with a gene. Requires `DISGENET_API_KEY`; falls back to OpenTargets | readOnly, openWorld |
-| `gene_go_enrichment` | `symbol: string` | Get GO term enrichment via QuickGO | readOnly, openWorld |
-| `gene_interactions` | `symbol: string`, `limit?: number (1-50, default 20)` | Get protein interactions via STRING | readOnly, openWorld |
-| `gene_expression` | `symbol: string`, `limit?: number (1-50, default 20)` | Get GTEx tissue expression (~54 tissues) | readOnly, openWorld |
-| `gene_constraint` | `symbol: string` | Get gnomAD constraint metrics | readOnly, openWorld |
-| `gene_druggability` | `symbol: string` | Get druggability data via DGIdb and OpenTargets | readOnly, openWorld |
-| `gene_clingen` | `symbol: string` | Get ClinGen dosage sensitivity | readOnly, openWorld |
+| `gene_drugs` | `symbol: string` | Find drugs targeting a gene | readOnly |
+| `gene_trials` | `symbol: string` | Find clinical trials for a gene | readOnly |
+| `gene_articles` | `symbol: string` | Find articles about a gene | readOnly |
+| `gene_enrich` | `genes: string[]` | Pathway enrichment analysis for a gene list | readOnly |
 
-### Variant Tools (`tools/variant.ts`)
+### Variant Tools (`tools/variant.ts`) — 4 tools
 
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
 | `variant_search` | `query?: string`, `gene?: string`, `significance?: "benign" \| "likely_benign" \| "pathogenic" \| "likely_pathogenic" \| "uncertain"`, `max_frequency?: number`, `min_cadd?: number`, `consequence?: string`, `rsid?: string`, `hgvsp?: string`, `hgvsc?: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for variants by rsid, HGVS, gene+protein change | readOnly, openWorld |
-| `variant_get` | `id: string`, `sections?: ("core" \| "frequency" \| "predictions" \| "clinical" \| "alphagenome" \| "all")[]` | Get detailed variant information with optional sections | readOnly, openWorld |
-| `variant_frequency` | `id: string` | Get population frequency data from gnomAD | readOnly, openWorld |
-| `variant_predictions` | `id: string` | Get pathogenicity predictions (CADD, SIFT, PolyPhen, conservation) | readOnly, openWorld |
+| `variant_get` | `id: string`, `sections?: ("core" \| "frequency" \| "predictions" \| "clinical" \| "alphagenome_scores" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed variant information with optional sections | readOnly, openWorld |
 | `variant_oncokb` | `gene: string`, `protein_change: string` | Get OncoKB annotations. Requires `ONCOKB_TOKEN` | readOnly, openWorld |
-| `variant_alphagenome` | `id: string`, `gene?: string` | Get AlphaGenome variant scores via gRPC. Requires `ALPHAGENOME_API_KEY` | readOnly, openWorld |
+| `variant_trials` | `variant: string` | Find clinical trials for a variant | readOnly |
 
-### Drug Tools (`tools/drug.ts`)
+### Drug Tools (`tools/drug.ts`) — 3 tools
 
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
 | `drug_search` | `query: string`, `drug_type?: string`, `source?: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for drugs by name, mechanism, or keyword | readOnly, openWorld |
-| `drug_get` | `name: string`, `sections?: ("core" \| "us_regulatory" \| "eu_regulatory" \| "who_regulatory" \| "safety" \| "targets" \| "indications" \| "all")[]` | Get detailed drug information by name | readOnly, openWorld |
-| `drug_targets` | `name: string`, `limit?: number (1-50, default 20)` | Get drug targets via ChEMBL | readOnly, openWorld |
-| `drug_indications` | `name: string`, `limit?: number (1-50, default 20)` | Get drug indications via ChEMBL | readOnly, openWorld |
-| `drug_adverse_events` | `name: string` | Get adverse events via OpenFDA | readOnly, openWorld |
-| `drug_regulatory` | `name: string` | Get FDA regulatory information | readOnly, openWorld |
+| `drug_get` | `name: string`, `sections?: ("core" \| "us_regulatory" \| "eu_regulatory" \| "who_regulatory" \| "safety" \| "targets" \| "indications" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed drug information by name | readOnly, openWorld |
+| `drug_trials` | `drug: string` | Find clinical trials for a drug | readOnly |
 
-### Disease Tools (`tools/disease.ts`)
+### Disease Tools (`tools/disease.ts`) — 4 tools
 
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
 | `disease_search` | `query: string`, `disease_type?: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for diseases by name, phenotype, or keyword | readOnly, openWorld |
-| `disease_get` | `disease_id: string`, `sections?: ("core" \| "gene_associations" \| "phenotypes" \| "pathways" \| "survival" \| "all")[]` | Get detailed disease information by ID | readOnly, openWorld |
-| `disease_genes` | `disease_id: string`, `limit?: number (1-50, default 20)` | Get genes associated with a disease via DisGeNET. Requires `DISGENET_API_KEY` | readOnly, openWorld |
-| `disease_phenotypes` | `disease_id: string`, `limit?: number (1-50, default 20)` | Get HPO phenotypes for a disease | readOnly, openWorld |
+| `disease_get` | `disease_id: string`, `sections?: ("core" \| "gene_associations" \| "phenotypes" \| "pathways" \| "survival" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed disease information by ID | readOnly, openWorld |
 | `disease_drugs` | `disease_id: string`, `limit?: number (1-50, default 20)` | Get drugs for a disease via OpenTargets | readOnly, openWorld |
 | `disease_trials` | `disease_id: string`, `limit?: number (1-50, default 20)` | Get clinical trials for a disease | readOnly, openWorld |
 
-### Article Tools (`tools/article.ts`)
+### Article Tools (`tools/article.ts`) — 2 tools
 
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
 | `article_search` | `query: string`, `source?: "pubmed" \| "europepmc" \| "semantic_scholar" \| "pubtator" \| "litsense"`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Federated literature search with deduplication | readOnly, openWorld |
-| `article_get` | `pmid: string`, `sections?: ("core" \| "oa" \| "annotations" \| "graph" \| "all")[]` | Get detailed article information by PMID | readOnly, openWorld |
-| `article_annotations` | `pmid: string` | Get PubTator annotations for an article | readOnly, openWorld |
-| `article_citations` | `pmid: string` | Get citation graph for an article | readOnly, openWorld |
+| `article_get` | `pmid: string`, `sections?: ("core" \| "oa" \| "annotations" \| "graph" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed article information by PMID | readOnly, openWorld |
 
-### Trial Tools (`tools/trial.ts`)
+### Trial Tools (`tools/trial.ts`) — 2 tools
 
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
 | `trial_search` | `query: string`, `status?: string`, `phase?: string`, `intervention_type?: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search clinical trials by condition, intervention, or keyword | readOnly, openWorld |
-| `trial_get` | `nct_id: string`, `sections?: ("core" \| "eligibility" \| "locations" \| "outcomes" \| "all")[]` | Get detailed trial information by NCT ID | readOnly, openWorld |
-| `trial_eligibility` | `nct_id: string` | Get eligibility criteria for a trial | readOnly, openWorld |
-| `trial_locations` | `nct_id: string`, `limit?: number (1-100, default 50)` | Get trial location sites | readOnly, openWorld |
-| `trial_outcomes` | `nct_id: string` | Get trial outcomes | readOnly, openWorld |
+| `trial_get` | `nct_id: string`, `sections?: ("core" \| "eligibility" \| "locations" \| "outcomes" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed trial information by NCT ID | readOnly, openWorld |
 
-### Pivot / Cross-Entity Tools (`tools/pivot.ts`)
+### Utility Tools (`tools/utility.ts`) — 2 tools
 
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
-| `gene_drugs` | `symbol: string` | Find drugs targeting a gene | readOnly |
-| `gene_trials` | `symbol: string` | Find clinical trials for a gene | readOnly |
-| `gene_articles` | `symbol: string` | Find articles about a gene | readOnly |
-| `variant_trials` | `variant: string` | Find clinical trials for a variant | readOnly |
-| `drug_genes` | `drug: string` | Find genes targeted by a drug | readOnly |
-| `drug_trials` | `drug: string` | Find clinical trials for a drug | readOnly |
-| `gene_enrich` | `genes: string[]` | Pathway enrichment analysis for a gene list | readOnly |
 | `discover` | `query: string` | Free-text concept resolution | readOnly |
-| `search_all` | `query: string`, `limit?: number (1-20, default 5)`, `entities?: ("gene" \| "variant" \| "drug" \| "disease" \| "article" \| "trial")[]` | Federated search across all entity types | readOnly |
 | `batch_get` | `inputs: { entity: "gene" \| "variant" \| "drug" \| "disease" \| "trial" \| "article", id: string, sections?: string[] }[]` | Get multiple entities in parallel | readOnly |
 
-### Utility Tools (`tools/utility.ts`)
-
-| Tool | Input Schema | Description | Annotations |
-|------|-------------|-------------|-------------|
-| `biomcp_health` | `apis_only?: boolean (default false)` | Check connectivity to upstream data sources (mygene, myvariant, pubmed, uniprot, clinicaltrials) | readOnly |
-| `biomcp_list` | `entity?: string` | List available entities, tools, and operations | readOnly |
-| `version` | _(none)_ | Get BioMCP server version info | readOnly |
-
-**Total: 50 tools** across 8 registration modules.
+**Total: 24 tools** across 7 registration modules.
 
 ## Error Handling (`errors.ts`)
 
@@ -226,12 +195,11 @@ src/server/
   errors.ts           BioMCPError types, formatError, withErrorHandling, section helpers
   validation.ts       Zod schemas, validateInput, isValidEntityInput, getEntitySuggestions
   tools/
-    gene.ts           10 gene tools
-    variant.ts        6 variant tools
-    drug.ts           6 drug tools
-    disease.ts        6 disease tools
-    article.ts        4 article tools
-    trial.ts          5 trial tools
-    pivot.ts          10 cross-entity pivot tools
-    utility.ts        3 utility tools
+    gene.ts           7 gene tools (search, get, diseases, drugs, trials, articles, enrich)
+    variant.ts        4 variant tools (search, get, oncokb, trials)
+    drug.ts           3 drug tools (search, get, trials)
+    disease.ts        4 disease tools (search, get, drugs, trials)
+    article.ts        2 article tools (search, get)
+    trial.ts          2 trial tools (search, get)
+    utility.ts        2 utility tools (discover, batch_get)
 ```

@@ -1,6 +1,6 @@
 # connections
 
-API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a source registry, connection lifecycle management, and rate limiting for 40+ bioinformatics data sources.
+API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a source registry, connection lifecycle management, and rate limiting for 55 bioinformatics data sources.
 
 ## Architecture
 
@@ -178,7 +178,7 @@ Wraps any async function with an `AbortController`-based timeout. Returns `{ dat
 
 ## Registry — Sources by Protocol
 
-### REST (44 sources)
+### REST (45 sources)
 
 | Category | Source IDs |
 |---|---|

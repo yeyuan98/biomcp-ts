@@ -319,12 +319,24 @@ diseaseToTrials(diseaseQuery: string): Promise<Array<{ nct_id: string; title?: s
 | `drugToTrials` | ClinicalTrials.gov (via `trialSearch`, `searchType: 'intervention'`) | None |
 | `drugToAdverseEvents` | OpenFDA (`/drug/event.json`) | None |
 | `diseaseToDrugs` | MyDisease (ID resolution) + OpenTargets (GraphQL) | None |
-| `diseaseToGenes` | DisGeNET | `DISGENET_API_KEY` |
+| `diseaseToGenes` | DisGeNET (`/api/v1/disease/{diseaseId}`) | `DISGENET_API_KEY` |
 | `diseaseToTrials` | ClinicalTrials.gov (via `trialSearch`) | None |
 
 #### `diseaseToDrugs` ID Resolution
 
 When the input matches `^(DOID|MONDO|OMIM|OMOPS|ORPHA):`, the function first resolves it via MyDisease to get a human-readable label. If the MONDO-based OpenTargets search fails, it tries an EFO ID probe (`MONDO:` → `MONDO_`).
+
+### Search All
+
+```ts
+searchAll(query: string, options?: { limit?: number; entities?: string[] }): Promise<SearchAllResult[]>
+```
+
+- Searches across all 6 entity types concurrently via `Promise.allSettled`
+- Default entities: `['gene', 'variant', 'drug', 'disease', 'article', 'trial']`
+- Default limit: 5 per entity
+
+**Exported type:** `SearchAllResult { entity_type: string; results: unknown[] }`
 
 ### Enrichment
 
@@ -366,15 +378,3 @@ batchGet(inputs: BatchGetInput[]): Promise<BatchGetResult[]>
 BatchGetInput { entity: string; id: string; sections?: string[] }
 BatchGetResult { entity: string; id: string; success: boolean; data?: unknown; error?: string }
 ```
-
-### Search All
-
-```ts
-searchAll(query: string, options?: { limit?: number; entities?: string[] }): Promise<SearchAllResult[]>
-```
-
-- Searches across all 6 entity types concurrently via `Promise.allSettled`
-- Default entities: `['gene', 'variant', 'drug', 'disease', 'article', 'trial']`
-- Default limit: 5 per entity
-
-**Exported type:** `SearchAllResult { entity_type: string; results: unknown[] }`
