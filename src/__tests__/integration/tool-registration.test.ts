@@ -27,7 +27,6 @@ jest.mock('../../entities/variant.js', () => ({
   variantGet: jest.fn(),
   fetchOncoKbAnnotation: jest.fn(),
   getVariantSearchFilters: jest.fn().mockReturnValue(['consequence', 'significance']),
-  getVariantGetSections: jest.fn().mockReturnValue(['core', 'frequency', 'predictions', 'clinical', 'alphagenome']),
   VariantSearchResult: undefined,
   VariantResult: undefined,
 }));
@@ -93,7 +92,6 @@ import { registerVariantTools } from '../../server/tools/variant.js';
 import { registerDiseaseTools } from '../../server/tools/disease.js';
 import { registerTrialTools } from '../../server/tools/trial.js';
 import { registerArticleTools } from '../../server/tools/article.js';
-import { registerPivotTools } from '../../server/tools/pivot.js';
 import { registerUtilityTools } from '../../server/tools/utility.js';
 
 beforeEach(() => {
@@ -101,56 +99,50 @@ beforeEach(() => {
 });
 
 describe('Tool registration', () => {
-  it('registerGeneTools calls registerTool 10 times', () => {
+  it('registerGeneTools calls registerTool 7 times', () => {
     registerGeneTools(mockServer);
-    expect(mockRegisterTool).toHaveBeenCalledTimes(10);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(7);
   });
 
-  it('registerDrugTools calls registerTool 6 times', () => {
+  it('registerDrugTools calls registerTool 3 times', () => {
     registerDrugTools(mockServer);
-    expect(mockRegisterTool).toHaveBeenCalledTimes(6);
-  });
-
-  it('registerVariantTools calls registerTool 6 times', () => {
-    registerVariantTools(mockServer);
-    expect(mockRegisterTool).toHaveBeenCalledTimes(6);
-  });
-
-  it('registerDiseaseTools calls registerTool 6 times', () => {
-    registerDiseaseTools(mockServer);
-    expect(mockRegisterTool).toHaveBeenCalledTimes(6);
-  });
-
-  it('registerTrialTools calls registerTool 5 times', () => {
-    registerTrialTools(mockServer);
-    expect(mockRegisterTool).toHaveBeenCalledTimes(5);
-  });
-
-  it('registerArticleTools calls registerTool 4 times', () => {
-    registerArticleTools(mockServer);
-    expect(mockRegisterTool).toHaveBeenCalledTimes(4);
-  });
-
-  it('registerPivotTools calls registerTool 10 times', () => {
-    registerPivotTools(mockServer);
-    expect(mockRegisterTool).toHaveBeenCalledTimes(10);
-  });
-
-  it('registerUtilityTools calls registerTool 3 times', () => {
-    registerUtilityTools(mockServer);
     expect(mockRegisterTool).toHaveBeenCalledTimes(3);
   });
 
-  it('total registerTool calls across all registrations = 50', () => {
+  it('registerVariantTools calls registerTool 4 times', () => {
+    registerVariantTools(mockServer);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(4);
+  });
+
+  it('registerDiseaseTools calls registerTool 4 times', () => {
+    registerDiseaseTools(mockServer);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(4);
+  });
+
+  it('registerTrialTools calls registerTool 2 times', () => {
+    registerTrialTools(mockServer);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(2);
+  });
+
+  it('registerArticleTools calls registerTool 2 times', () => {
+    registerArticleTools(mockServer);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(2);
+  });
+
+  it('registerUtilityTools calls registerTool 2 times', () => {
+    registerUtilityTools(mockServer);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(2);
+  });
+
+  it('total registerTool calls across all registrations = 24', () => {
     registerGeneTools(mockServer);
     registerDrugTools(mockServer);
     registerVariantTools(mockServer);
     registerDiseaseTools(mockServer);
     registerTrialTools(mockServer);
     registerArticleTools(mockServer);
-    registerPivotTools(mockServer);
     registerUtilityTools(mockServer);
-    expect(mockRegisterTool).toHaveBeenCalledTimes(50);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(24);
   });
 
   it('no duplicate tool names across all registrations', () => {
@@ -160,11 +152,32 @@ describe('Tool registration', () => {
     registerDiseaseTools(mockServer);
     registerTrialTools(mockServer);
     registerArticleTools(mockServer);
-    registerPivotTools(mockServer);
     registerUtilityTools(mockServer);
 
     const names = mockRegisterTool.mock.calls.map((call: any[]) => call[0]);
     const uniqueNames = new Set(names);
     expect(uniqueNames.size).toBe(names.length);
+  });
+
+  it('registered tool names match expected list', () => {
+    registerGeneTools(mockServer);
+    registerDrugTools(mockServer);
+    registerVariantTools(mockServer);
+    registerDiseaseTools(mockServer);
+    registerTrialTools(mockServer);
+    registerArticleTools(mockServer);
+    registerUtilityTools(mockServer);
+
+    const names = mockRegisterTool.mock.calls.map((call: any[]) => call[0]);
+    const expected = [
+      'gene_search', 'gene_get', 'gene_diseases', 'gene_drugs', 'gene_trials', 'gene_articles', 'gene_enrich',
+      'variant_search', 'variant_get', 'variant_oncokb', 'variant_trials',
+      'drug_search', 'drug_get', 'drug_trials',
+      'disease_search', 'disease_get', 'disease_drugs', 'disease_trials',
+      'article_search', 'article_get',
+      'trial_search', 'trial_get',
+      'discover', 'batch_get',
+    ];
+    expect(names.sort()).toEqual(expected.sort());
   });
 });

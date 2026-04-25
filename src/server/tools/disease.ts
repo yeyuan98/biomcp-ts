@@ -7,6 +7,38 @@ const DISEASE_SECTIONS = [
   'core', 'gene_associations', 'phenotypes', 'pathways', 'survival', 'all'
 ] as const;
 
+function applyLimit(
+  sections: Record<string, unknown>,
+  requestedNames: string[],
+  storageKeyMap: Record<string, string>,
+  arrayKeyMap: Record<string, string[]>,
+  limit: number,
+): void {
+  for (const name of requestedNames) {
+    const storedKey = storageKeyMap[name] ?? name;
+    const data = sections[storedKey];
+    if (!data || typeof data !== 'object') continue;
+
+    const keys = arrayKeyMap[name];
+    if (Array.isArray(data)) {
+      sections[storedKey] = data.slice(0, limit);
+    } else if (keys) {
+      const obj = data as Record<string, unknown>;
+      for (const k of keys) {
+        if (Array.isArray(obj[k])) obj[k] = obj[k].slice(0, limit);
+      }
+    }
+  }
+}
+
+const DISEASE_ALL_SECTIONS = ['gene_associations', 'phenotypes', 'pathways', 'survival'];
+const DISEASE_STORAGE_KEYS: Record<string, string> = {};
+const DISEASE_ARRAY_KEYS: Record<string, string[]> = {
+  gene_associations: [],
+  phenotypes: [],
+  pathways: [],
+};
+
 interface ClinicalTrialsDiseaseResponse {
   studies?: Array<{
     protocolSection?: {
@@ -54,67 +86,25 @@ export function registerDiseaseTools(server: McpServer): void {
       inputSchema: {
         disease_id: z.string().describe('Disease ID (e.g., "DOID:0060268", "C0018794")'),
         sections: z.array(z.enum(DISEASE_SECTIONS)).optional().describe('Sections to include'),
+        limit: z.number().int().min(1).max(100).default(20),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
-    async ({ disease_id, sections }) => {
+    async ({ disease_id, sections, limit }) => {
       try {
         const result = await diseaseGet(disease_id, sections);
+        const requestedSections = (sections ?? []).includes('all')
+          ? DISEASE_ALL_SECTIONS
+          : (sections ?? []);
+        if (result.sections) {
+          applyLimit(result.sections, requestedSections, DISEASE_STORAGE_KEYS, DISEASE_ARRAY_KEYS, limit);
+        }
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       } catch (error) {
         return { 
           content: [{ type: 'text', text: String(error) }],
           isError: true 
         };
-      }
-    }
-  );
-
-  server.registerTool(
-    'disease_genes',
-    {
-      description: 'Get genes associated with a disease via DisGeNET. Requires DISGENET_API_KEY environment variable. Obtain an API key at https://www.disgenet.org/.',
-      inputSchema: {
-        disease_id: z.string().describe('Disease ID'),
-        limit: z.number().int().min(1).max(50).default(20),
-      },
-      annotations: { readOnlyHint: true, openWorldHint: true }
-    },
-    async ({ disease_id, limit }) => {
-      try {
-        const result = await diseaseGet(disease_id, ['gene_associations']);
-        const section = result.sections?.gene_associations;
-        if (section && typeof section === 'object' && '_error' in section) {
-          return { content: [{ type: 'text', text: JSON.stringify(section) }], isError: true };
-        }
-        const genes = (Array.isArray(section) ? section : []).slice(0, limit) || [];
-        return { content: [{ type: 'text', text: JSON.stringify(genes) }] };
-      } catch (error) {
-        return { content: [{ type: 'text', text: String(error) }], isError: true };
-      }
-    }
-  );
-
-  server.registerTool(
-    'disease_phenotypes',
-    {
-      description: 'Get HPO phenotypes for a disease',
-      inputSchema: {
-        disease_id: z.string().describe('Disease ID'),
-        limit: z.number().int().min(1).max(50).default(20),
-      },
-      annotations: { readOnlyHint: true, openWorldHint: true }
-    },
-    async ({ disease_id, limit }) => {
-      try {
-        const result = await diseaseGet(disease_id, ['phenotypes']);
-        const phenotypesRaw = (result as { sections?: { phenotypes?: unknown } }).sections?.phenotypes;
-        const phenotypes = Array.isArray(phenotypesRaw)
-          ? (phenotypesRaw as Array<{ hpo_id: string; name: string }>).slice(0, limit)
-          : phenotypesRaw;
-        return { content: [{ type: 'text', text: JSON.stringify(phenotypes) }] };
-      } catch (error) {
-        return { content: [{ type: 'text', text: String(error) }], isError: true };
       }
     }
   );

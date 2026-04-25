@@ -1,10 +1,30 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { drugSearch, drugGet } from '../../entities/drug.js';
+import { drugToTrials } from '../../entities/cross-entity.js';
 
 const DRUG_SECTIONS = [
   'core', 'us_regulatory', 'eu_regulatory', 'who_regulatory', 'safety', 'targets', 'indications', 'all'
 ] as const;
+
+function sliceArraysRecursive(obj: unknown, limit: number): unknown {
+  if (Array.isArray(obj)) return obj.slice(0, limit);
+  if (obj && typeof obj === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      result[k] = sliceArraysRecursive(v, limit);
+    }
+    return result;
+  }
+  return obj;
+}
+
+const DRUG_ALL_SECTIONS = ['us_regulatory', 'eu_regulatory', 'who_regulatory', 'safety', 'targets', 'indications'];
+const DRUG_STORAGE_KEYS: Record<string, string> = {};
+const DRUG_ARRAY_KEYS: Record<string, string[]> = {
+  targets: [],
+  indications: [],
+};
 
 export function registerDrugTools(server: McpServer): void {
   server.registerTool(
@@ -40,12 +60,33 @@ export function registerDrugTools(server: McpServer): void {
       inputSchema: {
         name: z.string().describe('Drug name (e.g., "imatinib", "aspirin")'),
         sections: z.array(z.enum(DRUG_SECTIONS)).optional().describe('Sections to include'),
+        limit: z.number().int().min(1).max(100).default(20),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
-    async ({ name, sections }) => {
+    async ({ name, sections, limit }) => {
       try {
         const result = await drugGet(name, sections);
+        const requestedSections = (sections ?? []).includes('all')
+          ? DRUG_ALL_SECTIONS
+          : (sections ?? []);
+        if (result.sections) {
+          for (const name_ of requestedSections) {
+            const data = result.sections[name_];
+            if (!data || typeof data !== 'object') continue;
+            if (Array.isArray(data)) {
+              result.sections[name_] = data.slice(0, limit);
+            } else if (DRUG_ARRAY_KEYS[name_]) {
+              const keys = DRUG_ARRAY_KEYS[name_];
+              const obj = data as Record<string, unknown>;
+              for (const k of keys) {
+                if (Array.isArray(obj[k])) obj[k] = obj[k].slice(0, limit);
+              }
+            } else {
+              result.sections[name_] = sliceArraysRecursive(data, limit);
+            }
+          }
+        }
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       } catch (error) {
         return { 
@@ -57,87 +98,18 @@ export function registerDrugTools(server: McpServer): void {
   );
 
   server.registerTool(
-    'drug_targets',
+    'drug_trials',
     {
-      description: 'Get drug targets via ChEMBL',
+      description: 'Find clinical trials for a drug',
       inputSchema: {
-        name: z.string().describe('Drug name'),
-        limit: z.number().int().min(1).max(50).default(20),
+        drug: z.string().describe('Drug name'),
       },
-      annotations: { readOnlyHint: true, openWorldHint: true }
+      annotations: { readOnlyHint: true }
     },
-    async ({ name, limit }) => {
+    async ({ drug }) => {
       try {
-        const result = await drugGet(name, ['targets']);
-        const section = result.sections?.targets;
-        if (section && typeof section === 'object' && '_error' in section) {
-          return { content: [{ type: 'text', text: JSON.stringify(section) }], isError: true };
-        }
-        const targets = (Array.isArray(section) ? section : []).slice(0, limit) || [];
-        return { content: [{ type: 'text', text: JSON.stringify(targets) }] };
-      } catch (error) {
-        return { content: [{ type: 'text', text: String(error) }], isError: true };
-      }
-    }
-  );
-
-  server.registerTool(
-    'drug_indications',
-    {
-      description: 'Get drug indications via ChEMBL',
-      inputSchema: {
-        name: z.string().describe('Drug name'),
-        limit: z.number().int().min(1).max(50).default(20),
-      },
-      annotations: { readOnlyHint: true, openWorldHint: true }
-    },
-    async ({ name, limit }) => {
-      try {
-        const result = await drugGet(name, ['indications']);
-        const section = result.sections?.indications;
-        if (section && typeof section === 'object' && '_error' in section) {
-          return { content: [{ type: 'text', text: JSON.stringify(section) }], isError: true };
-        }
-        const indications = (Array.isArray(section) ? section : []).slice(0, limit) || [];
-        return { content: [{ type: 'text', text: JSON.stringify(indications) }] };
-      } catch (error) {
-        return { content: [{ type: 'text', text: String(error) }], isError: true };
-      }
-    }
-  );
-
-  server.registerTool(
-    'drug_adverse_events',
-    {
-      description: 'Get adverse events for a drug via OpenFDA',
-      inputSchema: {
-        name: z.string().describe('Drug name'),
-      },
-      annotations: { readOnlyHint: true, openWorldHint: true }
-    },
-    async ({ name }) => {
-      try {
-        const result = await drugGet(name, ['safety']);
-        return { content: [{ type: 'text', text: JSON.stringify(result.sections?.safety) }] };
-      } catch (error) {
-        return { content: [{ type: 'text', text: String(error) }], isError: true };
-      }
-    }
-  );
-
-  server.registerTool(
-    'drug_regulatory',
-    {
-      description: 'Get FDA regulatory information for a drug',
-      inputSchema: {
-        name: z.string().describe('Drug name'),
-      },
-      annotations: { readOnlyHint: true, openWorldHint: true }
-    },
-    async ({ name }) => {
-      try {
-        const result = await drugGet(name, ['us_regulatory']);
-        return { content: [{ type: 'text', text: JSON.stringify(result.sections?.us_regulatory) }] };
+        const results = await drugToTrials(drug);
+        return { content: [{ type: 'text', text: JSON.stringify(results) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
       }
