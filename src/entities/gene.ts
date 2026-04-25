@@ -70,7 +70,14 @@ export async function geneGet(
   symbol: string,
   sections?: string[]
 ): Promise<GeneResult> {
-  const sectionConfig = sections || ['core'];
+  const SECTION_ALIASES: Record<string, string> = {
+    dosage_sensitivity: 'clingen',
+    protein_atlas: 'hpa',
+    clinical_evidence: 'civic',
+    disease_associations: 'disgenet',
+  };
+  const normalizedSections = (sections || []).map(s => SECTION_ALIASES[s] || s);
+  const sectionConfig = normalizedSections.length > 0 ? normalizedSections : ['core'];
   
   const conn = connectionManager.getConnection('mygene');
   

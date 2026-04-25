@@ -4,6 +4,40 @@ import { articleSearch, articleGet } from '../../entities/article.js';
 
 const ARTICLE_SECTIONS = ['core', 'oa', 'annotations', 'graph', 'all'] as const;
 
+function applyLimit(
+  sections: Record<string, unknown>,
+  requestedNames: string[],
+  storageKeyMap: Record<string, string>,
+  arrayKeyMap: Record<string, string[]>,
+  limit: number,
+): void {
+  for (const name of requestedNames) {
+    const storedKey = storageKeyMap[name] ?? name;
+    const data = sections[storedKey];
+    if (!data || typeof data !== 'object') continue;
+
+    const keys = arrayKeyMap[name];
+    if (Array.isArray(data)) {
+      sections[storedKey] = data.slice(0, limit);
+    } else if (keys) {
+      const obj = data as Record<string, unknown>;
+      for (const k of keys) {
+        if (Array.isArray(obj[k])) obj[k] = obj[k].slice(0, limit);
+      }
+    }
+  }
+}
+
+const ARTICLE_ALL_SECTIONS = ['oa', 'annotations', 'graph'];
+const ARTICLE_STORAGE_KEYS: Record<string, string> = {
+  graph: 'citation_graph',
+  oa: 'open_access',
+};
+const ARTICLE_ARRAY_KEYS: Record<string, string[]> = {
+  annotations: [],
+  graph: ['citations', 'references'],
+};
+
 export function registerArticleTools(server: McpServer): void {
   server.registerTool(
     'article_search',
@@ -37,56 +71,25 @@ export function registerArticleTools(server: McpServer): void {
       inputSchema: {
         pmid: z.string().describe('PubMed ID (PMID)'),
         sections: z.array(z.enum(ARTICLE_SECTIONS)).optional().describe('Sections to include'),
+        limit: z.number().int().min(1).max(100).default(20),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
-    async ({ pmid, sections }) => {
+    async ({ pmid, sections, limit }) => {
       try {
         const result = await articleGet(pmid, sections);
+        const requestedSections = (sections ?? []).includes('all')
+          ? ARTICLE_ALL_SECTIONS
+          : (sections ?? []);
+        if (result.sections) {
+          applyLimit(result.sections, requestedSections, ARTICLE_STORAGE_KEYS, ARTICLE_ARRAY_KEYS, limit);
+        }
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       } catch (error) {
         return {
           content: [{ type: 'text', text: String(error) }],
           isError: true
         };
-      }
-    }
-  );
-
-  server.registerTool(
-    'article_annotations',
-    {
-      description: 'Get PubTator annotations for an article',
-      inputSchema: {
-        pmid: z.string().describe('PubMed ID (PMID)'),
-      },
-      annotations: { readOnlyHint: true, openWorldHint: true }
-    },
-    async ({ pmid }) => {
-      try {
-        const result = await articleGet(pmid, ['annotations']);
-        return { content: [{ type: 'text', text: JSON.stringify(result.sections?.annotations) }] };
-      } catch (error) {
-        return { content: [{ type: 'text', text: String(error) }], isError: true };
-      }
-    }
-  );
-
-  server.registerTool(
-    'article_citations',
-    {
-      description: 'Get citation graph for an article',
-      inputSchema: {
-        pmid: z.string().describe('PubMed ID (PMID)'),
-      },
-      annotations: { readOnlyHint: true, openWorldHint: true }
-    },
-    async ({ pmid }) => {
-      try {
-        const result = await articleGet(pmid, ['graph']);
-        return { content: [{ type: 'text', text: JSON.stringify(result.sections?.citation_graph) }] };
-      } catch (error) {
-        return { content: [{ type: 'text', text: String(error) }], isError: true };
       }
     }
   );

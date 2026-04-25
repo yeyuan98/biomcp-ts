@@ -1,32 +1,47 @@
 {
   "name": "biomcp",
-  "version": "1.0.0",
+  "version": "0.1.1",
   "description": "BioMCP - Biomedical MCP Server in TypeScript",
   "type": "module",
-  "main": "dist/server/index.js",
+  "main": "dist/bundle.js",
   "bin": {
-    "biomcp": "dist/server/index.js"
+    "biomcp": "dist/bundle.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yeyuan98/biomcp-ts.git"
+  },
+  "exports": {
+    ".": "./dist/bundle.js"
+  },
+  "files": [
+    "dist/bundle.js",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
-    "start": "node dist/server/index.js",
+    "build:bundle": "tsc && esbuild dist/server/index.js --bundle --platform=node --format=esm --minify --outfile=dist/bundle.js",
+    "start": "node dist/bundle.js",
     "dev": "tsx watch src/server/index.ts",
-    "test": "node --experimental-vm-modules node_modules/.bin/jest",
-    "test:coverage": "node --experimental-vm-modules node_modules/.bin/jest --coverage",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest --testPathIgnorePatterns=integration",
+    "test:coverage": "node --experimental-vm-modules node_modules/.bin/jest --testPathIgnorePatterns=integration --coverage",
+    "test:integration": "node --experimental-vm-modules node_modules/.bin/jest --config jest.integration.config.ts --runInBand",
+    "test:all": "node --experimental-vm-modules node_modules/.bin/jest",
+    "test:update-fixtures": "UPDATE_FIXTURES=1 node --experimental-vm-modules node_modules/.bin/jest --config jest.integration.config.ts --runInBand",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "fast-xml-parser": "^5.7.1",
-    "zod": "^3.25.0"
-  },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^20.11.0",
+    "esbuild": "^0.28.0",
+    "fast-xml-parser": "^5.7.1",
     "jest": "^30.3.0",
     "ts-jest": "^29.4.9",
     "tsx": "^4.7.0",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "zod": "^3.25.0"
   },
   "engines": {
     "node": ">=18.0.0"
