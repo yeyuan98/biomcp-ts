@@ -7,6 +7,24 @@ export interface ArticleSearchOptions {
   limit?: number;
   offset?: number;
   cursorMark?: string;
+  dateRange?: string;
+}
+
+interface ParsedDateRange {
+  from?: string;
+  to?: string;
+}
+
+export function parseDateRange(dateRange: string): ParsedDateRange {
+  const [from, to] = dateRange.split('/');
+  return {
+    from: from || undefined,
+    to: to || undefined,
+  };
+}
+
+function formatPubMedDate(isoDate: string): string {
+  return isoDate.replace(/-/g, '/');
 }
 
 export interface Article {
@@ -41,26 +59,34 @@ export async function articleSearch(
   options: ArticleSearchOptions = {}
 ): Promise<Article[]> {
   const { source, limit = 10, offset = 0 } = options;
+  const dateRange = options.dateRange ? parseDateRange(options.dateRange) : undefined;
 
   if (source) {
-    return searchSingleSource(query, source, limit, offset, options.cursorMark);
+    return searchSingleSource(query, source, limit, offset, options.cursorMark, dateRange);
   }
 
-  return federatedSearch(query, limit, offset);
+  return federatedSearch(query, limit, offset, dateRange);
 }
 
 async function federatedSearch(
   query: string,
   limit: number,
-  offset: number
+  offset: number,
+  dateRange?: ParsedDateRange
 ): Promise<Article[]> {
-  const backends = [
-    searchPubMed(query, limit, offset),
-    searchEuropePMC(query, limit, offset),
-    searchSemanticScholar(query, limit, offset),
-    searchPubTator(query, limit, offset),
-    searchLitSense(query, limit, offset),
-  ];
+  const backends = dateRange
+    ? [
+        searchPubMed(query, limit, offset, dateRange),
+        searchEuropePMC(query, limit, offset, undefined, dateRange),
+        searchSemanticScholar(query, limit, offset, dateRange),
+      ]
+    : [
+        searchPubMed(query, limit, offset),
+        searchEuropePMC(query, limit, offset),
+        searchSemanticScholar(query, limit, offset),
+        searchPubTator(query, limit, offset),
+        searchLitSense(query, limit, offset),
+      ];
 
   const results = await Promise.allSettled(backends);
   const allArticles: Article[] = [];
@@ -79,25 +105,34 @@ async function searchSingleSource(
   source: string,
   limit: number,
   offset: number,
-  cursorMark?: string
+  cursorMark?: string,
+  dateRange?: ParsedDateRange
 ): Promise<Article[]> {
+  if (dateRange && (source === 'pubtator' || source === 'litsense')) {
+    return [{ _error: `${source} does not support date filtering. Use pubmed, europepmc, or semantic_scholar.` } as any];
+  }
   switch (source) {
-    case 'pubmed': return searchPubMed(query, limit, offset);
-    case 'europepmc': return searchEuropePMC(query, limit, offset, cursorMark);
-    case 'semantic_scholar': return searchSemanticScholar(query, limit, offset);
+    case 'pubmed': return searchPubMed(query, limit, offset, dateRange);
+    case 'europepmc': return searchEuropePMC(query, limit, offset, cursorMark, dateRange);
+    case 'semantic_scholar': return searchSemanticScholar(query, limit, offset, dateRange);
     case 'pubtator': return searchPubTator(query, limit, offset);
     case 'litsense': return searchLitSense(query, limit, offset);
     default: return [];
   }
 }
 
-async function searchPubMed(query: string, limit: number, offset: number): Promise<Article[]> {
+async function searchPubMed(query: string, limit: number, offset: number, dateRange?: ParsedDateRange): Promise<Article[]> {
   try {
     const conn = connectionManager.getConnection('pubmed');
 
-    const searchResponse = await conn.request(
-      `/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=${limit}&retstart=${offset}&retmode=json`
-    ) as PubMedSearchResponse;
+    let searchUrl = `/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=${limit}&retstart=${offset}&retmode=json`;
+    if (dateRange?.from || dateRange?.to) {
+      searchUrl += `&datetype=pdat`;
+      if (dateRange.from) searchUrl += `&mindate=${formatPubMedDate(dateRange.from)}`;
+      if (dateRange.to) searchUrl += `&maxdate=${formatPubMedDate(dateRange.to)}`;
+    }
+
+    const searchResponse = await conn.request(searchUrl) as PubMedSearchResponse;
 
     if (!searchResponse.esearchresult?.idlist?.length) return [];
 
@@ -114,13 +149,20 @@ async function searchPubMed(query: string, limit: number, offset: number): Promi
   }
 }
 
-async function searchEuropePMC(query: string, limit: number, _offset: number, cursorMark?: string): Promise<Article[]> {
+async function searchEuropePMC(query: string, limit: number, _offset: number, cursorMark?: string, dateRange?: ParsedDateRange): Promise<Article[]> {
   try {
     const conn = connectionManager.getConnection('europepmc');
 
+    let queryString = query;
+    if (dateRange?.from || dateRange?.to) {
+      const from = dateRange.from || '*';
+      const to = dateRange.to || '*';
+      queryString += ` AND FIRST_PUB_DATE:[${from} TO ${to}]`;
+    }
+
     const cursor = cursorMark || '*';
     const response = await conn.request(
-      `/search?query=${encodeURIComponent(query)}&resulttype=lite&format=json&pageSize=${limit}&cursorMark=${encodeURIComponent(cursor)}`
+      `/search?query=${encodeURIComponent(queryString)}&resulttype=lite&format=json&pageSize=${limit}&cursorMark=${encodeURIComponent(cursor)}`
     ) as EuropePMCResponse;
 
     return (response.resultList?.result || []).map(transformEuropePMC);
@@ -131,13 +173,18 @@ async function searchEuropePMC(query: string, limit: number, _offset: number, cu
   }
 }
 
-async function searchSemanticScholar(query: string, limit: number, offset: number): Promise<Article[]> {
+async function searchSemanticScholar(query: string, limit: number, offset: number, dateRange?: ParsedDateRange): Promise<Article[]> {
   try {
     const conn = connectionManager.getConnection('semantic_scholar');
 
-    const response = await conn.request(
-      `/graph/v1/paper/search?query=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}&fields=title,abstract,authors,year,venue,citationCount,isOpenAccess,externalIds`
-    ) as SemanticScholarResponse;
+    let searchUrl = `/graph/v1/paper/search?query=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}&fields=title,abstract,authors,year,venue,citationCount,isOpenAccess,externalIds`;
+    if (dateRange?.from || dateRange?.to) {
+      const from = dateRange.from || '';
+      const to = dateRange.to || '';
+      searchUrl += `&publicationDateOrYear=${from}:${to}`;
+    }
+
+    const response = await conn.request(searchUrl) as SemanticScholarResponse;
 
     return (response.data || []).map(transformSemanticScholar);
   } catch (error) {

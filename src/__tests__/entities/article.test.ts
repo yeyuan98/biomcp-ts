@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { articleSearch, articleGet, deduplicateAndRank, transformPubTator, transformLitSense, transformEuropePMC, transformSemanticScholar } from '../../entities/article.js';
+import { articleSearch, articleGet, deduplicateAndRank, transformPubTator, transformLitSense, transformEuropePMC, transformSemanticScholar, parseDateRange } from '../../entities/article.js';
 import { parsePubMedXml } from '../../transform/pubmed.js';
 
 const SINGLE_ARTICLE_XML = `<?xml version="1.0"?>
@@ -349,5 +349,169 @@ describe('article', () => {
   test('articleSearch() returns empty for unknown source', async () => {
     const results = await articleSearch('brca1', { source: 'unknown' as any });
     expect(results).toEqual([]);
+  });
+
+  describe('dateRange', () => {
+    test('parseDateRange parses full range', () => {
+      expect(parseDateRange('2020-01-01/2023-12-31')).toEqual({
+        from: '2020-01-01',
+        to: '2023-12-31',
+      });
+    });
+
+    test('parseDateRange parses open-ended from', () => {
+      expect(parseDateRange('2020-01-01/')).toEqual({
+        from: '2020-01-01',
+        to: undefined,
+      });
+    });
+
+    test('parseDateRange parses open-ended to', () => {
+      expect(parseDateRange('/2023-12-31')).toEqual({
+        from: undefined,
+        to: '2023-12-31',
+      });
+    });
+
+    test('PubMed search appends date params when dateRange is set', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ esearchresult: { idlist: [] } }),
+        }) as any;
+
+      await articleSearch('brca1', { source: 'pubmed', dateRange: '2020-01-01/2023-12-31' });
+
+      const searchCallUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(searchCallUrl).toContain('datetype=pdat');
+      expect(searchCallUrl).toContain('mindate=2020/01/01');
+      expect(searchCallUrl).toContain('maxdate=2023/12/31');
+    });
+
+    test('PubMed search with open-ended from-only dateRange', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ esearchresult: { idlist: [] } }),
+        }) as any;
+
+      await articleSearch('brca1', { source: 'pubmed', dateRange: '2020-01-01/' });
+
+      const searchCallUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(searchCallUrl).toContain('datetype=pdat');
+      expect(searchCallUrl).toContain('mindate=2020/01/01');
+      expect(searchCallUrl).not.toContain('maxdate');
+    });
+
+    test('Europe PMC search appends date range in query', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ resultList: { result: [] } }),
+      }) as any;
+
+      await articleSearch('brca1', { source: 'europepmc', dateRange: '2020-01-01/2023-12-31' });
+
+      const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(callUrl).toContain('FIRST_PUB_DATE');
+      expect(callUrl).toContain('2020-01-01');
+      expect(callUrl).toContain('2023-12-31');
+    });
+
+    test('Europe PMC search with open-ended to-only dateRange', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ resultList: { result: [] } }),
+      }) as any;
+
+      await articleSearch('brca1', { source: 'europepmc', dateRange: '/2023-12-31' });
+
+      const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+      const decodedUrl = decodeURIComponent(callUrl);
+      expect(decodedUrl).toContain('FIRST_PUB_DATE:[* TO 2023-12-31]');
+    });
+
+    test('Semantic Scholar search appends publicationDateOrYear param', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ data: [] }),
+      }) as any;
+
+      await articleSearch('brca1', { source: 'semantic_scholar', dateRange: '2020-01-01/2023-12-31' });
+
+      const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(callUrl).toContain('publicationDateOrYear=2020-01-01:2023-12-31');
+    });
+
+    test('Semantic Scholar search with open-ended from-only', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ data: [] }),
+      }) as any;
+
+      await articleSearch('brca1', { source: 'semantic_scholar', dateRange: '2020-01-01/' });
+
+      const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(callUrl).toContain('publicationDateOrYear=2020-01-01:');
+    });
+
+    test('pubtator source returns error when dateRange is set', async () => {
+      const results = await articleSearch('brca1', { source: 'pubtator', dateRange: '2020-01-01/2023-12-31' });
+      expect(results).toHaveLength(1);
+      expect(results[0]).toHaveProperty('_error');
+      expect((results[0] as any)._error).toContain('does not support date filtering');
+    });
+
+    test('litsense source returns error when dateRange is set', async () => {
+      const results = await articleSearch('brca1', { source: 'litsense', dateRange: '2020-01-01/2023-12-31' });
+      expect(results).toHaveLength(1);
+      expect(results[0]).toHaveProperty('_error');
+      expect((results[0] as any)._error).toContain('does not support date filtering');
+    });
+
+    test('federated search with dateRange only queries date-aware backends', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ esearchresult: { idlist: [] } }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ resultList: { result: [] } }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ data: [] }),
+        }) as any;
+
+      await articleSearch('brca1', { dateRange: '2020-01-01/2023-12-31' });
+
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+
+      const urls = (global.fetch as any).mock.calls.map((c: any) => c[0] as string);
+      expect(urls[0]).toContain('esearch.fcgi');
+      expect(urls[1]).toContain('europepmc');
+      expect(urls[2]).toContain('semanticscholar');
+    });
+
+    test('federated search without dateRange queries all backends', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ esearchresult: { idlist: [] } }),
+      }) as any;
+
+      await articleSearch('brca1');
+
+      expect(global.fetch).toHaveBeenCalledTimes(5);
+    });
   });
 });
