@@ -1,6 +1,6 @@
 # Entities Layer
 
-The business logic layer for biomcp-ts. Each entity module (gene, variant, drug, disease, article, trial) implements a consistent **search / get / sections** pattern:
+The business logic layer for biomcp-ts. Each entity module (gene, variant, drug, disease, article, trial, pdb) implements a consistent **search / get / sections** pattern:
 
 1. **`search`** — queries a primary data source with filters, returns lightweight result arrays
 2. **`get`** — fetches a single entity by identifier, optionally enriching with parallel section fetches
@@ -283,6 +283,62 @@ transformTrialResponse(data: ClinicalTrialsDetailStudy): TrialResult
 | `outcomes` | ClinicalTrials.gov | None | Primary and secondary outcome measures with timeframes |
 
 All sections re-fetch the full study record from `/studies/<nctId>` and extract the relevant `protocolSection` submodule.
+
+---
+
+## PDB (`pdb.ts`)
+
+**Primary sources:** RCSB PDB Data API (`pdb_data` connection), Search API (`pdb_search` connection), File Download (`pdb_files` connection)
+
+### Exported Functions
+
+```ts
+pdbSearch(query: string, options?: PdbSearchOptions): Promise<PdbSearchResult[]>
+pdbGet(pdbId: string, sections?: string[]): Promise<PdbResult>
+pdbDownload(pdbId: string, format?: 'cif' | 'pdb'): Promise<PdbDownloadResult>
+validatePdbId(pdbId: string): void
+formatFileSize(bytes: number): string
+```
+
+### Exported Types
+
+| Type | Fields |
+|------|--------|
+| `PdbSearchOptions` | `limit?: number`, `offset?: number` |
+| `PdbSearchResult` | `pdb_id`, `score?`, `summary?: PdbEntrySummary` |
+| `PdbEntrySummary` | `pdb_id`, `title`, `experimental_method?`, `resolution?`, `molecular_weight?`, `polymer_count?`, `polymer_composition?`, `deposition_date?`, `release_date?`, `organism?`, `doi?`, `pmid?`, `authors?`, `space_group?`, `unit_cell?`, `container_ids?` |
+| `PdbResult` | `pdb_id`, `summary: PdbEntrySummary`, `sections?: Record<string, unknown>` |
+| `PdbDownloadResult` | `file_path`, `file_size_bytes`, `file_size_human`, `format`, `pdb_id`, `_warn?` |
+
+### Search Behavior
+
+- Uses `post()` on the `pdb_search` connection (RCSB Search API v2, POST to `/query`)
+- Full-text search via `service: "full_text"` with compact verbosity
+- Fetches summary metadata for top results in parallel via `fetchWithTimeout`
+- Handles empty results (204 No Content) gracefully
+
+### Sections
+
+| Section | Upstream API | Auth | Notes |
+|---------|-------------|------|-------|
+| `polymer_entities` | RCSB Data API `/core/polymer_entity/{id}_{entityId}` | None | One request per polymer entity from `container_ids` |
+| `ligands` | RCSB Data API `/core/nonpolymer_entity/{id}_{entityId}` | None | One request per non-polymer entity |
+| `assembly` | RCSB Data API `/core/assembly/{id}-{assemblyId}` | None | One request per biological assembly |
+| `experiment` | Extracted from core `exptl`, `refine`, `em_3d_reconstruction` | None | No additional network request |
+| `citation` | Extracted from core `rcsb_primary_citation` | None | No additional network request |
+
+### Download Behavior
+
+- Fetches from `https://files.rcsb.org/download/{id}.{ext}`
+- Saves to OS temp directory (`mkdtempSync`) with timestamped filename
+- Default format is `cif` (mmCIF, universally available for all experimental entries)
+- Legacy `pdb` format may 404 for some entries; returns clear error suggesting retry with `cif`
+- Files >1 MB include `_warn` field advising the agent to use grep/read specific line ranges
+
+### Validation
+
+- `validatePdbId` rejects IDs not matching `/^[A-Za-z0-9]{4}$/`
+- AlphaFold/CSM IDs (starting with `AF_` or `MA_`) are rejected with a message pointing to AlphaFold DB
 
 ---
 

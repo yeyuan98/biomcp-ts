@@ -6,18 +6,6 @@ const PDB_SECTIONS = [
   'polymer_entities', 'ligands', 'assembly', 'experiment', 'citation', 'all',
 ] as const;
 
-function sliceArraysRecursive(obj: unknown, limit: number): unknown {
-  if (Array.isArray(obj)) return obj.slice(0, limit);
-  if (obj && typeof obj === 'object') {
-    const result: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(obj)) {
-      result[k] = sliceArraysRecursive(v, limit);
-    }
-    return result;
-  }
-  return obj;
-}
-
 export function registerPdbTools(server: McpServer): void {
   server.registerTool(
     'pdb',

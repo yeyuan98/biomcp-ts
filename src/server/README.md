@@ -14,7 +14,7 @@ const transport = new StdioServerTransport();
 await server.connect(transport);
 ```
 
-Entry point: `src/server/index.ts`. Calls seven registration functions in order: `registerGeneTools`, `registerVariantTools`, `registerDrugTools`, `registerDiseaseTools`, `registerArticleTools`, `registerTrialTools`, `registerUtilityTools`.
+Entry point: `src/server/index.ts`. Calls eight registration functions in order: `registerGeneTools`, `registerVariantTools`, `registerDrugTools`, `registerDiseaseTools`, `registerArticleTools`, `registerTrialTools`, `registerUtilityTools`, `registerPdbTools`.
 
 ## Tool Handler Pattern
 
@@ -88,7 +88,15 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 | `discover` | `query: string` | Free-text concept resolution | readOnly |
 | `batch_get` | `inputs: { entity: "gene" \| "variant" \| "drug" \| "disease" \| "trial" \| "article", id: string, sections?: string[] }[]` | Get multiple entities in parallel | readOnly |
 
-**Total: 24 tools** across 7 registration modules.
+### PDB Tools (`tools/pdb.ts`) — 1 tool
+
+| Tool | Input Schema | Description | Annotations |
+|------|-------------|-------------|-------------|
+| `pdb` | `query?: string`, `pdb_id?: string`, `sections?: ("polymer_entities" \| "ligands" \| "assembly" \| "experiment" \| "citation" \| "all")[]`, `download?: boolean` (default false), `format?: "cif" \| "pdb"` (default "cif"), `limit?: number` (1-50, default 10), `offset?: number` (default 0) | Access RCSB PDB: search structures (query), get metadata (pdb_id), download files (pdb_id + download) | openWorld |
+
+Param-based dispatch: `query` → search mode, `pdb_id` → get mode, `pdb_id` + `download=true` → download mode. Downloads save to OS temp dir and return file path + size. Default format is mmCIF (universally available); legacy PDB format may 404 for some entries.
+
+**Total: 25 tools** across 8 registration modules.
 
 ## Error Handling (`errors.ts`)
 
@@ -202,4 +210,5 @@ src/server/
     article.ts        2 article tools (search, get)
     trial.ts          2 trial tools (search, get)
     utility.ts        2 utility tools (discover, batch_get)
+    pdb.ts            1 PDB tool (search, get, download)
 ```

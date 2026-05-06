@@ -5,6 +5,7 @@ import { writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+const ENTRY_TIMEOUT_MS = 15000;
 const SECTION_TIMEOUT_MS = 8000;
 const LARGE_FILE_WARN_BYTES = 1_000_000;
 const PDB_ID_REGEX = /^[A-Za-z0-9]{4}$/;
@@ -123,7 +124,7 @@ export async function pdbSearch(
       const dataConn = connectionManager.getConnection('pdb_data');
       const raw = await dataConn.request(`/core/entry/${id}`) as Record<string, unknown>;
       return { id, summary: transformPdbEntry(id, raw as any) };
-    }, SECTION_TIMEOUT_MS)
+    }, ENTRY_TIMEOUT_MS)
   );
 
   const settled = await Promise.allSettled(summaryPromises);
@@ -148,7 +149,13 @@ export async function pdbGet(
   validatePdbId(pdbId);
 
   const conn = connectionManager.getConnection('pdb_data');
-  const raw = await conn.request(`/core/entry/${pdbId}`) as Record<string, unknown>;
+  const { data: raw, error: entryError } = await fetchWithTimeout(
+    () => conn.request(`/core/entry/${pdbId}`) as Promise<Record<string, unknown>>,
+    ENTRY_TIMEOUT_MS
+  );
+  if (entryError || !raw) {
+    throw new Error(`Failed to fetch PDB entry ${pdbId}: ${entryError ?? 'no data returned'}`);
+  }
   const summary = transformPdbEntry(pdbId, raw as any);
 
   const result: PdbResult = { pdb_id: pdbId, summary };
@@ -249,13 +256,15 @@ async function fetchPolymerEntities(
 
   try {
     const conn = connectionManager.getConnection('pdb_data');
+    const id = pdbId.toLowerCase();
     const promises = entityIds.map(entityId =>
-      conn.request(`/core/polymer_entity/${pdbId}_${entityId}`)
+      conn.request(`/core/polymer_entity/${id}/${entityId}`)
     );
     const results = await Promise.allSettled(promises);
     return results.map((r, i) => {
       if (r.status === 'fulfilled') return r.value;
-      return { _error: `Failed to fetch polymer entity ${entityIds[i]}` } as any;
+      const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
+      return { _error: `Failed to fetch polymer entity ${entityIds[i]}: ${reason}` } as any;
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -274,13 +283,15 @@ async function fetchLigands(
 
   try {
     const conn = connectionManager.getConnection('pdb_data');
+    const id = pdbId.toLowerCase();
     const promises = entityIds.map(entityId =>
-      conn.request(`/core/nonpolymer_entity/${pdbId}_${entityId}`)
+      conn.request(`/core/nonpolymer_entity/${id}/${entityId}`)
     );
     const results = await Promise.allSettled(promises);
     return results.map((r, i) => {
       if (r.status === 'fulfilled') return r.value;
-      return { _error: `Failed to fetch non-polymer entity ${entityIds[i]}` } as any;
+      const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
+      return { _error: `Failed to fetch non-polymer entity ${entityIds[i]}: ${reason}` } as any;
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -299,13 +310,15 @@ async function fetchAssembly(
 
   try {
     const conn = connectionManager.getConnection('pdb_data');
+    const id = pdbId.toLowerCase();
     const promises = assemblyIds.map(assemblyId =>
-      conn.request(`/core/assembly/${pdbId}-${assemblyId}`)
+      conn.request(`/core/assembly/${id}/${assemblyId}`)
     );
     const results = await Promise.allSettled(promises);
     return results.map((r, i) => {
       if (r.status === 'fulfilled') return r.value;
-      return { _error: `Failed to fetch assembly ${assemblyIds[i]}` } as any;
+      const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
+      return { _error: `Failed to fetch assembly ${assemblyIds[i]}: ${reason}` } as any;
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
