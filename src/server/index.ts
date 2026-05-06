@@ -8,6 +8,7 @@ import { registerDiseaseTools } from './tools/disease.js';
 import { registerArticleTools } from './tools/article.js';
 import { registerTrialTools } from './tools/trial.js';
 import { registerUtilityTools } from './tools/utility.js';
+import { registerPdbTools } from './tools/pdb.js';
 
 const server = new McpServer({
   name: 'biomcp',
@@ -21,6 +22,7 @@ registerDiseaseTools(server);
 registerArticleTools(server);
 registerTrialTools(server);
 registerUtilityTools(server);
+registerPdbTools(server);
 
 async function main() {
   const transport = new StdioServerTransport();
