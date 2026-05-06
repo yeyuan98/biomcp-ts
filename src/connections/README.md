@@ -1,6 +1,6 @@
 # connections
 
-API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a source registry, connection lifecycle management, and rate limiting for 55 bioinformatics data sources.
+API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a source registry, connection lifecycle management, and rate limiting for 58 bioinformatics data sources.
 
 ## Architecture
 
@@ -109,13 +109,14 @@ const connectionManager: ConnectionManager;
 class RestConnection implements IConnection<string, unknown> {
   constructor(options: ConnectionOptions);
   request(path: string): Promise<unknown>;
+  post(path: string, body: Record<string, unknown>): Promise<unknown>;
   batch(paths: string[]): Promise<unknown[]>;
   healthCheck(): Promise<boolean>;
   close(): void;
 }
 ```
 
-Issues `GET` requests. Auth credentials are read from `process.env` at construction time (`hasAuth` is snapshot). Response content type is auto-detected from the `content-type` header — JSON is parsed, everything else returned as text. Supports `timeoutMs` via `AbortSignal.timeout`.
+Issues `GET` requests via `request()`. Issues `POST` requests with JSON body via `post()` (handles 204 No Content by returning null). Auth credentials are read from `process.env` at construction time (`hasAuth` is snapshot). Response content type is auto-detected from the `content-type` header — JSON is parsed, everything else returned as text. Supports `timeoutMs` via `AbortSignal.timeout`.
 
 ### `graphql.ts`
 
@@ -178,7 +179,7 @@ Wraps any async function with an `AbortController`-based timeout. Returns `{ dat
 
 ## Registry — Sources by Protocol
 
-### REST (45 sources)
+### REST (48 sources)
 
 | Category | Source IDs |
 |---|---|
@@ -193,6 +194,7 @@ Wraps any async function with an `AbortController`-based timeout. Returns `{ dat
 | Funding & Research | `nih_reporter` |
 | cBio Portal | `cbioportal`, `cbioportal_datahub` |
 | Oncology | `oncokb` |
+| Structural Biology | `pdb_data`, `pdb_search`, `pdb_files` |
 | Required Auth Keys | `disgenet`, `umls` |
 
 ### GraphQL (4 sources)

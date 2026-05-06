@@ -73,6 +73,7 @@ jest.mock('../../connections/manager.js', () => ({
   connectionManager: {
     getConnection: jest.fn().mockReturnValue({
       request: jest.fn(),
+      post: jest.fn(),
       healthCheck: jest.fn().mockResolvedValue(true),
     }),
   },
@@ -86,6 +87,10 @@ jest.mock('../../transform/gene.js', () => ({
   transformMyGeneHit: jest.fn(),
 }));
 
+jest.mock('../../transform/pdb.js', () => ({
+  transformPdbEntry: jest.fn(),
+}));
+
 import { registerGeneTools } from '../../server/tools/gene.js';
 import { registerDrugTools } from '../../server/tools/drug.js';
 import { registerVariantTools } from '../../server/tools/variant.js';
@@ -93,6 +98,7 @@ import { registerDiseaseTools } from '../../server/tools/disease.js';
 import { registerTrialTools } from '../../server/tools/trial.js';
 import { registerArticleTools } from '../../server/tools/article.js';
 import { registerUtilityTools } from '../../server/tools/utility.js';
+import { registerPdbTools } from '../../server/tools/pdb.js';
 
 beforeEach(() => {
   mockRegisterTool.mockClear();
@@ -134,7 +140,12 @@ describe('Tool registration', () => {
     expect(mockRegisterTool).toHaveBeenCalledTimes(2);
   });
 
-  it('total registerTool calls across all registrations = 24', () => {
+  it('registerPdbTools calls registerTool 1 time', () => {
+    registerPdbTools(mockServer);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('total registerTool calls across all registrations = 25', () => {
     registerGeneTools(mockServer);
     registerDrugTools(mockServer);
     registerVariantTools(mockServer);
@@ -142,7 +153,8 @@ describe('Tool registration', () => {
     registerTrialTools(mockServer);
     registerArticleTools(mockServer);
     registerUtilityTools(mockServer);
-    expect(mockRegisterTool).toHaveBeenCalledTimes(24);
+    registerPdbTools(mockServer);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(25);
   });
 
   it('no duplicate tool names across all registrations', () => {
@@ -153,6 +165,7 @@ describe('Tool registration', () => {
     registerTrialTools(mockServer);
     registerArticleTools(mockServer);
     registerUtilityTools(mockServer);
+    registerPdbTools(mockServer);
 
     const names = mockRegisterTool.mock.calls.map((call: any[]) => call[0]);
     const uniqueNames = new Set(names);
@@ -167,6 +180,7 @@ describe('Tool registration', () => {
     registerTrialTools(mockServer);
     registerArticleTools(mockServer);
     registerUtilityTools(mockServer);
+    registerPdbTools(mockServer);
 
     const names = mockRegisterTool.mock.calls.map((call: any[]) => call[0]);
     const expected = [
@@ -177,6 +191,7 @@ describe('Tool registration', () => {
       'article_search', 'article_get',
       'trial_search', 'trial_get',
       'discover', 'batch_get',
+      'pdb',
     ];
     expect(names.sort()).toEqual(expected.sort());
   });

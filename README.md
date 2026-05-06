@@ -1,17 +1,17 @@
 # BioMCP
 
-A high-performance MCP server that gives LLMs access to 24 biomedical tools federated across 50+ upstream APIs — genes, variants, drugs, diseases, literature, and clinical trials in a single integration.
+A high-performance MCP server that gives LLMs access to 25 biomedical tools federated across 50+ upstream APIs — genes, variants, drugs, diseases, literature, clinical trials, and structural biology in a single integration.
 
 Adapted from the [BioMCP Rust](https://github.com/genomoncology/biomcp) with agent-first development approach and enhancements. Kudos to the original authors.
 
 ## Highlights
 
-- **24 tools** across 7 domains — search, retrieve, and cross-reference biomedical entities
+- **25 tools** across 8 domains — search, retrieve, and cross-reference biomedical entities
 - **50+ upstream sources** — MyGene, MyVariant, MyChem, MyDisease, ClinVar, gnomAD, UniProt, Reactome, OpenTargets, CIViC, OncoKB, DisGeNET, GTEx, STRING, DGIdb, ClinicalTrials.gov, PubMed, EuropePMC, Semantic Scholar, PubTator, LitSense, Monarch Initiative, OpenFDA, NIH Reporter, AlphaGenome, and more
 - **Section-based fetching** — `entityGet(id, sections)` fans out to multiple sources with per-section timeouts and graceful degradation (failed sections return `{ _error }` instead of crashing)
 - **Federated article search** — queries 5 literature backends simultaneously with PMID/PMCID/DOI deduplication
 - **Zero-config startup** — works out of the box; optional API keys unlock higher rate limits and premium data
-- **195 tests** — 131 unit tests (mocked) + 64 integration tests (live APIs via in-process MCP client)
+- **244 tests** — 154 unit tests (mocked) + 90 integration tests (live APIs via in-process MCP client)
 
 ## Quick Start
 
@@ -120,6 +120,12 @@ BioMCP speaks standard MCP over **stdio**. Point any MCP client at the `biomcp` 
 |------|-------------|
 | `discover` | Free-text concept resolution across all entity types |
 | `batch_get` | Retrieve multiple entities in parallel |
+
+### Structural Biology (1)
+
+| Tool | Description |
+|------|-------------|
+| `pdb` | Search PDB structures, get entry metadata with optional sections (polymer entities, ligands, assembly, experiment, citation), and download structure files (mmCIF/PDB) |
 
 ## Development
 

@@ -73,3 +73,29 @@ Parses a PubMed XML document (e.g. from NCBI EFetch) into an array of `Article` 
 All array fields handle both single-object and array XML representations (PubMed inconsistency). Empty/falsy values are filtered out.
 
 **Output:** `Article[]` (from `entities/article.ts`)
+
+## pdb.ts
+
+Transforms RCSB PDB Data API responses into `PdbEntrySummary` type.
+
+### Functions
+
+#### `transformPdbEntry(pdbId: string, raw: RcsbEntryResponse): PdbEntrySummary`
+
+Maps a raw RCSB Data API entry response to a `PdbEntrySummary`. Extracts `pdb_id`, `title`, `experimental_method` (deduplicated), `resolution`, `molecular_weight`, `polymer_count`, `polymer_composition`, `deposition_date`, `release_date`, `organism`, `doi`, `pmid`, `authors`, `space_group`, `unit_cell`, and `container_ids`. All optional fields default to `undefined` when absent.
+
+**Input type `RcsbEntryResponse` (partial):**
+```
+{ struct?: { title?: string }; exptl?: Array<{ method?: string }>;
+  refine?: Array<{ ls_d_res_high?: number }>;
+  rcsb_entry_info?: { resolution_combined?, molecular_weight?, polymer_entity_count?, polymer_composition? };
+  rcsb_accession_info?: { initial_release_date?, deposit_date? };
+  rcsb_entry_container_identifiers?: { polymer_entity_ids?, non_polymer_entity_ids?, assembly_ids? };
+  rcsb_primary_citation?: { title?, pdbx_database_id_DOI?, pdbx_database_id_PubMed?, authors?, journal_abbrev?, year? };
+  audit_author?: Array<{ name?: string }>;
+  rcsb_entity_source_organism?: Array<{ ncbi_scientific_name?, common_name? }>;
+  symmetry?: { space_group_name_H_M? };
+  cell?: { length_a?, length_b?, length_c?, angle_alpha?, angle_beta?, angle_gamma? } }
+```
+
+**Output:** `PdbEntrySummary` (from `entities/pdb.ts`)

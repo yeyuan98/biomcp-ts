@@ -8,6 +8,7 @@ import { registerDiseaseTools } from '../../server/tools/disease.js';
 import { registerArticleTools } from '../../server/tools/article.js';
 import { registerTrialTools } from '../../server/tools/trial.js';
 import { registerUtilityTools } from '../../server/tools/utility.js';
+import { registerPdbTools } from '../../server/tools/pdb.js';
 import { connectionManager } from '../../connections/manager.js';
 
 export type McpTestHarness = {
@@ -26,6 +27,7 @@ export async function createMcpTestHarness(): Promise<McpTestHarness> {
   registerArticleTools(server);
   registerTrialTools(server);
   registerUtilityTools(server);
+  registerPdbTools(server);
 
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'test-client', version: '1.0.0' });

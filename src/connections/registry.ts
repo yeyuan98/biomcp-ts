@@ -420,6 +420,29 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   },
   
   // ==========================================
+  // STRUCTURAL BIOLOGY - REST (3 sources)
+  // ==========================================
+  pdb_data: {
+    sourceId: 'pdb_data',
+    baseUrl: 'https://data.rcsb.org/rest/v1',
+    protocol: 'rest',
+    rateLimit: { intervalMs: 100 },
+  },
+  pdb_search: {
+    sourceId: 'pdb_search',
+    baseUrl: 'https://search.rcsb.org/rcsbsearch/v2',
+    protocol: 'rest',
+    rateLimit: { intervalMs: 200 },
+  },
+  pdb_files: {
+    sourceId: 'pdb_files',
+    baseUrl: 'https://files.rcsb.org',
+    protocol: 'rest',
+    handling: { contentType: 'text' },
+    rateLimit: { intervalMs: 200 },
+  },
+
+  // ==========================================
   // GRAPHQL (5 sources)
   // ==========================================
   gnomad: {

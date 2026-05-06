@@ -1,6 +1,6 @@
 # BioMCP TypeScript — Source Architecture
 
-ESM-only MCP server exposing 24 biomedical tools to LLMs. Federates queries across 50+ upstream APIs. Node.js >=18, targets ES2022, 3 runtime dependencies (`@modelcontextprotocol/sdk`, `zod`, `fast-xml-parser`).
+ESM-only MCP server exposing 25 biomedical tools to LLMs. Federates queries across 50+ upstream APIs. Node.js >=18, targets ES2022, 3 runtime dependencies (`@modelcontextprotocol/sdk`, `zod`, `fast-xml-parser`).
 
 ## Architecture
 
@@ -9,7 +9,7 @@ ESM-only MCP server exposing 24 biomedical tools to LLMs. Federates queries acro
 │  LLM  ──stdio──▶  server/index.ts  (McpServer bootstrap)   │
 │                          │                                   │
 │                   server/tools/*.ts                         │
-│                   (7 modules, 24 tools)                      │
+│                   (8 modules, 25 tools)                      │
 │                          │                                   │
 │              ┌───────────┼───────────┐                      │
 │              ▼           ▼           ▼                      │
@@ -61,6 +61,7 @@ Each module exports a single `register*Tools(server: McpServer): void` function 
 | `article.ts` | 2 | Article search (federated/single-source), get |
 | `trial.ts` | 2 | Trial search, get (3 sections) |
 | `utility.ts` | 2 | Free-text discovery, batch entity resolution |
+| `pdb.ts` | 1 | PDB structure search, metadata, file download (RCSB PDB) |
 
 ### `server/errors.ts`
 - `BioMCPError` interface: `{ code, message, suggestion?, details? }`
@@ -98,6 +99,7 @@ entityGet(id, sections?)      → { ...core, sections: Record<string, unknown> }
 | `disease.ts` | 314 | 4 (gene_associations, phenotypes, pathways, survival) | MyDisease.info, DisGeNET, Monarch, Reactome, SEER |
 | `article.ts` | 593 | 3 (open_access, annotations, citation_graph) | PubMed, Europe PMC, Semantic Scholar, PubTator, LitSense, NCBI ID Converter, PMC OA |
 | `trial.ts` | 395 | 3 (eligibility, locations, outcomes) | ClinicalTrials.gov |
+| `pdb.ts` | 355 | 5 (polymer_entities, ligands, assembly, experiment, citation) | RCSB PDB (Data API, Search API, File Download) |
 
 ### `entities/cross-entity.ts` (619 lines)
 

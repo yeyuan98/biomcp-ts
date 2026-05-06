@@ -74,7 +74,39 @@ export class RestConnection implements IConnection<string, unknown> {
     }
     return response.text();
   }
-  
+
+  async post(path: string, body: Record<string, unknown>): Promise<unknown> {
+    await this.rateLimiter.acquire();
+
+    const url = this.buildUrl(path);
+    const headers = this.buildHeaders();
+    headers.set('Content-Type', 'application/json');
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: this.handling.timeoutMs
+        ? AbortSignal.timeout(this.handling.timeoutMs)
+        : undefined,
+    });
+
+    if (response.status === 204) return null;
+
+    if (!response.ok) {
+      const hint = getHttpStatusHint(response.status, this.sourceId);
+      throw new Error(`HTTP ${response.status}: ${response.statusText} — URL: ${url} — Source: ${this.sourceId}${hint}`);
+    }
+
+    const contentType = response.headers?.get?.('content-type') || '';
+    if (!contentType || contentType.includes('json')) {
+      const text = await response.text();
+      if (!text.trim()) return null;
+      return JSON.parse(text);
+    }
+    return response.text();
+  }
+
   async batch(paths: string[]): Promise<unknown[]> {
     const results: unknown[] = [];
     for (const path of paths) {
