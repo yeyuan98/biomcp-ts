@@ -73,17 +73,17 @@ export function registerArticleTools(server: McpServer): void {
   server.registerTool(
     'article_get',
     {
-      description: 'Get detailed article information by PMID',
+      description: 'Get detailed article information by identifier',
       inputSchema: {
-        pmid: z.string().describe('PubMed ID (PMID)'),
+        id: z.string().describe('Article identifier: PMID (numeric, e.g. "12345"), PMCID (e.g. "PMC1234567"), or DOI (e.g. "10.1038/s41586-021-03819-2")'),
         sections: z.array(z.enum(ARTICLE_SECTIONS)).optional().describe('Sections to include'),
         limit: z.number().int().min(1).max(100).default(20),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
-    async ({ pmid, sections, limit }) => {
+    async ({ id, sections, limit }) => {
       try {
-        const result = await articleGet(pmid, sections);
+        const result = await articleGet(id, sections);
         const requestedSections = (sections ?? []).includes('all')
           ? ARTICLE_ALL_SECTIONS
           : (sections ?? []);

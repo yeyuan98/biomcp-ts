@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { createMcpTestHarness } from '../../helpers/mcp-harness.js';
+import { retryOnRateLimit } from '../../helpers/retry.js';
 
 let harness: Awaited<ReturnType<typeof createMcpTestHarness>>;
 
@@ -13,33 +14,33 @@ afterAll(async () => {
 
 describe('discover', () => {
   it('finds entities for "BRAF"', async () => {
-    const results = await harness.callTool('discover', { query: 'BRAF' });
+    const results = await retryOnRateLimit(() => harness.callTool('discover', { query: 'BRAF' }));
     expect(results).toBeDefined();
     expect(Array.isArray(results)).toBe(true);
     expect(results.length).toBeGreaterThan(0);
-  }, 30000);
+  }, 60000);
 
   it('finds entities for "breast cancer"', async () => {
-    const results = await harness.callTool('discover', { query: 'breast cancer' });
+    const results = await retryOnRateLimit(() => harness.callTool('discover', { query: 'breast cancer' }));
     expect(results).toBeDefined();
     expect(Array.isArray(results)).toBe(true);
-  }, 30000);
+  }, 60000);
 
   it('finds entities for "imatinib"', async () => {
-    const results = await harness.callTool('discover', { query: 'imatinib' });
+    const results = await retryOnRateLimit(() => harness.callTool('discover', { query: 'imatinib' }));
     expect(results).toBeDefined();
     expect(Array.isArray(results)).toBe(true);
-  }, 30000);
+  }, 60000);
 });
 
 describe('batch_get', () => {
   it('fetches multiple entities in parallel', async () => {
-    const results = await harness.callTool('batch_get', {
+    const results = await retryOnRateLimit(() => harness.callTool('batch_get', {
       inputs: [
         { entity: 'gene', id: 'BRCA1' },
         { entity: 'drug', id: 'aspirin' },
       ],
-    });
+    }));
     expect(results).toBeDefined();
     expect(Array.isArray(results)).toBe(true);
     expect(results.length).toBe(2);
@@ -48,17 +49,17 @@ describe('batch_get', () => {
     const drugResult = results.find((r: any) => r.entity === 'drug');
     expect(geneResult?.success).toBe(true);
     expect(drugResult?.success).toBe(true);
-  }, 30000);
+  }, 60000);
 
   it('handles mixed success and failure gracefully', async () => {
-    const results = await harness.callTool('batch_get', {
+    const results = await retryOnRateLimit(() => harness.callTool('batch_get', {
       inputs: [
         { entity: 'gene', id: 'BRCA1' },
         { entity: 'gene', id: 'INVALIDGENEXYZ999' },
       ],
-    });
+    }));
     expect(results).toBeDefined();
     expect(Array.isArray(results)).toBe(true);
     expect(results.length).toBe(2);
-  }, 30000);
+  }, 60000);
 });

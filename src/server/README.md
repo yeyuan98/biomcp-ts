@@ -71,8 +71,8 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
-| `article_search` | `query: string`, `source?: "pubmed" \| "europepmc" \| "semantic_scholar" \| "pubtator" \| "litsense"`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Federated literature search with deduplication | readOnly, openWorld |
-| `article_get` | `pmid: string`, `sections?: ("core" \| "oa" \| "annotations" \| "graph" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed article information by PMID | readOnly, openWorld |
+| `article_search` | `query: string`, `source?: "pubmed" \| "europepmc" \| "semantic_scholar" \| "pubtator" \| "litsense"`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)`, `dateRange?: string` (YYYY-MM-DD/YYYY-MM-DD, open-ended allowed) | Federated literature search with deduplication and optional date filtering (pubmed, europepmc, semantic_scholar). Note: europepmc truncates date ranges to year-level granularity | readOnly, openWorld |
+| `article_get` | `id: string` (PMID, PMCID, or DOI), `sections?: ("core" \| "oa" \| "annotations" \| "graph" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed article information by identifier. DOIs are resolved via NCBI IDConv with PubMed esearch fallback | readOnly, openWorld |
 
 ### Trial Tools (`tools/trial.ts`) — 2 tools
 
@@ -178,14 +178,14 @@ Runs `schema.safeParse(data)`. Returns `{ success: true, data }` or `{ success: 
 | `variantId` | `z.string()` | min 1, max 100 |
 | `drugName` | `z.string()` | min 1, max 200 |
 | `diseaseQuery` | `z.string()` | min 1, max 200 |
-| `pmid` | `z.string()` | regex `/^\d+$/` |
+| `articleId` | `z.string()` | regex `/^(?:\d+|PMC\d+|10\.\d{4,}\/\S+)$/i` (PMID, PMCID, or DOI) |
 | `nctId` | `z.string()` | regex `/^NCT\d{8}$/` |
 | `limit` | `z.number()` | int, min 1, max 100 |
 | `offset` | `z.number()` | int, min 0 |
 
 ### `isValidEntityInput(entity: string, id: string): boolean`
 
-Validates an entity identifier against the appropriate `InputValidation` schema. Supports: `gene`, `variant`, `drug`, `disease`, `trial` (accepts NCT ID or PMID), `article`.
+Validates an entity identifier against the appropriate `InputValidation` schema. Supports: `gene`, `variant`, `drug`, `disease`, `trial` (accepts NCT ID or PMID), `article` (accepts PMID, PMCID, or DOI).
 
 ### `getEntitySuggestions(entity: string): string`
 

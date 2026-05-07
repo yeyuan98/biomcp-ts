@@ -29,7 +29,7 @@ export const InputValidation = {
   variantId: z.string().min(1).max(100),
   drugName: z.string().min(1).max(200),
   diseaseQuery: z.string().min(1).max(200),
-  pmid: z.string().regex(/^\d+$/, 'PMID must be numeric'),
+  articleId: z.string().regex(/^(?:\d+|PMC\d+|10\.\d{4,}\/\S+)$/i, 'Article ID must be a PMID (numeric), PMCID (PMC...), or DOI (10.x/...)'),
   nctId: z.string().regex(/^NCT\d{8}$/, 'NCT ID must be in format NCT########'),
   limit: z.number().int().min(1).max(100),
   offset: z.number().int().min(0),
@@ -51,9 +51,9 @@ export function isValidEntityInput(entity: string, id: string): boolean {
     case 'disease':
       return InputValidation.diseaseQuery.safeParse(id).success;
     case 'trial':
-      return InputValidation.nctId.safeParse(id).success || InputValidation.pmid.safeParse(id).success;
+      return InputValidation.nctId.safeParse(id).success || InputValidation.articleId.safeParse(id).success;
     case 'article':
-      return InputValidation.pmid.safeParse(id).success;
+      return InputValidation.articleId.safeParse(id).success;
     default:
       return false;
   }
@@ -72,7 +72,7 @@ export function getEntitySuggestions(entity: string): string {
     case 'trial':
       return 'Use trial_search to find valid NCT IDs (format: NCT########)';
     case 'article':
-      return 'Use article_search to find valid PMIDs (numeric)';
+      return 'Use article_search to find valid article identifiers (PMID, PMCID, or DOI)';
     default:
       return 'Check the entity type and try again.';
   }

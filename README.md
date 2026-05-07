@@ -11,7 +11,7 @@ Adapted from the [BioMCP Rust](https://github.com/genomoncology/biomcp) with age
 - **Section-based fetching** — `entityGet(id, sections)` fans out to multiple sources with per-section timeouts and graceful degradation (failed sections return `{ _error }` instead of crashing)
 - **Federated article search** — queries 5 literature backends simultaneously with PMID/PMCID/DOI deduplication
 - **Zero-config startup** — works out of the box; optional API keys unlock higher rate limits and premium data
-- **244 tests** — 154 unit tests (mocked) + 90 integration tests (live APIs via in-process MCP client)
+- **283 tests** — 189 unit tests (mocked) + 94 integration tests (live APIs via in-process MCP client, with automatic retry on 429 rate limits)
 
 ## Quick Start
 
@@ -104,8 +104,8 @@ BioMCP speaks standard MCP over **stdio**. Point any MCP client at the `biomcp` 
 
 | Tool | Description |
 |------|-------------|
-| `article_search` | Federated literature search across PubMed, EuropePMC, Semantic Scholar, PubTator, and LitSense |
-| `article_get` | Get detailed article info by PMID with optional sections (open_access, annotations, citation_graph) |
+| `article_search` | Federated literature search across PubMed, EuropePMC, Semantic Scholar, PubTator, and LitSense with optional date range filtering |
+| `article_get` | Get detailed article info by identifier (PMID, PMCID, or DOI) with optional sections (open_access, annotations, citation_graph) |
 
 ### Trial (2)
 

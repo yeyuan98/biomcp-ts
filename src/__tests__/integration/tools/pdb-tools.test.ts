@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { createMcpTestHarness } from '../../helpers/mcp-harness.js';
+import { retryOnRateLimit } from '../../helpers/retry.js';
 import { unlinkSync, existsSync, readFileSync } from 'node:fs';
 
 let harness: Awaited<ReturnType<typeof createMcpTestHarness>>;
@@ -14,28 +15,28 @@ afterAll(async () => {
 
 describe('pdb search mode', () => {
   it('searches for crambin and returns results with metadata', async () => {
-    const results = await harness.callTool('pdb', { query: 'crambin', limit: 5 });
+    const results = await retryOnRateLimit(() => harness.callTool('pdb', { query: 'crambin', limit: 5 }));
     expect(Array.isArray(results)).toBe(true);
     expect(results.length).toBeGreaterThan(0);
     expect(results[0].pdb_id).toBeTruthy();
     expect(results[0].pdb_id.length).toBe(4);
     expect(results[0].summary).toBeDefined();
     expect(results[0].summary.title).toBeTruthy();
-  }, 30000);
+  }, 60000);
 
   it('returns empty for nonsense query', async () => {
-    const results = await harness.callTool('pdb', { query: 'ZZZZNOTAPROTEIN99999', limit: 5 });
+    const results = await retryOnRateLimit(() => harness.callTool('pdb', { query: 'ZZZZNOTAPROTEIN99999', limit: 5 }));
     expect(Array.isArray(results)).toBe(true);
     expect(results.length).toBe(0);
-  }, 30000);
+  }, 60000);
 
   it('respects limit parameter', async () => {
-    const results = await harness.callTool('pdb', { query: 'hemoglobin', limit: 2 });
+    const results = await retryOnRateLimit(() => harness.callTool('pdb', { query: 'hemoglobin', limit: 2 }));
     expect(results.length).toBeLessThanOrEqual(2);
-  }, 30000);
+  }, 60000);
 
   it('search results include key metadata fields', async () => {
-    const results = await harness.callTool('pdb', { query: 'hemoglobin', limit: 1 });
+    const results = await retryOnRateLimit(() => harness.callTool('pdb', { query: 'hemoglobin', limit: 1 }));
     expect(results.length).toBeGreaterThan(0);
     const r = results[0];
     expect(r.pdb_id).toBeTruthy();
@@ -45,20 +46,20 @@ describe('pdb search mode', () => {
     expect(r.summary.resolution).toBeDefined();
     expect(r.summary.deposition_date).toBeDefined();
     expect(r.summary.release_date).toBeDefined();
-  }, 30000);
+  }, 60000);
 });
 
 describe('pdb get mode', () => {
   it('returns 1CRN metadata', async () => {
-    const result = await harness.callTool('pdb', { pdb_id: '1CRN' });
+    const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '1CRN' }));
     expect(result.pdb_id).toBe('1CRN');
     expect(result.summary).toBeDefined();
     expect(result.summary.title).toBeTruthy();
     expect(result.summary.experimental_method).toBeTruthy();
-  }, 30000);
+  }, 60000);
 
   it('returns 4HHB with specific sections', async () => {
-    const result = await harness.callTool('pdb', { pdb_id: '4HHB', sections: ['polymer_entities', 'experiment'] });
+    const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '4HHB', sections: ['polymer_entities', 'experiment'] }));
     expect(result.pdb_id).toBe('4HHB');
     expect(result.summary).toBeDefined();
     expect(result.sections).toBeDefined();
@@ -66,10 +67,10 @@ describe('pdb get mode', () => {
     expect(result.sections).toHaveProperty('experiment');
     expect(result.sections.polymer_entities.length).toBeGreaterThan(0);
     expect(result.sections.experiment.methods).toBeDefined();
-  }, 30000);
+  }, 60000);
 
   it('returns 1CRN with all sections', async () => {
-    const result = await harness.callTool('pdb', { pdb_id: '1CRN', sections: ['all'] });
+    const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '1CRN', sections: ['all'] }));
     expect(result.pdb_id).toBe('1CRN');
     expect(result.summary).toBeDefined();
     expect(result.sections).toBeDefined();
@@ -78,10 +79,10 @@ describe('pdb get mode', () => {
     expect(result.sections).toHaveProperty('assembly');
     expect(result.sections).toHaveProperty('experiment');
     expect(result.sections).toHaveProperty('citation');
-  }, 30000);
+  }, 60000);
 
   it('polymer_entities section returns array with entity data', async () => {
-    const result = await harness.callTool('pdb', { pdb_id: '4HHB', sections: ['polymer_entities'] });
+    const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '4HHB', sections: ['polymer_entities'] }));
     const entities = result.sections.polymer_entities;
     expect(Array.isArray(entities)).toBe(true);
     expect(entities.length).toBeGreaterThan(0);
@@ -89,59 +90,59 @@ describe('pdb get mode', () => {
       expect(entity).toBeDefined();
       expect(entity._error).toBeUndefined();
     }
-  }, 30000);
+  }, 60000);
 
   it('ligands section returns array for entries with ligands', async () => {
-    const result = await harness.callTool('pdb', { pdb_id: '4HHB', sections: ['ligands'] });
+    const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '4HHB', sections: ['ligands'] }));
     const ligands = result.sections.ligands;
     expect(Array.isArray(ligands)).toBe(true);
     expect(ligands.length).toBeGreaterThan(0);
     for (const lig of ligands) {
       expect(lig._error).toBeUndefined();
     }
-  }, 30000);
+  }, 60000);
 
   it('ligands section returns empty array for entries without ligands', async () => {
-    const result = await harness.callTool('pdb', { pdb_id: '1CRN', sections: ['ligands'] });
+    const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '1CRN', sections: ['ligands'] }));
     const ligands = result.sections.ligands;
     expect(Array.isArray(ligands)).toBe(true);
     expect(ligands.length).toBe(0);
-  }, 30000);
+  }, 60000);
 
   it('assembly section returns array with assembly data', async () => {
-    const result = await harness.callTool('pdb', { pdb_id: '1CRN', sections: ['assembly'] });
+    const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '1CRN', sections: ['assembly'] }));
     const assemblies = result.sections.assembly;
     expect(Array.isArray(assemblies)).toBe(true);
     expect(assemblies.length).toBeGreaterThan(0);
     for (const asm of assemblies) {
       expect(asm._error).toBeUndefined();
     }
-  }, 30000);
+  }, 60000);
 
   it('citation section returns publication data', async () => {
-    const result = await harness.callTool('pdb', { pdb_id: '1CRN', sections: ['citation'] });
+    const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '1CRN', sections: ['citation'] }));
     const citation = result.sections.citation;
     expect(citation).toBeDefined();
     expect(citation._error).toBeUndefined();
-  }, 30000);
+  }, 60000);
 
   it('experiment section returns methods and refinement', async () => {
-    const result = await harness.callTool('pdb', { pdb_id: '1CRN', sections: ['experiment'] });
+    const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '1CRN', sections: ['experiment'] }));
     const exp = result.sections.experiment;
     expect(exp).toBeDefined();
     expect(exp._error).toBeUndefined();
     expect(exp.methods).toBeDefined();
-  }, 30000);
+  }, 60000);
 
   it('returns metadata without sections when sections omitted', async () => {
-    const result = await harness.callTool('pdb', { pdb_id: '1CRN' });
+    const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '1CRN' }));
     expect(result.pdb_id).toBe('1CRN');
     expect(result.summary).toBeDefined();
     expect(result.sections).toBeUndefined();
-  }, 30000);
+  }, 60000);
 
   it('returns 4HHB with all section data having no _error fields', async () => {
-    const result = await harness.callTool('pdb', { pdb_id: '4HHB', sections: ['all'] });
+    const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '4HHB', sections: ['all'] }));
     for (const [name, data] of Object.entries(result.sections as Record<string, any>)) {
       if (Array.isArray(data)) {
         for (const item of data) {
@@ -151,7 +152,7 @@ describe('pdb get mode', () => {
         expect(data._error).toBeUndefined();
       }
     }
-  }, 30000);
+  }, 60000);
 
   it('rejects invalid PDB ID format', async () => {
     await expect(
@@ -174,7 +175,7 @@ describe('pdb get mode', () => {
 
 describe('pdb download mode', () => {
   it('downloads 1CRN in cif format and returns file path', async () => {
-    const result = await harness.callTool('pdb', { pdb_id: '1CRN', download: true, format: 'cif' });
+    const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '1CRN', download: true, format: 'cif' }));
     expect(result.file).toBeDefined();
     expect(result.file.file_path).toBeTruthy();
     expect(result.file.format).toBe('cif');
@@ -187,10 +188,10 @@ describe('pdb download mode', () => {
     unlinkSync(result.file.file_path);
     const parentDir = result.file.file_path.substring(0, result.file.file_path.lastIndexOf('/'));
     try { require('node:fs').rmSync(parentDir, { recursive: true }); } catch {}
-  }, 30000);
+  }, 60000);
 
   it('downloads 1CRN in pdb format with valid content', async () => {
-    const result = await harness.callTool('pdb', { pdb_id: '1CRN', download: true, format: 'pdb' });
+    const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '1CRN', download: true, format: 'pdb' }));
     expect(result.file).toBeDefined();
     expect(result.file.format).toBe('pdb');
     expect(existsSync(result.file.file_path)).toBe(true);
@@ -200,18 +201,18 @@ describe('pdb download mode', () => {
     unlinkSync(result.file.file_path);
     const parentDir = result.file.file_path.substring(0, result.file.file_path.lastIndexOf('/'));
     try { require('node:fs').rmSync(parentDir, { recursive: true }); } catch {}
-  }, 30000);
+  }, 60000);
 
   it('includes file size in human-readable format', async () => {
-    const result = await harness.callTool('pdb', { pdb_id: '1CRN', download: true, format: 'cif' });
+    const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '1CRN', download: true, format: 'cif' }));
     expect(result.file.file_size_human).toMatch(/\d+(\.\d+)?\s*(B|KB|MB|GB)/);
     unlinkSync(result.file.file_path);
     const parentDir = result.file.file_path.substring(0, result.file.file_path.lastIndexOf('/'));
     try { require('node:fs').rmSync(parentDir, { recursive: true }); } catch {}
-  }, 30000);
+  }, 60000);
 
   it('returns metadata and file when downloading with sections', async () => {
-    const result = await harness.callTool('pdb', { pdb_id: '1CRN', download: true, format: 'cif', sections: ['experiment'] });
+    const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '1CRN', download: true, format: 'cif', sections: ['experiment'] }));
     expect(result.pdb_id).toBe('1CRN');
     expect(result.summary).toBeDefined();
     expect(result.file).toBeDefined();
@@ -221,24 +222,24 @@ describe('pdb download mode', () => {
     unlinkSync(result.file.file_path);
     const parentDir = result.file.file_path.substring(0, result.file.file_path.lastIndexOf('/'));
     try { require('node:fs').rmSync(parentDir, { recursive: true }); } catch {}
-  }, 30000);
+  }, 60000);
 });
 
 describe('pdb pagination', () => {
   it('respects offset parameter', async () => {
-    const page1 = await harness.callTool('pdb', { query: 'kinase inhibitor', limit: 2, offset: 0 });
-    const page2 = await harness.callTool('pdb', { query: 'kinase inhibitor', limit: 2, offset: 1 });
+    const page1 = await retryOnRateLimit(() => harness.callTool('pdb', { query: 'kinase inhibitor', limit: 2, offset: 0 }));
+    const page2 = await retryOnRateLimit(() => harness.callTool('pdb', { query: 'kinase inhibitor', limit: 2, offset: 1 }));
     expect(page1.length).toBeGreaterThan(0);
     expect(page2.length).toBeGreaterThan(0);
     const ids1 = page1.map((r: any) => r.pdb_id);
     const ids2 = page2.map((r: any) => r.pdb_id);
     expect(ids1).not.toEqual(ids2);
-  }, 30000);
+  }, 60000);
 
   it('respects limit parameter across pages', async () => {
-    const results = await harness.callTool('pdb', { query: 'protein', limit: 1 });
+    const results = await retryOnRateLimit(() => harness.callTool('pdb', { query: 'protein', limit: 1 }));
     expect(results.length).toBeLessThanOrEqual(1);
-  }, 30000);
+  }, 60000);
 });
 
 describe('pdb error handling', () => {

@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { articleSearch, articleGet, deduplicateAndRank, transformPubTator, transformLitSense, transformEuropePMC, transformSemanticScholar, parseDateRange } from '../../entities/article.js';
+import { articleSearch, articleGet, deduplicateAndRank, transformPubTator, transformLitSense, transformEuropePMC, transformSemanticScholar, parseDateRange, parseArticleId } from '../../entities/article.js';
 import { parsePubMedXml } from '../../transform/pubmed.js';
 
 const SINGLE_ARTICLE_XML = `<?xml version="1.0"?>
@@ -415,9 +415,9 @@ describe('article', () => {
       await articleSearch('brca1', { source: 'europepmc', dateRange: '2020-01-01/2023-12-31' });
 
       const callUrl = (global.fetch as any).mock.calls[0][0] as string;
-      expect(callUrl).toContain('FIRST_PUB_DATE');
-      expect(callUrl).toContain('2020-01-01');
-      expect(callUrl).toContain('2023-12-31');
+      expect(callUrl).toContain('pub_year');
+      expect(callUrl).toContain('2020');
+      expect(callUrl).toContain('2023');
     });
 
     test('Europe PMC search with open-ended to-only dateRange', async () => {
@@ -431,7 +431,7 @@ describe('article', () => {
 
       const callUrl = (global.fetch as any).mock.calls[0][0] as string;
       const decodedUrl = decodeURIComponent(callUrl);
-      expect(decodedUrl).toContain('FIRST_PUB_DATE:[* TO 2023-12-31]');
+      expect(decodedUrl).toContain('pub_year:[* TO 2023]');
     });
 
     test('Semantic Scholar search appends publicationDateOrYear param', async () => {
@@ -512,6 +512,483 @@ describe('article', () => {
       await articleSearch('brca1');
 
       expect(global.fetch).toHaveBeenCalledTimes(5);
+    });
+  });
+
+  describe('parseArticleId', () => {
+    test('parses PMID (numeric)', () => {
+      expect(parseArticleId('12345')).toEqual({ type: 'pmid', value: '12345' });
+    });
+
+    test('parses PMID with whitespace trimmed', () => {
+      expect(parseArticleId('  12345  ')).toEqual({ type: 'pmid', value: '12345' });
+    });
+
+    test('parses PMCID', () => {
+      expect(parseArticleId('PMC1234567')).toEqual({ type: 'pmcid', value: 'PMC1234567' });
+    });
+
+    test('parses lowercase pmcid', () => {
+      expect(parseArticleId('pmc1234567')).toEqual({ type: 'pmcid', value: 'pmc1234567' });
+    });
+
+    test('parses DOI', () => {
+      expect(parseArticleId('10.1038/s41586-021-03819-2')).toEqual({ type: 'doi', value: '10.1038/s41586-021-03819-2' });
+    });
+
+    test('parses DOI with doi: prefix', () => {
+      expect(parseArticleId('doi:10.1038/s41586-021-03819-2')).toEqual({ type: 'doi', value: '10.1038/s41586-021-03819-2' });
+    });
+
+    test('parses DOI with DOI: prefix (uppercase)', () => {
+      expect(parseArticleId('DOI:10.1038/s41586-021-03819-2')).toEqual({ type: 'doi', value: '10.1038/s41586-021-03819-2' });
+    });
+
+    test('throws for empty string', () => {
+      expect(() => parseArticleId('')).toThrow('Unrecognized identifier format');
+    });
+
+    test('throws for random text', () => {
+      expect(() => parseArticleId('hello world')).toThrow('Unrecognized identifier format');
+    });
+
+    test('throws for invalid DOI (too few digits)', () => {
+      expect(() => parseArticleId('10.1/test')).toThrow('Unrecognized identifier format');
+    });
+
+    test('throws for DOI without suffix', () => {
+      expect(() => parseArticleId('10.1038/')).toThrow('Unrecognized identifier format');
+    });
+
+    test('parses PMID with leading zeros', () => {
+      expect(parseArticleId('00012345')).toEqual({ type: 'pmid', value: '00012345' });
+    });
+  });
+
+  describe('articleGet with ID resolution', () => {
+    test('articleGet() with PMID still works directly (no IDConv call)', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ 'content-type': 'text/xml' }),
+        text: () => Promise.resolve(SINGLE_ARTICLE_XML),
+      }) as any;
+
+      const result = await articleGet('12345');
+
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(callUrl).toContain('efetch.fcgi');
+      expect(result.pmid).toBe('12345');
+    });
+
+    test('articleGet() with empty records from IDConv throws error', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ status: 'ok', records: [] }),
+      }) as any;
+
+      await expect(articleGet('PMC99999999')).rejects.toThrow('No record returned for pmcid');
+    });
+
+    test('articleGet() with PMCID error-status record without errmsg throws error', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({
+          status: 'ok',
+          records: [{ pmcid: 'PMC99999999', requestedId: 'PMC99999999', status: 'error' }],
+        }),
+      }) as any;
+
+      await expect(articleGet('PMC99999999')).rejects.toThrow('Could not resolve pmcid');
+    });
+
+    test('articleGet() with error-status record without errmsg throws error', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({
+          status: 'ok',
+          records: [{ pmcid: 'PMC99999999', status: 'error' }],
+        }),
+      }) as any;
+
+      await expect(articleGet('PMC99999999')).rejects.toThrow('Could not resolve pmcid');
+    });
+
+    test('articleGet() with PMID and oa section returns empty when IDConv has error record', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(SINGLE_ARTICLE_XML),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({
+            status: 'ok',
+            records: [{ pmid: 12345, status: 'error', errmsg: 'Not in PMC' }],
+          }),
+        }) as any;
+
+      const result = await articleGet('12345', ['oa']);
+
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(result.sections?.open_access).toEqual({});
+    });
+
+    test('articleGet() with PMCID resolves to PMID then fetches', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({
+            status: 'ok',
+            records: [{ doi: '10.1234/test.2018', pmcid: 'PMC9999999', pmid: 12345 }],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(SINGLE_ARTICLE_XML),
+        }) as any;
+
+      const result = await articleGet('PMC9999999');
+
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      const idConvUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(idConvUrl).toContain('ids=PMC9999999');
+      expect(idConvUrl).toContain('idconv');
+
+      expect(result.pmid).toBe('12345');
+      expect(result.title).toBe('Test article about BRCA1');
+    });
+
+    test('articleGet() with DOI merges resolved IDs into result', async () => {
+      const minimalXml = `<?xml version="1.0"?>
+<PubmedArticleSet>
+<PubmedArticle>
+<MedlineCitation Status="MEDLINE" Owner="NLM">
+<PMID Version="1">12345</PMID>
+<Article PubModel="Electronic">
+<Journal><Title>Nature</Title><ISOAbbreviation>Nature</ISOAbbreviation></Journal>
+<ArticleTitle>Test</ArticleTitle>
+</Article>
+</MedlineCitation>
+<PubmedData>
+<ArticleIdList>
+<ArticleId IdType="pubmed">12345</ArticleId>
+</ArticleIdList>
+</PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>`;
+
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({
+            status: 'ok',
+            records: [{ doi: '10.1234/test.2018', pmcid: 'PMC9999999', pmid: 12345 }],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(minimalXml),
+        }) as any;
+
+      const result = await articleGet('10.1234/test.2018');
+
+      expect(result.pmid).toBe('12345');
+      expect(result.doi).toBe('10.1234/test.2018');
+      expect(result.pmcid).toBe('PMC9999999');
+    });
+
+    test('articleGet() with unresolvable DOI throws error', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({
+          status: 'ok',
+          records: [{
+            doi: '10.9999/nonexistent',
+            requestedId: '10.9999/nonexistent',
+            status: 'error',
+            errmsg: 'Identifier not found in PMC',
+          }],
+        }),
+      }) as any;
+
+      await expect(articleGet('10.9999/nonexistent')).rejects.toThrow('Could not resolve doi');
+    });
+
+    test('articleGet() with invalid identifier format throws error', async () => {
+      await expect(articleGet('not-a-valid-id')).rejects.toThrow('Unrecognized identifier format');
+    });
+
+    test('articleGet() with DOI and oa section avoids double IDConv call', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({
+            status: 'ok',
+            records: [{ doi: '10.1234/test.2018', pmcid: 'PMC9999999', pmid: 12345 }],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(SINGLE_ARTICLE_XML),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve('<OA><records><record><link format="pdf">https://example.com/paper.pdf</link></record><record/></records></OA>'),
+        }) as any;
+
+      const result = await articleGet('10.1234/test.2018', ['oa']);
+
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+      const idConvUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(idConvUrl).toContain('idconv');
+
+      const efetchUrl = (global.fetch as any).mock.calls[1][0] as string;
+      expect(efetchUrl).toContain('efetch.fcgi');
+
+      const oaUrl = (global.fetch as any).mock.calls[2][0] as string;
+      expect(oaUrl).toContain('oa.fcgi');
+      expect(oaUrl).toContain('PMC9999999');
+
+      expect(result.sections?.open_access).toEqual({ pmcid: 'PMC9999999', pdf_url: 'https://example.com/paper.pdf' });
+    });
+
+    test('articleGet() with PMID and oa section uses IDConv to get PMCID', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(SINGLE_ARTICLE_XML),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({
+            status: 'ok',
+            records: [{ pmcid: 'PMC9999999', pmid: 12345 }],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve('<OA><records><record><link format="pdf">https://example.com/paper.pdf</link></record><record/></records></OA>'),
+        }) as any;
+
+      const result = await articleGet('12345', ['oa']);
+
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+      const idConvUrl = (global.fetch as any).mock.calls[1][0] as string;
+      expect(idConvUrl).toContain('ids=12345');
+      expect(idConvUrl).toContain('idconv');
+
+      expect(result.sections?.open_access).toEqual({ pmcid: 'PMC9999999', pdf_url: 'https://example.com/paper.pdf' });
+    });
+
+    test('fetchOpenAccess returns empty when no PMCID found', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(SINGLE_ARTICLE_XML),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({
+            status: 'ok',
+            records: [{ pmid: 12345 }],
+          }),
+        }) as any;
+
+      const result = await articleGet('12345', ['oa']);
+
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(result.sections?.open_access).toEqual({});
+    });
+
+    test('articleGet() with doi: prefix resolves correctly', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({
+            status: 'ok',
+            records: [{ doi: '10.1234/test.2018', pmid: 12345 }],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(SINGLE_ARTICLE_XML),
+        }) as any;
+
+      const result = await articleGet('doi:10.1234/test.2018');
+
+      const idConvUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(idConvUrl).toContain('ids=10.1234');
+      expect(idConvUrl).not.toContain('doi:');
+      expect(result.pmid).toBe('12345');
+    });
+
+    test('articleGet() with DOI that fails IDConv falls back to PubMed esearch', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({
+            status: 'ok',
+            records: [],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({
+            esearchresult: { idlist: ['12345'] },
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(SINGLE_ARTICLE_XML),
+        }) as any;
+
+      const result = await articleGet('10.9999/nonexistent');
+
+      expect(result.pmid).toBe('12345');
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+    });
+
+    test('articleGet() with DOI that fails both IDConv and PubMed esearch throws', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({
+          status: 'ok',
+          records: [],
+        }),
+      }) as any;
+
+      await expect(articleGet('10.9999/nonexistent')).rejects.toThrow('Could not resolve doi');
+    });
+
+    test('articleGet() with DOI that returns error status without errmsg throws', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({
+            status: 'ok',
+            records: [{
+              doi: '10.9999/nonexistent',
+              requestedId: '10.9999/nonexistent',
+              status: 'error',
+            }],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({
+            status: 'ok',
+            records: [],
+          }),
+        }) as any;
+
+      await expect(articleGet('10.9999/nonexistent')).rejects.toThrow('Could not resolve doi');
+    });
+
+    test('articleGet() with PMID and oa section returns empty when IDConv returns error record', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(SINGLE_ARTICLE_XML),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({
+            status: 'ok',
+            records: [{ pmid: 12345, status: 'error', errmsg: 'not found' }],
+          }),
+        }) as any;
+
+      const result = await articleGet('12345', ['oa']);
+
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(result.sections?.open_access).toEqual({});
+    });
+
+    test('articleGet() with sections=["all"] fetches all 3 section types', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(SINGLE_ARTICLE_XML),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({
+            status: 'ok',
+            records: [{ pmcid: 'PMC9999999', pmid: 12345 }],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve('<OA><records><record><link format="pdf">https://example.com/paper.pdf</link></record><record/></records></OA>'),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ PubTator3: [{ passages: [{ text: 'test', annotations: [] }] }] }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ linksets: [{ linksetdbs: [{ linkname: 'pubmed_pubmed_citedin', links: ['111', '222'] }] }] }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ linksets: [{ linksetdbs: [{ linkname: 'pubmed_pubmed_refs', links: ['333', '444'] }] }] }),
+        }) as any;
+
+      const result = await articleGet('12345', ['all']);
+
+      expect(global.fetch).toHaveBeenCalledTimes(6);
+      expect(result.sections).toBeDefined();
+      expect(result.sections).toHaveProperty('open_access');
+      expect(result.sections).toHaveProperty('annotations');
+      expect(result.sections).toHaveProperty('citation_graph');
+    });
+
+    test('articleGet() with DOI where IDConv record has no pmid throws', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({
+          status: 'ok',
+          records: [{ doi: '10.9999/x', pmcid: 'PMC123' }],
+        }),
+      }) as any;
+
+      await expect(articleGet('10.9999/x')).rejects.toThrow('Could not resolve doi');
     });
   });
 });

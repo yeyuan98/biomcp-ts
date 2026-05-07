@@ -155,9 +155,9 @@ async function searchEuropePMC(query: string, limit: number, _offset: number, cu
 
     let queryString = query;
     if (dateRange?.from || dateRange?.to) {
-      const from = dateRange.from || '*';
-      const to = dateRange.to || '*';
-      queryString += ` AND FIRST_PUB_DATE:[${from} TO ${to}]`;
+      const fromYear = dateRange.from ? dateRange.from.slice(0, 4) : '*';
+      const toYear = dateRange.to ? dateRange.to.slice(0, 4) : '*';
+      queryString += ` AND pub_year:[${fromYear} TO ${toYear}]`;
     }
 
     const cursor = cursorMark || '*';
@@ -218,7 +218,7 @@ async function searchLitSense(query: string, limit: number, _offset: number): Pr
       `/sentences/?query=${encodeURIComponent(query)}&size=${limit}`
     ) as LitSenseResponse;
 
-    return (Array.isArray(response) ? response : []).map(transformLitSense);
+    return (Array.isArray(response) ? response : []).slice(0, limit).map(transformLitSense);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error('[searchLitSense] Error:', error);
@@ -243,39 +243,126 @@ export function deduplicateAndRank(articles: Article[], limit: number): Article[
     .slice(0, limit);
 }
 
+export function parseArticleId(id: string): { type: 'pmid' | 'pmcid' | 'doi'; value: string } {
+  const trimmed = id.trim();
+  if (/^\d+$/.test(trimmed)) return { type: 'pmid', value: trimmed };
+  if (/^PMC\d+$/i.test(trimmed)) return { type: 'pmcid', value: trimmed };
+  const doiMatch = trimmed.match(/^(?:doi:)?(10\.\d{4,}\/\S+)$/i);
+  if (doiMatch) return { type: 'doi', value: doiMatch[1] };
+  throw new Error(`Unrecognized identifier format: "${id}". Expected PMID (numeric), PMCID (PMC...), or DOI (10.x/...).`);
+}
+
+interface ResolvedPmid {
+  pmid: string;
+  pmcid?: string;
+  doi?: string;
+}
+
+async function resolveToPmid(id: string, type: 'doi' | 'pmcid'): Promise<ResolvedPmid> {
+  try {
+    const conn = connectionManager.getConnection('ncbi_idconv');
+
+    const response = await conn.request(
+      `?ids=${encodeURIComponent(id)}&format=json`
+    ) as IDConvResponse;
+
+    const record = response.records?.[0];
+    if (!record) {
+      throw new Error(`No record returned for ${type}: "${id}". The identifier may not exist in the NCBI database.`);
+    }
+    if (record.errmsg || record.status === 'error') {
+      throw new Error(`Could not resolve ${type} "${id}": ${record.errmsg || 'Unknown error'}.`);
+    }
+    if (!record.pmid) {
+      throw new Error(`Could not resolve ${type} "${id}" to a PMID. The article may not be indexed in PubMed.`);
+    }
+
+    return {
+      pmid: String(record.pmid),
+      pmcid: record.pmcid,
+      doi: record.doi,
+    };
+  } catch (error) {
+    if (error instanceof Error && (error.message.startsWith('Could not resolve') || error.message.startsWith('No record'))) throw error;
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[resolveToPmid] Error:', error);
+    throw new Error(`ID resolution failed (source: ncbi_idconv): ${msg}. The data source may be temporarily unavailable.`);
+  }
+}
+
+async function resolveDoiToPmid(doi: string): Promise<ResolvedPmid> {
+  try {
+    const conn = connectionManager.getConnection('pubmed');
+
+    const searchResponse = await conn.request(
+      `/esearch.fcgi?db=pubmed&term=${encodeURIComponent(doi)}[doi]&retmode=json&retmax=1`
+    ) as PubMedSearchResponse;
+
+    const pmid = searchResponse.esearchresult?.idlist?.[0];
+    if (!pmid) {
+      throw new Error(`Could not resolve doi "${doi}" to a PMID. The DOI may not be indexed in PubMed.`);
+    }
+
+    return { pmid, doi };
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Could not resolve')) throw error;
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[resolveDoiToPmid] Error:', error);
+    throw new Error(`DOI resolution failed (source: pubmed): ${msg}. The data source may be temporarily unavailable.`);
+  }
+}
+
 export async function articleGet(
   identifier: string,
   sections?: string[]
 ): Promise<ArticleResult> {
-  const isPmid = /^\d+$/.test(identifier);
+  const parsed = parseArticleId(identifier);
 
-  let article: Article;
+  let pmid: string;
+  let resolvedIds: ResolvedPmid | undefined;
 
-  if (isPmid) {
-    article = await fetchPubMedArticle(identifier);
+  if (parsed.type === 'pmid') {
+    pmid = parsed.value;
+  } else if (parsed.type === 'doi') {
+    try {
+      resolvedIds = await resolveToPmid(parsed.value, parsed.type);
+      pmid = resolvedIds.pmid;
+    } catch {
+      resolvedIds = await resolveDoiToPmid(parsed.value);
+      pmid = resolvedIds.pmid;
+    }
   } else {
-    throw new Error(`Invalid identifier. Use PMID to fetch article details.`);
+    resolvedIds = await resolveToPmid(parsed.value, parsed.type);
+    pmid = resolvedIds.pmid;
   }
+
+  const article = await fetchPubMedArticle(pmid);
 
   const result: ArticleResult = {
     ...article,
   };
 
+  if (resolvedIds) {
+    if (!result.pmid) result.pmid = resolvedIds.pmid;
+    if (!result.pmcid && resolvedIds.pmcid) result.pmcid = resolvedIds.pmcid;
+    if (!result.doi && resolvedIds.doi) result.doi = resolvedIds.doi;
+  }
+
   const sectionsToFetch = sections?.filter(s => s !== 'core') || [];
 
   if (sectionsToFetch.includes('oa') || sectionsToFetch.includes('all')) {
     result.sections = result.sections || {};
-    (result.sections as Record<string, unknown>)['open_access'] = await fetchOpenAccess(identifier);
+    (result.sections as Record<string, unknown>)['open_access'] = await fetchOpenAccess(pmid, resolvedIds?.pmcid);
   }
 
   if (sectionsToFetch.includes('annotations') || sectionsToFetch.includes('all')) {
     result.sections = result.sections || {};
-    (result.sections as Record<string, unknown>)['annotations'] = await fetchAnnotations(identifier);
+    (result.sections as Record<string, unknown>)['annotations'] = await fetchAnnotations(pmid);
   }
 
   if (sectionsToFetch.includes('graph') || sectionsToFetch.includes('all')) {
     result.sections = result.sections || {};
-    (result.sections as Record<string, unknown>)['citation_graph'] = await fetchCitationGraph(identifier);
+    (result.sections as Record<string, unknown>)['citation_graph'] = await fetchCitationGraph(pmid);
   }
 
   return result;
@@ -298,23 +385,33 @@ async function fetchPubMedArticle(pmid: string): Promise<Article> {
   }
 }
 
-async function fetchOpenAccess(pmid: string): Promise<{ pmcid?: string; pdf_url?: string }> {
+async function fetchOpenAccess(pmid: string, resolvedPmcid?: string): Promise<{ pmcid?: string; pdf_url?: string }> {
   try {
-    const conn = connectionManager.getConnection('ncbi_idconv');
+    let pmcid = resolvedPmcid;
 
-    const response = await conn.request(
-      `?pmid=${pmid}&format=json`
-    ) as IDConvResponse;
+    if (!pmcid) {
+      const conn = connectionManager.getConnection('ncbi_idconv');
 
-    if (response.pmcid) {
+      const response = await conn.request(
+        `?ids=${pmid}&format=json`
+      ) as IDConvResponse;
+
+      const record = response.records?.[0];
+      if (record?.errmsg || record?.status === 'error') {
+        return {};
+      }
+      pmcid = record?.pmcid;
+    }
+
+    if (pmcid) {
       const pmcConn = connectionManager.getConnection('pmc_oa');
       const oaXml = await pmcConn.request(
-        `?id=${response.pmcid}`
+        `?id=${pmcid}`
       ) as string;
 
       const links = parseOaXml(oaXml);
       return {
-        pmcid: response.pmcid,
+        pmcid,
         pdf_url: links.pdfUrl,
       };
     }
@@ -509,7 +606,15 @@ interface LitSenseResponse {
 }
 
 interface IDConvResponse {
-  pmcid?: string;
+  status?: string;
+  records?: Array<{
+    doi?: string;
+    pmcid?: string;
+    pmid?: number;
+    requestedId?: string;
+    status?: string;
+    errmsg?: string;
+  }>;
 }
 
 interface BioCJSONResponse {

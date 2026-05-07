@@ -38,14 +38,24 @@ describe('InputValidation.nctId', () => {
   });
 });
 
-describe('InputValidation.pmid', () => {
-  it('accepts numeric string "12345678"', () => {
-    const result = InputValidation.pmid.safeParse('12345678');
+describe('InputValidation.articleId', () => {
+  it('accepts PMID "12345678"', () => {
+    const result = InputValidation.articleId.safeParse('12345678');
     expect(result.success).toBe(true);
   });
 
-  it('rejects non-numeric "PM123"', () => {
-    const result = InputValidation.pmid.safeParse('PM123');
+  it('accepts PMCID "PMC1234567"', () => {
+    const result = InputValidation.articleId.safeParse('PMC1234567');
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts DOI "10.1038/s41586-021-03819-2"', () => {
+    const result = InputValidation.articleId.safeParse('10.1038/s41586-021-03819-2');
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects non-numeric non-PMCID non-DOI "PM123"', () => {
+    const result = InputValidation.articleId.safeParse('PM123');
     expect(result.success).toBe(false);
   });
 });
@@ -122,6 +132,14 @@ describe('isValidEntityInput', () => {
   it('returns true for valid article PMID input', () => {
     expect(isValidEntityInput('article', '12345678')).toBe(true);
   });
+
+  it('returns true for valid article PMCID input', () => {
+    expect(isValidEntityInput('article', 'PMC1234567')).toBe(true);
+  });
+
+  it('returns true for valid article DOI input', () => {
+    expect(isValidEntityInput('article', '10.1038/s41586-021-03819-2')).toBe(true);
+  });
 });
 
 describe('getEntitySuggestions', () => {
@@ -145,8 +163,11 @@ describe('getEntitySuggestions', () => {
     expect(getEntitySuggestions('trial')).toContain('trial_search');
   });
 
-  it('returns suggestion for article', () => {
-    expect(getEntitySuggestions('article')).toContain('article_search');
+  it('returns suggestion for article mentioning PMCID and DOI', () => {
+    const suggestion = getEntitySuggestions('article');
+    expect(suggestion).toContain('article_search');
+    expect(suggestion).toContain('PMCID');
+    expect(suggestion).toContain('DOI');
   });
 
   it('returns fallback for unknown entity', () => {
