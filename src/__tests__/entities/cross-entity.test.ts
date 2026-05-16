@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals';
 import { geneEnrichment, discover, searchAll, batchGet } from '../../entities/cross-entity.js';
+import { connectionManager } from '../../connections/manager.js';
 
 describe('cross-entity', () => {
   let originalFetch: typeof global.fetch;
@@ -7,6 +8,7 @@ describe('cross-entity', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     originalFetch = global.fetch;
+    connectionManager.closeAll();
     process.env.NCBI_API_KEY = '';
   });
 

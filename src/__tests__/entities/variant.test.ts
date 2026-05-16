@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals';
 import { variantSearch, variantGet, transformMyVariantHit } from '../../entities/variant.js';
+import { connectionManager } from '../../connections/manager.js';
 
 describe('variant', () => {
   let originalFetch: typeof global.fetch;
@@ -7,6 +8,7 @@ describe('variant', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     originalFetch = global.fetch;
+    connectionManager.closeAll();
   });
 
   afterEach(() => {

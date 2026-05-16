@@ -40,6 +40,8 @@ Filters out falsy and empty-string values from an alias list. Returns `[]` for `
 
 ## pubmed.ts
 
+**Moved to `entities/article/transform/pubmed.ts`** — this module now lives alongside the article entity it transforms.
+
 Parses PubMed XML into `Article[]` entities using `fast-xml-parser`.
 
 ### Functions

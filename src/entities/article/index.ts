@@ -1,0 +1,13 @@
+export type { ArticleSearchOptions, Article, ArticleResult, ArticleGetOptions } from './types.js';
+export { articleSearch, parseDateRange } from './search/index.js';
+export { articleGet } from './detail/index.js';
+export { deduplicateAndRank } from './search/dedup.js';
+export { parseArticleId } from './detail/id-resolution.js';
+export { transformEuropePMC } from './search/europepmc.js';
+export { transformSemanticScholar } from './search/semantic-scholar.js';
+export { transformPubTator } from './search/pubtator.js';
+export { transformLitSense } from './search/litsense.js';
+export { parsePubMedXml } from './transform/pubmed.js';
+export { parseOaXml } from './detail/open-access.js';
+export { getCitations, clearCitationCache } from './citation/index.js';
+export type { ArticleId, CitationRecord, CitationCount, SourceCitationResult, FederatedCitationResult } from './citation/types.js';

@@ -192,15 +192,49 @@ transformMyDiseaseResponse(data: Record<string, unknown>): DiseaseResult
 
 ---
 
-## Article (`article.ts`)
+## Article (`article/`)
 
 **Primary source:** PubMed (`pubmed` connection) for get; federated across 5 sources for search
+
+### Architecture
+
+The article entity is organized as a directory module at `src/entities/article/`:
+
+```
+article/
+├── index.ts              # Re-exports all public API
+├── types.ts              # Article, ArticleSearchOptions, ArticleResult, ArticleGetOptions
+├── search/               # Search backends (5 sources)
+│   ├── index.ts          # articleSearch() orchestrator + federatedSearch
+│   ├── dedup.ts          # deduplicateAndRank()
+│   ├── pubmed.ts         # searchPubMed(), formatPubMedDate()
+│   ├── europepmc.ts      # searchEuropePMC(), transformEuropePMC()
+│   ├── semantic-scholar.ts # searchSemanticScholar(), transformSemanticScholar()
+│   ├── pubtator.ts       # searchPubTator(), transformPubTator()
+│   └── litsense.ts       # searchLitSense(), transformLitSense()
+├── detail/               # Article get + sections
+│   ├── index.ts          # articleGet() orchestrator
+│   ├── id-resolution.ts  # parseArticleId(), resolveToPmid(), resolveDoiToPmid()
+│   ├── open-access.ts    # fetchOpenAccess(), parseOaXml()
+│   └── annotations.ts    # fetchAnnotations(), fetchCitationGraph()
+├── citation/             # Citation providers (5 sources)
+│   ├── index.ts          # getCitations() orchestrator (federated)
+│   ├── types.ts          # ArticleId, CitationRecord, CitationCount, FederatedCitationResult
+│   ├── pubmed.ts         # PubMed elink-based provider
+│   ├── europepmc.ts      # EuropePMC citations/references API
+│   ├── semantic-scholar.ts # Semantic Scholar graph API
+│   ├── crossref.ts       # Crossref DOI-based provider
+│   └── opencitations.ts  # OpenCitations DOI-based provider (with 5s timeout)
+└── transform/
+    └── pubmed.ts         # parsePubMedXml()
+```
 
 ### Exported Functions
 
 ```ts
 articleSearch(query: string, options?: ArticleSearchOptions): Promise<Article[]>
 articleGet(identifier: string, sections?: string[]): Promise<ArticleResult>
+getCitations(id: ArticleId, options?: { direction?, source?, limit? }): Promise<FederatedCitationResult>
 deduplicateAndRank(articles: Article[], limit: number): Article[]
 transformEuropePMC(a: EuropePMCResult): Article
 transformSemanticScholar(a: SemanticScholarPaper): Article
@@ -212,10 +246,15 @@ transformLitSense(a: LitSenseResult): Article
 
 | Type | Fields |
 |------|--------|
-| `ArticleSearchOptions` | `source?: 'pubmed' \| 'europepmc' \| 'semantic_scholar' \| 'pubtator' \| 'litsense'`, `limit?`, `offset?`, `cursorMark?` |
+| `ArticleSearchOptions` | `source?: 'pubmed' \| 'europepmc' \| 'semantic_scholar' \| 'pubtator' \| 'litsense'`, `limit?`, `offset?`, `cursorMark?`, `dateRange?` |
 | `Article` | `pmid?`, `pmcid?`, `doi?`, `title?`, `abstract?`, `authors?`, `journal?`, `publication_date?`, `cited_by?`, `is_open_access?`, `source?`, `score?`, `mesh_headings?`, `publication_types?`, `keywords?`, `chemicals?` |
 | `ArticleGetOptions` | `sections?: string[]` |
 | `ArticleResult` | Extends `Article` with `sections?: Record<string, unknown>` |
+| `ArticleId` | `pmid?`, `pmcid?`, `doi?` |
+| `CitationRecord` | `pmid?`, `pmcid?`, `doi?`, `title?`, `authors?`, `journal?`, `year?`, `source` |
+| `CitationCount` | `total`, `by_year?`, `source` |
+| `SourceCitationResult` | `source_id`, `citation_count?`, `forward_citations`, `backward_references`, `error?` |
+| `FederatedCitationResult` | `article_id`, `citation_counts`, `forward_citations`, `backward_references`, `source_results` |
 
 ### Federated Search
 
@@ -231,18 +270,40 @@ When no `source` is specified, `articleSearch` queries all 5 backends concurrent
 
 Results are deduplicated by PMID/PMCID/DOI and ranked by citation count via `deduplicateAndRank`.
 
+### Federated Citation
+
+When `citation` section is requested, `getCitations` queries citation providers concurrently via `Promise.allSettled`. By default, **fast mode** queries 3 providers; **full mode** (set `full: true`) queries all 5. Each provider has a 10-second timeout (`DEFAULT_PROVIDER_TIMEOUT_MS`). Within each provider, forward/backward/count requests run in parallel for 66% time reduction.
+
+| Provider | Connection | Forward Citations | Backward References | Citation Count | Fast Mode | Notes |
+|----------|-----------|:-:|:-:|:-:|:-:|-------|
+| Europe PMC | `europepmc` | Yes (`/{PMID,DOI,PMC}/{id}/citations`) | Yes (`/{PMID,DOI,PMC}/{id}/references`) | Yes (`citedByCount`) | ✓ | Fastest (~0.23s); PMID/DOI/PMCID support |
+| Semantic Scholar | `semantic_scholar` | Yes (`/citations`) | Yes (`/references`) | Yes (`citationCount`) | ✓ | Moderate (~1.1s); supports PMID/DOI/PMCID; retries on 429 (3 attempts, exponential backoff) |
+| Crossref | `crossref` | Yes (`/works?filter=references:{doi}`) | Yes (`reference` array) | Yes (`is-referenced-by-count`) | ✓ | Moderate (~1.25s); DOI-based; work response cached within query |
+| PubMed | `pubmed` | Yes (elink `pubmed_pubmed_citedin`) | Yes (elink `pubmed_pubmed_refs`) | Yes (derived from elink, cached) | — | Slow (~7.67s per request); PMID-centric; EFetch enrichment |
+| OpenCitations | `opencitations` | Yes (`/v2/citations/`) | Yes (`/references/`) | Yes (`/citation-count/`) | — | Slow (~1.75s); DOI-based; lowest data quality |
+
+**Performance**: Fast mode completes in ~4-5s; full mode takes ~15-30s (dominated by PubMed). Results are cached for 10 minutes by article ID. Use `clearCitationCache()` to clear.
+
+**Caching**: Federated results cached 10min; per-query caches (Crossref work, PubMed elink) use 30s TTL.
+
+**Rate Limiting**: Semantic Scholar automatically retries on 429 with exponential backoff. Other providers handle 429 gracefully (partial results).
+
+Citation records are deduplicated by DOI (primary), then PMID, then PMCID. For duplicates, the record with the most populated fields is kept (field-completeness scoring).
+
 ### Sections (sequential, not Promise.allSettled)
 
 | Section | Upstream API | Auth | Notes |
 |---------|-------------|------|-------|
 | `open_access` | NCBI ID Converter + PMC OA | None | Resolves PMCID → parses OA XML for PDF URL |
 | `annotations` | PubTator (BioC JSON) | None | NER annotations (genes, diseases, variants, etc.) with offset positions |
-| `citation_graph` | PubMed E-utilities (`elink`) | None | Forward citations (`pubmed_pubmed_citedin`) and references (`pubmed_pubmed_refs`) |
+| `citation_graph` | PubMed E-utilities (`elink`) | None | Forward citations (`pubmed_pubmed_citedin`) and references (`pubmed_pubmed_refs`) as PMID lists. **Deprecated** — use `citation` instead |
+| `citation` | 5 citation providers (federated) | `S2_API_KEY` optional | Rich citation data with metadata, counts from multiple sources, deduplicated |
 
 ### Special Behaviors
 
-- `articleGet` only accepts numeric PMIDs; other identifiers throw
+- `articleGet` accepts numeric PMIDs, PMCIDs (via ID Converter), and DOIs (via ID Converter or PubMed esearch fallback)
 - Error messages include contextual hints (e.g., rate-limit advice for 429, index-not-found for 400)
+- The `graph` section is deprecated in favor of `citation`; both work for backward compatibility
 
 ---
 

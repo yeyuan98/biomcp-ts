@@ -1,6 +1,6 @@
 # connections
 
-API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a source registry, connection lifecycle management, and rate limiting for 58 bioinformatics data sources.
+API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a source registry, connection lifecycle management, and rate limiting for 60 bioinformatics data sources.
 
 ## Architecture
 
@@ -179,7 +179,7 @@ Wraps any async function with an `AbortController`-based timeout. Returns `{ dat
 
 ## Registry — Sources by Protocol
 
-### REST (48 sources)
+### REST (50 sources)
 
 | Category | Source IDs |
 |---|---|
@@ -187,7 +187,7 @@ Wraps any async function with an `AbortController`-based timeout. Returns `{ dat
 | Proteins & Pathways | `uniprot`, `interpro`, `complexportal`, `reactome`, `reactome_analysis`, `kegg`, `wikipathways` |
 | Drugs & Pharmacology | `mychem`, `chembl`, `openfda`, `cpic`, `pharmgkb` |
 | Diseases | `mydisease`, `monarch`, `seer`, `medlineplus`, `hpo` |
-| Literature | `pubmed`, `pubtator`, `europepmc`, `semantic_scholar`, `litsense`, `ncbi_idconv`, `pmc_oa` |
+| Literature | `pubmed`, `pubtator`, `europepmc`, `semantic_scholar`, `litsense`, `ncbi_idconv`, `pmc_oa`, `crossref`, `opencitations` |
 | Clinical Trials | `clinicaltrials`, `nci_cts` |
 | Diagnostics & Registries | `vaers` |
 | Enrichment & Analysis | `enrichr`, `gprofiler`, `ols4`, `quickgo` |

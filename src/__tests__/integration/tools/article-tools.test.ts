@@ -42,10 +42,11 @@ describe('article_get', () => {
     expect(result.title).toBeTruthy();
   }, 60000);
 
-  it('returns empty for invalid PMID', async () => {
-    const result = await retryOnRateLimit(() => harness.callTool('article_get', { id: '99999999' }));
-    expect(result).toBeDefined();
-  }, 60000);
+  it('returns error for invalid PMID', async () => {
+    await expect(
+      harness.callTool('article_get', { id: '99999999' })
+    ).rejects.toThrow('Could not resolve pmid');
+  }, 30000);
 
   it('returns article by PMCID', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('article_get', { id: 'PMC4325238' }));

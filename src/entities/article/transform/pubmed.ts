@@ -1,5 +1,5 @@
 import { XMLParser } from 'fast-xml-parser';
-import type { Article } from '../entities/article.js';
+import type { Article } from '../types.js';
 
 export function parsePubMedXml(xmlString: string): Article[] {
   const parser = new XMLParser({
@@ -141,8 +141,50 @@ function extractDoiFromELocation(article: any): string | undefined {
   return undefined;
 }
 
+function flattenHtmlTitle(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (!value || typeof value !== 'object') return '';
+
+  const obj = value as Record<string, unknown>;
+  let result = '';
+
+  // Handle #text first (main text content)
+  if (obj['#text']) {
+    result += String(obj['#text']);
+  }
+
+  // Handle HTML tags in order (i, b, sub, sup, u, etc.)
+  const htmlTags = ['i', 'b', 'sub', 'sup', 'u', 'em', 'strong', 'small', 'tt'];
+  for (const tag of htmlTags) {
+    const tagValue = obj[tag];
+    if (tagValue) {
+      const tagContents = Array.isArray(tagValue) ? tagValue : [tagValue];
+      for (const content of tagContents) {
+        const innerContent = flattenHtmlTitle(content);
+        result += `<${tag}>${innerContent}</${tag}>`;
+      }
+    }
+  }
+
+  // Handle any other keys that aren't #text or known HTML tags
+  for (const [key, val] of Object.entries(obj)) {
+    if (key !== '#text' && !htmlTags.includes(key) && val !== undefined) {
+      const innerContent = flattenHtmlTitle(val);
+      if (innerContent) {
+        result += `<${key}>${innerContent}</${key}>`;
+      }
+    }
+  }
+
+  return result;
+}
+
 function extractTitle(article: any): string | undefined {
-  return article?.ArticleTitle || undefined;
+  const title = article?.ArticleTitle;
+  if (!title) return undefined;
+  if (typeof title === 'string') return title;
+  return flattenHtmlTitle(title);
 }
 
 function extractAbstract(article: any): string | undefined {

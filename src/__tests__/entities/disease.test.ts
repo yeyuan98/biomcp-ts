@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals';
 import { diseaseSearch, diseaseGet, transformMyDiseaseResponse } from '../../entities/disease.js';
+import { connectionManager } from '../../connections/manager.js';
 
 describe('disease', () => {
   let originalFetch: typeof global.fetch;
@@ -7,6 +8,7 @@ describe('disease', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     originalFetch = global.fetch;
+    connectionManager.closeAll();
   });
 
   afterEach(() => {

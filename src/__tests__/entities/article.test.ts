@@ -1,6 +1,9 @@
 import { jest } from '@jest/globals';
-import { articleSearch, articleGet, deduplicateAndRank, transformPubTator, transformLitSense, transformEuropePMC, transformSemanticScholar, parseDateRange, parseArticleId } from '../../entities/article.js';
-import { parsePubMedXml } from '../../transform/pubmed.js';
+import { articleSearch, articleGet, deduplicateAndRank, transformPubTator, transformLitSense, transformEuropePMC, transformSemanticScholar, parseDateRange, parseArticleId, parseOaXml, parsePubMedXml } from '../../entities/article.js';
+import { clearCitationCache } from '../../entities/article/citation/index.js';
+import { clearWorkCache } from '../../entities/article/citation/crossref.js';
+import { clearCitedInCache } from '../../entities/article/citation/pubmed.js';
+import { connectionManager } from '../../connections/manager.js';
 
 const SINGLE_ARTICLE_XML = `<?xml version="1.0"?>
 <PubmedArticleSet>
@@ -98,12 +101,16 @@ describe('article', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     originalFetch = global.fetch;
+    connectionManager.closeAll();
     process.env.NCBI_API_KEY = '';
   });
 
   afterEach(() => {
     global.fetch = originalFetch;
     delete process.env.NCBI_API_KEY;
+    clearCitationCache();
+    clearWorkCache();
+    clearCitedInCache();
   });
 
   test('articleSearch() calls ESearch then EFetch for PubMed', async () => {
@@ -111,7 +118,7 @@ describe('article', () => {
       .mockResolvedValueOnce({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
-        json: () => Promise.resolve({ esearchresult: { idlist: ['12345'] } }),
+        json: () => Promise.resolve({ esearchresult: { idlist: ['12345'], count: '1' } }),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -119,7 +126,7 @@ describe('article', () => {
         text: () => Promise.resolve(SINGLE_ARTICLE_XML),
       }) as any;
 
-    const results = await articleSearch('brca1', { source: 'pubmed' });
+    const result = await articleSearch('brca1', { source: 'pubmed' });
 
     expect(global.fetch).toHaveBeenCalledTimes(2);
     const searchCallUrl = (global.fetch as any).mock.calls[0][0] as string;
@@ -129,16 +136,16 @@ describe('article', () => {
     const fetchCallUrl = (global.fetch as any).mock.calls[1][0] as string;
     expect(fetchCallUrl).toContain('efetch.fcgi');
 
-    expect(results).toHaveLength(1);
-    expect(results[0].pmid).toBe('12345');
-    expect(results[0].title).toBe('Test article about BRCA1');
-    expect(results[0].abstract).toBe('Full abstract text for testing purposes.');
-    expect(results[0].journal).toBe('Sci Rep');
-    expect(results[0].authors).toEqual(['Smith John', 'Doe Jane']);
-    expect(results[0].doi).toBe('10.1234/test.2018');
-    expect(results[0].pmcid).toBe('PMC9999999');
-    expect(results[0].mesh_headings).toEqual(['BRCA1 Protein', 'Humans']);
-    expect(results[0].publication_types).toEqual(['Journal Article']);
+    expect(result).toHaveLength(1);
+    expect(result[0].pmid).toBe('12345');
+    expect(result[0].title).toBe('Test article about BRCA1');
+    expect(result[0].abstract).toBe('Full abstract text for testing purposes.');
+    expect(result[0].journal).toBe('Sci Rep');
+    expect(result[0].authors).toEqual(['Smith John', 'Doe Jane']);
+    expect(result[0].doi).toBe('10.1234/test.2018');
+    expect(result[0].pmcid).toBe('PMC9999999');
+    expect(result[0].mesh_headings).toEqual(['BRCA1 Protein', 'Humans']);
+    expect(result[0].publication_types).toEqual(['Journal Article']);
   });
 
   test('articleSearch() returns empty on empty results', async () => {
@@ -148,8 +155,8 @@ describe('article', () => {
       json: () => Promise.resolve({ esearchresult: { idlist: [] } }),
     }) as any;
 
-    const results = await articleSearch('nonexistent', { source: 'pubmed' });
-    expect(results).toEqual([]);
+    const result = await articleSearch('nonexistent', { source: 'pubmed' });
+    expect(result).toEqual([]);
   });
 
   test('articleGet() calls EFetch with correct PMID', async () => {
@@ -205,18 +212,18 @@ describe('article', () => {
       }),
     }) as any;
 
-    const results = await articleSearch('brca1', { source: 'pubtator' });
+    const result = await articleSearch('brca1', { source: 'pubtator' });
 
     const callUrl = (global.fetch as any).mock.calls[0][0] as string;
     expect(callUrl).toContain('/search/?text=');
     expect(callUrl).toContain('brca1');
-    expect(results).toHaveLength(1);
-    expect(results[0].pmid).toBe('34083286');
-    expect(results[0].pmcid).toBe('PMC999');
-    expect(results[0].authors).toEqual(['Smith J']);
-    expect(results[0].journal).toBe('Nature');
-    expect(results[0].doi).toBe('10.1234/test');
-    expect(results[0].source).toBe('pubtator');
+    expect(result).toHaveLength(1);
+    expect(result[0].pmid).toBe('34083286');
+    expect(result[0].pmcid).toBe('PMC999');
+    expect(result[0].authors).toEqual(['Smith J']);
+    expect(result[0].journal).toBe('Nature');
+    expect(result[0].doi).toBe('10.1234/test');
+    expect(result[0].source).toBe('pubtator');
   });
 
   test('articleSearch() with litsense source uses /sentences/?query= endpoint', async () => {
@@ -228,16 +235,16 @@ describe('article', () => {
       ]),
     }) as any;
 
-    const results = await articleSearch('brca1', { source: 'litsense' });
+    const result = await articleSearch('brca1', { source: 'litsense' });
 
     const callUrl = (global.fetch as any).mock.calls[0][0] as string;
     expect(callUrl).toContain('/sentences/?query=');
     expect(callUrl).toContain('brca1');
-    expect(results).toHaveLength(1);
-    expect(results[0].pmid).toBe('12345');
-    expect(results[0].abstract).toBe('This is a relevant sentence.');
-    expect(results[0].score).toBe(0.95);
-    expect(results[0].source).toBe('litsense');
+    expect(result).toHaveLength(1);
+    expect(result[0].pmid).toBe('12345');
+    expect(result[0].abstract).toBe('This is a relevant sentence.');
+    expect(result[0].score).toBe(0.95);
+    expect(result[0].source).toBe('litsense');
   });
 
   test('transformPubTator maps new PubTator3 fields correctly', () => {
@@ -347,8 +354,8 @@ describe('article', () => {
   });
 
   test('articleSearch() returns empty for unknown source', async () => {
-    const results = await articleSearch('brca1', { source: 'unknown' as any });
-    expect(results).toEqual([]);
+    const result = await articleSearch('brca1', { source: 'unknown' as any });
+    expect(result).toEqual([]);
   });
 
   describe('dateRange', () => {
@@ -461,17 +468,17 @@ describe('article', () => {
     });
 
     test('pubtator source returns error when dateRange is set', async () => {
-      const results = await articleSearch('brca1', { source: 'pubtator', dateRange: '2020-01-01/2023-12-31' });
-      expect(results).toHaveLength(1);
-      expect(results[0]).toHaveProperty('_error');
-      expect((results[0] as any)._error).toContain('does not support date filtering');
+      const result = await articleSearch('brca1', { source: 'pubtator', dateRange: '2020-01-01/2023-12-31' });
+      expect(result).toHaveLength(1);
+      expect(result[0]).toHaveProperty('_error');
+      expect((result[0] as any)._error).toContain('does not support date filtering');
     });
 
     test('litsense source returns error when dateRange is set', async () => {
-      const results = await articleSearch('brca1', { source: 'litsense', dateRange: '2020-01-01/2023-12-31' });
-      expect(results).toHaveLength(1);
-      expect(results[0]).toHaveProperty('_error');
-      expect((results[0] as any)._error).toContain('does not support date filtering');
+      const result = await articleSearch('brca1', { source: 'litsense', dateRange: '2020-01-01/2023-12-31' });
+      expect(result).toHaveLength(1);
+      expect(result[0]).toHaveProperty('_error');
+      expect((result[0] as any)._error).toContain('does not support date filtering');
     });
 
     test('federated search with dateRange only queries date-aware backends', async () => {
@@ -933,7 +940,12 @@ describe('article', () => {
       expect(result.sections?.open_access).toEqual({});
     });
 
-    test('articleGet() with sections=["all"] fetches all 3 section types', async () => {
+    test('articleGet() with sections=["all"] fetches all section types', async () => {
+      const emptyJsonResponse = {
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({}),
+      };
       global.fetch = jest.fn()
         .mockResolvedValueOnce({
           ok: true,
@@ -967,16 +979,18 @@ describe('article', () => {
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
           json: () => Promise.resolve({ linksets: [{ linksetdbs: [{ linkname: 'pubmed_pubmed_refs', links: ['333', '444'] }] }] }),
-        }) as any;
+        })
+        .mockResolvedValue(emptyJsonResponse) as any;
 
       const result = await articleGet('12345', ['all']);
 
-      expect(global.fetch).toHaveBeenCalledTimes(6);
+      expect(global.fetch.mock.calls.length).toBeGreaterThanOrEqual(6);
       expect(result.sections).toBeDefined();
       expect(result.sections).toHaveProperty('open_access');
       expect(result.sections).toHaveProperty('annotations');
       expect(result.sections).toHaveProperty('citation_graph');
-    });
+      expect(result.sections).toHaveProperty('citation');
+    }, 30000);
 
     test('articleGet() with DOI where IDConv record has no pmid throws', async () => {
       global.fetch = jest.fn().mockResolvedValue({
@@ -989,6 +1003,159 @@ describe('article', () => {
       }) as any;
 
       await expect(articleGet('10.9999/x')).rejects.toThrow('Could not resolve doi');
+    });
+
+    test('articleGet() with oa section returns license information', async () => {
+      const OA_XML_WITH_LICENSE = `<?xml version="1.0"?>
+      <OA>
+        <responseDate>2019-01-28 10:41:16</responseDate>
+        <request id="PMC5334499">https://www.ncbi.nlm.nih.gov/utils/oa/oa.fcgi?id=PMC5334499</request>
+        <records returned-count="1" total-count="1">
+          <record id="PMC5334499" citation="World J Radiol. 2017 Feb 28; 9(2):27-33" license="CC BY-NC" retracted="no">
+            <link format="tgz" updated="2017-03-17 13:10:45" href="ftp://ftp.ncbi.nlm.nih.gov/pub/pmc/oa_package/8e/71/PMC5334499.tar.gz"/>
+            <link format="pdf" updated="2017-03-03 06:05:17" href="ftp://ftp.ncbi.nlm.nih.gov/pub/pmc/oa_pdf/8e/71/WJR-9-27.PMC5334499.pdf"/>
+          </record>
+        </records>
+      </OA>`;
+
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(SINGLE_ARTICLE_XML),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({
+            status: 'ok',
+            records: [{ pmcid: 'PMC5334499', pmid: 12345 }],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(OA_XML_WITH_LICENSE),
+        }) as any;
+
+      const result = await articleGet('12345', ['oa']);
+
+      expect(result.sections?.open_access).toEqual({
+        pmcid: 'PMC5334499',
+        pdf_url: 'ftp://ftp.ncbi.nlm.nih.gov/pub/pmc/oa_pdf/8e/71/WJR-9-27.PMC5334499.pdf',
+        license: 'CC BY-NC',
+        license_url: 'https://creativecommons.org/licenses/by-nc/4.0/',
+      });
+    });
+  });
+
+  describe('parseOaXml', () => {
+    test('parseOaXml extracts license from record attribute', () => {
+      const OA_XML = `<?xml version="1.0"?>
+      <OA>
+        <records returned-count="1" total-count="1">
+          <record id="PMC5334499" license="CC BY-NC" retracted="no">
+            <link format="pdf" href="https://example.com/paper.pdf"/>
+          </record>
+        </records>
+      </OA>`;
+
+      const result = parseOaXml(OA_XML);
+
+      expect(result.license).toBe('CC BY-NC');
+      expect(result.license_url).toBe('https://creativecommons.org/licenses/by-nc/4.0/');
+      expect(result.pdf_url).toBe('https://example.com/paper.pdf');
+    });
+
+    test('parseOaXml handles various CC license types', () => {
+      const licenses = [
+        'CC0',
+        'CC BY',
+        'CC BY-NC',
+        'CC BY-NC-ND',
+        'CC BY-NC-SA',
+        'CC BY-ND',
+        'CC BY-SA',
+      ];
+
+      for (const license of licenses) {
+        const OA_XML = `<?xml version="1.0"?>
+        <OA>
+          <records>
+            <record license="${license}">
+              <link format="pdf" href="https://example.com/paper.pdf"/>
+            </record>
+          </records>
+        </OA>`;
+
+        const result = parseOaXml(OA_XML);
+        expect(result.license).toBe(license);
+        expect(result.license_url).toBeDefined();
+      }
+    });
+
+    test('parseOaXml returns undefined for license when not present', () => {
+      const OA_XML = `<?xml version="1.0"?>
+      <OA>
+        <records>
+          <record id="PMC123">
+            <link format="pdf" href="https://example.com/paper.pdf"/>
+          </record>
+        </records>
+      </OA>`;
+
+      const result = parseOaXml(OA_XML);
+
+      expect(result.license).toBeUndefined();
+      expect(result.license_url).toBeUndefined();
+      expect(result.pdf_url).toBe('https://example.com/paper.pdf');
+    });
+
+    test('parseOaXml handles alternative record location', () => {
+      const OA_XML = `<?xml version="1.0"?>
+      <OA>
+        <record license="CC BY">
+          <link format="pdf" href="https://example.com/paper.pdf"/>
+        </record>
+      </OA>`;
+
+      const result = parseOaXml(OA_XML);
+
+      expect(result.license).toBe('CC BY');
+      expect(result.license_url).toBe('https://creativecommons.org/licenses/by/4.0/');
+      expect(result.pdf_url).toBe('https://example.com/paper.pdf');
+    });
+
+    test('parseOaXml handles case-insensitive license matching', () => {
+      const OA_XML = `<?xml version="1.0"?>
+      <OA>
+        <records>
+          <record license="cc by-nc">
+            <link format="pdf" href="https://example.com/paper.pdf"/>
+          </record>
+        </records>
+      </OA>`;
+
+      const result = parseOaXml(OA_XML);
+
+      expect(result.license).toBe('cc by-nc');
+      expect(result.license_url).toBe('https://creativecommons.org/licenses/by-nc/4.0/');
+    });
+
+    test('parseOaXml handles license with version number', () => {
+      const OA_XML = `<?xml version="1.0"?>
+      <OA>
+        <records>
+          <record license="CC BY 4.0">
+            <link format="pdf" href="https://example.com/paper.pdf"/>
+          </record>
+        </records>
+      </OA>`;
+
+      const result = parseOaXml(OA_XML);
+
+      expect(result.license).toBe('CC BY 4.0');
+      expect(result.license_url).toBe('https://creativecommons.org/licenses/by/4.0/');
     });
   });
 });

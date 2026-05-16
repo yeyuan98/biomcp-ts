@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals';
 import { geneSearch, geneGet, transformMyGeneResponse } from '../../entities/gene.js';
+import { connectionManager } from '../../connections/manager.js';
 
 describe('gene', () => {
   let originalFetch: typeof global.fetch;
@@ -7,6 +8,7 @@ describe('gene', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     originalFetch = global.fetch;
+    connectionManager.closeAll();
   });
 
   afterEach(() => {

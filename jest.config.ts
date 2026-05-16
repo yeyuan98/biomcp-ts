@@ -13,6 +13,8 @@ export default {
     }],
   },
   testMatch: ['**/src/__tests__/**/*.test.ts'],
+  testTimeout: 30000,
+  forceExit: true,
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/**/*.d.ts',

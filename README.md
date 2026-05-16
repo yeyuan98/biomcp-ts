@@ -19,7 +19,7 @@ Adapted from the [BioMCP Rust](https://github.com/genomoncology/biomcp) with age
 
 ```bash
 git clone <repo-url> && cd biomcp-ts
-make install build-bundle
+make install build
 ```
 
 ### Configure with Claude Desktop
@@ -104,8 +104,8 @@ BioMCP speaks standard MCP over **stdio**. Point any MCP client at the `biomcp` 
 
 | Tool | Description |
 |------|-------------|
-| `article_search` | Federated literature search across PubMed, EuropePMC, Semantic Scholar, PubTator, and LitSense with optional date range filtering |
-| `article_get` | Get detailed article info by identifier (PMID, PMCID, or DOI) with optional sections (open_access, annotations, citation_graph) |
+| `article_search` | Federated literature search across PubMed, EuropePMC, Semantic Scholar, PubTator, and LitSense with optional date range filtering. Returns `{results: [...], total_results?: number}`. Supports `enrich_pmid=true` to resolve PMID for results missing it. |
+| `article_get` | Get detailed article info by identifier (PMID, PMCID, or DOI) with optional sections: `open_access` (includes license info), `annotations` (limit parameter controls max annotations), `citation_graph` |
 
 ### Trial (2)
 
@@ -127,18 +127,50 @@ BioMCP speaks standard MCP over **stdio**. Point any MCP client at the `biomcp` 
 |------|-------------|
 | `pdb` | Search PDB structures, get entry metadata with optional sections (polymer entities, ligands, assembly, experiment, citation), and download structure files (mmCIF/PDB) |
 
+### Citation Module
+
+**Modes:**
+- **Fast** (default): Europe PMC, Semantic Scholar, Crossref (~4s)
+  - Returns: Citations with title, authors, journal, year when available
+  - Note: Crossref requires DOI; Europe PMC auto-resolves DOI/PMCID to PMID
+- **Full** (`citation_mode="full"`): All 5 providers (~15-30s)
+  - Adds: PubMed (PMID only) and OpenCitations (DOI only)
+  - Use for: Comprehensive citation analysis
+
+**Provider Data Coverage:**
+| Provider | Forward | Backward | Count | Required ID |
+|----------|---------|----------|-------|-------------|
+| Europe PMC | ✓ | ✓ | ✓ | PMID/DOI/PMCID |
+| Semantic Scholar | ✓ | ✓ | ✓ | PMID/DOI/PMCID |
+| Crossref | ✓ | ✓ | ✓ | DOI only |
+| PubMed | ✓ | ✓ | ✓ | PMID only |
+| OpenCitations | ✓ | ✓ | ✓ | DOI only |
+
+**Automatic Fallback:** Fast mode automatically queries PubMed when other providers return counts but no items (requires PMID).
+
 ## Development
 
 ```bash
 make              # Show available targets
 make install      # Install dependencies
-make build-bundle # Compile and bundle into dist/bundle.js
+make build        # Compile and bundle into dist/bundle.js
 make typecheck    # Type-check without emitting
 make test         # Run unit tests (fast, mocked)
 make test-integration  # Run integration tests (live APIs, ~60s)
 make test-all     # Run all tests
 make clean        # Remove build artifacts
 ```
+
+### Local Testing with npx
+
+After building, you can test the MCP server locally via npx:
+
+```bash
+make build        # Creates dist/bundle.js
+npx .             # Runs the bundled MCP server
+```
+
+This is the recommended workflow for local development and testing.
 
 ## Environment Variables
 
@@ -147,7 +179,7 @@ All keys are optional. BioMCP works without any keys — they unlock higher rate
 | Variable | Source | Benefit |
 |----------|--------|---------|
 | `NCBI_API_KEY` | [NCBI](https://www.ncbi.nlm.nih.gov/account/settings/) | Higher PubMed / NCBI rate limits |
-| `S2_API_KEY` | [Semantic Scholar](https://www.semanticscholar.org/product/api#api-key-form) | Semantic Scholar API access |
+| `S2_API_KEY` | [Semantic Scholar API key](https://www.semanticscholar.org/product/api#api-key-form) (prevents 429 rate limits) |
 | `OPENFDA_API_KEY` | [OpenFDA](https://open.fda.gov/apis/) | OpenFDA API access |
 | `NCI_API_KEY` | [NCI CTS](https://cts.nci.nih.gov/) | NCI Clinical Trials API |
 | `ONCOKB_TOKEN` | [OncoKB](https://www.oncokb.org/) | OncoKB cancer variant annotations |

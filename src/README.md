@@ -97,7 +97,7 @@ entityGet(id, sections?)      → { ...core, sections: Record<string, unknown> }
 | `variant.ts` | 678 | 5 (core, frequency, predictions, clinical, alphagenome_scores) | MyVariant.info, CIViC, OncoKB, AlphaGenome |
 | `drug.ts` | 359 | 6 (us_regulatory, eu_regulatory, who_regulatory, safety, targets, indications) | MyChem.info, OpenFDA, OpenTargets |
 | `disease.ts` | 314 | 4 (gene_associations, phenotypes, pathways, survival) | MyDisease.info, DisGeNET, Monarch, Reactome, SEER |
-| `article.ts` | 593 | 3 (open_access, annotations, citation_graph) | PubMed, Europe PMC, Semantic Scholar, PubTator, LitSense, NCBI ID Converter, PMC OA |
+| `article.ts` | 593 | 4 (open_access, annotations, citation_graph, citation) | PubMed, Europe PMC, Semantic Scholar, PubTator, LitSense, NCBI ID Converter, PMC OA, Crossref, OpenCitations |
 | `trial.ts` | 395 | 3 (eligibility, locations, outcomes) | ClinicalTrials.gov |
 | `pdb.ts` | 355 | 5 (polymer_entities, ligands, assembly, experiment, citation) | RCSB PDB (Data API, Search API, File Download) |
 
@@ -116,6 +116,20 @@ Functions not exposed as MCP tools: `geneToPathways`, `drugToGenes`, `drugToAdve
 ### `entities/article.ts` — Federated Search
 
 `articleSearch` without a `source` parameter fans out to 5 backends in parallel via `Promise.allSettled`. Results are deduplicated by PMID/DOI and ranked by citation count. With a `source` parameter, queries a single backend directly.
+
+### Citation Module (`entities/article/citation/`)
+
+Federated citation data from 5 sources with 10s timeout on all providers:
+
+| Provider | Forward | Backward | Count | ID Support |
+|----------|---------|----------|-------|------------|
+| PubMed | ELink + EFetch enrichment | ELink + EFetch enrichment | ELink link count | PMID |
+| EuropePMC | REST citations API | REST references API | Search API | PMID, DOI, PMCID |
+| Semantic Scholar | Graph API citations | Graph API references | Paper API | PMID, DOI, PMCID |
+| Crossref | `/works?filter=references:` | `/works/{doi}` (cached) | `/works/{doi}` (cached) | DOI |
+| OpenCitations | `/v2/citations/` | `/references/` | `/citation-count/` | DOI |
+
+The orchestrator (`citation/index.ts`) queries all providers in parallel, deduplicates by DOI/PMID/PMCID keeping the record with the most fields, and aggregates citation counts. Crossref uses a 30s work cache to avoid redundant `/works/{doi}` calls between backward references and citation count requests.
 
 ## Layer 3 — `connections/` API Abstraction Layer
 
@@ -203,7 +217,7 @@ Error classification (`server/errors.ts`): `formatError()` inspects `Error.messa
 ```
 make                # Show available targets
 make install        # Install dependencies
-make build-bundle   # Compile and bundle into dist/bundle.js
+make build          # Compile and bundle into dist/bundle.js
 make typecheck      # tsc --noEmit
 make test           # Unit tests (fast, mocked, parallel)
 make test-integration # Integration tests (live APIs, serial, ~60s)

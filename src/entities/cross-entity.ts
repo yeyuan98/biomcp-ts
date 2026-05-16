@@ -5,7 +5,7 @@ import { variantSearch, VariantSearchResult } from './variant.js';
 import { drugSearch, DrugSearchResult } from './drug.js';
 import { diseaseSearch, DiseaseSearchResult } from './disease.js';
 import { trialSearch, TrialSearchResult } from './trial.js';
-import { articleSearch, Article } from './article.js';
+import { articleSearch, Article } from './article/index.js';
 
 const SECTION_TIMEOUT_MS = 8000;
 
@@ -93,8 +93,7 @@ export async function geneToPathways(geneSymbol: string): Promise<Array<{ pathwa
 }
 
 export async function geneToArticles(geneSymbol: string): Promise<Article[]> {
-  const articles = await articleSearch(geneSymbol, { limit: 10 });
-  return articles;
+  return await articleSearch(geneSymbol, { limit: 10 });
 }
 
 export async function variantToTrials(variantId: string): Promise<Array<{ nct_id: string; title?: string; status?: string }>> {
@@ -523,7 +522,7 @@ export async function batchGet(inputs: BatchGetInput[]): Promise<BatchGetResult[
           break;
         }
         case 'article': {
-          const { articleGet } = await import('./article.js');
+          const { articleGet } = await import('./article/index.js');
           data = await articleGet(input.id, input.sections);
           break;
         }

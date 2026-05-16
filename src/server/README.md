@@ -72,7 +72,7 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
 | `article_search` | `query: string`, `source?: "pubmed" \| "europepmc" \| "semantic_scholar" \| "pubtator" \| "litsense"`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)`, `dateRange?: string` (YYYY-MM-DD/YYYY-MM-DD, open-ended allowed) | Federated literature search with deduplication and optional date filtering (pubmed, europepmc, semantic_scholar). Note: europepmc truncates date ranges to year-level granularity | readOnly, openWorld |
-| `article_get` | `id: string` (PMID, PMCID, or DOI), `sections?: ("core" \| "oa" \| "annotations" \| "graph" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed article information by identifier. DOIs are resolved via NCBI IDConv with PubMed esearch fallback | readOnly, openWorld |
+| `article_get` | `id: string` (PMID, PMCID, or DOI), `sections?: ("core" \| "oa" \| "annotations" \| "graph" \| "citation" \| "all")[]`, `limit?: number (1-100, default 20)`, `citation_mode?: "fast" \| "full"` (default "fast"), `citation_direction?: "forward" \| "backward" \| "both"` (default "both") | Get detailed article information by identifier. Citation section uses fast mode (Europe PMC, Semantic Scholar, Crossref; ~4s) or full mode (adds PubMed, OpenCitations; ~15-30s). Results cached 10min. DOIs are resolved via NCBI IDConv with PubMed esearch fallback | readOnly, openWorld |
 
 ### Trial Tools (`tools/trial.ts`) — 2 tools
 

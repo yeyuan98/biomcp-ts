@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals';
 import { drugSearch, drugGet, transformMyChemResponse } from '../../entities/drug.js';
+import { connectionManager } from '../../connections/manager.js';
 
 describe('drug', () => {
   let originalFetch: typeof global.fetch;
@@ -7,6 +8,7 @@ describe('drug', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     originalFetch = global.fetch;
+    connectionManager.closeAll();
     process.env.MYCHEM_API_KEY = '';
   });
 

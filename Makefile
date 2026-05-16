@@ -7,11 +7,10 @@ help: ## Show this help
 install: ## Install dependencies
 	npm install
 
-build: ## Compile TypeScript to dist/
+build: ## Compile and bundle into dist/bundle.js
 	npm run build
 
-build-bundle: ## Compile and bundle into dist/bundle.js
-	npm run build:bundle
+build-bundle: build ## Alias for build
 
 typecheck: ## Type-check without emitting
 	npm run typecheck
@@ -36,8 +35,8 @@ test-update-fixtures: ## Refresh ground-truth fixtures from live APIs
 clean: ## Remove build artifacts
 	rm -rf dist
 
-publish: clean build-bundle test-unit ## Publish to npm (requires clean + test first)
+publish: clean build test-unit ## Publish to npm (requires clean + test first)
 	npm publish
 
-publish-alpha: clean build-bundle test-unit ## Publish alpha prerelease to npm
+publish-alpha: clean build test-unit ## Publish alpha prerelease to npm
 	npm publish --tag alpha
