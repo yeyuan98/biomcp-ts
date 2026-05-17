@@ -2,21 +2,10 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { variantSearch, variantGet, fetchOncoKbAnnotation, getVariantSearchFilters } from '../../entities/variant.js';
 import { variantToTrials } from '../../entities/cross-entity.js';
+import { sliceArraysRecursive } from './utils.js';
 
 const VARIANT_GET_SECTIONS = ['core', 'frequency', 'predictions', 'clinical', 'alphagenome_scores', 'all'] as const;
 const VARIANT_SEARCH_FILTERS = getVariantSearchFilters();
-
-function sliceArraysRecursive(obj: unknown, limit: number): unknown {
-  if (Array.isArray(obj)) return obj.slice(0, limit);
-  if (obj && typeof obj === 'object') {
-    const result: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(obj)) {
-      result[k] = sliceArraysRecursive(v, limit);
-    }
-    return result;
-  }
-  return obj;
-}
 
 const VARIANT_ALL_SECTIONS = ['frequency', 'predictions', 'clinical', 'alphagenome_scores'];
 const VARIANT_STORAGE_KEYS: Record<string, string> = {

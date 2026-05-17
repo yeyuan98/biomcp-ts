@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { articleSearch, articleGet } from '../../entities/article/index.js';
+import { applyLimit } from './utils.js';
 
 const TOOL_TIMEOUT_MS = 30000;
 
@@ -15,30 +16,6 @@ function withToolTimeout<T>(promise: Promise<T>, timeoutMs = TOOL_TIMEOUT_MS): P
 }
 
 const ARTICLE_SECTIONS = ['core', 'oa', 'annotations', 'graph', 'citation', 'all'] as const;
-
-function applyLimit(
-  sections: Record<string, unknown>,
-  requestedNames: string[],
-  storageKeyMap: Record<string, string>,
-  arrayKeyMap: Record<string, string[]>,
-  limit: number,
-): void {
-  for (const name of requestedNames) {
-    const storedKey = storageKeyMap[name] ?? name;
-    const data = sections[storedKey];
-    if (!data || typeof data !== 'object') continue;
-
-    const keys = arrayKeyMap[name];
-    if (Array.isArray(data)) {
-      sections[storedKey] = data.slice(0, limit);
-    } else if (keys) {
-      const obj = data as Record<string, unknown>;
-      for (const k of keys) {
-        if (Array.isArray(obj[k])) obj[k] = obj[k].slice(0, limit);
-      }
-    }
-  }
-}
 
 const ARTICLE_ALL_SECTIONS = ['oa', 'annotations', 'graph', 'citation'];
 const ARTICLE_STORAGE_KEYS: Record<string, string> = {

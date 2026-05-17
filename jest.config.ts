@@ -20,4 +20,5 @@ export default {
     '!src/**/*.d.ts',
     '!src/**/index.ts',
   ],
+  coverageDirectory: 'coverage/unit',
 };

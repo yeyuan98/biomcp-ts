@@ -29,6 +29,7 @@
     "test:coverage": "node --experimental-vm-modules node_modules/.bin/jest --testPathIgnorePatterns=integration --coverage",
     "test:integration": "node --experimental-vm-modules node_modules/.bin/jest --config jest.integration.config.ts --runInBand",
     "test:all": "npm run test && npm run test:integration",
+    "test:coverage-all": "npm run test:coverage && npm run test:integration -- --coverage",
     "test:update-fixtures": "UPDATE_FIXTURES=1 node --experimental-vm-modules node_modules/.bin/jest --config jest.integration.config.ts --runInBand",
     "typecheck": "tsc --noEmit"
   },

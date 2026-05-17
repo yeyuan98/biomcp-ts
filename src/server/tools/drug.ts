@@ -2,22 +2,11 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { drugSearch, drugGet } from '../../entities/drug.js';
 import { drugToTrials } from '../../entities/cross-entity.js';
+import { sliceArraysRecursive } from './utils.js';
 
 const DRUG_SECTIONS = [
   'core', 'us_regulatory', 'eu_regulatory', 'who_regulatory', 'safety', 'targets', 'indications', 'all'
 ] as const;
-
-function sliceArraysRecursive(obj: unknown, limit: number): unknown {
-  if (Array.isArray(obj)) return obj.slice(0, limit);
-  if (obj && typeof obj === 'object') {
-    const result: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(obj)) {
-      result[k] = sliceArraysRecursive(v, limit);
-    }
-    return result;
-  }
-  return obj;
-}
 
 const DRUG_ALL_SECTIONS = ['us_regulatory', 'eu_regulatory', 'who_regulatory', 'safety', 'targets', 'indications'];
 const DRUG_STORAGE_KEYS: Record<string, string> = {};

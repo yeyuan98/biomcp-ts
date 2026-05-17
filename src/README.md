@@ -46,9 +46,9 @@ Four layers, strict downward dependency. No upward references.
 Entry point. Converts MCP tool calls into entity-layer invocations. All tools declare `readOnlyHint: true`.
 
 ### `server/index.ts`
-Creates `McpServer` on `StdioServerTransport`. Imports and calls all 7 `register*Tools(server)` functions.
+Creates `McpServer` on `StdioServerTransport`. Imports and calls all 8 `register*Tools(server)` functions.
 
-### `server/tools/` — Tool Registration (7 modules, 24 tools)
+### `server/tools/` — Tool Registration (8 modules, 25 tools)
 
 Each module exports a single `register*Tools(server: McpServer): void` function that calls `server.registerTool()` for each tool. Tool handlers perform try/catch and delegate to entity-layer functions. Input schemas use Zod directly.
 

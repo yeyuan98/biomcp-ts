@@ -35,12 +35,21 @@ src/__tests__/
     rate-limiter.test.ts
     registry.test.ts
     rest.test.ts
+    retry.test.ts
   entities/
     article.test.ts
+    citation.test.ts
+    citation/
+      cache.test.ts
+      timeout.test.ts
     cross-entity.test.ts
+    dedup.test.ts
     disease.test.ts
     drug.test.ts
     gene.test.ts
+    id-resolution.test.ts
+    pdb.test.ts
+    pubmed-transform.test.ts
     trial.test.ts
     variant.test.ts
   integration/
@@ -53,11 +62,14 @@ src/__tests__/
       article-tools.test.ts     # Integration: real article API calls
       trial-tools.test.ts       # Integration: real trial API calls
       utility-tools.test.ts     # Integration: discover + batch_get
+      pdb-tools.test.ts         # Integration: real PDB API calls
   server/
     errors.test.ts
+    tool-utils.test.ts       # Shared tool utility functions (applyLimit, sliceArraysRecursive)
     validation.test.ts
   transform/
     gene.test.ts
+    pdb.test.ts
 ```
 
 ## Test Counts by Module
@@ -65,45 +77,56 @@ src/__tests__/
 | Module | File | Tests |
 |---|---|---|
 | connections | fetch-utils.test.ts | 3 |
-| connections | graphql.test.ts | 2 |
+| connections | graphql.test.ts | 5 |
 | connections | grpc.test.ts | 2 |
 | connections | manager.test.ts | 2 |
-| connections | rate-limiter.test.ts | 9 |
+| connections | rate-limiter.test.ts | 8 |
 | connections | registry.test.ts | 7 |
 | connections | rest.test.ts | 16 |
-| entities | article.test.ts | 15 |
-| entities | cross-entity.test.ts | 5 |
+| connections | retry.test.ts | 20 |
+| entities | article.test.ts | 66 |
+| entities | citation.test.ts | 35 |
+| entities | citation/cache.test.ts | 17 |
+| entities | citation/timeout.test.ts | 10 |
+| entities | cross-entity.test.ts | 34 |
+| entities | dedup.test.ts | 13 |
 | entities | disease.test.ts | 4 |
 | entities | drug.test.ts | 4 |
-| entities | gene.test.ts | 4 |
-| entities | trial.test.ts | 4 |
-| entities | variant.test.ts | 4 |
-| integration | tool-registration.test.ts | 10 |
-| integration | gene-tools.test.ts | 13 |
-| integration | drug-tools.test.ts | 7 |
-| integration | variant-tools.test.ts | 7 |
-| integration | disease-tools.test.ts | 7 |
-| integration | article-tools.test.ts | 5 |
+| entities | gene.test.ts | 45 |
+| entities | id-resolution.test.ts | 22 |
+| entities | pdb.test.ts | 31 |
+| entities | pubmed-transform.test.ts | 27 |
+| entities | trial.test.ts | 13 |
+| entities | variant.test.ts | 34 |
+| integration | tool-registration.test.ts | 11 |
+| integration | gene-tools.test.ts | 14 |
+| integration | drug-tools.test.ts | 8 |
+| integration | variant-tools.test.ts | 8 |
+| integration | disease-tools.test.ts | 8 |
+| integration | article-tools.test.ts | 9 |
 | integration | trial-tools.test.ts | 6 |
 | integration | utility-tools.test.ts | 5 |
+| integration | pdb-tools.test.ts | 25 |
 | server | errors.test.ts | 19 |
-| server | validation.test.ts | 28 |
+| server | tool-utils.test.ts | 16 |
+| server | validation.test.ts | 32 |
 | transform | gene.test.ts | 4 |
-| **Total** | | **195** |
+| transform | pdb.test.ts | 3 |
+| **Total** | | **~490** |
 
 ## Testing Approach
 
-### Unit Tests (131 tests, `npm test`)
+### Unit Tests (350+ tests, `npm test`)
 
 All unit tests use mocked `global.fetch` to avoid real network calls.
 
-- **Connections:** Test URL construction, auth headers, rate limiting, content-type handling
-- **Entities:** Test API endpoint correctness, query parameter construction, field mapping transforms
+- **Connections:** Test URL construction, auth headers, rate limiting, retry logic, content-type handling
+- **Entities:** Test API endpoint correctness, query parameter construction, field mapping transforms, citation orchestration, deduplication, ID resolution
 - **Server:** Test error classification, Zod validation schemas, input formatting
 - **Transform:** Test pure transform functions with known inputs/outputs
 - **Tool registration:** Verify `register*Tools` calls and tool name uniqueness
 
-### Integration Tests (64 tests, `npm run test:integration`)
+### Integration Tests (90+ tests, `npm run test:integration`)
 
 Integration tests use `InMemoryTransport` from the MCP SDK to connect a real `Client` to a real `McpServer` in-process. All tool handlers execute against live biomedical APIs.
 

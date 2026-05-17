@@ -13,6 +13,12 @@ export default {
     }],
   },
   testMatch: ['**/src/__tests__/integration/**/*.test.ts'],
+  collectCoverageFrom: [
+    'src/**/*.ts',
+    '!src/**/*.d.ts',
+    '!src/**/index.ts',
+  ],
+  coverageDirectory: 'coverage/integration',
   testTimeout: 30000,
   forceExit: true,
 };

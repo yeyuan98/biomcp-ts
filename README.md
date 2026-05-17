@@ -11,7 +11,7 @@ Adapted from the [BioMCP Rust](https://github.com/genomoncology/biomcp) with age
 - **Section-based fetching** — `entityGet(id, sections)` fans out to multiple sources with per-section timeouts and graceful degradation (failed sections return `{ _error }` instead of crashing)
 - **Federated article search** — queries 5 literature backends simultaneously with PMID/PMCID/DOI deduplication
 - **Zero-config startup** — works out of the box; optional API keys unlock higher rate limits and premium data
-- **283 tests** — 189 unit tests (mocked) + 94 integration tests (live APIs via in-process MCP client, with automatic retry on 429 rate limits)
+- **350+ unit tests** (mocked) + **90+ integration tests** (live APIs via in-process MCP client, with automatic retry on 429 rate limits)
 
 ## Quick Start
 
@@ -67,7 +67,7 @@ BioMCP speaks standard MCP over **stdio**. Point any MCP client at the `biomcp` 
 | Tool | Description |
 |------|-------------|
 | `gene_search` | Search genes by symbol, name, or keyword with type/chromosome filters |
-| `gene_get` | Get detailed gene info by HGNC symbol with optional sections (pathways, protein, GO, interactions, expression, constraint, druggability, clinical evidence, disease associations, funding) |
+| `gene_get` | Get detailed gene info by HGNC symbol with optional sections (core, pathways, protein, ontology, GO, interactions, expression, protein_atlas, constraint, druggability, dosage_sensitivity, clinical evidence, disease associations, diseases, funding). Set `smart=true` to auto-resolve gene aliases (e.g., "HER2" → "ERBB2") |
 | `gene_diseases` | Get diseases associated with a gene (DisGeNET / OpenTargets) |
 | `gene_drugs` | Find drugs targeting a gene (OpenTargets) |
 | `gene_trials` | Find clinical trials for a gene |
@@ -104,14 +104,14 @@ BioMCP speaks standard MCP over **stdio**. Point any MCP client at the `biomcp` 
 
 | Tool | Description |
 |------|-------------|
-| `article_search` | Federated literature search across PubMed, EuropePMC, Semantic Scholar, PubTator, and LitSense with optional date range filtering. Returns `{results: [...], total_results?: number}`. Supports `enrich_pmid=true` to resolve PMID for results missing it. |
-| `article_get` | Get detailed article info by identifier (PMID, PMCID, or DOI) with optional sections: `open_access` (includes license info), `annotations` (limit parameter controls max annotations), `citation_graph` |
+| `article_search` | Federated literature search across PubMed, EuropePMC, Semantic Scholar, PubTator, and LitSense with optional date range filtering. Accepts `query`, `source`, `limit`, `offset`, and `dateRange` parameters. |
+| `article_get` | Get detailed article info by identifier (PMID, PMCID, or DOI) with optional sections: `oa` (open access / license info), `annotations`, `graph` (citation graph), `citation` (fast-mode or full citation data with `citation_mode` and `citation_direction` options) |
 
 ### Trial (2)
 
 | Tool | Description |
 |------|-------------|
-| `trial_search` | Search clinical trials by condition, intervention, status, or phase |
+| `trial_search` | Search clinical trials by condition, intervention, status, or phase. Uses cursor-based pagination via `page_token` parameter |
 | `trial_get` | Get detailed trial info by NCT ID with optional sections (eligibility, locations, outcomes) |
 
 ### Utility (2)
