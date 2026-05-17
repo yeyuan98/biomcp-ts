@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { pdbSearch, pdbGet, pdbDownload } from '../../entities/pdb.js';
 
 const PDB_SECTIONS = [
-  'polymer_entities', 'ligands', 'assembly', 'experiment', 'citation', 'all',
+  'core', 'polymer_entities', 'ligands', 'assembly', 'experiment', 'citation', 'all',
 ] as const;
 
 export function registerPdbTools(server: McpServer): void {

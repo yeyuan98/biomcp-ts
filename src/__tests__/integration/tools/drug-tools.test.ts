@@ -48,7 +48,8 @@ describe('drug_get', () => {
   it('returns aspirin core data', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('drug_get', { name: 'aspirin' }));
     expectDrugGetResult(result);
-    expect(result.name.toLowerCase()).toContain('aspirin');
+    // Canonical ChEBI name is "acetylsalicylic acid"; "aspirin" is a synonym
+    expect(['aspirin', 'acetylsalicylic acid']).toContain(result.name.toLowerCase());
   }, 60000);
 
   it('returns imatinib core data', async () => {

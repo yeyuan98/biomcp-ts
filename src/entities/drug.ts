@@ -21,10 +21,6 @@ export interface DrugSearchResult {
   unii?: string;
 }
 
-export interface DrugGetOptions {
-  sections?: string[];
-}
-
 export interface DrugResult {
   name: string;
   chembl_id?: string;
@@ -46,51 +42,126 @@ export async function drugSearch(
   options: DrugSearchOptions = {}
 ): Promise<DrugSearchResult[]> {
   const { drug_type, source, limit = 10, offset = 0 } = options;
-  
+
   const conn = connectionManager.getConnection('mychem');
-  
+
   const queryParams = new URLSearchParams({
     q: query,
     fields: 'chebi.name,chebi.id,chebi.formula,chebi.mass,chebi.inchikey,unii.smiles,unii.molecular_formula,unii.display_name,unii.registry_number,unichem.chembl,ndc.nonproprietaryname,ndc.substancename',
     size: String(limit),
     from: String(offset),
   });
-  
+
   if (drug_type) {
     queryParams.set('type', drug_type);
   }
-  
+
   const response = await conn.request(`/query?${queryParams.toString()}`) as MyChemSearchResponse;
-  
+
   return (response.hits || []).map(transformMyChemHit);
 }
+
+export interface BestMatchResult {
+  hit: Record<string, unknown>;
+  score: number;
+}
+
+const LUCENE_SPECIAL = /[+\-&|!(){}\[\]^"~*?:\\]/g;
+
+function escapeLucene(value: string): string {
+  return value.replace(LUCENE_SPECIAL, '\\$&');
+}
+
+export function resolveBestMatch(
+  name: string,
+  hits: Array<Record<string, unknown>>
+): BestMatchResult | null {
+  if (!hits || hits.length === 0) return null;
+
+  const queryLower = name.toLowerCase();
+
+  let bestHit: Record<string, unknown> | null = null;
+  let bestScore = -1;
+
+  for (const hit of hits) {
+    let score = 0;
+
+    const chebi = hit.chebi as Record<string, unknown> | undefined;
+    const unii = hit.unii as Record<string, unknown> | undefined;
+    const ndc = hit.ndc as Record<string, unknown> | undefined;
+
+    const chebiName = (chebi?.name as string) || '';
+    const displayName = (unii?.display_name as string) || '';
+    const nonPropName = (ndc?.nonproprietaryname as string) || '';
+
+    if (chebiName.toLowerCase() === queryLower) {
+      score = 3;
+    } else if (
+      displayName.toLowerCase() === queryLower ||
+      nonPropName.toLowerCase() === queryLower
+    ) {
+      score = 2;
+    } else if (chebiName.toLowerCase().includes(queryLower)) {
+      score = 1;
+    }
+
+    // Check synonym match when not already matched at a higher level
+    if (score < 2) {
+      const synonyms = (chebi?.name_synonyms as string[] | undefined) || [];
+      if (synonyms.some(s => typeof s === 'string' && s.toLowerCase() === queryLower)) {
+        score = 2;
+      }
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestHit = hit;
+    }
+  }
+
+  return bestHit ? { hit: bestHit, score: bestScore } : null;
+}
+
+/** Fields we request from MyChem when resolving a drug by name. */
+const DRUG_GET_FIELDS =
+  'chebi.name,chebi.formula,chebi.mass,chebi.inchi,chebi.inchikey,chebi.id,chebi.name_synonyms,unii.smiles,unii.molecular_formula,unii.display_name,unii.registry_number,unichem.chembl,ndc.nonproprietaryname,ndc.substancename';
 
 export async function drugGet(
   name: string,
   sections?: string[]
 ): Promise<DrugResult> {
   const sectionConfig = sections || ['core'];
-  
+
   const conn = connectionManager.getConnection('mychem');
-  
+
+  const escaped = escapeLucene(name);
+
+  // Single combined query covering exact match, synonyms, display names, and broad fallback.
+  // resolveBestMatch scores candidates: 3=exact chebi name, 2=exact synonym/display name, 1=contains, 0=other.
+  const q = `chebi.name:"${escaped}" OR chebi.name_synonyms:"${escaped}" OR unii.display_name:"${escaped}" OR ndc.nonproprietaryname:"${escaped}" OR "${escaped}"`;
+
   const queryParams = new URLSearchParams({
-    q: `chebi.name:"${name}" OR ${name}`,
-    fields: 'chebi.name,chebi.formula,chebi.mass,chebi.inchi,chebi.inchikey,chebi.id,unii.smiles,unii.molecular_formula,unii.display_name,unii.registry_number,unichem.chembl,ndc.nonproprietaryname,ndc.substancename',
-    size: '1',
+    q,
+    fields: DRUG_GET_FIELDS,
+    size: '5',
   });
-  
-  const response = await conn.request(`/query?${queryParams.toString()}`) as MyChemGetResponse;
-  
-  if (!response.hits || response.hits.length === 0) {
+
+  const response = await conn.request(
+    `/query?${queryParams.toString()}`
+  ) as MyChemGetResponse;
+
+  const bestMatch = resolveBestMatch(name, response.hits || []);
+
+  if (!bestMatch) {
     throw new Error(`Drug '${name}' not found. Try drug_search to find valid drug names.`);
   }
-  
-  const hit = response.hits[0];
+
+  const hit = bestMatch.hit;
   const chebi = hit.chebi as Record<string, unknown> | undefined;
   const unii = hit.unii as Record<string, unknown> | undefined;
   const unichem = hit.unichem as Record<string, unknown> | undefined;
   const ndc = hit.ndc as Record<string, unknown> | undefined;
-  
+
   const result: DrugResult = {
     name: (chebi?.name || unii?.display_name || ndc?.nonproprietaryname || ndc?.substancename || unii?.registry_number || name) as string,
     chembl_id: (unichem?.chembl as string) || undefined,
@@ -100,32 +171,45 @@ export async function drugGet(
     molecular_weight: (chebi?.mass as number) || undefined,
     molecular_formula: (chebi?.formula as string) || (unii?.molecular_formula as string) || undefined,
   };
-  
+
   if (unii?.registry_number) {
     result.aliases = [unii.registry_number as string];
   }
-  
-  const sectionsToFetch = sectionConfig.includes('all') 
+
+  const sectionsToFetch = sectionConfig.includes('all')
     ? ['us_regulatory', 'eu_regulatory', 'who_regulatory', 'safety', 'targets', 'indications']
     : sectionConfig.filter(s => s !== 'core');
 
+  // Use the original user input for external API calls (OpenFDA, OpenTargets)
+  // since those databases index drugs by common names, not ChEBI canonical names.
+  const lookupName = name;
+
   if (sectionsToFetch.length > 0) {
+    // Pre-resolve shared dependencies to avoid duplicate API calls.
+    const needOpenFDA = sectionsToFetch.includes('us_regulatory') || sectionsToFetch.includes('safety');
+    const needOpenTargets = sectionsToFetch.includes('targets') || sectionsToFetch.includes('indications');
+
+    const [openFDALabel, chemblId] = await Promise.all([
+      needOpenFDA ? fetchOpenFDALabel(lookupName) : Promise.resolve(null),
+      needOpenTargets ? resolveDrugChemblId(lookupName) : Promise.resolve(undefined),
+    ]);
+
     const sectionPromises = sectionsToFetch.map(section => {
       return fetchWithTimeout(async () => {
         switch (section) {
-          case 'us_regulatory': return { section: 'us_regulatory', data: await fetchUSRegulatory(name) };
-          case 'eu_regulatory': return { section: 'eu_regulatory', data: await fetchEURegulatory(name) };
-          case 'who_regulatory': return { section: 'who_regulatory', data: await fetchWHORegulatory(name) };
-          case 'safety': return { section: 'safety', data: await fetchSafety(name) };
-          case 'targets': return { section: 'targets', data: await fetchTargets(name) };
-          case 'indications': return { section: 'indications', data: await fetchIndications(name) };
+          case 'us_regulatory': return { section: 'us_regulatory', data: extractUSRegulatory(openFDALabel) };
+          case 'safety': return { section: 'safety', data: extractSafety(openFDALabel) };
+          case 'eu_regulatory': return { section: 'eu_regulatory', data: await fetchEURegulatory(lookupName) };
+          case 'who_regulatory': return { section: 'who_regulatory', data: await fetchWHORegulatory(lookupName) };
+          case 'targets': return { section: 'targets', data: await fetchTargets(chemblId ?? null) };
+          case 'indications': return { section: 'indications', data: await fetchIndications(chemblId ?? null) };
           default: return { section, data: null };
         }
       }, SECTION_TIMEOUT_MS);
     });
 
     const settledResults = await Promise.allSettled(sectionPromises);
-    
+
     result.sections = {};
     for (let si = 0; si < settledResults.length; si++) {
       const settled = settledResults[si];
@@ -134,8 +218,8 @@ export async function drugGet(
         (result.sections as Record<string, unknown>)[sectionData.section] = sectionData.data;
       } else if (settled.status === 'fulfilled' && settled.value.error) {
         const sectionResult = settled.value as { error?: string };
-        (result.sections as Record<string, unknown>)[sectionsToFetch[si]] = { 
-          error: sectionResult.error 
+        (result.sections as Record<string, unknown>)[sectionsToFetch[si]] = {
+          error: sectionResult.error
         };
       } else if (settled.status === 'rejected') {
         const reason = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
@@ -145,70 +229,48 @@ export async function drugGet(
       }
     }
   }
-  
+
   return result;
 }
 
-async function fetchUSRegulatory(drugName: string): Promise<{ fda_status?: string; ndc_codes?: string[]; label?: string }> {
+async function fetchOpenFDALabel(drugName: string): Promise<OpenFDAResponse['results'] | null> {
   try {
     const conn = connectionManager.getConnection('openfda');
-    
     const response = await conn.request(
-      `/drug/label.json?search=openfda.generic_name:${encodeURIComponent(drugName)}&limit=1`
+      `/drug/label.json?search=openfda.generic_name:"${encodeURIComponent(drugName)}"&limit=1`
     ) as OpenFDAResponse;
-    
-    if (response.results && response.results.length > 0) {
-      const label = response.results[0];
-      return {
-        fda_status: label.effective_time ? 'approved' : 'unknown',
-        ndc_codes: label.openfda?.ndc_code,
-        label: label.openfda?.brand_name?.[0],
-      };
-    }
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return { _error: `US regulatory lookup failed (source: openfda): ${msg}. The data source may be temporarily unavailable.` } as any;
-  }
-  return {};
-}
-
-async function fetchEURegulatory(uichemId: string): Promise<{ authorized?: boolean; url?: string }> {
-  try {
-    return { authorized: false };
+    return response.results || null;
   } catch {
-    return {};
+    return null;
   }
 }
 
-async function fetchWHORegulatory(uichemId: string): Promise<{ prequalified?: boolean; url?: string }> {
-  try {
-    return { prequalified: false };
-  } catch {
-    return {};
-  }
+function extractUSRegulatory(results: OpenFDAResponse['results'] | null): { fda_status?: string; ndc_codes?: string[]; label?: string; _error?: string } {
+  if (!results || results.length === 0) return {};
+  const label = results[0];
+  return {
+    fda_status: label.effective_time ? 'approved' : 'unknown',
+    ndc_codes: label.openfda?.ndc_code,
+    label: label.openfda?.brand_name?.[0],
+  };
 }
 
-async function fetchSafety(drugName: string): Promise<{ box_warning?: string; warnings?: string[]; adverse_reactions?: string[] }> {
-  try {
-    const conn = connectionManager.getConnection('openfda');
-    
-    const response = await conn.request(
-      `/drug/label.json?search=openfda.generic_name:${encodeURIComponent(drugName)}&limit=1`
-    ) as OpenFDAResponse;
-    
-    if (response.results && response.results.length > 0) {
-      const label = response.results[0];
-      return {
-        box_warning: label.boxed_warning?.[0],
-        warnings: label.warnings,
-        adverse_reactions: label.adverse_reactions,
-      };
-    }
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return { _error: `Safety lookup failed (source: openfda): ${msg}. The data source may be temporarily unavailable.` } as any;
-  }
-  return {};
+function extractSafety(results: OpenFDAResponse['results'] | null): { box_warning?: string; warnings?: string[]; adverse_reactions?: string[]; _error?: string } {
+  if (!results || results.length === 0) return {};
+  const label = results[0];
+  return {
+    box_warning: label.boxed_warning?.[0],
+    warnings: label.warnings,
+    adverse_reactions: label.adverse_reactions,
+  };
+}
+
+async function fetchEURegulatory(_drugName: string): Promise<{ authorized?: boolean; url?: string }> {
+  return { authorized: false };
+}
+
+async function fetchWHORegulatory(_drugName: string): Promise<{ prequalified?: boolean; url?: string }> {
+  return { prequalified: false };
 }
 
 async function resolveDrugChemblId(drugName: string): Promise<string | null> {
@@ -227,14 +289,11 @@ async function resolveDrugChemblId(drugName: string): Promise<string | null> {
   }
 }
 
-async function fetchTargets(drugName: string): Promise<Array<{ gene_symbol: string; name: string; action_type?: string; source: string }>> {
-  if (!drugName) return [];
+async function fetchTargets(chemblId: string | null): Promise<Array<{ gene_symbol: string; name: string; action_type?: string; source: string }>> {
+  if (!chemblId) {
+    return [{ _error: 'No OpenTargets entry found for this drug. The drug may not be in the OpenTargets database.' } as any];
+  }
   try {
-    const chemblId = await resolveDrugChemblId(drugName);
-    if (!chemblId) {
-      return [{ _error: `No OpenTargets entry found for drug '${drugName}'. The drug may not be in the OpenTargets database.` } as any];
-    }
-    
     const conn = connectionManager.getConnection('opentargets');
     const query = `query($chemblId: String!) {
       drug(chemblId: $chemblId) {
@@ -245,11 +304,11 @@ async function fetchTargets(drugName: string): Promise<Array<{ gene_symbol: stri
         }
       }
     }`;
-    
+
     const raw = await conn.request(query, { chemblId }) as any;
     const data = JSON.parse(JSON.stringify(raw));
     const rows = data?.data?.drug?.mechanismsOfAction?.rows || [];
-    
+
     const seen = new Set<string>();
     const results: Array<{ gene_symbol: string; name: string; action_type?: string; source: string }> = [];
     for (const row of rows) {
@@ -272,14 +331,11 @@ async function fetchTargets(drugName: string): Promise<Array<{ gene_symbol: stri
   }
 }
 
-async function fetchIndications(drugName: string): Promise<Array<{ disease_name: string; phase: string; source: string }>> {
-  if (!drugName) return [];
+async function fetchIndications(chemblId: string | null): Promise<Array<{ disease_name: string; phase: string; source: string }>> {
+  if (!chemblId) {
+    return [{ _error: 'No OpenTargets entry found for this drug. The drug may not be in the OpenTargets database.' } as any];
+  }
   try {
-    const chemblId = await resolveDrugChemblId(drugName);
-    if (!chemblId) {
-      return [{ _error: `No OpenTargets entry found for drug '${drugName}'. The drug may not be in the OpenTargets database.` } as any];
-    }
-    
     const conn = connectionManager.getConnection('opentargets');
     const query = `query($chemblId: String!) {
       drug(chemblId: $chemblId) {
@@ -289,11 +345,11 @@ async function fetchIndications(drugName: string): Promise<Array<{ disease_name:
         }
       }
     }`;
-    
+
     const raw = await conn.request(query, { chemblId }) as any;
     const data = JSON.parse(JSON.stringify(raw));
     const rows = data?.data?.drug?.indications?.rows || [];
-    
+
     return rows.slice(0, 20).map((r: { maxClinicalStage?: string; disease?: { name?: string } }) => ({
       disease_name: r.disease?.name || '',
       phase: r.maxClinicalStage || '',
@@ -331,7 +387,7 @@ export function transformMyChemHit(hit: Record<string, unknown>): DrugSearchResu
   const unii = hit.unii as Record<string, unknown> | undefined;
   const unichem = hit.unichem as Record<string, unknown> | undefined;
   const ndc = hit.ndc as Record<string, unknown> | undefined;
-  
+
   return {
     name: (chebi?.name || unii?.display_name || ndc?.nonproprietaryname || ndc?.substancename || unii?.registry_number || '') as string,
     chembl_id: (unichem?.chembl as string) || undefined,
@@ -347,7 +403,7 @@ export function transformMyChemResponse(data: Record<string, unknown>): DrugResu
   const chebi = data.chebi as Record<string, unknown> | undefined;
   const unii = data.unii as Record<string, unknown> | undefined;
   const unichem = data.unichem as Record<string, unknown> | undefined;
-  
+
   return {
     name: (chebi?.name || unii?.display_name || '') as string,
     chembl_id: (unichem?.chembl as string) || undefined,

@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { drugSearch, drugGet, transformMyChemResponse } from '../../entities/drug.js';
+import { drugSearch, drugGet, transformMyChemResponse, resolveBestMatch } from '../../entities/drug.js';
 import { connectionManager } from '../../connections/manager.js';
 
 describe('drug', () => {
@@ -56,20 +56,70 @@ describe('drug', () => {
     expect(results[0].molecular_formula).toBe('C9H8O4');
   });
 
-  test('drugGet() calls connection with correct endpoint', async () => {
+  test('drugGet() uses single combined query', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
-        hits: [{ name: 'Aspirin', uichem: 'CHEMBL25' }],
+        hits: [{
+          chebi: { name: 'Aspirin', mass: 180.16, formula: 'C9H8O4' },
+          unichem: { chembl: 'CHEMBL25' },
+        }],
       }),
     }) as any;
 
     await drugGet('Aspirin');
 
-    expect(global.fetch).toHaveBeenCalled();
+    // Single MyChem query — not 3 sequential calls
+    expect(global.fetch).toHaveBeenCalledTimes(1);
     const callUrl = (global.fetch as any).mock.calls[0][0] as string;
     expect(callUrl).toContain('mychem.info');
     expect(callUrl).toContain('/query?');
+    expect(callUrl).toContain('chebi.name');
+    expect(callUrl).toContain('chebi.name_synonyms');
+  });
+
+  test('drugGet() escapes Lucene special characters in query', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ hits: [] }),
+    }) as any;
+
+    await expect(drugGet('drug+name')).rejects.toThrow('not found');
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    // '+' should be escaped to '\\+'
+    expect(callUrl).toContain('drug%5C%2Bname');
+  });
+
+  test('drugGet() resolves drug found via synonym', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        hits: [{
+          chebi: {
+            name: 'Acetylsalicylic acid',
+            mass: 180.16,
+            formula: 'C9H8O4',
+            name_synonyms: ['aspirin', '2-acetoxybenzoic acid'],
+          },
+          unii: { display_name: 'Aspirin' },
+        }],
+      }),
+    }) as any;
+
+    const result = await drugGet('aspirin');
+    expect(result.name).toBe('Acetylsalicylic acid');
+    expect(result.molecular_formula).toBe('C9H8O4');
+  });
+
+  test('drugGet() throws when no hits returned', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ hits: [] }),
+    }) as any;
+
+    await expect(drugGet('nonexistent-drug-xyz')).rejects.toThrow(
+      "Drug 'nonexistent-drug-xyz' not found"
+    );
   });
 
   test('transformMyChemResponse() maps fields correctly', () => {
@@ -99,6 +149,112 @@ describe('drug', () => {
       smiles: 'CC(=O)Oc1ccccc1C(=O)O',
       molecular_weight: 180.16,
       molecular_formula: 'C9H8O4',
+    });
+  });
+
+  describe('resolveBestMatch', () => {
+    test('returns null for empty hits', () => {
+      expect(resolveBestMatch('aspirin', [])).toBeNull();
+    });
+
+    test('picks exact case-insensitive chebi.name match (score 3)', () => {
+      const hits = [
+        { chebi: { name: 'Acetylsalicylic acid' } },
+        { chebi: { name: 'Aspirin' } },
+        { chebi: { name: 'aspirin derivative' } },
+      ];
+      const result = resolveBestMatch('aspirin', hits)!;
+      expect(result.score).toBe(3);
+      expect((result.hit as any).chebi.name).toBe('Aspirin');
+    });
+
+    test('picks exact match regardless of case', () => {
+      const hits = [
+        { chebi: { name: 'ASPIRIN' } },
+        { chebi: { name: 'Some other drug' } },
+      ];
+      const result = resolveBestMatch('aspirin', hits)!;
+      expect(result.score).toBe(3);
+      expect((result.hit as any).chebi.name).toBe('ASPIRIN');
+    });
+
+    test('picks exact unii.display_name match when no chebi.name match (score 2)', () => {
+      const hits = [
+        { chebi: { name: 'Other Compound' }, unii: { display_name: 'Ibuprofen' } },
+        { chebi: { name: 'Another Compound' } },
+      ];
+      const result = resolveBestMatch('ibuprofen', hits)!;
+      expect(result.score).toBe(2);
+      expect((result.hit as any).unii.display_name).toBe('Ibuprofen');
+    });
+
+    test('picks exact ndc.nonproprietaryname match when no chebi.name match (score 2)', () => {
+      const hits = [
+        { chebi: { name: 'Something else' }, ndc: { nonproprietaryname: 'Metformin' } },
+        { chebi: { name: 'Unrelated' } },
+      ];
+      const result = resolveBestMatch('metformin', hits)!;
+      expect(result.score).toBe(2);
+      expect((result.hit as any).ndc.nonproprietaryname).toBe('Metformin');
+    });
+
+    test('picks contains match when no exact match (score 1)', () => {
+      const hits = [
+        { chebi: { name: 'Random Drug X' } },
+        { chebi: { name: 'aspirin sodium' } },
+      ];
+      const result = resolveBestMatch('aspirin', hits)!;
+      expect(result.score).toBe(1);
+      expect((result.hit as any).chebi.name).toBe('aspirin sodium');
+    });
+
+    test('returns first hit with score 0 when nothing matches well', () => {
+      const hits = [
+        { chebi: { name: 'Totally unrelated' } },
+        { chebi: { name: 'Also unrelated' } },
+      ];
+      const result = resolveBestMatch('aspirin', hits)!;
+      expect(result.score).toBe(0);
+      expect((result.hit as any).chebi.name).toBe('Totally unrelated');
+    });
+
+    test('picks exact synonym match as score 2', () => {
+      const hits = [
+        { chebi: { name: 'Acetylsalicylic acid', name_synonyms: ['aspirin', '2-acetoxybenzoic acid'] } },
+        { chebi: { name: 'Other Drug' } },
+      ];
+      const result = resolveBestMatch('aspirin', hits)!;
+      expect(result.score).toBe(2);
+      expect((result.hit as any).chebi.name).toBe('Acetylsalicylic acid');
+    });
+
+    test('synonym match loses to exact chebi.name match', () => {
+      const hits = [
+        { chebi: { name: 'Aspirin' } },
+        { chebi: { name: 'Acetylsalicylic acid', name_synonyms: ['aspirin'] } },
+      ];
+      const result = resolveBestMatch('aspirin', hits)!;
+      expect(result.score).toBe(3);
+      expect((result.hit as any).chebi.name).toBe('Aspirin');
+    });
+
+    test('synonym match wins over contains match', () => {
+      const hits = [
+        { chebi: { name: 'aspirin sodium' } },
+        { chebi: { name: 'Acetylsalicylic acid', name_synonyms: ['aspirin'] } },
+      ];
+      const result = resolveBestMatch('aspirin', hits)!;
+      expect(result.score).toBe(2);
+      expect((result.hit as any).chebi.name).toBe('Acetylsalicylic acid');
+    });
+
+    test('synonym-only match scores 2 without display_name', () => {
+      // Hit found via synonym, no unii.display_name or ndc.nonproprietaryname
+      const hits = [
+        { chebi: { name: 'N-(4-hydroxyphenyl)acetamide', name_synonyms: ['paracetamol', 'acetaminophen'] } },
+      ];
+      const result = resolveBestMatch('acetaminophen', hits)!;
+      expect(result.score).toBe(2);
     });
   });
 });
