@@ -53,17 +53,18 @@ Do NOT use compound free-text like "BRAF V600E" — use separate gene and hgvsp 
         let searchQuery = query;
         let searchGene = gene;
         let searchHgvsp = hgvsp;
+        let searchHgvsc = hgvsc;
 
         if (!searchQuery && !searchGene && (rsid || hgvsp || hgvsc)) {
           const parts: string[] = [];
           if (rsid) parts.push(`dbsnp.rsid:${rsid}`);
-          if (hgvsp) parts.push(`hgvsp.p:${hgvsp}`);
-          if (hgvsc) parts.push(`hgvsc:${hgvsc}`);
+          if (hgvsp) parts.push(`dbnsfp.hgvsp:*${hgvsp}*`);
+          if (hgvsc) parts.push(`snpeff.ann.hgvs_c:"${hgvsc}"`);
           searchQuery = parts.join(' AND ');
         }
 
         if (!searchQuery && !rsid && !hgvsc && searchGene && searchHgvsp) {
-          searchQuery = `gene:${searchGene} AND hgvsp.p:${searchHgvsp}`;
+          searchQuery = `cadd.gene.genename:${searchGene} AND dbnsfp.hgvsp:*${searchHgvsp}*`;
           searchGene = undefined;
           searchHgvsp = undefined;
         }
@@ -71,18 +72,21 @@ Do NOT use compound free-text like "BRAF V600E" — use separate gene and hgvsp 
         if (searchQuery && !searchGene && !searchHgvsp) {
           const compoundMatch = searchQuery.match(/^([A-Za-z0-9_]+)\s+(V\d+[A-Z*])$/i);
           if (compoundMatch) {
-            searchQuery = `gene:${compoundMatch[1].toUpperCase()} AND hgvsp.p:${compoundMatch[2]}`;
+            searchQuery = `cadd.gene.genename:${compoundMatch[1].toUpperCase()} AND dbnsfp.hgvsp:*${compoundMatch[2]}*`;
           }
         }
 
-        const results = await variantSearch({ 
-          query: searchQuery, 
-          gene: searchGene, 
+        const results = await variantSearch({
+          query: searchQuery,
+          gene: searchGene,
           hgvsp: searchHgvsp,
-          significance, 
-          max_frequency, 
-          limit, 
-          offset 
+          hgvsc: searchHgvsc,
+          significance,
+          max_frequency,
+          consequence,
+          min_cadd,
+          limit,
+          offset
         });
         return { content: [{ type: 'text', text: JSON.stringify(results) }] };
       } catch (error) {

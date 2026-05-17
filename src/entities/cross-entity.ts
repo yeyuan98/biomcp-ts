@@ -4,7 +4,7 @@ import { geneSearch, GeneSearchResult } from './gene.js';
 import { variantSearch, VariantSearchResult } from './variant.js';
 import { drugSearch, DrugSearchResult } from './drug.js';
 import { diseaseSearch, DiseaseSearchResult } from './disease.js';
-import { trialSearch, TrialSearchResult } from './trial.js';
+import { trialSearch } from './trial.js';
 import { articleSearch, Article } from './article/index.js';
 
 const SECTION_TIMEOUT_MS = 8000;
@@ -51,8 +51,8 @@ export async function geneToDrugs(geneSymbol: string): Promise<Array<{ drug_name
 }
 
 export async function geneToTrials(geneSymbol: string): Promise<Array<{ nct_id: string; title?: string; status?: string }>> {
-  const trials = await trialSearch(geneSymbol, { limit: 10 });
-  return trials.map(t => ({
+  const response = await trialSearch(geneSymbol, { limit: 10 });
+  return response.studies.map(t => ({
     nct_id: t.nct_id,
     title: t.title,
     status: t.status,
@@ -96,9 +96,75 @@ export async function geneToArticles(geneSymbol: string): Promise<Article[]> {
   return await articleSearch(geneSymbol, { limit: 10 });
 }
 
+/**
+ * Convert HGVS three-letter amino acid notation to single-letter shorthand.
+ * e.g. "Val600Glu" -> "V600E", "Leu858Arg" -> "L858R"
+ */
+function hgvsToShorthand(hgvs: string): string {
+  const THREE_TO_ONE: Record<string, string> = {
+    Ala: 'A', Arg: 'R', Asn: 'N', Asp: 'D', Cys: 'C',
+    Gln: 'Q', Glu: 'E', Gly: 'G', His: 'H', Ile: 'I',
+    Leu: 'L', Lys: 'K', Met: 'M', Phe: 'F', Pro: 'P',
+    Ser: 'S', Thr: 'T', Trp: 'W', Tyr: 'Y', Val: 'V',
+    Ter: '*', // stop codon
+  };
+  // Handles simple missense substitutions only (e.g. Val600Glu -> V600E).
+  // Complex HGVS patterns (del, ins, fs, dup, multi-position) pass through unchanged.
+  // Match pattern like Val600Glu, Leu858Arg, etc.
+  return hgvs.replace(
+    /^([A-Z][a-z]{2})(\d+)([A-Z][a-z]{2})$/,
+    (_, ref: string, pos: string, alt: string) => {
+      const refLetter = THREE_TO_ONE[ref] || ref;
+      const altLetter = THREE_TO_ONE[alt] || alt;
+      return `${refLetter}${pos}${altLetter}`;
+    }
+  );
+}
+
 export async function variantToTrials(variantId: string): Promise<Array<{ nct_id: string; title?: string; status?: string }>> {
-  const trials = await trialSearch(variantId, { limit: 10 });
-  return trials.map(t => ({
+  let searchQuery = variantId;
+  let geneOnly = variantId;
+
+  // Try variantGet first for rich gene/protein data, then fall back to variantSearch
+  try {
+    const { variantGet } = await import('./variant.js');
+    const variant = await variantGet(variantId);
+    if (variant.gene) {
+      geneOnly = variant.gene;
+      if (variant.hgvs_p) {
+        const proteinChange = variant.hgvs_p.replace(/^p\./, '');
+        const shorthand = hgvsToShorthand(proteinChange);
+        searchQuery = `${variant.gene} ${shorthand}`;
+      } else {
+        searchQuery = variant.gene;
+      }
+    }
+  } catch {
+    try {
+      const results = await variantSearch({ query: variantId, limit: 1 });
+      if (results.length > 0 && results[0].gene) {
+        geneOnly = results[0].gene;
+        if (results[0].hgvs_p) {
+          const proteinChange = results[0].hgvs_p.replace(/^p\./, '');
+          const shorthand = hgvsToShorthand(proteinChange);
+          searchQuery = `${results[0].gene} ${shorthand}`;
+        } else {
+          searchQuery = results[0].gene;
+        }
+      }
+    } catch {
+      // Use the raw variantId as last resort
+    }
+  }
+
+  let response = await trialSearch(searchQuery, { limit: 10 });
+
+  // Fallback: if gene+mutation search returns no results, try gene name only
+  if (response.studies.length === 0 && geneOnly !== searchQuery) {
+    response = await trialSearch(geneOnly, { limit: 10 });
+  }
+
+  return response.studies.map(t => ({
     nct_id: t.nct_id,
     title: t.title,
     status: t.status,
@@ -159,8 +225,8 @@ export async function drugToGenes(drugName: string): Promise<Array<{ gene_symbol
 }
 
 export async function drugToTrials(drugName: string): Promise<Array<{ nct_id: string; title?: string; status?: string }>> {
-  const trials = await trialSearch(drugName, { limit: 10, searchType: 'intervention' });
-  return trials.map(t => ({
+  const response = await trialSearch(drugName, { limit: 10, searchType: 'intervention' });
+  return response.studies.map(t => ({
     nct_id: t.nct_id,
     title: t.title,
     status: t.status,
@@ -282,8 +348,8 @@ export async function diseaseToGenes(diseaseId: string): Promise<Array<{ gene_sy
 }
 
 export async function diseaseToTrials(diseaseQuery: string): Promise<Array<{ nct_id: string; title?: string; status?: string }>> {
-  const trials = await trialSearch(diseaseQuery, { limit: 10 });
-  return trials.map(t => ({
+  const response = await trialSearch(diseaseQuery, { limit: 10 });
+  return response.studies.map(t => ({
     nct_id: t.nct_id,
     title: t.title,
     status: t.status,
@@ -449,7 +515,7 @@ export async function searchAll(
     searches.push({ entity: 'article', promise: articleSearch(query, { limit }) });
   }
   if (entities.includes('trial')) {
-    searches.push({ entity: 'trial', promise: trialSearch(query, { limit }) });
+    searches.push({ entity: 'trial', promise: trialSearch(query, { limit }).then(r => r.studies) });
   }
   
   const results = await Promise.allSettled(searches.map(s => s.promise));

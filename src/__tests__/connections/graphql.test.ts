@@ -70,4 +70,39 @@ describe('GraphQLConnection', () => {
 
     delete process.env.GNOMAD_TOKEN;
   });
+
+  test('request() includes a timeout signal in fetch', async () => {
+    global.fetch = jest.fn().mockImplementation(async (_url: string, init: any) => {
+      expect(init.signal).toBeDefined();
+      return { ok: true, json: () => Promise.resolve({ data: {} }) };
+    }) as any;
+
+    const conn = new GraphQLConnection(baseOptions);
+    await conn.request('{ gene { name } }');
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('request() accepts external signal and combines with timeout', async () => {
+    const externalCtrl = new AbortController();
+
+    global.fetch = jest.fn().mockImplementation(async (_url: string, init: any) => {
+      expect(init.signal).toBeDefined();
+      return { ok: true, json: () => Promise.resolve({ data: {} }) };
+    }) as any;
+
+    const conn = new GraphQLConnection(baseOptions);
+    await conn.request('{ gene { name } }', undefined, { signal: externalCtrl.signal });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('healthCheck() includes a timeout signal', async () => {
+    global.fetch = jest.fn().mockImplementation(async (_url: string, init: any) => {
+      expect(init.signal).toBeDefined();
+      return { ok: false, status: 500 };
+    }) as any;
+
+    const conn = new GraphQLConnection(baseOptions);
+    await conn.healthCheck();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
 });

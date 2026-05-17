@@ -164,8 +164,14 @@ describe('RestConnection', () => {
     }) as any;
 
     const conn = new RestConnection(baseOptions);
-    await expect(conn.request('/test')).rejects.toThrow('The request was rejected by mygene');
-    await expect(conn.request('/test')).rejects.toThrow('may not be indexed yet');
+    try {
+      await conn.request('/test');
+      fail('Expected an error to be thrown');
+    } catch (error) {
+      const msg = (error as Error).message;
+      expect(msg).toContain('The request was rejected by mygene');
+      expect(msg).toContain('may not be indexed yet');
+    }
   });
 
   test('request() includes hint for HTTP 404 (not found)', async () => {
@@ -176,8 +182,14 @@ describe('RestConnection', () => {
     }) as any;
 
     const conn = new RestConnection(baseOptions);
-    await expect(conn.request('/test')).rejects.toThrow('Resource not found at mygene');
-    await expect(conn.request('/test')).rejects.toThrow('Verify the ID');
+    try {
+      await conn.request('/test');
+      fail('Expected an error to be thrown');
+    } catch (error) {
+      const msg = (error as Error).message;
+      expect(msg).toContain('Resource not found at mygene');
+      expect(msg).toContain('Verify the ID');
+    }
   });
 
   test('request() includes hint for HTTP 429 (rate limited)', async () => {
@@ -188,9 +200,15 @@ describe('RestConnection', () => {
     }) as any;
 
     const conn = new RestConnection(baseOptions);
-    await expect(conn.request('/test')).rejects.toThrow('Rate limited by mygene');
-    await expect(conn.request('/test')).rejects.toThrow('Wait a few seconds and retry');
-    await expect(conn.request('/test')).rejects.toThrow('API key in environment variables');
+    try {
+      await conn.request('/test');
+      fail('Expected an error to be thrown');
+    } catch (error) {
+      const msg = (error as Error).message;
+      expect(msg).toContain('Rate limited by mygene');
+      expect(msg).toContain('Wait a few seconds and retry');
+      expect(msg).toContain('API key in environment variables');
+    }
   });
 
   test('request() includes hint for HTTP 401 (auth required)', async () => {
@@ -201,7 +219,12 @@ describe('RestConnection', () => {
     }) as any;
 
     const conn = new RestConnection(baseOptions);
-    await expect(conn.request('/test')).rejects.toThrow('Authentication required or forbidden by mygene');
+    try {
+      await conn.request('/test');
+      fail('Expected an error to be thrown');
+    } catch (error) {
+      expect((error as Error).message).toContain('Authentication required or forbidden by mygene');
+    }
   });
 
   test('request() includes hint for HTTP 403 (forbidden)', async () => {
@@ -212,7 +235,12 @@ describe('RestConnection', () => {
     }) as any;
 
     const conn = new RestConnection(baseOptions);
-    await expect(conn.request('/test')).rejects.toThrow('Authentication required or forbidden by mygene');
+    try {
+      await conn.request('/test');
+      fail('Expected an error to be thrown');
+    } catch (error) {
+      expect((error as Error).message).toContain('Authentication required or forbidden by mygene');
+    }
   });
 
   test('request() includes hint for HTTP 500 (server error)', async () => {
@@ -223,8 +251,14 @@ describe('RestConnection', () => {
     }) as any;
 
     const conn = new RestConnection(baseOptions);
-    await expect(conn.request('/test')).rejects.toThrow('Server error from mygene');
-    await expect(conn.request('/test')).rejects.toThrow('temporarily unavailable');
+    try {
+      await conn.request('/test');
+      fail('Expected an error to be thrown');
+    } catch (error) {
+      const msg = (error as Error).message;
+      expect(msg).toContain('Server error from mygene');
+      expect(msg).toContain('temporarily unavailable');
+    }
   });
 
   test('request() includes no hint for other HTTP errors', async () => {

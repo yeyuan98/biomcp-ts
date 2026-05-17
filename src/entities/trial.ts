@@ -13,7 +13,12 @@ export interface TrialSearchOptions {
   intervention_type?: string;
   searchType?: 'condition' | 'intervention';
   limit?: number;
-  offset?: number;
+  pageToken?: string;
+}
+
+export interface TrialSearchResponse {
+  studies: TrialSearchResult[];
+  nextPageToken?: string;
 }
 
 export interface TrialSearchResult {
@@ -44,35 +49,65 @@ export interface TrialResult {
   sections?: Record<string, unknown>;
 }
 
+const PHASE_MAP: Record<string, string> = {
+  'EARLY PHASE1': 'EARLY_PHASE1',
+  'EARLY PHASE 1': 'EARLY_PHASE1',
+  'EARLYPHASE1': 'EARLY_PHASE1',
+  'PHASE1': 'PHASE1', 'PHASE 1': 'PHASE1', '1': 'PHASE1',
+  'PHASE2': 'PHASE2', 'PHASE 2': 'PHASE2', '2': 'PHASE2',
+  'PHASE3': 'PHASE3', 'PHASE 3': 'PHASE3', '3': 'PHASE3',
+  'PHASE4': 'PHASE4', 'PHASE 4': 'PHASE4', '4': 'PHASE4',
+  'NA': 'NA', 'NOT APPLICABLE': 'NA', 'N/A': 'NA',
+};
+
 export async function trialSearch(
   query: string,
   options: TrialSearchOptions = {}
-): Promise<TrialSearchResult[]> {
-  const { status, phase, intervention_type, searchType, limit = 10, offset = 0 } = options;
-  
+): Promise<TrialSearchResponse> {
+  const { status, phase, intervention_type, searchType, limit = 10, pageToken } = options;
+
   const conn = connectionManager.getConnection('clinicaltrials');
-  
+
   const queryParams = new URLSearchParams({
     [searchType === 'intervention' ? 'query.intr' : 'query.cond']: query,
     pageSize: String(limit),
     format: 'json',
   });
-  
+
+  if (pageToken) {
+    queryParams.set('pageToken', pageToken);
+  }
+
   if (status) {
     queryParams.set('filter.overallStatus', status.toUpperCase());
   }
-  
+
+  const advancedParts: string[] = [];
   if (phase) {
-    queryParams.set('filter.phase', phase);
+    // Handle combined phases like "Phase 1/Phase 2" → AREA[Phase]PHASE1 OR AREA[Phase]PHASE2
+    const phaseSegments = phase.split('/').map(seg => {
+      const key = seg.trim().toUpperCase();
+      return PHASE_MAP[key] || key.replace(/\s+/g, '');
+    });
+    const phaseExpr = phaseSegments.length > 1
+      ? `(${phaseSegments.map(p => `AREA[Phase]${p}`).join(' OR ')})`
+      : `AREA[Phase]${phaseSegments[0]}`;
+    advancedParts.push(phaseExpr);
   }
-  
   if (intervention_type) {
-    queryParams.set('query.intr_type', intervention_type);
+    const normalizedType = intervention_type.toUpperCase().replace(/\s+/g, '_');
+    advancedParts.push(`AREA[InterventionType]${normalizedType}`);
   }
-  
+  if (advancedParts.length > 0) {
+    queryParams.set('filter.advanced', advancedParts.join(' AND '));
+  }
+
   const response = await conn.request(`/studies?${queryParams.toString()}`) as ClinicalTrialsSearchResponse;
-  
-  return (response.studies || []).map(transformTrialSearchResult);
+
+  return {
+    studies: (response.studies || []).map(transformTrialSearchResult),
+    nextPageToken: response.nextPageToken || undefined,
+  };
 }
 
 export async function trialGet(
@@ -250,6 +285,7 @@ async function fetchOutcomes(nctId: string): Promise<{ primary?: Array<{ measure
 }
 
 interface ClinicalTrialsSearchResponse {
+  nextPageToken?: string;
   studies?: Array<{
     protocolSection?: {
       identificationModule?: {

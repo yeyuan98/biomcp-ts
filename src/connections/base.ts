@@ -45,7 +45,7 @@ export interface IConnection<TRequest = string, TResponse = unknown> {
   readonly protocol: ProtocolType;
   effectiveRateLimitMs: number;
   
-  request(req: TRequest, variables?: Record<string, unknown>): Promise<TResponse>;
+  request(req: TRequest, variables?: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<TResponse>;
   batch?(requests: TRequest[]): Promise<TResponse[]>;
   healthCheck(): Promise<boolean>;
   close(): void;

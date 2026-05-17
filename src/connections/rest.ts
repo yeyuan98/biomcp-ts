@@ -49,18 +49,21 @@ export class RestConnection implements IConnection<string, unknown> {
     );
   }
   
-  async request(path: string): Promise<unknown> {
+  async request(path: string, _variables?: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<unknown> {
     await this.rateLimiter.acquire();
-    
+
     const url = this.buildUrl(path);
     const headers = this.buildHeaders();
-    
+
+    const signals: AbortSignal[] = [];
+    if (this.handling.timeoutMs) signals.push(AbortSignal.timeout(this.handling.timeoutMs));
+    if (options?.signal) signals.push(options.signal);
+    const signal = signals.length > 0 ? (signals.length === 1 ? signals[0] : AbortSignal.any(signals)) : undefined;
+
     const response = await fetch(url, {
       method: 'GET',
       headers,
-      signal: this.handling.timeoutMs 
-        ? AbortSignal.timeout(this.handling.timeoutMs) 
-        : undefined,
+      signal,
     });
     
     if (!response.ok) {
@@ -75,20 +78,23 @@ export class RestConnection implements IConnection<string, unknown> {
     return response.text();
   }
 
-  async post(path: string, body: Record<string, unknown>): Promise<unknown> {
+  async post(path: string, body: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<unknown> {
     await this.rateLimiter.acquire();
 
     const url = this.buildUrl(path);
     const headers = this.buildHeaders();
     headers.set('Content-Type', 'application/json');
 
+    const signals: AbortSignal[] = [];
+    if (this.handling.timeoutMs) signals.push(AbortSignal.timeout(this.handling.timeoutMs));
+    if (options?.signal) signals.push(options.signal);
+    const signal = signals.length > 0 ? (signals.length === 1 ? signals[0] : AbortSignal.any(signals)) : undefined;
+
     const response = await fetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-      signal: this.handling.timeoutMs
-        ? AbortSignal.timeout(this.handling.timeoutMs)
-        : undefined,
+      signal,
     });
 
     if (response.status === 204) return null;

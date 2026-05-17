@@ -7,7 +7,10 @@ export interface VariantSearchOptions {
   query?: string;
   gene?: string;
   hgvsp?: string;
+  hgvsc?: string;
   significance?: 'benign' | 'likely_benign' | 'pathogenic' | 'likely_pathogenic' | 'uncertain';
+  consequence?: string;
+  min_cadd?: number;
   max_frequency?: number;
   limit?: number;
   offset?: number;
@@ -108,25 +111,25 @@ export interface OncoKbAnnotation {
 }
 
 const VARIANT_SEARCH_FILTERS = [
-  'gene', 'hgvsp', 'hgvsc', 'rsid', 'protein_alias',
-  'significance', 'max_frequency', 'min_cadd', 'consequence',
-  'review_status', 'population', 'revel_min', 'gerp_min',
-  'tumor_site', 'condition', 'impact', 'lof', 'has', 'missing', 'therapy'
+  'gene', 'hgvsp', 'significance', 'max_frequency', 'min_cadd', 'consequence',
 ] as const;
 
 const VARIANT_GET_SECTIONS = ['core', 'frequency', 'predictions', 'clinical', 'alphagenome'] as const;
 
 function rewriteVariantQuery(rawQuery: string): string {
-  if (rawQuery.includes(':')) return rawQuery;
   if (/^rs\d+$/i.test(rawQuery)) return `dbsnp.rsid:${rawQuery}`;
-  if (/^[NX]M_\d+\.\d+:[acgtnACGTN>]+/.test(rawQuery)) return rawQuery;
+  // HGVS cDNA notation (e.g., NM_004333.4:c.1799T>A)
+  const hgvsMatch = rawQuery.match(/^((?:NM_|NR_|ENST)\d+\.\d+):(c\..+)$/i);
+  if (hgvsMatch) {
+    return `snpeff.ann.feature_id:${hgvsMatch[1]} AND snpeff.ann.hgvs_c:"${hgvsMatch[2]}"`;
+  }
   return rawQuery;
 }
 
 export async function variantSearch(
   options: VariantSearchOptions
 ): Promise<VariantSearchResult[]> {
-  const { query, gene, hgvsp, significance, max_frequency, limit = 10, offset = 0 } = options;
+  const { query, gene, hgvsp, hgvsc, significance, consequence, min_cadd, max_frequency, limit = 10, offset = 0 } = options;
   
   const conn = connectionManager.getConnection('myvariant');
   
@@ -143,11 +146,15 @@ export async function variantSearch(
   }
   
   if (gene) {
-    qParts.push(`gene:${gene}`);
+    qParts.push(`cadd.gene.genename:${gene}`);
   }
   
   if (hgvsp) {
-    qParts.push(`hgvsp.p:${hgvsp}`);
+    qParts.push(`dbnsfp.hgvsp:*${hgvsp}*`);
+  }
+
+  if (hgvsc) {
+    qParts.push(`snpeff.ann.hgvs_c:"${hgvsc}"`);
   }
   
   if (significance) {
@@ -158,7 +165,26 @@ export async function variantSearch(
       likely_benign: 'likely benign',
       uncertain: 'uncertain significance',
     };
-    qParts.push(`clinvar.significance:${sigMap[significance] || significance}`);
+    qParts.push(`clinvar.rcv.clinical_significance:*${sigMap[significance] || significance}*`);
+  }
+
+  if (consequence) {
+    const consequenceMap: Record<string, string> = {
+      missense: 'missense_variant',
+      synonymous: 'synonymous_variant',
+      nonsense: 'stop_gained',
+      frameshift: 'frameshift_variant',
+      splice: 'splice_region_variant',
+      intron: 'intron_variant',
+      utr3: '3_prime_UTR_variant',
+      utr5: '5_prime_UTR_variant',
+    };
+    const effectTerm = consequenceMap[consequence.toLowerCase()] || consequence;
+    qParts.push(`snpeff.ann.effect:${effectTerm}`);
+  }
+
+  if (min_cadd !== undefined) {
+    qParts.push(`cadd.phred:[${min_cadd} TO *]`);
   }
   
   if (max_frequency !== undefined) {
@@ -174,6 +200,27 @@ export async function variantSearch(
   return (response.hits || []).map(transformMyVariantHit);
 }
 
+const HGVS_PATTERN = /^(NM_|NR_|ENST)\d+\.\d+:c\./;
+
+async function resolveHgvsToGenomicId(hgvsId: string, conn: any): Promise<string> {
+  const colonIdx = hgvsId.indexOf(':');
+  const transcript = hgvsId.substring(0, colonIdx);
+  const cNotation = hgvsId.substring(colonIdx + 1);
+
+  const queryParams = new URLSearchParams({
+    q: `snpeff.ann.feature_id:${transcript} AND snpeff.ann.hgvs_c:"${cNotation}"`,
+    fields: '_id',
+    size: '1',
+  });
+
+  const response = await conn.request(`/query?${queryParams.toString()}`) as { hits?: Array<{ _id: string }> };
+  const genomicId = response.hits?.[0]?._id;
+  if (!genomicId) {
+    throw new Error(`Variant '${hgvsId}' not found (HGVS transcript ID could not be resolved to a genomic coordinate)`);
+  }
+  return genomicId;
+}
+
 export async function variantGet(
   id: string,
   sections?: string[]
@@ -183,11 +230,16 @@ export async function variantGet(
   };
   const normalizedSections = (sections || []).map(s => SECTION_ALIASES[s] || s);
   const sectionConfig = normalizedSections.length > 0 ? normalizedSections : ['core'];
-  
+
   const conn = connectionManager.getConnection('myvariant');
-  
+
+  let resolvedId = id;
+  if (HGVS_PATTERN.test(id)) {
+    resolvedId = await resolveHgvsToGenomicId(id, conn);
+  }
+
   let rawResponse = await conn.request(
-    `/variant/${id}?fields=dbsnp,clinvar,gnomad_exome,gnomad_genome,cadd,dbnsfp,snpeff,cosmic`
+    `/variant/${resolvedId}?fields=dbsnp,clinvar,gnomad_exome,gnomad_genome,cadd,dbnsfp,snpeff,cosmic`
   ) as MyVariantGetResponse | MyVariantGetResponse[];
 
   let allVariants: MyVariantGetResponse[] | undefined;
@@ -209,18 +261,21 @@ export async function variantGet(
 
   const response = rawResponse as MyVariantGetResponse;
   
+  const ann = asArray(response.snpeff?.ann)[0];
   const variant: VariantResult = {
     id: response.dbsnp?.rsid || response._id || id,
-    gene: response.dbsnp?.gene?.symbol || response.snpeff?.ann?.[0]?.genename || (response as any).dbnsfp?.gene?.genename,
-    hgvs_p: response.snpeff?.ann?.[0]?.hgvs_p,
-    hgvs_c: response.snpeff?.ann?.[0]?.hgvs_c,
+    gene: response.dbsnp?.gene?.symbol || ann?.genename || (response as any).dbnsfp?.gene?.genename,
+    hgvs_p: ann?.hgvs_p,
+    hgvs_c: ann?.hgvs_c,
     rsid: response.dbsnp?.rsid,
     cosmic_id: response.cosmic?.cosmic_id,
   };
   
   if (response.clinvar) {
-    variant.significance = response.clinvar.significance;
-    variant.conditions = response.clinvar.conditions;
+    const rcv = asArray((response.clinvar as any).rcv);
+    const mainRcv = rcv.find((r: any) => r.clinical_significance && r.clinical_significance !== 'not provided') || rcv[0];
+    variant.significance = mainRcv?.clinical_significance;
+    variant.conditions = extractAllClinvarConditions(rcv);
   }
   
   const sectionsToFetch = sectionConfig.includes('all')
@@ -411,13 +466,16 @@ async function fetchClinicalSection(variant: MyVariantGetResponse, gene?: string
   const result: ClinicalSection = {};
   
   if (variant.clinvar) {
+    const rcv = asArray((variant.clinvar as any).rcv);
+    const mainRcv = rcv.find((r: any) => r.clinical_significance && r.clinical_significance !== 'not provided') || rcv[0];
+    const allConditions = extractAllClinvarConditions(rcv);
     result.clinvar = {
-      id: variant.clinvar.id,
-      significance: variant.clinvar.significance,
-      stars: variant.clinvar.stars,
-      conditions: variant.clinvar.conditions,
-      review_status: variant.clinvar.review_status,
-      submitters: variant.clinvar.submitters,
+      id: (variant.clinvar as any).variant_id,
+      significance: mainRcv?.clinical_significance,
+      stars: mainRcv?.number_submitters,
+      conditions: allConditions.length > 0 ? allConditions : undefined,
+      review_status: mainRcv?.review_status,
+      submitters: rcv.map((r: any) => `${r.number_submitters || 0} submitter(s)`),
     };
   }
   
@@ -666,13 +724,40 @@ interface OncoKbResponse {
   }>;
 }
 
+function asArray<T>(val: T | T[] | undefined): T[] {
+  if (!val) return [];
+  return Array.isArray(val) ? val : [val];
+}
+
+function extractClinvarSignificance(clinvar: any): string | undefined {
+  if (!clinvar) return undefined;
+  const rcv = asArray(clinvar.rcv);
+  const main = rcv.find((r: any) => r.clinical_significance && r.clinical_significance !== 'not provided') || rcv[0];
+  return main?.clinical_significance;
+}
+
+function extractConditionNames(conditions: any): string[] {
+  if (!conditions) return [];
+  const items = Array.isArray(conditions) ? conditions : [conditions];
+  return items.map((c: any) => c?.name).filter((n: any): n is string => !!n && n !== 'not provided');
+}
+
+function extractAllClinvarConditions(rcv: any[]): string[] {
+  const names: string[] = [];
+  for (const r of rcv) {
+    names.push(...extractConditionNames(r.conditions));
+  }
+  return [...new Set(names)];
+}
+
 export function transformMyVariantHit(hit: any): VariantSearchResult {
+  const ann = asArray(hit.snpeff?.ann)[0];
   return {
     id: hit.dbsnp?.rsid || hit._id,
-    gene: hit.dbsnp?.gene?.symbol || hit.snpeff?.ann?.[0]?.genename || (hit as any).dbnsfp?.gene?.genename,
-    hgvs_p: hit.snpeff?.ann?.[0]?.hgvs_p,
-    hgvs_c: hit.snpeff?.ann?.[0]?.hgvs_c,
-    significance: hit.clinvar?.significance || (hit as any).dbnsfp?.clinvar?.clnsig,
+    gene: hit.dbsnp?.gene?.symbol || ann?.genename || (hit as any).dbnsfp?.gene?.genename,
+    hgvs_p: ann?.hgvs_p,
+    hgvs_c: ann?.hgvs_c,
+    significance: extractClinvarSignificance(hit.clinvar) || (hit as any).dbnsfp?.clinvar?.clnsig,
     clinvar_stars: hit.clinvar?.stars,
     gnomad_af: hit.gnomad?.af,
   };

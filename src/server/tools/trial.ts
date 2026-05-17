@@ -46,14 +46,14 @@ export function registerTrialTools(server: McpServer): void {
         phase: z.string().optional().describe('Filter by phase (Phase 1, Phase 2, etc.)'),
         intervention_type: z.string().optional().describe('Filter by intervention type (Drug, Device, etc.)'),
         limit: z.number().int().min(1).max(50).default(10).describe('Maximum results'),
-        offset: z.number().int().min(0).default(0).describe('Result offset'),
+        page_token: z.string().optional().describe('Page token from previous response for pagination'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
-    async ({ query, status, phase, intervention_type, limit, offset }) => {
+    async ({ query, status, phase, intervention_type, limit, page_token }) => {
       try {
-        const results = await trialSearch(query, { status, phase, intervention_type, limit, offset });
-        return { content: [{ type: 'text', text: JSON.stringify(results) }] };
+        const response = await trialSearch(query, { status, phase, intervention_type, limit, pageToken: page_token });
+        return { content: [{ type: 'text', text: JSON.stringify(response) }] };
       } catch (error) {
         return { 
           content: [{ type: 'text', text: String(error) }],

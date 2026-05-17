@@ -53,6 +53,12 @@ interface ClinicalTrialsDiseaseResponse {
   }>;
 }
 
+function isDiseaseId(input: string): boolean {
+  if (/^(DOID|MONDO|OMIM|OMOPS|ORPHA|Orphanet|EFO)[:_]/i.test(input)) return true;
+  if (/^C\d{7}$/.test(input)) return true;
+  return false;
+}
+
 export function registerDiseaseTools(server: McpServer): void {
   server.registerTool(
     'disease_search',
@@ -144,7 +150,7 @@ export function registerDiseaseTools(server: McpServer): void {
       try {
         let searchName = disease_id;
 
-        if (disease_id.match(/^(DOID|MONDO|OMIM|OMOPS|ORPHA):/i)) {
+        if (isDiseaseId(disease_id)) {
           try {
             const { diseaseGet } = await import('../../entities/disease.js');
             const resolved = await diseaseGet(disease_id, []);

@@ -76,10 +76,11 @@ export function expectArticleGetResult(data: unknown): asserts data is Record<st
   expect(typeof (data as Record<string, unknown>).title).toBe('string');
 }
 
-export function expectTrialSearchResult(data: unknown): asserts data is Array<Record<string, unknown>> {
-  expect(Array.isArray(data)).toBe(true);
-  if (data.length > 0) {
-    const first = data[0] as Record<string, unknown>;
+export function expectTrialSearchResult(data: unknown): asserts data is { studies: Array<Record<string, unknown>>; nextPageToken?: string } {
+  expect(data).toHaveProperty('studies');
+  expect(Array.isArray((data as any).studies)).toBe(true);
+  if ((data as any).studies.length > 0) {
+    const first = (data as any).studies[0] as Record<string, unknown>;
     expect(first).toHaveProperty('nct_id');
     expect(typeof first.nct_id).toBe('string');
   }

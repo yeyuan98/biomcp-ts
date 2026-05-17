@@ -24,7 +24,7 @@ export class GrpcConnection implements IConnection<GrpcRequest, unknown> {
     this.apiKey = process.env[options.auth?.envVar || ''];
   }
   
-  async request(req: GrpcRequest): Promise<unknown> {
+  async request(req: GrpcRequest, _variables?: Record<string, unknown>, _options?: { signal?: AbortSignal }): Promise<unknown> {
     if (!req.scorer) {
       req.scorer = 'GeneMaskLFCScorer';
     }

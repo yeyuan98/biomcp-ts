@@ -15,16 +15,16 @@ afterAll(async () => {
 
 describe('trial_search', () => {
   it('returns trials with valid NCT IDs', async () => {
-    const results = await retryOnRateLimit(() => harness.callTool('trial_search', { query: 'breast cancer' }));
-    expectTrialSearchResult(results);
-    expect(results.length).toBeGreaterThan(0);
-    expect(results[0].nct_id).toMatch(/^NCT\d+$/);
+    const response = await retryOnRateLimit(() => harness.callTool('trial_search', { query: 'breast cancer' }));
+    expectTrialSearchResult(response);
+    expect(response.studies.length).toBeGreaterThan(0);
+    expect(response.studies[0].nct_id).toMatch(/^NCT\d+$/);
   }, 60000);
 
   it('returns trials with status filter', async () => {
-    const results = await retryOnRateLimit(() => harness.callTool('trial_search', { query: 'breast cancer', status: 'Recruiting' }));
-    expectTrialSearchResult(results);
-    for (const trial of results) {
+    const response = await retryOnRateLimit(() => harness.callTool('trial_search', { query: 'breast cancer', status: 'Recruiting' }));
+    expectTrialSearchResult(response);
+    for (const trial of response.studies) {
       if (trial.status) {
         expect(trial.status.toUpperCase()).toBe('RECRUITING');
       }
@@ -32,15 +32,15 @@ describe('trial_search', () => {
   }, 60000);
 
   it('returns empty for nonsense query', async () => {
-    const results = await retryOnRateLimit(() => harness.callTool('trial_search', { query: 'ZZZZZNOTATRIAL99999' }));
-    expectTrialSearchResult(results);
-    expect(results.length).toBe(0);
+    const response = await retryOnRateLimit(() => harness.callTool('trial_search', { query: 'ZZZZZNOTATRIAL99999' }));
+    expectTrialSearchResult(response);
+    expect(response.studies.length).toBe(0);
   }, 60000);
 
   it('respects limit parameter', async () => {
-    const results = await retryOnRateLimit(() => harness.callTool('trial_search', { query: 'cancer', limit: 2 }));
-    expectTrialSearchResult(results);
-    expect(results.length).toBeLessThanOrEqual(2);
+    const response = await retryOnRateLimit(() => harness.callTool('trial_search', { query: 'cancer', limit: 2 }));
+    expectTrialSearchResult(response);
+    expect(response.studies.length).toBeLessThanOrEqual(2);
   }, 60000);
 });
 

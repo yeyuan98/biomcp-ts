@@ -38,7 +38,7 @@ describe('variant', () => {
           _id: 'vcf123',
           dbsnp: { rsid: 'rs123', gene: { symbol: 'BRCA1' } },
           snpeff: { ann: [{ hgvs_p: 'p.Val600Glu', hgvs_c: 'c.1799T>A', genename: 'BRCA1' }] },
-          clinvar: { significance: 'pathogenic', stars: 2 },
+          clinvar: { rcv: [{ clinical_significance: 'Pathogenic', review_status: 'reviewed by expert panel' }] },
           gnomad: { af: 0.001 },
         }],
       }),
@@ -50,7 +50,7 @@ describe('variant', () => {
     expect(results[0].id).toBe('rs123');
     expect(results[0].gene).toBe('BRCA1');
     expect(results[0].hgvs_p).toBe('p.Val600Glu');
-    expect(results[0].significance).toBe('pathogenic');
+    expect(results[0].significance).toBe('Pathogenic');
     expect(results[0].gnomad_af).toBe(0.001);
   });
 
@@ -77,7 +77,7 @@ describe('variant', () => {
       _id: 'vcf123',
       dbsnp: { rsid: 'rs123', gene: { symbol: 'BRCA1' } },
       snpeff: { ann: [{ hgvs_p: 'p.Val600Glu', hgvs_c: 'c.1799T>A', genename: 'BRCA1' }] },
-      clinvar: { significance: 'pathogenic', stars: 2 },
+      clinvar: { rcv: [{ clinical_significance: 'Pathogenic', review_status: 'reviewed by expert panel' }] },
       gnomad: { af: 0.001 },
     };
 
@@ -88,8 +88,8 @@ describe('variant', () => {
       gene: 'BRCA1',
       hgvs_p: 'p.Val600Glu',
       hgvs_c: 'c.1799T>A',
-      significance: 'pathogenic',
-      clinvar_stars: 2,
+      significance: 'Pathogenic',
+      clinvar_stars: undefined,
       gnomad_af: 0.001,
     });
   });

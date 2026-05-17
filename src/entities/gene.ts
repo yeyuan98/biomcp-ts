@@ -1,5 +1,6 @@
 import { connectionManager } from '../connections/manager.js';
 import { fetchWithTimeout } from '../connections/fetch-utils.js';
+import { withRetry, isRetryableError } from '../connections/retry.js';
 import { transformMyGeneHit } from '../transform/gene.js';
 
 const SECTION_TIMEOUT_MS = 8000;
@@ -70,103 +71,116 @@ export async function geneGet(
   symbol: string,
   sections?: string[]
 ): Promise<GeneResult> {
-  const SECTION_ALIASES: Record<string, string> = {
-    dosage_sensitivity: 'clingen',
-    protein_atlas: 'hpa',
-    clinical_evidence: 'civic',
-    disease_associations: 'disgenet',
-  };
-  const normalizedSections = (sections || []).map(s => SECTION_ALIASES[s] || s);
-  const sectionConfig = normalizedSections.length > 0 ? normalizedSections : ['core'];
-  
-  const conn = connectionManager.getConnection('mygene');
-  
-  const queryParams = new URLSearchParams({
-    q: `symbol:"${symbol}"`,
-    species: 'human',
-    fields: 'symbol,name,summary,genomic_pos,uniprot,omim,interactor',
-    size: '1',
-  });
-  
-  const response = await conn.request(`/query?${queryParams.toString()}`) as MyGeneGetResponse;
-  
-  if (!response.hits || response.hits.length === 0) {
-    throw new Error(`Gene '${symbol}' not found. Try gene_search to find valid gene symbols.`);
-  }
-  
-  const gene = response.hits[0];
-  const result: GeneResult = {
-    symbol: gene.symbol,
-    name: gene.name,
-    summary: gene.summary,
-  };
-  
-  if (gene.genomic_pos) {
-    const pos = Array.isArray(gene.genomic_pos) ? gene.genomic_pos[0] : gene.genomic_pos;
-    if (pos && pos.chr) {
-      result.chromosome = pos.chr;
-      result.position = `${pos.start}-${pos.end}`;
-    }
-  }
-  
-  const sectionsToFetch = sectionConfig.includes('all') 
-    ? ['pathways', 'protein', 'ontology', 'go', 'interactions', 'civic', 'expression', 'hpa', 'druggability', 'clingen', 'constraint', 'disgenet', 'diseases', 'funding']
-    : sectionConfig.filter(s => s !== 'core');
+  const overallController = new AbortController();
+  const overallTimeoutId = setTimeout(() => overallController.abort(), 30000);
 
-  if (sectionsToFetch.length > 0) {
-    const sectionPromises = sectionsToFetch.map(section => {
-      return fetchWithTimeout(async () => {
-        switch (section) {
-          case 'pathways': return { section: 'pathways', data: await fetchPathways(symbol) };
-          case 'protein': return { section: 'protein', data: await fetchProtein(symbol) };
-          case 'ontology': return { section: 'ontology', data: await fetchOntology(symbol) };
-          case 'go': return { section: 'go', data: await fetchGo(symbol) };
-          case 'interactions': return { section: 'interactions', data: await fetchInteractions(symbol) };
-          case 'civic': return { section: 'civic', data: await fetchCivic(symbol) };
-          case 'expression': return { section: 'expression', data: await fetchExpression(symbol) };
-          case 'hpa': return { section: 'hpa', data: await fetchHpa(symbol) };
-          case 'druggability': return { section: 'druggability', data: await fetchDruggability(symbol) };
-          case 'clingen': return { section: 'clingen', data: await fetchClingen(symbol) };
-          case 'constraint': return { section: 'constraint', data: await fetchConstraint(symbol) };
-          case 'disgenet': return { section: 'disgenet', data: await fetchDisgenet(symbol) };
-          case 'diseases': return { section: 'diseases', data: await fetchDiseases(symbol) };
-          case 'funding': return { section: 'funding', data: await fetchFunding(symbol) };
-          default: return { section, data: null };
-        }
-      }, SECTION_TIMEOUT_MS);
+  try {
+    const SECTION_ALIASES: Record<string, string> = {
+      dosage_sensitivity: 'clingen',
+      protein_atlas: 'hpa',
+      clinical_evidence: 'civic',
+      disease_associations: 'disgenet',
+    };
+    const normalizedSections = (sections || []).map(s => SECTION_ALIASES[s] || s);
+    const sectionConfig = normalizedSections.length > 0 ? normalizedSections : ['core'];
+
+    const conn = connectionManager.getConnection('mygene');
+
+    const queryParams = new URLSearchParams({
+      q: `symbol:"${symbol}"`,
+      species: 'human',
+      fields: 'symbol,name,summary,genomic_pos,uniprot,omim,interactor',
+      size: '1',
     });
 
-    const settledResults = await Promise.allSettled(sectionPromises);
-    
-    result.sections = {};
-    for (let si = 0; si < settledResults.length; si++) {
-      const settled = settledResults[si];
-      if (settled.status === 'fulfilled' && settled.value.data) {
-        const sectionData = settled.value.data as { section: string; data: unknown };
-        (result.sections as Record<string, unknown>)[sectionData.section] = sectionData.data;
-      } else if (settled.status === 'fulfilled' && settled.value.error) {
-        const sectionResult = settled.value as { error?: string };
-        (result.sections as Record<string, unknown>)[sectionsToFetch[si]] = { 
-          error: sectionResult.error 
-        };
-      } else if (settled.status === 'rejected') {
-        const reason = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
-        (result.sections as Record<string, unknown>)[sectionsToFetch[si]] = {
-          error: `Section '${sectionsToFetch[si]}' fetch failed: ${reason}. The data source may be temporarily unavailable.`
-        };
+    const response = await conn.request(`/query?${queryParams.toString()}`, undefined, { signal: overallController.signal }) as MyGeneGetResponse;
+
+    if (!response.hits || response.hits.length === 0) {
+      throw new Error(`Gene '${symbol}' not found. Try gene_search to find valid gene symbols.`);
+    }
+
+    const gene = response.hits[0];
+    const result: GeneResult = {
+      symbol: gene.symbol,
+      name: gene.name,
+      summary: gene.summary,
+    };
+
+    if (gene.genomic_pos) {
+      const pos = Array.isArray(gene.genomic_pos) ? gene.genomic_pos[0] : gene.genomic_pos;
+      if (pos && pos.chr) {
+        result.chromosome = pos.chr;
+        result.position = `${pos.start}-${pos.end}`;
       }
     }
+
+    const sectionsToFetch = sectionConfig.includes('all')
+      ? ['pathways', 'protein', 'ontology', 'go', 'interactions', 'civic', 'expression', 'hpa', 'druggability', 'clingen', 'constraint', 'disgenet', 'diseases', 'funding']
+      : sectionConfig.filter(s => s !== 'core');
+
+    if (sectionsToFetch.length > 0) {
+      const sectionPromises = sectionsToFetch.map(section => {
+        return fetchWithTimeout(async (signal) => {
+          const combinedSignal = signal
+            ? AbortSignal.any([signal, overallController.signal])
+            : overallController.signal;
+          const retryOpts = { maxRetries: 1, baseDelayMs: 500, isRetryable: (err: unknown) => !combinedSignal?.aborted && isRetryableError(err) };
+        switch (section) {
+            case 'pathways': return { section: 'pathways', data: await withRetry(() => fetchPathways(symbol, combinedSignal), retryOpts) };
+            case 'protein': return { section: 'protein', data: await withRetry(() => fetchProtein(symbol, combinedSignal), retryOpts) };
+            case 'ontology': return { section: 'ontology', data: await withRetry(() => fetchOntology(symbol, combinedSignal), retryOpts) };
+            case 'go': return { section: 'go', data: await withRetry(() => fetchGo(symbol, combinedSignal), retryOpts) };
+            case 'interactions': return { section: 'interactions', data: await withRetry(() => fetchInteractions(symbol, combinedSignal), retryOpts) };
+            case 'civic': return { section: 'civic', data: await withRetry(() => fetchCivic(symbol, combinedSignal), retryOpts) };
+            case 'expression': return { section: 'expression', data: await withRetry(() => fetchExpression(symbol, combinedSignal), retryOpts) };
+            case 'hpa': return { section: 'hpa', data: await withRetry(() => fetchHpa(symbol, combinedSignal), retryOpts) };
+            case 'druggability': return { section: 'druggability', data: await withRetry(() => fetchDruggability(symbol, combinedSignal), retryOpts) };
+            case 'clingen': return { section: 'clingen', data: await withRetry(() => fetchClingen(symbol, combinedSignal), retryOpts) };
+            case 'constraint': return { section: 'constraint', data: await withRetry(() => fetchConstraint(symbol, combinedSignal), retryOpts) };
+            case 'disgenet': return { section: 'disgenet', data: await withRetry(() => fetchDisgenet(symbol, combinedSignal), retryOpts) };
+            case 'diseases': return { section: 'diseases', data: await withRetry(() => fetchDiseases(symbol, combinedSignal), retryOpts) };
+            case 'funding': return { section: 'funding', data: await withRetry(() => fetchFunding(symbol, combinedSignal), retryOpts) };
+            default: return { section, data: null };
+          }
+        }, SECTION_TIMEOUT_MS);
+      });
+
+      const settledResults = await Promise.allSettled(sectionPromises);
+
+      result.sections = {};
+      for (let si = 0; si < settledResults.length; si++) {
+        const settled = settledResults[si];
+        if (settled.status === 'fulfilled' && settled.value.data) {
+          const sectionData = settled.value.data as { section: string; data: unknown };
+          (result.sections as Record<string, unknown>)[sectionData.section] = sectionData.data;
+        } else if (settled.status === 'fulfilled' && settled.value.error) {
+          const sectionResult = settled.value as { error?: string };
+          (result.sections as Record<string, unknown>)[sectionsToFetch[si]] = {
+            error: sectionResult.error
+          };
+        } else if (settled.status === 'rejected') {
+          const reason = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
+          (result.sections as Record<string, unknown>)[sectionsToFetch[si]] = {
+            error: `Section '${sectionsToFetch[si]}' fetch failed: ${reason}. The data source may be temporarily unavailable.`
+          };
+        }
+      }
+    }
+
+    return result;
+  } finally {
+    clearTimeout(overallTimeoutId);
   }
-  
-  return result;
 }
 
-async function fetchPathways(geneSymbol: string): Promise<Array<{ id: string; name: string; source: string }>> {
+async function fetchPathways(geneSymbol: string, signal?: AbortSignal): Promise<Array<{ id: string; name: string; source: string }>> {
   try {
     const conn = connectionManager.getConnection('reactome');
-    
+
     const response = await conn.request(
-      `/search/query?query=${encodeURIComponent(geneSymbol)}&species=Homo sapiens&limit=10&types=Pathway`
+      `/search/query?query=${encodeURIComponent(geneSymbol)}&species=Homo sapiens&limit=10&types=Pathway`,
+      undefined,
+      signal ? { signal } : undefined
     ) as ReactomeResponse;
     
     const pathways: Array<{ id: string; name: string; source: string }> = [];
@@ -194,12 +208,14 @@ async function fetchPathways(geneSymbol: string): Promise<Array<{ id: string; na
   }
 }
 
-async function fetchProtein(geneSymbol: string): Promise<{ accession?: string; name?: string }> {
+async function fetchProtein(geneSymbol: string, signal?: AbortSignal): Promise<{ accession?: string; name?: string }> {
   try {
     const conn = connectionManager.getConnection('uniprot');
-    
+
     const response = await conn.request(
-      `/uniprotkb/stream?query=gene:${geneSymbol}+AND+organism_id:9606&format=json&fields=accession,protein_name&size=1`
+      `/uniprotkb/stream?query=gene:${geneSymbol}+AND+organism_id:9606&format=json&fields=accession,protein_name&size=1`,
+      undefined,
+      signal ? { signal } : undefined
     ) as UniProtSearchResponse;
     
     if (response.results && response.results.length > 0) {
@@ -217,12 +233,14 @@ async function fetchProtein(geneSymbol: string): Promise<{ accession?: string; n
   return {};
 }
 
-async function fetchOntology(geneSymbol: string): Promise<{ go_enrichment?: Array<{ id: string; term: string; p_value?: number }> }> {
+async function fetchOntology(geneSymbol: string, signal?: AbortSignal): Promise<{ go_enrichment?: Array<{ id: string; term: string; p_value?: number }> }> {
   try {
     const conn = connectionManager.getConnection('mygene');
-    
+
     const response = await conn.request(
-      `/query?q=symbol:${encodeURIComponent(geneSymbol)}&species=human&fields=go&size=1`
+      `/query?q=symbol:${encodeURIComponent(geneSymbol)}&species=human&fields=go&size=1`,
+      undefined,
+      signal ? { signal } : undefined
     ) as MyGeneGOResponse;
     
     const goData = response.hits?.[0]?.go;
@@ -247,12 +265,14 @@ async function fetchOntology(geneSymbol: string): Promise<{ go_enrichment?: Arra
   }
 }
 
-async function fetchGo(geneSymbol: string): Promise<Array<{ id: string; term: string; aspect: string }>> {
+async function fetchGo(geneSymbol: string, signal?: AbortSignal): Promise<Array<{ id: string; term: string; aspect: string }>> {
   try {
     const conn = connectionManager.getConnection('mygene');
-    
+
     const response = await conn.request(
-      `/query?q=symbol:${encodeURIComponent(geneSymbol)}&species=human&fields=go&size=1`
+      `/query?q=symbol:${encodeURIComponent(geneSymbol)}&species=human&fields=go&size=1`,
+      undefined,
+      signal ? { signal } : undefined
     ) as MyGeneGOResponse;
     
     const goData = response.hits?.[0]?.go;
@@ -273,12 +293,14 @@ async function fetchGo(geneSymbol: string): Promise<Array<{ id: string; term: st
   }
 }
 
-async function fetchInteractions(geneSymbol: string): Promise<Array<{ symbol: string; score: number; source: string }>> {
+async function fetchInteractions(geneSymbol: string, signal?: AbortSignal): Promise<Array<{ symbol: string; score: number; source: string }>> {
   try {
     const conn = connectionManager.getConnection('string');
-    
+
     const response = await conn.request(
-      `/json/interaction_partners?identifiers=${encodeURIComponent(geneSymbol)}&species=9606&limit=20`
+      `/json/interaction_partners?identifiers=${encodeURIComponent(geneSymbol)}&species=9606&limit=20`,
+      undefined,
+      signal ? { signal } : undefined
     ) as StringInteractionsResponse;
     
     return (Array.isArray(response) ? response : []).slice(0, 20).map(r => ({
@@ -292,13 +314,13 @@ async function fetchInteractions(geneSymbol: string): Promise<Array<{ symbol: st
   }
 }
 
-async function fetchCivic(geneSymbol: string): Promise<{ variants?: Array<{ name: string; clinical_significance?: string }> }> {
+async function fetchCivic(geneSymbol: string, signal?: AbortSignal): Promise<{ variants?: Array<{ name: string; clinical_significance?: string }> }> {
   try {
     const conn = connectionManager.getConnection('civic');
-    
+
     const query = `query($symbol: String!) { genes(symbol: $symbol) { name variants { name clinicalSignificance } } }`;
-    
-    const response = await conn.request(query, { symbol: geneSymbol }) as unknown as { data?: { genes: Array<{ name: string; variants: Array<{ name: string; clinicalSignificance?: string }> }> } };
+
+    const response = await conn.request(query, { symbol: geneSymbol }, signal ? { signal } : undefined) as unknown as { data?: { genes: Array<{ name: string; variants: Array<{ name: string; clinicalSignificance?: string }> }> } };
     const parsed = JSON.parse(JSON.stringify(response));
     
     const variants = (parsed.data?.genes || []).slice(0, 20).map((g: { name: string; variants: Array<{ name: string; clinicalSignificance?: string }> }) => ({
@@ -314,34 +336,41 @@ async function fetchCivic(geneSymbol: string): Promise<{ variants?: Array<{ name
   }
 }
 
-async function fetchExpression(geneSymbol: string): Promise<{ tissues?: Array<{ tissue: string; tpm: number }> }> {
+async function fetchExpression(geneSymbol: string, signal?: AbortSignal): Promise<{ tissues?: Array<{ tissue: string; tpm: number }> }> {
   try {
     const mygeneConn = connectionManager.getConnection('mygene');
     const geneResponse = await mygeneConn.request(
-      `/query?q=symbol:${encodeURIComponent(geneSymbol)}&species=human&fields=ensembl.gene&size=1`
+      `/query?q=symbol:${encodeURIComponent(geneSymbol)}&species=human&fields=ensembl.gene&size=1`,
+      undefined,
+      signal ? { signal } : undefined
     ) as any;
     const ensemblId = geneResponse?.hits?.[0]?.ensembl?.gene;
     if (!ensemblId) return { _error: `Could not resolve Ensembl ID for '${geneSymbol}'` } as any;
 
     const conn = connectionManager.getConnection('gtex');
-    
+
     let response: any = null;
     const baseId = ensemblId.replace(/\.\d+$/, '');
-    
+
     const versions = ['', '.13', '.12', '.14', '.15', '.16', '.11', '.10', '.09', '.08'];
-    for (const version of versions) {
+    const probeSignals = signal ? [AbortSignal.timeout(6000), signal] : [AbortSignal.timeout(6000)];
+    const probeSignal = probeSignals.length === 1 ? probeSignals[0] : AbortSignal.any(probeSignals);
+    const probes = versions.map(version => {
       const gencodeId = baseId + version;
-      try {
-        const attempt = await conn.request(
-          `/api/v2/expression/medianGeneExpression?gencodeId=${encodeURIComponent(gencodeId)}&datasetId=gtex_v8`
-        ) as any;
-        if (attempt?.data?.length > 0) {
-          response = attempt;
-          break;
-        }
-      } catch {
-        continue;
-      }
+      return conn.request(
+        `/api/v2/expression/medianGeneExpression?gencodeId=${encodeURIComponent(gencodeId)}&datasetId=gtex_v8`,
+        undefined,
+        { signal: probeSignal }
+      ).then((attempt: any) => {
+        if (attempt?.data?.length > 0) return attempt;
+        throw new Error('No data');
+      });
+    });
+
+    try {
+      response = await Promise.any(probes);
+    } catch {
+      // All probes failed — fall through to error handling below
     }
     
     if (!response || !response.data?.length) {
@@ -360,12 +389,14 @@ async function fetchExpression(geneSymbol: string): Promise<{ tissues?: Array<{ 
   }
 }
 
-async function fetchHpa(geneSymbol: string): Promise<{ subcellular?: Array<{ location: string; confidence: string }> }> {
+async function fetchHpa(geneSymbol: string, signal?: AbortSignal): Promise<{ subcellular?: Array<{ location: string; confidence: string }> }> {
   try {
     const conn = connectionManager.getConnection('hpa');
-    
+
     const response = await conn.request(
-      `/search?query=${encodeURIComponent(geneSymbol)}&format=json`
+      `/search?query=${encodeURIComponent(geneSymbol)}&format=json`,
+      undefined,
+      signal ? { signal } : undefined
     ) as HPAResponse;
     
     const subcellular = (response.results || []).slice(0, 10).map(r => ({
@@ -381,10 +412,11 @@ async function fetchHpa(geneSymbol: string): Promise<{ subcellular?: Array<{ loc
   }
 }
 
-async function fetchDruggability(geneSymbol: string): Promise<{ dgidb?: Array<{ drug_name: string; sources: string[] }>; opentargets?: Array<{ id: string; name: string; tractability: number }> }> {
+async function fetchDruggability(geneSymbol: string, signal?: AbortSignal): Promise<{ dgidb?: Array<{ drug_name: string; sources: string[] }>; opentargets?: Array<{ id: string; name: string; tractability: number }> }> {
   try {
     const dgidbConn = connectionManager.getConnection('dgidb');
-    
+    const otConn = connectionManager.getConnection('opentargets');
+
     const dgidbQuery = `query($names: [String!]!) {
       genes(names: $names) {
         nodes {
@@ -395,51 +427,61 @@ async function fetchDruggability(geneSymbol: string): Promise<{ dgidb?: Array<{ 
         }
       }
     }`;
-    
-    const rawDgidb = await dgidbConn.request(dgidbQuery, { names: [geneSymbol] }) as any;
-    const dgidbResponse = JSON.parse(JSON.stringify(rawDgidb));
-    const dgidbInteractions = dgidbResponse.data?.genes?.nodes?.[0]?.interactions || [];
-    const dgidbData = dgidbInteractions.slice(0, 20).map((d: { drug?: { name?: string; conceptId?: string }; interactionTypes?: Array<{ type?: string; directionality?: string }> }) => ({
-      drug_name: d.drug?.name || '',
-      sources: d.interactionTypes?.map((t: { type?: string }) => t.type || '') || [],
-    }));
-    
-    try {
-      const otConn = connectionManager.getConnection('opentargets');
-      
-      const searchQuery = `query($symbol: String!) {
-        search(queryString: $symbol, entityNames: ["target"], page: {index: 0, size: 1}) {
-          hits { id name entity }
-        }
-      }`;
-      const searchRaw = await otConn.request(searchQuery, { symbol: geneSymbol }) as any;
-      const ensemblId = searchRaw?.data?.search?.hits?.[0]?.id;
 
-      let opentargetsData: any = null;
+    const searchQuery = `query($symbol: String!) {
+      search(queryString: $symbol, entityNames: ["target"], page: {index: 0, size: 1}) {
+        hits { id name entity }
+      }
+    }`;
+
+    // Start both queries in parallel
+    const [rawDgidb, searchRaw] = await Promise.allSettled([
+      dgidbConn.request(dgidbQuery, { names: [geneSymbol] }, signal ? { signal } : undefined),
+      otConn.request(searchQuery, { symbol: geneSymbol }, signal ? { signal } : undefined),
+    ]);
+
+    // Process DGIdb results
+    let dgidbData: Array<{ drug_name: string; sources: string[] }> = [];
+    if (rawDgidb.status === 'fulfilled') {
+      const dgidbResponse = JSON.parse(JSON.stringify(rawDgidb.value));
+      const dgidbInteractions = dgidbResponse.data?.genes?.nodes?.[0]?.interactions || [];
+      dgidbData = dgidbInteractions.slice(0, 20).map((d: { drug?: { name?: string; conceptId?: string }; interactionTypes?: Array<{ type?: string; directionality?: string }> }) => ({
+        drug_name: d.drug?.name || '',
+        sources: d.interactionTypes?.map((t: { type?: string }) => t.type || '') || [],
+      }));
+    }
+
+    // Process OpenTargets search -> target detail (still sequential: search first, then detail)
+    let opentargetsData: any = null;
+    if (searchRaw.status === 'fulfilled') {
+      const searchResult = searchRaw.value as any;
+      const ensemblId = searchResult?.data?.search?.hits?.[0]?.id;
       if (ensemblId) {
-        const targetQuery = `query($ensemblId: String!) {
-          target(ensemblId: $ensemblId) {
-            id approvedName
-            tractability { label value }
+        try {
+          const targetQuery = `query($ensemblId: String!) {
+            target(ensemblId: $ensemblId) {
+              id approvedName
+              tractability { label value }
+            }
+          }`;
+          const targetRaw = await otConn.request(targetQuery, { ensemblId }, signal ? { signal } : undefined) as any;
+          const t = targetRaw?.data?.target;
+          if (t) {
+            opentargetsData = {
+              druggability: t.tractability?.map((item: any) => `${item.label}: ${item.value}`),
+            };
           }
-        }`;
-        const targetRaw = await otConn.request(targetQuery, { ensemblId }) as any;
-        const t = targetRaw?.data?.target;
-        if (t) {
-          opentargetsData = {
-            druggability: t.tractability?.map((item: any) => `${item.label}: ${item.value}`),
-          };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          console.error('[fetchDruggability/opentargets] Error:', error);
+          return { dgidb: dgidbData, _error: `OpenTargets tractability lookup failed: ${msg}. DGIdb drug data was retrieved successfully.` } as any;
         }
       } else {
         opentargetsData = { _error: `Could not resolve Ensembl ID for '${geneSymbol}'` };
       }
-      
-      return { dgidb: dgidbData, opentargets: opentargetsData };
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.error('[fetchDruggability/opentargets] Error:', error);
-      return { dgidb: dgidbData, _error: `OpenTargets tractability lookup failed: ${msg}. DGIdb drug data was retrieved successfully.` } as any;
     }
+
+    return { dgidb: dgidbData, opentargets: opentargetsData };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error('[fetchDruggability/dgidb] Error:', error);
@@ -447,14 +489,14 @@ async function fetchDruggability(geneSymbol: string): Promise<{ dgidb?: Array<{ 
   }
 }
 
-async function fetchClingen(geneSymbol: string): Promise<{ _error?: string }> {
+async function fetchClingen(geneSymbol: string, _signal?: AbortSignal): Promise<{ _error?: string }> {
   return { _error: `ClinGen dosage sensitivity data for '${geneSymbol}' is not available via public API. Visit https://search.clinicalgenome.org for manual lookup.` };
 }
 
-async function fetchConstraint(geneSymbol: string): Promise<{ lof?: { oe_score: number; oe_lof_upper?: number; mis_bad_loe: number }; syn?: { oe_score: number } }> {
+async function fetchConstraint(geneSymbol: string, signal?: AbortSignal): Promise<{ lof?: { oe_score: number; oe_lof_upper?: number; mis_bad_loe: number }; syn?: { oe_score: number } }> {
   try {
     const conn = connectionManager.getConnection('gnomad');
-    
+
     const query = `query($symbol: String!, $refGenome: ReferenceGenomeId!) {
       gene(gene_symbol: $symbol, reference_genome: $refGenome) {
         gnomad_constraint {
@@ -466,8 +508,8 @@ async function fetchConstraint(geneSymbol: string): Promise<{ lof?: { oe_score: 
       }
     }`;
     const vars = { symbol: geneSymbol, refGenome: 'GRCh38' };
-    
-    const rawResponse = await conn.request(query, vars) as any;
+
+    const rawResponse = await conn.request(query, vars, signal ? { signal } : undefined) as any;
     const response = JSON.parse(JSON.stringify(rawResponse));
     const data = response.data?.gene?.gnomad_constraint;
     
@@ -488,16 +530,18 @@ async function fetchConstraint(geneSymbol: string): Promise<{ lof?: { oe_score: 
   }
 }
 
-async function fetchDisgenet(geneSymbol: string): Promise<{ associations?: Array<{ disease_name: string; score: number; source: string }> }> {
+async function fetchDisgenet(geneSymbol: string, signal?: AbortSignal): Promise<{ associations?: Array<{ disease_name: string; score: number; source: string }> }> {
   try {
     if (!process.env.DISGENET_API_KEY) {
       return { _error: `Gene-disease association lookup failed (source: disgenet): DISGENET_API_KEY environment variable is not set. DisGeNET requires an API key. Obtain one at https://www.disgenet.org/ and set it in your environment.` } as any;
     }
 
     const conn = connectionManager.getConnection('disgenet');
-    
+
     const response = await conn.request(
-      `/api/v1/gene/${encodeURIComponent(geneSymbol)}?format=json`
+      `/api/v1/gene/${encodeURIComponent(geneSymbol)}?format=json`,
+      undefined,
+      signal ? { signal } : undefined
     ) as DisgenetResponse;
     
     const associations = (response.results || []).slice(0, 20).map(r => ({
@@ -514,16 +558,16 @@ async function fetchDisgenet(geneSymbol: string): Promise<{ associations?: Array
   }
 }
 
-async function fetchDiseases(geneSymbol: string): Promise<{ diseases?: Array<{ name: string; source: string }> }> {
+async function fetchDiseases(geneSymbol: string, signal?: AbortSignal): Promise<{ diseases?: Array<{ name: string; source: string }> }> {
   try {
     const otConn = connectionManager.getConnection('opentargets');
-    
+
     const searchQuery = `query($symbol: String!) {
       search(queryString: $symbol, entityNames: ["target"], page: {index: 0, size: 1}) {
         hits { id name entity }
       }
     }`;
-    const searchRaw = await otConn.request(searchQuery, { symbol: geneSymbol }) as any;
+    const searchRaw = await otConn.request(searchQuery, { symbol: geneSymbol }, signal ? { signal } : undefined) as any;
     const ensemblId = searchRaw?.data?.search?.hits?.[0]?.id;
     if (!ensemblId) {
       return { _error: `Could not resolve Ensembl ID for '${geneSymbol}' via OpenTargets. Gene symbol may be invalid.` } as any;
@@ -536,7 +580,7 @@ async function fetchDiseases(geneSymbol: string): Promise<{ diseases?: Array<{ n
         }
       }
     }`;
-    const targetRaw = await otConn.request(targetQuery, { ensemblId }) as any;
+    const targetRaw = await otConn.request(targetQuery, { ensemblId }, signal ? { signal } : undefined) as any;
     const rows = targetRaw?.data?.target?.associatedDiseases?.rows || [];
     
     const diseases = rows.map((r: any) => ({
@@ -552,12 +596,14 @@ async function fetchDiseases(geneSymbol: string): Promise<{ diseases?: Array<{ n
   }
 }
 
-async function fetchFunding(geneSymbol: string): Promise<{ grants?: Array<{ nih_id: string; title: string; agency: string; amount: number }> }> {
+async function fetchFunding(geneSymbol: string, signal?: AbortSignal): Promise<{ grants?: Array<{ nih_id: string; title: string; agency: string; amount: number }> }> {
   try {
     const conn = connectionManager.getConnection('nih_reporter');
-    
+
     const response = await conn.request(
-      `/projects/search?criteria=${encodeURIComponent(`{"genes":["${geneSymbol}"]}`)}&format=json`
+      `/projects/search?criteria=${encodeURIComponent(`{"genes":["${geneSymbol}"]}`)}&format=json`,
+      undefined,
+      signal ? { signal } : undefined
     ) as NIHReporterResponse;
     
     const grants = (response.results || []).slice(0, 20).map(r => ({
