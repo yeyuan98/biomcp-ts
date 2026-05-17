@@ -36,7 +36,7 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     sourceId: 'hpa',
     baseUrl: 'https://www.proteinatlas.org',
     protocol: 'rest',
-    handling: { contentType: 'xml', timeoutMs: 15000 },
+    handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
   },
   gwas: {
@@ -508,7 +508,7 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   },
   civic: {
     sourceId: 'civic',
-    baseUrl: 'https://civicdb.org/api',
+    baseUrl: 'https://civicdb.org/api/graphql',
     protocol: 'graphql',
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 334 },

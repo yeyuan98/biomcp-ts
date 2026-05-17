@@ -4,7 +4,7 @@ import { geneSearch, geneGet } from '../../entities/gene.js';
 import { geneToDrugs, geneToTrials, geneToArticles, geneEnrichment } from '../../entities/cross-entity.js';
 
 const GENE_SECTIONS = [
-  'pathways', 'ontology', 'diseases', 'protein',
+  'core', 'pathways', 'ontology', 'diseases', 'protein',
   'go', 'interactions', 'clinical_evidence', 'expression', 'protein_atlas', 'druggability',
   'dosage_sensitivity', 'constraint', 'disease_associations', 'funding', 'all'
 ] as const;
@@ -103,15 +103,16 @@ export function registerGeneTools(server: McpServer): void {
     {
       description: 'Get detailed gene information by symbol',
       inputSchema: {
-        symbol: z.string().describe('HGNC gene symbol (e.g., "BRAF", "TP53")'),
+        symbol: z.string().describe('Official HGNC gene symbol (e.g., "BRAF", "TP53", "ERBB2"). Common aliases like "HER2" or "NEU" are NOT accepted unless smart=true is enabled.'),
         sections: z.array(z.enum(GENE_SECTIONS)).optional().describe('Sections to include'),
         limit: z.number().int().min(1).max(100).default(20),
+        smart: z.boolean().default(false).describe('When true, automatically resolves gene aliases and common names to the official HGNC symbol before lookup (e.g., "HER2" → "ERBB2"). Zero overhead when input is already a valid HGNC symbol.'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
-    async ({ symbol, sections, limit }) => {
+    async ({ symbol, sections, limit, smart }) => {
       try {
-        const result = await geneGet(symbol, sections);
+        const result = await geneGet(symbol, sections, smart);
         const requestedSections = (sections ?? []).includes('all')
           ? GENE_ALL_SECTIONS
           : (sections ?? []);

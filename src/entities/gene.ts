@@ -1,4 +1,6 @@
+import { gunzipSync } from 'node:zlib';
 import { connectionManager } from '../connections/manager.js';
+import { RestConnection } from '../connections/rest.js';
 import { fetchWithTimeout } from '../connections/fetch-utils.js';
 import { withRetry, isRetryableError } from '../connections/retry.js';
 import { transformMyGeneHit } from '../transform/gene.js';
@@ -67,9 +69,52 @@ export async function geneSearch(
   return (response.hits || []).map(transformMyGeneHit);
 }
 
+async function resolveGeneAlias(query: string, signal?: AbortSignal): Promise<string | null> {
+  try {
+    const safe = query.replace(/"/g, '');
+    const conn = connectionManager.getConnection('mygene');
+    const queryParams = new URLSearchParams({
+      q: `alias:"${safe}"`,
+      species: 'human',
+      fields: 'symbol,alias',
+      size: '5',
+    });
+    const response = await conn.request(
+      `/query?${queryParams.toString()}`,
+      undefined,
+      signal ? { signal } : undefined
+    ) as MyGeneAliasResponse;
+    if (!response.hits || response.hits.length === 0) return null;
+
+    // Sort by _id (entrez_id) ascending for deterministic ordering —
+    // lower entrez_id typically means a more well-studied gene.
+    const hits = [...response.hits].sort((a, b) => {
+      const aId = parseInt(a._id || '999999', 10);
+      const bId = parseInt(b._id || '999999', 10);
+      return aId - bId;
+    });
+
+    // Prefer case-exact alias match
+    for (const hit of hits) {
+      const aliases = Array.isArray(hit.alias) ? hit.alias : hit.alias ? [hit.alias] : [];
+      if (aliases.some(a => a === safe)) return hit.symbol;
+    }
+    // Fall back to case-insensitive match
+    const upper = safe.toUpperCase();
+    for (const hit of hits) {
+      const aliases = Array.isArray(hit.alias) ? hit.alias : hit.alias ? [hit.alias] : [];
+      if (aliases.some(a => a.toUpperCase() === upper)) return hit.symbol;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function geneGet(
   symbol: string,
-  sections?: string[]
+  sections?: string[],
+  smart?: boolean
 ): Promise<GeneResult> {
   const overallController = new AbortController();
   const overallTimeoutId = setTimeout(() => overallController.abort(), 30000);
@@ -85,18 +130,34 @@ export async function geneGet(
     const sectionConfig = normalizedSections.length > 0 ? normalizedSections : ['core'];
 
     const conn = connectionManager.getConnection('mygene');
+    let lookupSymbol = symbol;
 
-    const queryParams = new URLSearchParams({
+    let queryParams = new URLSearchParams({
       q: `symbol:"${symbol}"`,
       species: 'human',
       fields: 'symbol,name,summary,genomic_pos,uniprot,omim,interactor',
       size: '1',
     });
 
-    const response = await conn.request(`/query?${queryParams.toString()}`, undefined, { signal: overallController.signal }) as MyGeneGetResponse;
+    let response = await conn.request(`/query?${queryParams.toString()}`, undefined, { signal: overallController.signal }) as MyGeneGetResponse;
+
+    // Smart alias resolution: if exact match fails, try alias field lookup
+    if ((!response.hits || response.hits.length === 0) && smart) {
+      const resolved = await resolveGeneAlias(symbol, overallController.signal);
+      if (resolved) {
+        lookupSymbol = resolved;
+        queryParams = new URLSearchParams({
+          q: `symbol:"${lookupSymbol}"`,
+          species: 'human',
+          fields: 'symbol,name,summary,genomic_pos,uniprot,omim,interactor',
+          size: '1',
+        });
+        response = await conn.request(`/query?${queryParams.toString()}`, undefined, { signal: overallController.signal }) as MyGeneGetResponse;
+      }
+    }
 
     if (!response.hits || response.hits.length === 0) {
-      throw new Error(`Gene '${symbol}' not found. Try gene_search to find valid gene symbols.`);
+      throw new Error(`Gene '${symbol}' not found. ${smart ? 'No matching gene found for this name or alias.' : 'Use gene_search to find the official symbol, or enable smart=true for automatic alias resolution.'}`);
     }
 
     const gene = response.hits[0];
@@ -126,20 +187,20 @@ export async function geneGet(
             : overallController.signal;
           const retryOpts = { maxRetries: 1, baseDelayMs: 500, isRetryable: (err: unknown) => !combinedSignal?.aborted && isRetryableError(err) };
         switch (section) {
-            case 'pathways': return { section: 'pathways', data: await withRetry(() => fetchPathways(symbol, combinedSignal), retryOpts) };
-            case 'protein': return { section: 'protein', data: await withRetry(() => fetchProtein(symbol, combinedSignal), retryOpts) };
-            case 'ontology': return { section: 'ontology', data: await withRetry(() => fetchOntology(symbol, combinedSignal), retryOpts) };
-            case 'go': return { section: 'go', data: await withRetry(() => fetchGo(symbol, combinedSignal), retryOpts) };
-            case 'interactions': return { section: 'interactions', data: await withRetry(() => fetchInteractions(symbol, combinedSignal), retryOpts) };
-            case 'civic': return { section: 'civic', data: await withRetry(() => fetchCivic(symbol, combinedSignal), retryOpts) };
-            case 'expression': return { section: 'expression', data: await withRetry(() => fetchExpression(symbol, combinedSignal), retryOpts) };
-            case 'hpa': return { section: 'hpa', data: await withRetry(() => fetchHpa(symbol, combinedSignal), retryOpts) };
-            case 'druggability': return { section: 'druggability', data: await withRetry(() => fetchDruggability(symbol, combinedSignal), retryOpts) };
-            case 'clingen': return { section: 'clingen', data: await withRetry(() => fetchClingen(symbol, combinedSignal), retryOpts) };
-            case 'constraint': return { section: 'constraint', data: await withRetry(() => fetchConstraint(symbol, combinedSignal), retryOpts) };
-            case 'disgenet': return { section: 'disgenet', data: await withRetry(() => fetchDisgenet(symbol, combinedSignal), retryOpts) };
-            case 'diseases': return { section: 'diseases', data: await withRetry(() => fetchDiseases(symbol, combinedSignal), retryOpts) };
-            case 'funding': return { section: 'funding', data: await withRetry(() => fetchFunding(symbol, combinedSignal), retryOpts) };
+            case 'pathways': return { section: 'pathways', data: await withRetry(() => fetchPathways(lookupSymbol, combinedSignal), retryOpts) };
+            case 'protein': return { section: 'protein', data: await withRetry(() => fetchProtein(lookupSymbol, combinedSignal), retryOpts) };
+            case 'ontology': return { section: 'ontology', data: await withRetry(() => fetchOntology(lookupSymbol, combinedSignal), retryOpts) };
+            case 'go': return { section: 'go', data: await withRetry(() => fetchGo(lookupSymbol, combinedSignal), retryOpts) };
+            case 'interactions': return { section: 'interactions', data: await withRetry(() => fetchInteractions(lookupSymbol, combinedSignal), retryOpts) };
+            case 'civic': return { section: 'civic', data: await withRetry(() => fetchCivic(lookupSymbol, combinedSignal), retryOpts) };
+            case 'expression': return { section: 'expression', data: await withRetry(() => fetchExpression(lookupSymbol, combinedSignal), retryOpts) };
+            case 'hpa': return { section: 'hpa', data: await withRetry(() => fetchHpa(lookupSymbol, combinedSignal), retryOpts) };
+            case 'druggability': return { section: 'druggability', data: await withRetry(() => fetchDruggability(lookupSymbol, combinedSignal), retryOpts) };
+            case 'clingen': return { section: 'clingen', data: await withRetry(() => fetchClingen(lookupSymbol, combinedSignal), retryOpts) };
+            case 'constraint': return { section: 'constraint', data: await withRetry(() => fetchConstraint(lookupSymbol, combinedSignal), retryOpts) };
+            case 'disgenet': return { section: 'disgenet', data: await withRetry(() => fetchDisgenet(lookupSymbol, combinedSignal), retryOpts) };
+            case 'diseases': return { section: 'diseases', data: await withRetry(() => fetchDiseases(lookupSymbol, combinedSignal), retryOpts) };
+            case 'funding': return { section: 'funding', data: await withRetry(() => fetchFunding(lookupSymbol, combinedSignal), retryOpts) };
             default: return { section, data: null };
           }
         }, SECTION_TIMEOUT_MS);
@@ -314,20 +375,30 @@ async function fetchInteractions(geneSymbol: string, signal?: AbortSignal): Prom
   }
 }
 
-async function fetchCivic(geneSymbol: string, signal?: AbortSignal): Promise<{ variants?: Array<{ name: string; clinical_significance?: string }> }> {
+async function fetchCivic(geneSymbol: string, signal?: AbortSignal): Promise<{ variants?: Array<{ name: string }> }> {
   try {
     const conn = connectionManager.getConnection('civic');
 
-    const query = `query($symbol: String!) { genes(symbol: $symbol) { name variants { name clinicalSignificance } } }`;
+    const query = `query($symbol: String!) {
+  gene(entrezSymbol: $symbol) {
+    id
+    name
+    variants {
+      nodes {
+        id
+        name
+      }
+    }
+  }
+}`;
 
-    const response = await conn.request(query, { symbol: geneSymbol }, signal ? { signal } : undefined) as unknown as { data?: { genes: Array<{ name: string; variants: Array<{ name: string; clinicalSignificance?: string }> }> } };
-    const parsed = JSON.parse(JSON.stringify(response));
-    
-    const variants = (parsed.data?.genes || []).slice(0, 20).map((g: { name: string; variants: Array<{ name: string; clinicalSignificance?: string }> }) => ({
-      name: g.name,
-      clinical_significance: g.variants?.[0]?.clinicalSignificance,
+    const response = await conn.request(query, { symbol: geneSymbol }, signal ? { signal } : undefined) as unknown as CivicResponse;
+
+    const gene = response.data?.gene;
+    const variants = (gene?.variants?.nodes || []).slice(0, 20).map((v: { id: number; name: string }) => ({
+      name: v.name,
     }));
-    
+
     return { variants };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -391,19 +462,23 @@ async function fetchExpression(geneSymbol: string, signal?: AbortSignal): Promis
 
 async function fetchHpa(geneSymbol: string, signal?: AbortSignal): Promise<{ subcellular?: Array<{ location: string; confidence: string }> }> {
   try {
-    const conn = connectionManager.getConnection('hpa');
+    const url = `https://www.proteinatlas.org/api/search_download.php?search=${encodeURIComponent(geneSymbol)}&format=json&columns=g,scl`;
+    const rawResponse = await fetch(url, { signal });
+    if (!rawResponse.ok) {
+      throw new Error(`HTTP ${rawResponse.status}: ${rawResponse.statusText}`);
+    }
+    const buffer = Buffer.from(await rawResponse.arrayBuffer());
+    const text = buffer[0] === 0x1f ? gunzipSync(buffer).toString('utf-8') : buffer.toString('utf-8');
+    const response = JSON.parse(text) as HPAResponse;
 
-    const response = await conn.request(
-      `/search?query=${encodeURIComponent(geneSymbol)}&format=json`,
-      undefined,
-      signal ? { signal } : undefined
-    ) as HPAResponse;
-    
-    const subcellular = (response.results || []).slice(0, 10).map(r => ({
-      location: r.subcellularLocation || '',
-      confidence: r['enhanced-reliability'] ? 'enhanced' : 'approved',
+    const geneEntry = (response || []).find(r => r.Gene === geneSymbol);
+    const locations = geneEntry?.['Subcellular location'] || [];
+
+    const subcellular = locations.map(location => ({
+      location,
+      confidence: 'approved',
     }));
-    
+
     return { subcellular };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -598,21 +673,31 @@ async function fetchDiseases(geneSymbol: string, signal?: AbortSignal): Promise<
 
 async function fetchFunding(geneSymbol: string, signal?: AbortSignal): Promise<{ grants?: Array<{ nih_id: string; title: string; agency: string; amount: number }> }> {
   try {
-    const conn = connectionManager.getConnection('nih_reporter');
+    const conn = connectionManager.getConnection('nih_reporter') as RestConnection;
 
-    const response = await conn.request(
-      `/projects/search?criteria=${encodeURIComponent(`{"genes":["${geneSymbol}"]}`)}&format=json`,
-      undefined,
+    const response = await conn.post(
+      '/projects/search',
+      {
+        criteria: {
+          advanced_text_search: {
+            operator: 'and',
+            search_field: 'terms',
+            search_text: geneSymbol,
+          },
+        },
+        offset: 0,
+        limit: 20,
+      },
       signal ? { signal } : undefined
     ) as NIHReporterResponse;
-    
+
     const grants = (response.results || []).slice(0, 20).map(r => ({
-      nih_id: r.projectNumber,
-      title: r.projectTitle,
-      agency: r.agency,
-      amount: r.totalCostAmount,
+      nih_id: r.project_num,
+      title: r.project_title,
+      agency: r.agency_code,
+      amount: r.award_amount,
     }));
-    
+
     return { grants };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -629,6 +714,14 @@ interface MyGeneSearchResponse {
     genomic_pos?: Array<{ chr: string; start: number; end: number }>;
     uniprot?: string[];
     omim?: number[];
+  }>;
+}
+
+interface MyGeneAliasResponse {
+  hits: Array<{
+    _id?: string;
+    symbol: string;
+    alias?: string[] | string;
   }>;
 }
 
@@ -689,13 +782,16 @@ interface StringInteractionsResponse extends Array<{
 
 interface CivicResponse {
   data?: {
-    genes: Array<{
+    gene: {
+      id: number;
       name: string;
-      variants: Array<{
-        name: string;
-        clinicalSignificance?: string;
-      }>;
-    }>;
+      variants: {
+        nodes: Array<{
+          id: number;
+          name: string;
+        }>;
+      };
+    } | null;
   };
 }
 
@@ -706,12 +802,10 @@ interface GTExResponse {
   }>;
 }
 
-interface HPAResponse {
-  results?: Array<{
-    subcellularLocation?: string;
-    'enhanced-reliability'?: boolean;
-  }>;
-}
+interface HPAResponse extends Array<{
+  Gene: string;
+  'Subcellular location': string[] | null;
+}> {}
 
 interface DGIdbResponse {
   data?: {
@@ -759,10 +853,10 @@ interface DisgenetResponse {
 
 interface NIHReporterResponse {
   results: Array<{
-    projectNumber: string;
-    projectTitle: string;
-    agency: string;
-    totalCostAmount: number;
+    project_num: string;
+    project_title: string;
+    agency_code: string;
+    award_amount: number;
   }>;
 }
 
