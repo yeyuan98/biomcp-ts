@@ -1,5 +1,4 @@
 const HTML_ENTITIES: Record<string, string> = {
-  '&amp;': '&',
   '&lt;': '<',
   '&gt;': '>',
   '&quot;': '"',
@@ -16,7 +15,21 @@ export function decodeHtmlEntities(s: string): string {
   for (const [entity, char] of Object.entries(HTML_ENTITIES)) {
     out = out.split(entity).join(char);
   }
-  return out.replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)));
+  out = out.replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
+    try {
+      return String.fromCodePoint(parseInt(hex, 16));
+    } catch {
+      return '';
+    }
+  });
+  out = out.replace(/&#(\d+);/g, (_, dec) => {
+    try {
+      return String.fromCodePoint(Number(dec));
+    } catch {
+      return '';
+    }
+  });
+  return out.replace(/&amp;/g, '&');
 }
 
 export function stripTags(s: string): string {
@@ -103,7 +116,7 @@ export function parseGooglePatentHtml(html: string): ParsedGooglePatent {
   result.assignee = allMetaContents(html, 'DC.contributor', 'assignee');
 
   const pubNumber = textAfterTag(html, 'publicationNumber');
-  if (pubNumber) result.publication_number = pubNumber.replace(/\s+/g, '');
+  if (pubNumber) result.publication_number = pubNumber.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
   const pubDate = textAfterTag(html, 'publicationDate');
   if (pubDate) result.publication_date = pubDate;
   const priorityDate = textAfterTag(html, 'priorityDate');
@@ -121,25 +134,29 @@ export function parseGooglePatentHtml(html: string): ParsedGooglePatent {
   }
 
   // Claims: [num]-attributed container elements inside the claims section.
+  // Split on claim-start boundaries so nested divs don't truncate content.
   const claimsSectionMatch = html.match(/itemprop="claims"[^>]*>([\s\S]*?)(?:<\/section>|<section\s+itemprop=)/i);
   if (claimsSectionMatch) {
+    const sectionHtml = claimsSectionMatch[1];
+    const numMatches = Array.from(sectionHtml.matchAll(/<(?:div|claim|li)\b[^>]*\snum="(\d+)"[^>]*>/gi)).map(m => m[1]);
+    const blocks = sectionHtml.split(/<(?:div|claim|li)\b[^>]*\snum="\d+"[^>]*>/i).slice(1);
     const seen = new Set<string>();
-    const claimMatches = matchAll(/<(?:div|claim|li)\b[^>]*\snum="(\d+)"[^>]*>([\s\S]*?)<\/(?:div|claim|li)>/i, claimsSectionMatch[1]);
-    for (const m of claimMatches) {
-      if (seen.has(m[1])) continue;
-      const text = stripTags(m[2]);
+    blocks.forEach((block, i) => {
+      const num = numMatches[i];
+      if (!num || seen.has(num)) return;
+      const text = stripTags(block);
       if (text) {
-        seen.add(m[1]);
-        result.claims.push({ num: m[1], text });
+        seen.add(num);
+        result.claims.push({ num, text });
       }
-    }
+    });
   }
 
   for (const direction of ['backwardReferences', 'forwardReferences'] as const) {
     const rows = matchAll(new RegExp(`<tr[^>]*itemprop="${direction}"[^>]*>([\\s\\S]*?)<\\/tr>`, 'i'), html);
     for (const row of rows) {
       const entry = {
-        publication_number: textAfterTag(row[1], 'publicationNumber')?.replace(/\s+/g, ''),
+        publication_number: textAfterTag(row[1], 'publicationNumber')?.replace(/[^A-Za-z0-9]/g, '').toUpperCase(),
         title: textAfterTag(row[1], 'title'),
         publication_date: textAfterTag(row[1], 'publicationDate'),
         assignee: textAfterTag(row[1], 'assigneeOriginal'),
@@ -168,7 +185,7 @@ export function parseGooglePatentHtml(html: string): ParsedGooglePatent {
   // Family: "Also Published As" rows.
   const familyRows = matchAll(/itemprop="docdbFamily"[^>]*>([\s\S]*?)<\/tr>/i, html);
   for (const row of familyRows) {
-    const num = textAfterTag(row[1], 'publicationNumber')?.replace(/\s+/g, '');
+    const num = textAfterTag(row[1], 'publicationNumber')?.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
     if (num) result.family_members.push(num);
   }
 

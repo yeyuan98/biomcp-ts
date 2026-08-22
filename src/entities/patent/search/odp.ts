@@ -27,11 +27,14 @@ interface OdpWrapper {
 export function transformOdpWrapper(wrapper: OdpWrapper): PatentSearchResult {
   const md = wrapper.applicationMetaData || {};
   const patentNumber = md.patentNumber ? String(md.patentNumber) : undefined;
-  const pub = patentNumber
-    ? `US${patentNumber.padStart(8, '0')}`
-    : md.earliestPublicationNumber
-      ? `US${String(md.earliestPublicationNumber).replace(/^US/, '')}`
-      : `US${wrapper.applicationNumberText || ''}`;
+  let pub: string | undefined;
+  if (patentNumber) {
+    pub = /^\d+$/.test(patentNumber)
+      ? `US${patentNumber.padStart(8, '0')}`
+      : `US${patentNumber}`;
+  } else if (md.earliestPublicationNumber) {
+    pub = `US${String(md.earliestPublicationNumber).replace(/^US/, '')}`;
+  }
 
   const cpc = (md.cpcClassificationBag?.cpcClassificationBag || [])
     .map(c => c.classification)
@@ -39,7 +42,7 @@ export function transformOdpWrapper(wrapper: OdpWrapper): PatentSearchResult {
     .slice(0, 10);
 
   return {
-    publication_number: pub,
+    publication_number: pub || `US${wrapper.applicationNumberText || ''}`,
     title: md.inventionTitle,
     publication_date: md.grantDate || md.earliestPublicationDate,
     filing_date: md.filingDate,
@@ -92,5 +95,5 @@ export async function searchOdp(
     results = results.filter(r => r.status === options.status);
   }
 
-  return { patents: results, total: raw.count };
+  return { patents: results, total: options.status ? undefined : raw.count };
 }

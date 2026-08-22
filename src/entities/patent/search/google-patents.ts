@@ -1,8 +1,8 @@
 import { connectionManager } from '../../../connections/manager.js';
 import type { PatentSearchOptions, PatentSearchResult } from '../types.js';
+import { kindToStatus } from './dedup.js';
 
 const BREAKER_OPEN_MS = 30 * 60 * 1000;
-const BLOCK_SIGNATURES = ['Sorry...', 'automated queries', '/sorry/'];
 
 interface BreakerState {
   openedAt: number;
@@ -56,9 +56,8 @@ interface GpResponse {
 
 export function transformGooglePatentsResult(p: GpPatent): PatentSearchResult {
   const pubNum = (p.publication_number || '').replace(/\s+/g, '');
-  // Kind heuristics: B*=granted, A*=application for the major authorities.
-  const kindMatch = pubNum.match(/[A-Z]\d?$/);
-  const status = kindMatch && /^B/.test(kindMatch[0]) ? 'granted' : 'application';
+  const kindMatch = pubNum.match(/([A-Z]\d?)$/);
+  const status = kindToStatus(kindMatch?.[1]);
   return {
     publication_number: pubNum,
     title: stripHtml(p.title),

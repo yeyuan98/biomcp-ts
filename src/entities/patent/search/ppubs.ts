@@ -56,8 +56,9 @@ function buildPpubsQuery(query: string, options: PatentSearchOptions): string {
   if (options.date_range) {
     const [from, to] = options.date_range.split('/').map(s => (s || '').replace(/-/g, ''));
     let dateExpr = '';
-    if (from) dateExpr += `@pd>=${from}`;
-    if (to) dateExpr += `${from ? ' ' : ''}@pd<=${to}`;
+    if (from && to) dateExpr = `@pd>=${from}<=${to}`;
+    else if (from) dateExpr = `@pd>=${from}`;
+    else if (to) dateExpr = `@pd<=${to}`;
     if (dateExpr) parts.push(dateExpr);
   }
   return parts.length > 0 ? parts.join(' AND ') : 'biomedical';

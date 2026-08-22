@@ -179,6 +179,7 @@ describe('getEntitySuggestions', () => {
     const suggestion = getEntitySuggestions('article');
     expect(suggestion).toContain('article_search');
     expect(suggestion).toContain('PMCID');
+    expect(suggestion).toContain('DOI');
   });
 
   it('returns suggestion for patent mentioning patent_search', () => {

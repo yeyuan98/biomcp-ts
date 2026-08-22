@@ -1,5 +1,6 @@
 import { opsClient, hasOpsCredentials } from '../ops-client.js';
 import type { PatentSearchOptions, PatentSearchResult } from '../types.js';
+import { kindToStatus } from './dedup.js';
 
 function asArray<T>(x: T | T[] | undefined | null): T[] {
   if (x === undefined || x === null) return [];
@@ -17,19 +18,24 @@ interface BadgerFish {
   [key: string]: unknown;
 }
 
+function escapeCql(s: string): string {
+  return s.replace(/"/g, '');
+}
+
 function buildCql(query: string, options: PatentSearchOptions): string {
   const parts: string[] = [];
   if (query.trim()) {
-    parts.push(`ti="${query.trim()}" OR ab="${query.trim()}"`);
+    const q = escapeCql(query.trim());
+    parts.push(`(ti="${q}" OR ab="${q}")`);
   }
   if (options.assignee) {
-    parts.push(`pa="${options.assignee}"`);
+    parts.push(`pa="${escapeCql(options.assignee)}"`);
   }
   if (options.inventor) {
-    parts.push(`in="${options.inventor}"`);
+    parts.push(`in="${escapeCql(options.inventor)}"`);
   }
   if (options.cpc) {
-    parts.push(`cpc=${options.cpc}`);
+    parts.push(`cpc=${escapeCql(options.cpc)}`);
   }
   if (parts.length === 0) {
     return 'ti="biomedical"';
@@ -108,7 +114,7 @@ export function transformOpsSearchHit(doc: BadgerFish): PatentSearchResult {
     }
   }
 
-  const status = kind.startsWith('B') || kind.startsWith('C') ? 'granted' : 'application';
+  const status = kindToStatus(kind);
 
   return {
     publication_number: `${country}${docNumber}${kind}`,
@@ -135,8 +141,11 @@ export async function searchOps(
 
   const limit = Math.min(options.limit ?? 10, 100);
   const offset = options.offset ?? 0;
-  const begin = Math.min(offset + 1, 1901);
-  const end = Math.min(offset + limit, 2000);
+  if (offset + limit > 2000) {
+    throw new Error('EPO OPS caps reachable results at 2000; reduce offset.');
+  }
+  const begin = offset + 1;
+  const end = offset + limit;
   const cql = buildCql(query, options);
   const path = `/published-data/search/biblio?q=${encodeURIComponent(cql)}&Range=${begin}-${end}`;
 
@@ -159,5 +168,26 @@ export async function searchOps(
   const exchangeDocs = (searchResult['exchange-documents'] || {}) as BadgerFish;
   const docs = asArray(exchangeDocs['exchange-document'] as BadgerFish[]);
 
-  return { patents: docs.map(transformOpsSearchHit), total };
+  let patents = docs.map(transformOpsSearchHit);
+
+  // OPS CQL has no reliable date-range or kind-code filters (verified: `pd
+  // within` 500s server-side), so narrow client-side when requested.
+  let filteredTotal = total;
+  if (options.date_range) {
+    const [from, to] = options.date_range.split('/');
+    patents = patents.filter(p => {
+      const d = p.publication_date;
+      if (!d) return false;
+      if (from && d < from) return false;
+      if (to && d > to) return false;
+      return true;
+    });
+    filteredTotal = undefined;
+  }
+  if (options.status) {
+    patents = patents.filter(p => p.status === options.status);
+    filteredTotal = undefined;
+  }
+
+  return { patents, total: filteredTotal };
 }

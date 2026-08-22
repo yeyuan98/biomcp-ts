@@ -10,6 +10,16 @@ export function sliceArraysRecursive(obj: unknown, limit: number): unknown {
   return obj;
 }
 
+export function withToolTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`Tool execution timed out after ${timeoutMs}ms`)), timeoutMs);
+    }),
+  ]);
+}
+
 export function applyLimit(
   sections: Record<string, unknown>,
   requestedNames: string[],

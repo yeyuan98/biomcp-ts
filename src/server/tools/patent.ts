@@ -1,29 +1,17 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { patentSearch, patentGet } from '../../entities/patent/index.js';
-import { applyLimit } from './utils.js';
+import { patentSearch, patentGet, PATENT_GET_SECTIONS } from '../../entities/patent/index.js';
+import { applyLimit, withToolTimeout } from './utils.js';
 
 const SEARCH_TIMEOUT_MS = 30000;
 const GET_TIMEOUT_MS = 120000;
-
-function withToolTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>;
-  return Promise.race([
-    promise.finally(() => clearTimeout(timer)),
-    new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`Tool execution timed out after ${timeoutMs}ms`)), timeoutMs);
-    }),
-  ]);
-}
-
-const PATENT_SECTIONS = ['core', 'abstract', 'claims', 'citations', 'family', 'classifications', 'all'] as const;
 
 const PATENT_ALL_SECTIONS = ['abstract', 'claims', 'citations', 'family', 'classifications'];
 const PATENT_STORAGE_KEYS: Record<string, string> = {};
 const PATENT_ARRAY_KEYS: Record<string, string[]> = {
   claims: ['claims'],
   citations: ['backward', 'forward', 'non_patent_literature'],
-  family: [],
+  family: ['family_members'],
   classifications: ['cpc', 'ipc'],
 };
 
@@ -74,7 +62,7 @@ export function registerPatentTools(server: McpServer): void {
         'citations (backward + forward), family, classifications.',
       inputSchema: {
         patent_id: z.string().describe('Publication number, e.g. "US11027025B2"'),
-        sections: z.array(z.enum(PATENT_SECTIONS)).optional().describe('Sections to include (default: core only)'),
+        sections: z.array(z.enum(PATENT_GET_SECTIONS)).optional().describe('Sections to include (default: core only)'),
         limit: z.number().int().min(1).max(100).default(20).describe('Max entries per section array'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },

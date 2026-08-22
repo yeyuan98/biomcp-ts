@@ -1,4 +1,3 @@
-import { fetchWithTimeout } from '../../../connections/fetch-utils.js';
 import { hasOpsCredentials } from '../ops-client.js';
 import { hasOdpKey } from '../search/odp.js';
 import type {
@@ -37,14 +36,9 @@ function sectionChains(publicationNumber: string): Record<string, Array<() => Pr
     const { fetchOpsBiblio } = await import('./ops.js');
     const biblio = await fetchOpsBiblio(publicationNumber);
     if (isKindStripped(biblio.publication_number)) {
-      // OPS detail strips kind codes; recover it from the user's input.
       biblio.publication_number = normalizePublicationNumber(publicationNumber);
     }
     return biblio;
-  };
-  const odpCore = async () => {
-    const { fetchOdpCore } = await import('./odp.js');
-    return fetchOdpCore(publicationNumber);
   };
   const gpDetail = async () => {
     const { fetchGooglePatentDetail } = await import('./google-patents.js');
@@ -113,7 +107,10 @@ function sectionChains(publicationNumber: string): Record<string, Array<() => Pr
     const parsed = await fetchGooglePatentDetail(publicationNumber);
     if (parsed.claims.length === 0) throw new Error('Google Patents detail has no claims markup');
     let warn: string | undefined;
-    let claims = parsed.claims.map(c => `${Number(c.num)}. ${c.text}`);
+    let claims = parsed.claims.map(c => {
+      const stripped = c.text.replace(/^\d+[.)]\s*/, '');
+      return `${Number(c.num)}. ${stripped}`;
+    });
     const total = claims.reduce((s, c) => s + c.length, 0);
     if (total > 100_000) {
       const kept: string[] = [];
@@ -225,11 +222,21 @@ function sectionChains(publicationNumber: string): Record<string, Array<() => Pr
 async function runChain(steps: Array<() => Promise<unknown>>, timeoutMs: number): Promise<{ value?: unknown; error?: string }> {
   let lastError = 'no source available';
   for (const step of steps) {
-    const { data, error } = await fetchWithTimeout(() => step(), timeoutMs);
-    if (data !== undefined && data !== null) {
-      return { value: data };
+    let timer: ReturnType<typeof setTimeout>;
+    try {
+      const value = await Promise.race([
+        step().finally(() => clearTimeout(timer)),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`Section fetch timed out after ${timeoutMs}ms. The upstream data source may be slow or unreachable.`)), timeoutMs);
+        }),
+      ]);
+      if (value !== undefined && value !== null) {
+        return { value };
+      }
+      lastError = 'source returned no data';
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
     }
-    lastError = error || 'source returned no data';
   }
   return { error: `All sources failed. Last error: ${lastError}` };
 }
