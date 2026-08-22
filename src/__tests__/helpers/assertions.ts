@@ -91,6 +91,23 @@ export function expectTrialGetResult(data: unknown): asserts data is Record<stri
   expect(typeof (data as Record<string, unknown>).nct_id).toBe('string');
 }
 
+export function expectPatentSearchResult(data: unknown): asserts data is { patents: Array<Record<string, unknown>>; total_hits?: Record<string, unknown> } {
+  expect(data).toHaveProperty('patents');
+  expect(Array.isArray((data as any).patents)).toBe(true);
+  for (const p of (data as any).patents as Array<Record<string, unknown>>) {
+    expect(p).toHaveProperty('source');
+    if (!(p as any)._error) {
+      expect(typeof p.publication_number).toBe('string');
+      expect(p.publication_number).toMatch(/^[A-Z]{2}/);
+    }
+  }
+}
+
+export function expectPatentGetResult(data: unknown): asserts data is Record<string, unknown> {
+  expect(data).toHaveProperty('publication_number');
+  expect(typeof (data as Record<string, unknown>).publication_number).toBe('string');
+}
+
 export function expectToolError(fn: () => Promise<unknown>, toolName: string): Promise<void> {
   return expect(fn()).rejects.toThrow(toolName);
 }

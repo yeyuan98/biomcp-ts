@@ -140,6 +140,18 @@ describe('isValidEntityInput', () => {
   it('returns true for valid article DOI input', () => {
     expect(isValidEntityInput('article', '10.1038/s41586-021-03819-2')).toBe(true);
   });
+
+  it('returns true for valid patent publication numbers', () => {
+    expect(isValidEntityInput('patent', 'US11027025B2')).toBe(true);
+    expect(isValidEntityInput('patent', 'EP3904939')).toBe(true);
+    expect(isValidEntityInput('patent', 'US20260240819A1')).toBe(true);
+    expect(isValidEntityInput('patent', 'us 11027025 b2')).toBe(true);
+  });
+
+  it('returns false for invalid patent input', () => {
+    expect(isValidEntityInput('patent', 'crispr')).toBe(false);
+    expect(isValidEntityInput('patent', '12345')).toBe(false);
+  });
 });
 
 describe('getEntitySuggestions', () => {
@@ -167,7 +179,10 @@ describe('getEntitySuggestions', () => {
     const suggestion = getEntitySuggestions('article');
     expect(suggestion).toContain('article_search');
     expect(suggestion).toContain('PMCID');
-    expect(suggestion).toContain('DOI');
+  });
+
+  it('returns suggestion for patent mentioning patent_search', () => {
+    expect(getEntitySuggestions('patent')).toContain('patent_search');
   });
 
   it('returns fallback for unknown entity', () => {

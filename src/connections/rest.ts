@@ -172,7 +172,13 @@ export class RestConnection implements IConnection<string, unknown> {
       ? acceptMap[this.handling.contentType] || 'application/json'
       : 'application/json';
     headers.set('Accept', accept);
-    
+
+    if (this.handling.headers) {
+      for (const [name, value] of Object.entries(this.handling.headers)) {
+        headers.set(name, value);
+      }
+    }
+
     if (!this.options.auth || !this.hasAuth) {
       return headers;
     }

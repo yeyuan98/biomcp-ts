@@ -1,0 +1,147 @@
+# Patent Entity
+
+Worldwide patent search and detail access for biomcp-ts, following the repo's
+search/get/sections pattern. Sources are ordered by stability; credentials
+degrade gracefully (see ladder below).
+
+> **Migration note:** the legacy USPTO PatentsView API
+> (`api.patentsview.org` / `search.patentsview.org`) was shut down on
+> March 20, 2026 (data migrated to USPTO Open Data Portal bulk datasets).
+> None of the code here touches PatentsView.
+
+## Architecture
+
+```
+patent/
+├── index.ts            Public re-exports
+├── types.ts            All public types
+├── ops-client.ts       EPO OPS OAuth2 session client (entity-managed)
+├── ppubs-client.ts     USPTO PPUBS session client (entity-managed, keyless)
+├── search/
+│   ├── index.ts        patentSearch() federated orchestrator + auto-selection
+│   ├── ops.ts          EPO OPS CQL search (BadgerFish transforms)
+│   ├── odp.ts          USPTO ODP Lucene search
+│   ├── ppubs.ts        USPTO PPUBS full-text search
+│   ├── google-patents.ts  Google Patents XHR (circuit-breaker gated)
+│   └── dedup.ts        Publication-number normalization + federated dedup
+└── detail/
+    ├── index.ts        patentGet() per-section priority chains
+    ├── ops.ts          biblio/abstract/claims/citations/family
+    ├── odp.ts          application-file-wrapper core
+    ├── ppubs.ts        claims HTML / usRef citations / family
+    ├── google-patents.ts  Live → Wayback fallback detail fetch
+    ├── wayback.ts      Wayback availability probe + id_ fetch (gzip sniff)
+    └── parse.ts        Google Patents HTML parser (DC meta + itemprop)
+```
+
+## Source Ladder
+
+| Source | Auth (env) | Coverage | Registry |
+|---|---|---|---|
+| EPO OPS | `EPO_OPS_CONSUMER_KEY` + `EPO_OPS_CONSUMER_SECRET` | 100M+ worldwide | entity-managed (OAuth2 doesn't fit static AuthConfig) |
+| USPTO ODP | `USPTO_API_KEY` | US applications + grants | `uspto_odp` connection |
+| USPTO PPUBS | none | US full-text, daily | entity-managed (session token) |
+| Google Patents | none | worldwide | `google_patents` connection + Wayback fallback |
+
+`patentSearch` auto-selects: worldwide = OPS (if creds) else Google Patents
+(breaker-gated); US = ODP (if key) else PPUBS. With OPS configured, Google
+Patents search is opt-in only (`source: 'google_patents'`) — Google
+hard-IP-blocks automated clients (verified: 503 block page lasting 24h+), so
+it is never load-bearing. A failed backend appends a `{ _error }` element to
+results instead of failing the search.
+
+`patentGet` sections run per-section priority chains with auth-aware silent
+skip and fall-through (8s slice timeout; claims get 30s):
+
+| Section | Chain |
+|---|---|
+| `core` (default) | OPS biblio → GP/Wayback detail → PPUBS (US) |
+| `abstract` | OPS abstract → GP/Wayback → PPUBS (US) |
+| `claims` | PPUBS `claimsHtml` (US — OPS has **no US fulltext**) → OPS claims (EP/WO/EU/CA) → GP/Wayback `[num]` elements |
+| `citations` | OPS backward refs + `ct=` forward search → GP/Wayback rows → PPUBS `usRef*`/`foreignRef*` (US) |
+| `family` | OPS INPADOC family → GP/Wayback `docdbFamily` → PPUBS (US) |
+| `classifications` | OPS IPC+CPC → GP/Wayback → ODP/PPUBS (US) |
+
+Claims are capped at ~100 KB with a `_warn` field (pdb-download precedent).
+
+## Verified API Contracts (Phase 0, 2026-08-22)
+
+All contracts below were verified live with credentials / from working client
+source code. Kept here so future maintainers don't re-verify from scratch.
+
+### EPO OPS (`https://ops.epo.org/3.2`)
+
+- **Auth**: `POST /auth/accesstoken`, Basic key:secret, form body
+  `grant_type=client_credentials` → `{access_token, expires_in: 1199}`.
+  Anonymous access is denied entirely (403 `AnonymousQuotaPerDay`).
+- **Search**: `GET /rest-services/published-data/search/biblio?q=<CQL>&Range=1-N`
+  (GET only; POST → 415). Bare `/search` returns only publication references;
+  `/search/biblio` returns full biblio per record. CQL operators verified:
+  `ti= "phrase"`, `ab=`, `pa=`, `in=`, `pn=`, `cpc=C12N15/11`, `pd=YYYYMMDD`,
+  `ct={pn}` (forward citations). `pd within "a,b"` 500s server-side — avoid.
+- **Pagination caps**: default 1-25, max 100/page, 2000 reachable,
+  total-result-count capped at 10000.
+- **Detail**: `/rest-services/published-data/publication/epodoc/{PN}/biblio|abstract|claims`.
+  Kind codes must be **stripped or dotted** — bare kind (`US11027025B2`)
+  404s; `US11027025` and `US11027025.B2` work.
+- **Claims**: `ftxt:fulltext-documents.ftxt:fulltext-document.claims.claim[]
+  .claim-text[]` (BadgerFish `{$}` values). Fulltext authorities exclude the
+  US (EP/WO/EU/CA and others only) — US claims must come from PPUBS.
+- **Family**: `GET /family/publication/epodoc/{PN}` →
+  `ops:patent-family.ops:family-member[].publication-reference.document-id[]`.
+- **Backward refs**: biblio `references-cited.citation[].patcit.document-id[]`.
+- **JSON**: universal via `Accept: application/json`, BadgerFish convention.
+- **Throttling**: **403 + `X-Rejection-Reason`** (`RegisteredQuotaPerWeek`,
+  `IndividualQuotaPerHour`), NOT 429. Quota headers
+  `X-IndividualQuotaPerHour-Used` / `X-RegisteredQuotaPerWeek-Used`; free tier
+  4 GB/week. No `Retry-After` documented. `OpsClient` retries once on 403
+  quota rejections.
+
+### USPTO ODP (`https://api.uspto.gov`)
+
+- `POST /api/v1/patent/applications/search`, header `X-API-KEY`, JSON body
+  `{"q": <lucene>, "pagination": {"offset", "limit"}}` (GET query filters are
+  silently ignored upstream — always POST).
+- Lucene fields: `applicationMetaData.patentNumber:"11027025"`,
+  `.firstApplicantName:"..."`, `.firstInventorName:"..."`,
+  `.filingDate:[YYYY-MM-DD TO YYYY-MM-DD]`; clauses AND-joined.
+- Response `{count, patentFileWrapperDataBag[]}`; granted patents surface
+  inside applications data (`patentNumber`, `applicationStatus: "patented"`).
+  Rich metadata: `cpcClassificationBag`, `inventorBag`, continuity bags,
+  `grantDocumentMetaData`, attorney, term adjustment.
+- PPUBS-style suffix filters (`(x).as.`) are accepted-but-have-different
+  semantics — never use them here.
+
+### USPTO PPUBS (`https://ppubs.uspto.gov`, keyless)
+
+- Session: `POST /api/users/me/session`, body `-1`, header
+  `X-Access-Token: null` → `x-access-token` response header + `caseId` from
+  body. Cookies NOT required. Sessions work for parallel searches.
+- Search: `POST /api/searches/searchWithBeFamily` with the exact template in
+  `ppubs-client.ts` — one wrong key (e.g. `showDocFamilyPref` instead of
+  `showDocPerFamilyPref`) returns HTTP 500. The counts call is NOT required.
+- Field syntax: `("11027025").pn.`, `(pfizer).as.`, `(smith).in.`,
+  `(C12N15/11).cpc.` (**full CPC symbols only** — truncated symbols silently
+  return 0); dates `@pd>=YYYYMMDD<=YYYYMMDD`, `@ad>=`; combine as free-text +
+  parenthesized field filters only (two free-text suffixes → 0 results);
+  `op: "AND"`; `start` for pagination; `databaseFilters` for granted/applications.
+- Documents: `GET /api/patents/highlight/{guid}?queryId=1&source={type}&includeSections=true`
+  → `claimsHtml`/`abstractHtml`/`descriptionHtml`; citations live in
+  `usRef*`/`foreignRef*` arrays (`refCitedPatentDocNumber` is null).
+- Applications have `assigneeName: null` — fall back to `applicantName`.
+- 401 **and** 403 both indicate session expiry (refresh and retry once).
+
+### Google Patents + Wayback (last resort)
+
+- `GET /xhr/query?url=<form-encoded inner query>` — multi-word queries MUST be
+  quoted (`q="crispr cas9"`), otherwise OR semantics return garbage.
+- Detail pages: Dublin Core meta + itemprop spans; claims are `[num]`-
+  attributed elements; citations are `backwardReferences`/`forwardReferences`
+  `<tr>` rows; family = `docdbFamily` rows; CPC = hierarchical `Code` values.
+  Layout varies by jurisdiction (EP lacks ref rows; JP lacks forwardRefs) —
+  parser treats every field as optional.
+- **IP-blocking is proven**: light probing earned a 503 "automated queries"
+  block lasting 24h+. A circuit breaker (30 min) guards both search and
+  detail; detail falls back to Wayback (`archive.org/wayback/available` →
+  `web.archive.org/web/{ts}id_/...`, gzip magic-byte sniff) when coverage
+  exists.

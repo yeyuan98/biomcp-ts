@@ -592,6 +592,11 @@ export async function batchGet(inputs: BatchGetInput[]): Promise<BatchGetResult[
           data = await articleGet(input.id, input.sections);
           break;
         }
+        case 'patent': {
+          const { patentGet } = await import('./patent/index.js');
+          data = await patentGet(input.id, input.sections);
+          break;
+        }
         default:
           throw new Error(`Unknown entity: ${input.entity}`);
       }

@@ -14,7 +14,7 @@ const transport = new StdioServerTransport();
 await server.connect(transport);
 ```
 
-Entry point: `src/server/index.ts`. Calls eight registration functions in order: `registerGeneTools`, `registerVariantTools`, `registerDrugTools`, `registerDiseaseTools`, `registerArticleTools`, `registerTrialTools`, `registerUtilityTools`, `registerPdbTools`.
+Entry point: `src/server/index.ts`. Calls nine registration functions in order: `registerGeneTools`, `registerVariantTools`, `registerDrugTools`, `registerDiseaseTools`, `registerArticleTools`, `registerTrialTools`, `registerUtilityTools`, `registerPdbTools`, `registerPatentTools`.
 
 ## Tool Handler Pattern
 
@@ -86,7 +86,7 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
 | `discover` | `query: string` | Free-text concept resolution | readOnly |
-| `batch_get` | `inputs: { entity: "gene" \| "variant" \| "drug" \| "disease" \| "trial" \| "article", id: string, sections?: string[] }[]` | Get multiple entities in parallel | readOnly |
+| `batch_get` | `inputs: { entity: "gene" \| "variant" \| "drug" \| "disease" \| "trial" \| "article" \| "patent", id: string, sections?: string[] }[]` | Get multiple entities in parallel | readOnly |
 
 ### PDB Tools (`tools/pdb.ts`) — 1 tool
 
@@ -96,7 +96,14 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 
 Param-based dispatch: `query` → search mode, `pdb_id` → get mode, `pdb_id` + `download=true` → download mode. Downloads save to OS temp dir and return file path + size. Default format is mmCIF (universally available); legacy PDB format may 404 for some entries.
 
-**Total: 25 tools** across 8 registration modules.
+### Patent Tools (`tools/patent.ts`) — 2 tools
+
+| Tool | Input Schema | Description | Annotations |
+|------|-------------|-------------|-------------|
+| `patent_search` | `query: string`, `assignee?: string`, `inventor?: string`, `cpc?: string` (full symbol e.g. "C12N15/11"), `status?: "granted" \| "application"`, `date_range?: string` (YYYY-MM-DD/YYYY-MM-DD, open-ended allowed), `limit?: number (1-50, default 10)`, `offset?: number (default 0)`, `source?: "ops" \| "uspto_odp" \| "ppubs" \| "google_patents"` | Search patents worldwide. Backends auto-selected: EPO OPS (worldwide, `EPO_OPS_CONSUMER_KEY`/`EPO_OPS_CONSUMER_SECRET`) + USPTO ODP (`USPTO_API_KEY`) or keyless fallbacks (USPTO Public Search; Google Patents best-effort with circuit breaker) | readOnly, openWorld |
+| `patent_get` | `patent_id: string` (e.g. "US11027025B2", "EP3904939B1"), `sections?: ("core" \| "abstract" \| "claims" \| "citations" \| "family" \| "classifications" \| "all")[]`, `limit?: number (1-100, default 20)` | Get patent details with per-section source fallback chains. Claims: US fulltext via PPUBS, EP/WO via OPS. Citations include forward (`ct=`) and backward references | readOnly, openWorld |
+
+**Total: 27 tools** across 9 registration modules.
 
 ## Error Handling (`errors.ts`)
 
@@ -211,4 +218,5 @@ src/server/
     trial.ts          2 trial tools (search, get)
     utility.ts        2 utility tools (discover, batch_get)
     pdb.ts            1 PDB tool (search, get, download)
+    patent.ts         2 patent tools (search, get)
 ```
