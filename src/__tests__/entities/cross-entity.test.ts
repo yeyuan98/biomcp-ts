@@ -100,6 +100,14 @@ describe('cross-entity', () => {
     expect(results[1].id).toBe('Aspirin');
   });
 
+  test('batchGet() supports patent entity with invalid-id error capture', async () => {
+    const results = await batchGet([{ entity: 'patent', id: 'not-a-patent' }]);
+    expect(results).toHaveLength(1);
+    expect(results[0].entity).toBe('patent');
+    expect(results[0].success).toBe(false);
+    expect(String(results[0].error)).toMatch(/Invalid patent number/i);
+  });
+
   test('discover() falls back to OLS4 when no other results found', async () => {
     let callCount = 0;
     global.fetch = jest.fn().mockImplementation((url: string) => {

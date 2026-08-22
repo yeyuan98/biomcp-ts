@@ -9,7 +9,7 @@ ESM-only MCP server exposing 25 biomedical tools to LLMs. Federates queries acro
 │  LLM  ──stdio──▶  server/index.ts  (McpServer bootstrap)   │
 │                          │                                   │
 │                   server/tools/*.ts                         │
-│                   (8 modules, 25 tools)                      │
+│                   (9 modules, 27 tools)                      │
 │                          │                                   │
 │              ┌───────────┼───────────┐                      │
 │              ▼           ▼           ▼                      │
@@ -28,7 +28,7 @@ ESM-only MCP server exposing 25 biomedical tools to LLMs. Federates queries acro
 │         │           │           │                           │
 │         └───────────┼───────────┘                           │
 │                     ▼                                       │
-│              registry.ts (50+ sources)                      │
+│              registry.ts (50+ sources, incl. patents)                      │
 │                     │                                       │
 │                     ▼                                       │
 │            transform/*.ts                                   │
@@ -48,7 +48,7 @@ Entry point. Converts MCP tool calls into entity-layer invocations. All tools de
 ### `server/index.ts`
 Creates `McpServer` on `StdioServerTransport`. Imports and calls all 8 `register*Tools(server)` functions.
 
-### `server/tools/` — Tool Registration (8 modules, 25 tools)
+### `server/tools/` — Tool Registration (9 modules, 27 tools)
 
 Each module exports a single `register*Tools(server: McpServer): void` function that calls `server.registerTool()` for each tool. Tool handlers perform try/catch and delegate to entity-layer functions. Input schemas use Zod directly.
 

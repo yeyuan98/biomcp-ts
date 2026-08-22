@@ -1,6 +1,6 @@
 # Entities Layer
 
-The business logic layer for biomcp-ts. Each entity module (gene, variant, drug, disease, article, trial, pdb) implements a consistent **search / get / sections** pattern:
+The business logic layer for biomcp-ts. Each entity module (gene, variant, drug, disease, article, trial, pdb, patent) implements a consistent **search / get / sections** pattern:
 
 1. **`search`** — queries a primary data source with filters, returns lightweight result arrays
 2. **`get`** — fetches a single entity by identifier, optionally enriching with parallel section fetches
@@ -403,6 +403,46 @@ formatFileSize(bytes: number): string
 
 ---
 
+## Patent (`patent/`)
+
+**Primary sources:** EPO OPS (worldwide, `EPO_OPS_CONSUMER_KEY`/`EPO_OPS_CONSUMER_SECRET`), USPTO ODP (`USPTO_API_KEY`), USPTO PPUBS (keyless), Google Patents (keyless, best-effort)
+
+Directory module at `src/entities/patent/` (mirrors `article/`). See `src/entities/patent/README.md` for the full architecture, the verified API contract appendix, and the source degradation ladder.
+
+### Exported Functions
+
+```ts
+patentSearch(query: string, options?: PatentSearchOptions): Promise<PatentSearchResponse>
+patentGet(publicationNumber: string, sections?: string[]): Promise<PatentResult>
+transformGooglePatentsResult(r): PatentSearchResult
+transformPpubsResult(r): PatentSearchResult
+transformOpsSearchHit(r): PatentSearchResult
+transformOdpWrapper(r): PatentSearchResult
+dedupPatents(patents: PatentSearchResult[]): PatentSearchResult[]
+normalizePublicationNumber(input: string): string
+```
+
+### Search Behavior
+
+Without `source`, backends are auto-selected: worldwide = EPO OPS when credentials exist (else Google Patents, circuit-breaker gated); US = USPTO ODP when keyed (else keyless PPUBS). With OPS configured, Google Patents is opt-in only — it hard-IP-blocks automated clients (verified). Results are deduplicated by publication number (kind-code-insensitive); US records prefer official sources. A failed backend appends a `{ _error }` element rather than failing the search.
+
+PPUBS queries combine free text with parenthesized field filters (`(pfizer).as.`, `(C12N15/11).cpc.` — full CPC symbols only); ODP uses Lucene (`applicationMetaData.patentNumber:"..."`, `.filingDate:[a TO b]`); OPS uses CQL (`ti=`, `pa=`, `cpc=`, `ct=`).
+
+### Sections (per-section priority chains, auth-aware)
+
+| Section | Upstream chain | Auth | Notes |
+|---------|---------------|------|-------|
+| `core` (default) | OPS biblio → GP/Wayback → PPUBS (US) | OPS: `EPO_OPS_CONSUMER_KEY/SECRET` | Bibliographic record |
+| `abstract` | OPS abstract → GP/Wayback → PPUBS (US) | same | |
+| `claims` | PPUBS `claimsHtml` (US) → OPS claims (EP/WO/EU/CA) → GP/Wayback | OPS creds optional | OPS has **no US fulltext**; capped ~100 KB with `_warn` |
+| `citations` | OPS backward + `ct=` forward → GP/Wayback → PPUBS `usRef*`/`foreignRef*` | OPS creds optional | |
+| `family` | OPS INPADOC family → GP/Wayback `docdbFamily` → PPUBS (US) | OPS creds optional | |
+| `classifications` | OPS IPC+CPC → GP/Wayback → ODP/PPUBS (US) | `USPTO_API_KEY` for ODP step | |
+
+Google Patents detail falls back to Wayback Machine snapshots (availability probe + original-bytes `id_` fetch with gzip sniffing) when live access is blocked.
+
+---
+
 ## Cross-Entity (`cross-entity.ts`)
 
 Orchestrates queries that span multiple entity types. All pivot functions delegate to the appropriate entity's search/get or query upstream APIs directly.
@@ -486,7 +526,7 @@ batchGet(inputs: BatchGetInput[]): Promise<BatchGetResult[]>
 ```
 
 - Dynamically imports the appropriate entity `get` function based on `input.entity`
-- Supports: `gene`, `variant`, `drug`, `disease`, `trial`, `article`
+- Supports: `gene`, `variant`, `drug`, `disease`, `trial`, `article`, `patent`
 - Each input is independent; failures are captured per-item
 
 **Exported types:**

@@ -51,6 +51,13 @@ jest.mock('../../entities/article.js', () => ({
   Article: undefined,
 }));
 
+jest.mock('../../entities/patent.js', () => ({
+  patentSearch: jest.fn(),
+  patentGet: jest.fn(),
+  PatentSearchResult: undefined,
+  PatentResult: undefined,
+}));
+
 jest.mock('../../entities/cross-entity.js', () => ({
   geneToDrugs: jest.fn(),
   geneToTrials: jest.fn(),
@@ -99,6 +106,7 @@ import { registerTrialTools } from '../../server/tools/trial.js';
 import { registerArticleTools } from '../../server/tools/article.js';
 import { registerUtilityTools } from '../../server/tools/utility.js';
 import { registerPdbTools } from '../../server/tools/pdb.js';
+import { registerPatentTools } from '../../server/tools/patent.js';
 
 beforeEach(() => {
   mockRegisterTool.mockClear();
@@ -154,7 +162,8 @@ describe('Tool registration', () => {
     registerArticleTools(mockServer);
     registerUtilityTools(mockServer);
     registerPdbTools(mockServer);
-    expect(mockRegisterTool).toHaveBeenCalledTimes(25);
+    registerPatentTools(mockServer);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(27);
   });
 
   it('no duplicate tool names across all registrations', () => {
@@ -166,6 +175,7 @@ describe('Tool registration', () => {
     registerArticleTools(mockServer);
     registerUtilityTools(mockServer);
     registerPdbTools(mockServer);
+    registerPatentTools(mockServer);
 
     const names = mockRegisterTool.mock.calls.map((call: any[]) => call[0]);
     const uniqueNames = new Set(names);
@@ -181,6 +191,7 @@ describe('Tool registration', () => {
     registerArticleTools(mockServer);
     registerUtilityTools(mockServer);
     registerPdbTools(mockServer);
+    registerPatentTools(mockServer);
 
     const names = mockRegisterTool.mock.calls.map((call: any[]) => call[0]);
     const expected = [
@@ -192,6 +203,7 @@ describe('Tool registration', () => {
       'trial_search', 'trial_get',
       'discover', 'batch_get',
       'pdb',
+      'patent_search', 'patent_get',
     ];
     expect(names.sort()).toEqual(expected.sort());
   });

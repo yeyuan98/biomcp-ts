@@ -6,10 +6,11 @@ Adapted from the [BioMCP Rust](https://github.com/genomoncology/biomcp) with age
 
 ## Highlights
 
-- **25 tools** across 8 domains — search, retrieve, and cross-reference biomedical entities
+- **27 tools** across 9 domains — search, retrieve, and cross-reference biomedical entities
 - **50+ upstream sources** — MyGene, MyVariant, MyChem, MyDisease, ClinVar, gnomAD, UniProt, Reactome, OpenTargets, CIViC, OncoKB, DisGeNET, GTEx, STRING, DGIdb, ClinicalTrials.gov, PubMed, EuropePMC, Semantic Scholar, PubTator, LitSense, Monarch Initiative, OpenFDA, NIH Reporter, AlphaGenome, and more
 - **Section-based fetching** — `entityGet(id, sections)` fans out to multiple sources with per-section timeouts and graceful degradation (failed sections return `{ _error }` instead of crashing)
 - **Federated article search** — queries 5 literature backends simultaneously with PMID/PMCID/DOI deduplication
+- **Patent access** — worldwide patent search and detail via EPO OPS / USPTO ODP / USPTO Public Search with keyless fallbacks (EPO, USPTO, Google Patents + Wayback)
 - **Zero-config startup** — works out of the box; optional API keys unlock higher rate limits and premium data
 - **350+ unit tests** (mocked) + **90+ integration tests** (live APIs via in-process MCP client, with automatic retry on 429 rate limits)
 
@@ -184,6 +185,8 @@ All keys are optional. BioMCP works without any keys — they unlock higher rate
 | `NCI_API_KEY` | [NCI CTS](https://cts.nci.nih.gov/) | NCI Clinical Trials API |
 | `ONCOKB_TOKEN` | [OncoKB](https://www.oncokb.org/) | OncoKB cancer variant annotations |
 | `DISGENET_API_KEY` | [DisGeNET](https://www.disgenet.org/) | Disease-gene associations |
+| `EPO_OPS_CONSUMER_KEY` / `EPO_OPS_CONSUMER_SECRET` | [EPO Open Patent Services](https://developers.epo.org/) | Worldwide patent search + detail (stable, official) |
+| `USPTO_API_KEY` | [USPTO Open Data Portal](https://data.uspto.gov) | US patent application search |
 | `UMLS_API_KEY` | [UMLS](https://www.nlm.nih.gov/research/umls/) | UMLS terminology services |
 | `ALPHAGENOME_API_KEY` | [AlphaGenome](https://www.alphagenome.com/) | AlphaGenome variant scores |
 

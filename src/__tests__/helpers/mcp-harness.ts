@@ -9,6 +9,7 @@ import { registerArticleTools } from '../../server/tools/article.js';
 import { registerTrialTools } from '../../server/tools/trial.js';
 import { registerUtilityTools } from '../../server/tools/utility.js';
 import { registerPdbTools } from '../../server/tools/pdb.js';
+import { registerPatentTools } from '../../server/tools/patent.js';
 import { connectionManager } from '../../connections/manager.js';
 
 export type McpTestHarness = {
@@ -28,6 +29,7 @@ export async function createMcpTestHarness(): Promise<McpTestHarness> {
   registerTrialTools(server);
   registerUtilityTools(server);
   registerPdbTools(server);
+  registerPatentTools(server);
 
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'test-client', version: '1.0.0' });

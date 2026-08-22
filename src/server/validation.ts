@@ -31,6 +31,7 @@ export const InputValidation = {
   diseaseQuery: z.string().min(1).max(200),
   articleId: z.string().regex(/^(?:\d+|PMC\d+|10\.\d{4,}\/\S+)$/i, 'Article ID must be a PMID (numeric), PMCID (PMC...), or DOI (10.x/...)'),
   nctId: z.string().regex(/^NCT\d{8}$/, 'NCT ID must be in format NCT########'),
+  patentId: z.string().regex(/^[A-Za-z]{2}\s?(?:RE|PP|H)?\s?\d{5,}\s?(?:[A-Za-z]\d{0,2})?$/, 'Patent ID must be a publication number like US11027025B2, EP3904939, US20260240819A1'),
   limit: z.number().int().min(1).max(100),
   offset: z.number().int().min(0),
 };
@@ -54,6 +55,8 @@ export function isValidEntityInput(entity: string, id: string): boolean {
       return InputValidation.nctId.safeParse(id).success || InputValidation.articleId.safeParse(id).success;
     case 'article':
       return InputValidation.articleId.safeParse(id).success;
+    case 'patent':
+      return InputValidation.patentId.safeParse(id).success;
     default:
       return false;
   }
@@ -73,6 +76,8 @@ export function getEntitySuggestions(entity: string): string {
       return 'Use trial_search to find valid NCT IDs (format: NCT########)';
     case 'article':
       return 'Use article_search to find valid article identifiers (PMID, PMCID, or DOI)';
+    case 'patent':
+      return 'Use patent_search to find valid publication numbers (e.g., "US11027025B2", "EP3904939B1")';
     default:
       return 'Check the entity type and try again.';
   }

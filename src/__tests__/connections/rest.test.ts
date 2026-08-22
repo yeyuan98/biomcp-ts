@@ -76,6 +76,28 @@ describe('RestConnection', () => {
     delete process.env.TEST_API_KEY;
   });
 
+  test('request() includes custom headers from handling.headers', async () => {
+    const optionsWithHeaders: ConnectionOptions = {
+      ...baseOptions,
+      handling: {
+        headers: { 'User-Agent': 'biomcp-test-agent/1.0', 'X-Custom': 'abc' },
+      },
+    };
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({}),
+    }) as any;
+
+    const conn = new RestConnection(optionsWithHeaders);
+    await conn.request('/test');
+
+    const callHeaders = (global.fetch as any).mock.calls[0][1].headers;
+    expect(callHeaders.get('User-Agent')).toBe('biomcp-test-agent/1.0');
+    expect(callHeaders.get('X-Custom')).toBe('abc');
+    expect(callHeaders.get('Accept')).toBe('application/json');
+  });
+
   test('request() calls rateLimiter.acquire() before fetch', async () => {
     let acquireCalled = false;
 

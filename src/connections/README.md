@@ -179,7 +179,7 @@ Wraps any async function with an `AbortController`-based timeout. Returns `{ dat
 
 ## Registry — Sources by Protocol
 
-### REST (50 sources)
+### REST (51 sources)
 
 | Category | Source IDs |
 |---|---|
@@ -192,6 +192,7 @@ Wraps any async function with an `AbortController`-based timeout. Returns `{ dat
 | Diagnostics & Registries | `vaers` |
 | Enrichment & Analysis | `enrichr`, `gprofiler`, `ols4`, `quickgo` |
 | Funding & Research | `nih_reporter` |
+| Patents | `google_patents`, `uspto_odp` |
 | cBio Portal | `cbioportal`, `cbioportal_datahub` |
 | Oncology | `oncokb` |
 | Structural Biology | `pdb_data`, `pdb_search`, `pdb_files` |

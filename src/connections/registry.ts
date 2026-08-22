@@ -497,6 +497,36 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   },
 
   // ==========================================
+  // PATENTS - REST (2 sources)
+  // Note: EPO OPS (OAuth2) and USPTO PPUBS (session token) are managed
+  // inside src/entities/patent/ — they do not fit static connection auth.
+  // ==========================================
+  google_patents: {
+    sourceId: 'google_patents',
+    baseUrl: 'https://patents.google.com',
+    protocol: 'rest',
+    handling: {
+      timeoutMs: 30000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      },
+    },
+    rateLimit: { intervalMs: 2000 },
+  },
+  uspto_odp: {
+    sourceId: 'uspto_odp',
+    baseUrl: 'https://api.uspto.gov',
+    protocol: 'rest',
+    handling: { timeoutMs: 15000 },
+    auth: {
+      envVar: 'USPTO_API_KEY',
+      required: false,
+      delivery: { type: 'header', name: 'X-API-KEY' },
+    },
+    rateLimit: { intervalMs: 1000 },
+  },
+
+  // ==========================================
   // GRAPHQL (5 sources)
   // ==========================================
   gnomad: {

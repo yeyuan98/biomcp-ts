@@ -28,7 +28,7 @@ export function registerUtilityTools(server: McpServer): void {
       description: 'Get multiple entities in parallel',
       inputSchema: {
         inputs: z.array(z.object({
-          entity: z.enum(['gene', 'variant', 'drug', 'disease', 'trial', 'article']),
+          entity: z.enum(['gene', 'variant', 'drug', 'disease', 'trial', 'article', 'patent']),
           id: z.string(),
           sections: z.array(z.string()).optional(),
         })).describe('List of entity requests'),

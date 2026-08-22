@@ -29,6 +29,7 @@ export interface ConnectionHandling {
   maxBatchSize?: number;
   contentType?: 'json' | 'xml' | 'text' | 'binary';
   staleHours?: number;
+  headers?: Record<string, string>;
 }
 
 export interface ConnectionOptions {
