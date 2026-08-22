@@ -48,12 +48,13 @@ src/__tests__/
     drug.test.ts
     gene.test.ts
     id-resolution.test.ts
+    patent.test.ts
     pdb.test.ts
     pubmed-transform.test.ts
     trial.test.ts
     variant.test.ts
   integration/
-    tool-registration.test.ts   # Unit: verifies tool registration counts
+    tool-registration.test.ts   # Verifies tool registration counts
     tools/
       gene-tools.test.ts        # Integration: real gene API calls
       drug-tools.test.ts        # Integration: real drug API calls
@@ -63,6 +64,7 @@ src/__tests__/
       trial-tools.test.ts       # Integration: real trial API calls
       utility-tools.test.ts     # Integration: discover + batch_get
       pdb-tools.test.ts         # Integration: real PDB API calls
+      patent-tools.test.ts      # Integration: patent search + get (keyed cases auto-skip)
   server/
     errors.test.ts
     tool-utils.test.ts       # Shared tool utility functions (applyLimit, sliceArraysRecursive)
@@ -82,18 +84,19 @@ src/__tests__/
 | connections | manager.test.ts | 2 |
 | connections | rate-limiter.test.ts | 8 |
 | connections | registry.test.ts | 7 |
-| connections | rest.test.ts | 16 |
+| connections | rest.test.ts | 17 |
 | connections | retry.test.ts | 20 |
 | entities | article.test.ts | 66 |
 | entities | citation.test.ts | 35 |
 | entities | citation/cache.test.ts | 17 |
 | entities | citation/timeout.test.ts | 10 |
-| entities | cross-entity.test.ts | 34 |
+| entities | cross-entity.test.ts | 35 |
 | entities | dedup.test.ts | 13 |
 | entities | disease.test.ts | 4 |
-| entities | drug.test.ts | 4 |
+| entities | drug.test.ts | 18 |
 | entities | gene.test.ts | 45 |
 | entities | id-resolution.test.ts | 22 |
+| entities | patent.test.ts | 32 |
 | entities | pdb.test.ts | 31 |
 | entities | pubmed-transform.test.ts | 27 |
 | entities | trial.test.ts | 13 |
@@ -107,16 +110,17 @@ src/__tests__/
 | integration | trial-tools.test.ts | 6 |
 | integration | utility-tools.test.ts | 5 |
 | integration | pdb-tools.test.ts | 25 |
+| integration | patent-tools.test.ts | 10 |
 | server | errors.test.ts | 19 |
 | server | tool-utils.test.ts | 16 |
-| server | validation.test.ts | 32 |
+| server | validation.test.ts | 35 |
 | transform | gene.test.ts | 4 |
 | transform | pdb.test.ts | 3 |
-| **Total** | | **~490** |
+| **Total (unit)** | | **543** (+104 integration) |
 
 ## Testing Approach
 
-### Unit Tests (350+ tests, `npm test`)
+### Unit Tests (540+ tests, `npm test`)
 
 All unit tests use mocked `global.fetch` to avoid real network calls.
 
@@ -126,7 +130,7 @@ All unit tests use mocked `global.fetch` to avoid real network calls.
 - **Transform:** Test pure transform functions with known inputs/outputs
 - **Tool registration:** Verify `register*Tools` calls and tool name uniqueness
 
-### Integration Tests (90+ tests, `npm run test:integration`)
+### Integration Tests (100+ tests, `npm run test:integration`)
 
 Integration tests use `InMemoryTransport` from the MCP SDK to connect a real `Client` to a real `McpServer` in-process. All tool handlers execute against live biomedical APIs.
 

@@ -51,7 +51,7 @@ it is never load-bearing. A failed backend appends a `{ _error }` element to
 results instead of failing the search.
 
 `patentGet` sections run per-section priority chains with auth-aware silent
-skip and fall-through (8s slice timeout; claims get 30s):
+skip and fall-through (24s per source step; claims get 30s):
 
 | Section | Chain |
 |---|---|

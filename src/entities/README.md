@@ -8,7 +8,7 @@ The business logic layer for biomcp-ts. Each entity module (gene, variant, drug,
 
 ## Section Fetching Strategy
 
-All entity `get` functions (except article) use the same pattern:
+All entity `get` functions (except article and patent) use the same pattern:
 
 - Sections are dispatched via `Promise.allSettled` with an **8-second timeout** per section (`fetchWithTimeout`, `SECTION_TIMEOUT_MS = 8000`)
 - Fulfilled sections populate `result.sections[<name>]`
@@ -414,13 +414,11 @@ Directory module at `src/entities/patent/` (mirrors `article/`). See `src/entiti
 ```ts
 patentSearch(query: string, options?: PatentSearchOptions): Promise<PatentSearchResponse>
 patentGet(publicationNumber: string, sections?: string[]): Promise<PatentResult>
-transformGooglePatentsResult(r): PatentSearchResult
-transformPpubsResult(r): PatentSearchResult
-transformOpsSearchHit(r): PatentSearchResult
-transformOdpWrapper(r): PatentSearchResult
-dedupPatents(patents: PatentSearchResult[]): PatentSearchResult[]
+dedupPatents(patents: PatentSearchResult[], limit?: number): PatentSearchResult[]
 normalizePublicationNumber(input: string): string
 ```
+
+(Per-backend transforms live in `src/entities/patent/search/*.ts` submodule exports.)
 
 ### Search Behavior
 

@@ -1,6 +1,6 @@
 # connections
 
-API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a source registry, connection lifecycle management, and rate limiting for 60 bioinformatics data sources.
+API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a source registry, connection lifecycle management, and rate limiting for 61 bioinformatics data sources.
 
 ## Architecture
 
@@ -46,6 +46,7 @@ interface ConnectionHandling {
   maxBatchSize?: number;
   contentType?: 'json' | 'xml' | 'text' | 'binary';
   staleHours?: number;
+  headers?: Record<string, string>;
 }
 
 interface ConnectionOptions {
@@ -116,7 +117,7 @@ class RestConnection implements IConnection<string, unknown> {
 }
 ```
 
-Issues `GET` requests via `request()`. Issues `POST` requests with JSON body via `post()` (handles 204 No Content by returning null). Auth credentials are read from `process.env` at construction time (`hasAuth` is snapshot). Response content type is auto-detected from the `content-type` header — JSON is parsed, everything else returned as text. Supports `timeoutMs` via `AbortSignal.timeout`.
+Issues `GET` requests via `request()`. Issues `POST` requests with JSON body via `post()` (handles 204 No Content by returning null). Auth credentials are read from `process.env` at construction time (`hasAuth` is snapshot). Static extra headers from `handling.headers` (e.g. `User-Agent`) are merged into every request. Response content type is auto-detected from the `content-type` header — JSON is parsed, everything else returned as text. Supports `timeoutMs` via `AbortSignal.timeout`.
 
 ### `graphql.ts`
 
@@ -178,6 +179,10 @@ function fetchWithTimeout<T>(
 Wraps any async function with an `AbortController`-based timeout. Returns `{ data }` on success or `{ error }` on failure/abort.
 
 ## Registry — Sources by Protocol
+
+> Sources that do not fit the static registry auth model are entity-managed:
+> EPO OPS (OAuth2 client-credentials) and USPTO PPUBS (session-token
+> handshake) live in `src/entities/patent/` as dedicated clients.
 
 ### REST (51 sources)
 

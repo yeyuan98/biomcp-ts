@@ -1,6 +1,6 @@
 # BioMCP TypeScript — Source Architecture
 
-ESM-only MCP server exposing 25 biomedical tools to LLMs. Federates queries across 50+ upstream APIs. Node.js >=18, targets ES2022, 3 runtime dependencies (`@modelcontextprotocol/sdk`, `zod`, `fast-xml-parser`).
+ESM-only MCP server exposing 27 biomedical tools to LLMs. Federates queries across 50+ upstream APIs. Node.js >=18, targets ES2022, 3 runtime dependencies (`@modelcontextprotocol/sdk`, `zod`, `fast-xml-parser`).
 
 ## Architecture
 
@@ -46,7 +46,7 @@ Four layers, strict downward dependency. No upward references.
 Entry point. Converts MCP tool calls into entity-layer invocations. All tools declare `readOnlyHint: true`.
 
 ### `server/index.ts`
-Creates `McpServer` on `StdioServerTransport`. Imports and calls all 8 `register*Tools(server)` functions.
+Creates `McpServer` on `StdioServerTransport`. Imports and calls all 9 `register*Tools(server)` functions.
 
 ### `server/tools/` — Tool Registration (9 modules, 27 tools)
 
@@ -62,6 +62,7 @@ Each module exports a single `register*Tools(server: McpServer): void` function 
 | `trial.ts` | 2 | Trial search, get (3 sections) |
 | `utility.ts` | 2 | Free-text discovery, batch entity resolution |
 | `pdb.ts` | 1 | PDB structure search, metadata, file download (RCSB PDB) |
+| `patent.ts` | 2 | Worldwide patent search, get (6 sections) |
 
 ### `server/errors.ts`
 - `BioMCPError` interface: `{ code, message, suggestion?, details? }`
@@ -100,8 +101,9 @@ entityGet(id, sections?)      → { ...core, sections: Record<string, unknown> }
 | `article.ts` | 593 | 4 (open_access, annotations, citation_graph, citation) | PubMed, Europe PMC, Semantic Scholar, PubTator, LitSense, NCBI ID Converter, PMC OA, Crossref, OpenCitations |
 | `trial.ts` | 395 | 3 (eligibility, locations, outcomes) | ClinicalTrials.gov |
 | `pdb.ts` | 355 | 5 (polymer_entities, ligands, assembly, experiment, citation) | RCSB PDB (Data API, Search API, File Download) |
+| `patent/` | 2374 | 6 (core, abstract, claims, citations, family, classifications) | EPO OPS, USPTO ODP, USPTO PPUBS, Google Patents (+ Wayback fallback) |
 
-### `entities/cross-entity.ts` (619 lines)
+### `entities/cross-entity.ts` (689 lines)
 
 Cross-entity pivot functions and multi-entity operations:
 
@@ -109,7 +111,7 @@ Cross-entity pivot functions and multi-entity operations:
 - **Enrichment**: `geneEnrichment(geneSymbols[])` — Reactome pathway enrichment
 - **Discovery**: `discover(query)` — multi-entity search across all domains
 - **Batch**: `batchGet(inputs: BatchGetInput[])` — parallel entity resolution
-- **Universal**: `searchAll(query, options?)` — fans out to all entity search functions
+- **Universal**: `searchAll(query, options?)` — fans out to the supported entity search functions (gene, variant, drug, disease, article, trial)
 
 Functions not exposed as MCP tools: `geneToPathways`, `drugToGenes`, `drugToAdverseEvents`, `diseaseToGenes`, `diseaseToTrials`, `searchAll`.
 
@@ -140,8 +142,8 @@ Hides upstream API protocol differences behind a uniform interface.
 - `ConnectionOptions`: source config including `baseUrl`, `protocol`, `auth?`, `rateLimit`, `handling?` (streaming, timeout, content type)
 - `AuthConfig`: env var name, delivery method (header, bearer, query-param, grpc-metadata), conditional rate limits
 
-### `connections/registry.ts` (483 lines)
-`SOURCE_REGISTRY`: `Record<string, ConnectionOptions>` with 40+ data source configurations. Organized by domain (genomics, proteins/pathways, drugs, diseases, literature, clinical trials, pathways). Each entry specifies URL, protocol (rest/graphql/grpc), auth config, and rate limit (including conditional keyed vs. fallback rates).
+### `connections/registry.ts` (594 lines)
+`SOURCE_REGISTRY`: `Record<string, ConnectionOptions>` with 61 data source configurations. Organized by domain (genomics, proteins/pathways, drugs, diseases, literature, clinical trials, pathways). Each entry specifies URL, protocol (rest/graphql/grpc), auth config, and rate limit (including conditional keyed vs. fallback rates).
 
 ### `connections/manager.ts`
 `ConnectionManager` — module-level singleton exported as `connectionManager`. Lazy factory: `getConnection(sourceId)` creates the connection on first access, caches in a `Map`. `createConnection()` dispatches on `protocol` to instantiate `RestConnection`, `GraphQLConnection`, or `GrpcConnection`.
