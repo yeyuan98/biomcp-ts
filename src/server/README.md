@@ -187,12 +187,13 @@ Runs `schema.safeParse(data)`. Returns `{ success: true, data }` or `{ success: 
 | `diseaseQuery` | `z.string()` | min 1, max 200 |
 | `articleId` | `z.string()` | regex `/^(?:\d+|PMC\d+|10\.\d{4,}\/\S+)$/i` (PMID, PMCID, or DOI) |
 | `nctId` | `z.string()` | regex `/^NCT\d{8}$/` |
+| `patentId` | `z.string()` | regex `/^[A-Za-z]{2}\s?(?:RE|PP|H)?\s?\d{5,}\s?(?:[A-Za-z]\d{0,2})?$/` (publication number) |
 | `limit` | `z.number()` | int, min 1, max 100 |
 | `offset` | `z.number()` | int, min 0 |
 
 ### `isValidEntityInput(entity: string, id: string): boolean`
 
-Validates an entity identifier against the appropriate `InputValidation` schema. Supports: `gene`, `variant`, `drug`, `disease`, `trial` (accepts NCT ID or PMID), `article` (accepts PMID, PMCID, or DOI).
+Validates an entity identifier against the appropriate `InputValidation` schema. Supports: `gene`, `variant`, `drug`, `disease`, `trial` (accepts NCT ID or PMID), `article` (accepts PMID, PMCID, or DOI), `patent` (accepts publication numbers like US11027025B2).
 
 ### `getEntitySuggestions(entity: string): string`
 

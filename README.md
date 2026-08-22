@@ -1,6 +1,6 @@
 # BioMCP
 
-A high-performance MCP server that gives LLMs access to 25 biomedical tools federated across 50+ upstream APIs — genes, variants, drugs, diseases, literature, clinical trials, and structural biology in a single integration.
+A high-performance MCP server that gives LLMs access to 27 biomedical tools federated across 50+ upstream APIs — genes, variants, drugs, diseases, literature, clinical trials, and structural biology in a single integration.
 
 Adapted from the [BioMCP Rust](https://github.com/genomoncology/biomcp) with agent-first development approach and enhancements. Kudos to the original authors.
 
@@ -12,7 +12,7 @@ Adapted from the [BioMCP Rust](https://github.com/genomoncology/biomcp) with age
 - **Federated article search** — queries 5 literature backends simultaneously with PMID/PMCID/DOI deduplication
 - **Patent access** — worldwide patent search and detail via EPO OPS / USPTO ODP / USPTO Public Search with keyless fallbacks (EPO, USPTO, Google Patents + Wayback)
 - **Zero-config startup** — works out of the box; optional API keys unlock higher rate limits and premium data
-- **350+ unit tests** (mocked) + **90+ integration tests** (live APIs via in-process MCP client, with automatic retry on 429 rate limits)
+- **540+ unit tests** (mocked) + **100+ integration tests** (live APIs via in-process MCP client, with automatic retry on 429 rate limits)
 
 ## Quick Start
 
@@ -127,6 +127,13 @@ BioMCP speaks standard MCP over **stdio**. Point any MCP client at the `biomcp` 
 | Tool | Description |
 |------|-------------|
 | `pdb` | Search PDB structures, get entry metadata with optional sections (polymer entities, ligands, assembly, experiment, citation), and download structure files (mmCIF/PDB) |
+
+### Patents (2)
+
+| Tool | Description |
+|------|-------------|
+| `patent_search` | Search patents worldwide (US, EP, WO, JP, 100+ authorities) with assignee/inventor/CPC/status/date filters. Backends auto-selected: EPO OPS (worldwide, keyed) + USPTO ODP (keyed) or keyless fallbacks (USPTO Public Search, Google Patents best-effort) |
+| `patent_get` | Get patent details by publication number with sections: abstract, claims (US fulltext via USPTO Public Search; EP/WO via EPO OPS), citations (forward + backward), family, classifications |
 
 ### Citation Module
 
