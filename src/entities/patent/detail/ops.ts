@@ -44,7 +44,11 @@ async function getJson(path: string): Promise<BadgerFish> {
   if (resp.status !== 200) {
     throw new Error(`EPO OPS request failed (HTTP ${resp.status}): ${path} — ${resp.body.slice(0, 150)}`);
   }
-  return JSON.parse(resp.body) as BadgerFish;
+  try {
+    return JSON.parse(resp.body) as BadgerFish;
+  } catch {
+    throw new Error(`EPO OPS request returned malformed JSON: ${path}`);
+  }
 }
 
 function exchangeDocumentOf(parsed: BadgerFish): BadgerFish {
@@ -142,8 +146,19 @@ export async function fetchOpsAbstract(publicationNumber: string): Promise<strin
   const doc = exchangeDocumentOf(parsed);
   const abstracts = asArray(doc['abstract'] as BadgerFish[]);
   const chosen = pickEnglish(abstracts);
-  const p = chosen?.['p'];
-  return textOf(p);
+  const paragraphs = asArray(chosen?.['p'] as BadgerFish | BadgerFish[]);
+  const text = paragraphs.map(textOf).filter((x): x is string => !!x).join(' ');
+  return text || undefined;
+}
+
+function flattenClaimText(node: BadgerFish): string[] {
+  const out: string[] = [];
+  const own = textOf(node);
+  if (own) out.push(own);
+  for (const child of asArray(node['claim-text'] as BadgerFish | BadgerFish[])) {
+    out.push(...flattenClaimText(child));
+  }
+  return out;
 }
 
 export async function fetchOpsClaims(publicationNumber: string): Promise<PatentClaimsSection> {
@@ -158,10 +173,7 @@ export async function fetchOpsClaims(publicationNumber: string): Promise<PatentC
   const claims = (fdoc['claims'] || {}) as BadgerFish;
   const claimItems = asArray(claims['claim'] as BadgerFish[]);
 
-  const texts = claimItems.map(c => {
-    const fragments = asArray(c['claim-text'] as BadgerFish[]).map(textOf);
-    return fragments.filter((x): x is string => !!x).join(' ');
-  }).filter(t => t.length > 0);
+  const texts = claimItems.map(c => flattenClaimText(c).join(' ')).filter(t => t.length > 0);
 
   if (texts.length === 0) {
     throw new Error(`EPO OPS returned no claims text for ${pn} (fulltext may not be available for this authority).`);

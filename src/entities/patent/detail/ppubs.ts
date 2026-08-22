@@ -112,12 +112,16 @@ export async function fetchPpubsClaims(publicationNumber: string): Promise<Paten
     throw new Error(`No claims text available via USPTO Public Search for ${publicationNumber}.`);
   }
 
-  // claimsHtml contains numbered claim divs; split on claim boundaries.
-  const claimBlocks = doc.claimsHtml.split(/<(?:div|claim)\b[^>]*\snum="\d+"/i).slice(1);
+  // claimsHtml contains numbered claim divs; split on full claim-start tags.
+  const CLAIM_START_RE = /<(?:div|claim)\b[^>]*\snum="(\d+)"[^>]*>/gi;
+  const numMatches = Array.from(doc.claimsHtml.matchAll(CLAIM_START_RE)).map(m => m[1]);
+  const claimBlocks = doc.claimsHtml.split(/<(?:div|claim)\b[^>]*\snum="\d+"[^>]*>/i).slice(1);
   let claims: string[];
   if (claimBlocks.length > 0) {
-    const numMatches = Array.from(doc.claimsHtml.matchAll(/num="(\d+)"/g)).map(m => m[1]);
-    claims = claimBlocks.map((block, i) => `${numMatches[i] || i + 1}. ${stripHtml(block)}`.trim());
+    claims = claimBlocks.map((block, i) => {
+      const stripped = stripHtml(block).replace(/^\d+[.)]\s*/, '');
+      return `${numMatches[i] || i + 1}. ${stripped}`.trim();
+    });
   } else {
     claims = [stripHtml(doc.claimsHtml)];
   }

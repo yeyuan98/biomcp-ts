@@ -1,21 +1,8 @@
 import { jest } from '@jest/globals';
 
-const PPUBS_TEMPLATE_SENTINEL = 'showDocPerFamilyPref';
+const REQUIRED_TEMPLATE_KEY = 'showDocPerFamilyPref';
 
 describe('patent search transforms', () => {
-  let originalFetch: typeof global.fetch;
-
-  beforeEach(() => {
-    originalFetch = global.fetch;
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
-    delete process.env.EPO_OPS_CONSUMER_KEY;
-    delete process.env.EPO_OPS_CONSUMER_SECRET;
-    delete process.env.USPTO_API_KEY;
-  });
-
   test('transformGooglePatentsResult strips HTML and maps fields', async () => {
     const { transformGooglePatentsResult } = await import('../../entities/patent/search/google-patents.js');
     const result = transformGooglePatentsResult({
@@ -190,6 +177,8 @@ describe('patent search federation', () => {
 
   test('patentSearch appends _error element when a backend fails', async () => {
     process.env.USPTO_API_KEY = 'u';
+    const gp = await import('../../entities/patent/search/google-patents.js');
+    gp.resetGooglePatentsBreaker();
     global.fetch = jest.fn().mockImplementation((url: any) => {
       const u = String(url);
       if (u.includes('api.uspto.gov')) {
@@ -217,8 +206,11 @@ describe('patent search federation', () => {
 
     const { patentSearch } = await import('../../entities/patent/search/index.js');
     const response = await patentSearch('crispr compositions', {});
-    expect(response.patents.some(p => (p as any)._error)).toBe(true);
+    expect(response.patents.some(p => p._error)).toBe(true);
     expect(response.patents.some(p => p.publication_number === 'US11027025')).toBe(true);
+    expect(response.total_hits?.uspto_odp).toBe(1);
+    gp.resetGooglePatentsBreaker();
+    (await import('../../connections/manager.js')).connectionManager.closeAll();
   });
 
   test('google patents breaker opens on 503 and short-circuits subsequent calls', async () => {
@@ -406,12 +398,18 @@ describe('PpubsClient', () => {
     expect(sessionCalls).toBe(1); // cached session
     expect(searchBodies).toHaveLength(2);
     // Exact template keys (showDocPerFamilyPref — one wrong key 500s upstream)
-    expect(searchBodies[0][PPUBS_TEMPLATE_SENTINEL]).toBe('showEnglish');
+    expect(searchBodies[0][REQUIRED_TEMPLATE_KEY]).toBe('showEnglish');
     expect(searchBodies[0]['showDocFamilyPref']).toBeUndefined();
     expect((searchBodies[0].query as any).caseId).toBe(12345);
     expect((searchBodies[0].query as any).op).toBe('AND');
     const filters = (searchBodies[0].query as any).databaseFilters as Array<{ databaseName: string }>;
     expect(filters.map(f => f.databaseName)).toEqual(['US-PGPUB', 'USPAT', 'USOCR']);
+    // Header contracts: session handshake and search auth
+    const sessionHeaders = (global.fetch as any).mock.calls[0][1].headers as Record<string, string>;
+    expect(sessionHeaders['X-Access-Token']).toBe('null');
+    expect(sessionHeaders['Referer']).toBe('https://ppubs.uspto.gov/pubwebapp/');
+    const searchHeaders = (global.fetch as any).mock.calls[1][1].headers as Record<string, string>;
+    expect(searchHeaders['X-Access-Token']).toBe('tok-1');
     client.close();
   });
 
@@ -579,5 +577,394 @@ describe('wayback fallback', () => {
     }) as any;
     const out = await fetchWaybackOriginal('https://web.archive.org/web/1id_/x');
     expect(out).toBe('<html>decompressed</html>');
+  });
+});
+
+describe('query builders (assert exact upstream request construction)', () => {
+  let originalFetch: typeof global.fetch;
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    delete process.env.EPO_OPS_CONSUMER_KEY;
+    delete process.env.EPO_OPS_CONSUMER_SECRET;
+    delete process.env.USPTO_API_KEY;
+  });
+
+  test('searchPpubs builds verified date syntax and field suffixes', async () => {
+    const { PpubsClient } = await import('../../entities/patent/ppubs-client.js');
+    const client = new PpubsClient();
+    const bodies: string[] = [];
+    global.fetch = jest.fn().mockImplementation((url: any, init?: any) => {
+      const u = String(url);
+      if (u.includes('/api/users/me/session')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'x-access-token': 'tok-1', 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ userCase: { caseId: 1 } })),
+        });
+      }
+      bodies.push(init.body);
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        text: () => Promise.resolve(JSON.stringify({ patents: [] })),
+      });
+    }) as any;
+
+    await client.search('', {});
+    const { searchPpubs } = await import('../../entities/patent/search/ppubs.js');
+    await searchPpubs('crispr', {
+      assignee: 'Moderna',
+      inventor: 'Hoge',
+      cpc: 'C12N15/11',
+      date_range: '2020-01-01/2024-06-30',
+    });
+    expect(JSON.parse(bodies[0]).query.q).toBe('');
+    expect(JSON.parse(bodies[1]).query.q).toBe(
+      'crispr AND (Moderna).as. AND (Hoge).in. AND (C12N15/11).cpc. AND @pd>=20200101<=20240630'
+    );
+    client.close();
+  });
+
+  test('searchOdp builds escaped Lucene with date range', async () => {
+    process.env.USPTO_API_KEY = 'u';
+    const { connectionManager } = await import('../../connections/manager.js');
+    connectionManager.closeAll();
+    const posts: Array<Record<string, unknown>> = [];
+    global.fetch = jest.fn().mockImplementation((url: any, init?: any) => {
+      posts.push({ url: String(url), body: JSON.parse(init.body) });
+      const payload = JSON.stringify({ count: 0, patentFileWrapperDataBag: [] });
+      return Promise.resolve({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        text: () => Promise.resolve(payload),
+      });
+    }) as any;
+
+    const { searchOdp } = await import('../../entities/patent/search/odp.js');
+    await searchOdp('crispr "gene editing"', {
+      assignee: 'Say "hi" Inc',
+      date_range: '2023-01-01/2024-12-31',
+    });
+    expect(posts).toHaveLength(1);
+    expect(posts[0].body.q).toBe(
+      '(crispr "gene editing") AND applicationMetaData.firstApplicantName:"Say \\"hi\\" Inc" AND applicationMetaData.filingDate:[2023-01-01 TO 2024-12-31]'
+    );
+    expect(posts[0].body.pagination).toEqual({ offset: 0, limit: 10 });
+    connectionManager.closeAll();
+  });
+
+  test('searchOps builds grouped CQL (precedence-safe) and asserts auth headers', async () => {
+    process.env.EPO_OPS_CONSUMER_KEY = 'k';
+    process.env.EPO_OPS_CONSUMER_SECRET = 's';
+    const calls: Array<{ url: string; headers: Headers; body?: string }> = [];
+    global.fetch = jest.fn().mockImplementation((url: any, init?: any) => {
+      const u = String(url);
+      if (u.includes('/auth/accesstoken')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ access_token: 'tok', expires_in: 1199 })),
+        });
+      }
+      calls.push({ url: u, headers: init.headers as Headers, body: init.body });
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        text: () => Promise.resolve(JSON.stringify({
+          'ops:world-patent-data': {
+            'ops:biblio-search': {
+              '@total-result-count': '7',
+              'ops:search-result': { 'exchange-documents': { 'exchange-document': [] } },
+            },
+          },
+        })),
+      });
+    }) as any;
+
+    const { searchOps } = await import('../../entities/patent/search/ops.js');
+    const result = await searchOps('crispr cas9', { assignee: 'moderna', limit: 5, offset: 10 });
+    expect(result.total).toBe(7);
+    const searchCall = calls.find(c => c.url.includes('search/biblio'));
+    expect(searchCall?.url).toContain(encodeURIComponent('(ti="crispr cas9" OR ab="crispr cas9") AND pa="moderna"'));
+    expect(searchCall?.url).toContain('Range=11-15');
+    expect((searchCall?.headers as Record<string, string>)['Authorization']).toBe('Bearer tok');
+    expect((searchCall?.headers as Record<string, string>)['Accept']).toBe('application/json');
+    const tokenCall = (global.fetch as any).mock.calls.find((c: any[]) => String(c[0]).includes('/auth/accesstoken'));
+    expect((tokenCall[1].headers as Record<string, string>)['Authorization']).toMatch(/^Basic /);
+    expect(tokenCall[1].body).toBe('grant_type=client_credentials');
+    (await import('../../entities/patent/ops-client.js')).opsClient.close();
+  });
+});
+
+describe('fetchPpubsClaims splitting', () => {
+  let originalFetch: typeof global.fetch;
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  test('splits claimsHtml into numbered claims and resolves guid by .pn. search', async () => {
+    const { PpubsClient } = await import('../../entities/patent/ppubs-client.js');
+    const client = new PpubsClient();
+    const searchQueries: string[] = [];
+    global.fetch = jest.fn().mockImplementation((url: any, init?: any) => {
+      const u = String(url);
+      if (u.includes('/api/users/me/session')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'x-access-token': 'tok-1', 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ userCase: { caseId: 1 } })),
+        });
+      }
+      if (u.includes('/api/searches/searchWithBeFamily')) {
+        searchQueries.push(JSON.parse(init.body).query.q);
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({
+            patents: [{ guid: 'US-11027025-B2', type: 'USPAT' }],
+          })),
+        });
+      }
+      if (u.includes('/api/patents/highlight/')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({
+            guid: 'US-11027025-B2',
+            type: 'USPAT',
+            publicationReferenceDocumentNumber: '11027025',
+            inventionTitle: 'Compositions',
+            numberOfClaims: 3,
+            claimsHtml: '<div class="claims"><div num="1" class="claim"><div class="claim-text">1. A composition.</div></div><div num="2" class="claim"><div class="claim-text">2. The composition of claim 1.</div></div><div num="3" class="claim"><div class="claim-text">3. A method.</div></div></div>',
+          })),
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${u}`));
+    }) as any;
+
+    const { fetchPpubsClaims } = await import('../../entities/patent/detail/ppubs.js');
+    const claims = await fetchPpubsClaims('US11027025B2');
+    expect(searchQueries).toEqual(['("11027025").pn.']);
+    expect(claims.number_of_claims).toBe(3);
+    expect(claims.claims).toHaveLength(3);
+    expect(claims.claims[0]).toBe('1. A composition.');
+    expect(claims.claims[1]).toBe('2. The composition of claim 1.');
+    client.close();
+  });
+});
+
+describe('patentGet orchestration (chains)', () => {
+  let originalFetch: typeof global.fetch;
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    delete process.env.EPO_OPS_CONSUMER_KEY;
+    delete process.env.EPO_OPS_CONSUMER_SECRET;
+    delete process.env.USPTO_API_KEY;
+  });
+
+  function ppubsMock(core: Record<string, unknown>) {
+    return jest.fn().mockImplementation((url: any) => {
+      const u = String(url);
+      if (u.includes('archive.org')) {
+        return Promise.resolve({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ archived_snapshots: {} })),
+        });
+      }
+      if (u.includes('patents.google.com')) {
+        return Promise.resolve({
+          ok: false,
+          status: 503,
+          statusText: 'Service Unavailable',
+          headers: new Headers(),
+          text: () => Promise.resolve('Sorry... automated queries'),
+        });
+      }
+      if (u.includes('/api/users/me/session')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'x-access-token': 'tok-1', 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ userCase: { caseId: 1 } })),
+        });
+      }
+      if (u.includes('/api/searches/searchWithBeFamily')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({
+            patents: [{ guid: 'US-11027025-B2', type: 'USPAT' }],
+          })),
+        });
+      }
+      if (u.includes('/api/patents/highlight/')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({
+            guid: 'US-11027025-B2',
+            type: 'USPAT',
+            publicationReferenceDocumentNumber: '11027025',
+            inventionTitle: 'Compositions comprising synthetic polynucleotides',
+            ...core,
+          })),
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${u}`));
+    });
+  }
+
+  test('US core falls through GP(blocked) → wayback(miss) → PPUBS', async () => {
+    global.fetch = ppubsMock({ abstractHtml: '<p>The present invention.</p>' }) as any;
+    const { patentGet } = await import('../../entities/patent/detail/index.js');
+    const result = await patentGet('US11027025B2');
+    expect(result.publication_number).toBe('US11027025B2');
+    expect(result.title).toBe('Compositions comprising synthetic polynucleotides');
+    expect(result.abstract).toBe('The present invention.');
+  });
+
+  test('all-sources-failed sections capture errors without throwing', async () => {
+    // citations section: no OPS creds; GP blocked; wayback miss; PPUBS doc has no usRef data
+    global.fetch = ppubsMock({ usRefPatentNumber: [], foreignRefPatentNumber: [] }) as any;
+    const { patentGet } = await import('../../entities/patent/detail/index.js');
+    const result = await patentGet('US11027025B2', ['citations']);
+    expect(result.sections?.citations).toEqual({ error: expect.stringContaining('All sources failed') });
+  });
+
+  test('unknown section yields explicit error entry', async () => {
+    global.fetch = ppubsMock({}) as any;
+    const { patentGet } = await import('../../entities/patent/detail/index.js');
+    const result = await patentGet('US11027025B2', ['nonsense_section' as string]);
+    expect(result.sections?.nonsense_section).toEqual({ error: expect.stringContaining('Unknown section') });
+  });
+
+  test("'all' expands to every section", async () => {
+    global.fetch = ppubsMock({
+      abstractHtml: '<p>Abstract.</p>',
+      claimsHtml: '<div num="1" class="claim">1. Claim one.</div>',
+      usRefPatentNumber: ['US5034506'], usRefIssueDate: ['1991-07-23'], usRefPatenteeName: ['Doe'],
+      foreignRefPatentNumber: [], foreignRefPubDate: [],
+      cpcInventiveFlattened: 'A61K9/51', ipcCodeFlattened: 'C12N15/11',
+      patentFamilyMembers: ['EP3019619A2'],
+    }) as any;
+    const { patentGet } = await import('../../entities/patent/detail/index.js');
+    const result = await patentGet('US11027025B2', ['all']);
+    for (const section of ['abstract', 'claims', 'citations', 'family', 'classifications']) {
+      expect(result.sections?.[section]).toBeDefined();
+      expect((result.sections?.[section] as any).error).toBeUndefined();
+    }
+    const citations = result.sections!.citations as any;
+    expect(citations.backward[0].publication_number).toBe('US5034506');
+    const claims = result.sections!.claims as any;
+    expect(claims.claims.length).toBeGreaterThan(0);
+  });
+});
+
+describe('fetchGooglePatentDetail block-page detection', () => {
+  let originalFetch: typeof global.fetch;
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  test('block page trips breaker and falls back to wayback snapshot', async () => {
+    const { connectionManager } = await import('../../connections/manager.js');
+    connectionManager.closeAll();
+    const { gzipSync } = await import('node:zlib');
+    const gz = gzipSync(Buffer.from(
+      '<meta name="DC.title" content="Wayback title"><span itemprop="publicationNumber">US11027025B2</span>'
+    ));
+    let googleDetailCalls = 0;
+    global.fetch = jest.fn().mockImplementation((url: any) => {
+      const u = String(url);
+      if (u.includes('web.archive.org')) {
+        return Promise.resolve({
+          ok: true,
+          arrayBuffer: () => Promise.resolve(gz.buffer.slice(gz.byteOffset, gz.byteOffset + gz.byteLength)),
+        });
+      }
+      if (u.includes('archive.org/wayback/available')) {
+        return Promise.resolve({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({
+            archived_snapshots: { closest: { url: 'x', timestamp: '20260215174326' } },
+          })),
+        });
+      }
+      if (u.includes('patents.google.com/patent/')) {
+        googleDetailCalls++;
+        return Promise.resolve({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/html' }),
+          text: () => Promise.resolve('<html>Sorry... automated queries</html>'),
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${u}`));
+    }) as any;
+
+    const { fetchGooglePatentDetail } = await import('../../entities/patent/detail/google-patents.js');
+    const parsed = await fetchGooglePatentDetail('US11027025B2');
+    expect(parsed.title).toBe('Wayback title');
+    expect(googleDetailCalls).toBe(1);
+    connectionManager.closeAll();
+  });
+
+  test('both live and wayback unavailable → descriptive error', async () => {
+    const { connectionManager } = await import('../../connections/manager.js');
+    connectionManager.closeAll();
+    global.fetch = jest.fn().mockImplementation((url: any) => {
+      const u = String(url);
+      if (u.includes('patents.google.com/patent/')) {
+        return Promise.resolve({
+          ok: false,
+          status: 503,
+          statusText: 'Service Unavailable',
+          headers: new Headers(),
+          text: () => Promise.resolve('Sorry...'),
+        });
+      }
+      if (u.includes('archive.org')) {
+        return Promise.resolve({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ archived_snapshots: {} })),
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${u}`));
+    }) as any;
+
+    const { fetchGooglePatentDetail } = await import('../../entities/patent/detail/google-patents.js');
+    await expect(fetchGooglePatentDetail('US11027025B2')).rejects.toThrow(/unavailable for US11027025B2/);
+    connectionManager.closeAll();
   });
 });

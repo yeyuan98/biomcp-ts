@@ -79,9 +79,10 @@ export async function patentSearch(
     }
   });
 
-  const patents: PatentSearchResult[] = dedupPatents(collected);
+  const limit = options.limit ?? 10;
+  const patents: PatentSearchResult[] = dedupPatents(collected, limit);
   for (const { source, message } of errors) {
-    patents.push({ _error: `Search on source '${source}' failed: ${message}`, source } as any);
+    patents.push({ _error: `Search on source '${source}' failed: ${message}`, source } as PatentSearchResult);
   }
 
   return { patents, total_hits };

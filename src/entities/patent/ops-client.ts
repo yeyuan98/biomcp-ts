@@ -120,7 +120,6 @@ export class OpsClient {
 
       const rejection = data.headers['x-rejection-reason'] || data.headers['X-Rejection-Reason'];
       if (data.status === 403 && rejection && attempt === 0) {
-        // OPS throttling: back off once and retry.
         await new Promise(r => setTimeout(r, 2000));
         continue;
       }

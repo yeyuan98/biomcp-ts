@@ -28,6 +28,7 @@ export interface PatentSearchResult {
   language?: string;
   source: PatentSource;
   also_found_in?: PatentSource[];
+  _error?: string;
 }
 
 export interface PatentSearchResponse {

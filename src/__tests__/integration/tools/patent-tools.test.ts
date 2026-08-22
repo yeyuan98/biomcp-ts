@@ -58,7 +58,10 @@ describe('patent_get', () => {
       }));
     expectPatentGetResult(result);
     expect(String(result.publication_number)).toMatch(/^US11027025/);
-    // claims: US fulltext must come through some chain step
+    const classifications = result.sections?.classifications as Record<string, unknown> | undefined;
+    expect(classifications).toBeDefined();
+    expect((classifications as any)?.error).toBeUndefined();
+    expect(((classifications as any)?.cpc as unknown[])?.length).toBeGreaterThan(0);
     const claims = result.sections?.claims as Record<string, unknown> | undefined;
     expect(claims).toBeDefined();
     if (!(claims as any)?.error) {

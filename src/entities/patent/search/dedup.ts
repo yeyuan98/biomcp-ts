@@ -1,11 +1,22 @@
-import type { PatentSearchResult, PatentSource } from '../types.js';
+import type { PatentSearchResult, PatentSource, PatentStatus } from '../types.js';
+
+const GRANTED_KIND_CHARS = new Set(['B', 'C', 'E', 'P', 'H', 'S', 'T']);
 
 /**
- * Normalize a publication number: uppercase, strip spaces.
- * Accepts forms like `US 11027025 B2`, `us11027025b2`, `US11027025`.
+ * Kind-code → status heuristic shared by all backends (B/C grants, E/P/H/S/T
+ * US special series; A and everything else = application).
+ */
+export function kindToStatus(kind: string | undefined): PatentStatus {
+  if (!kind) return 'application';
+  return GRANTED_KIND_CHARS.has(kind[0].toUpperCase()) ? 'granted' : 'application';
+}
+
+/**
+ * Normalize a publication number: uppercase, strip spaces and slashes.
+ * Accepts forms like `US 11027025 B2`, `us11027025b2`, `WO 2015/006747 A2`.
  */
 export function normalizePublicationNumber(input: string): string {
-  return input.replace(/\s+/g, '').toUpperCase();
+  return input.replace(/[\s/]+/g, '').toUpperCase();
 }
 
 const PUBLICATION_NUMBER_RE = /^[A-Z]{2}(RE|PP|H)?\d{5,}[A-Z]?\d{0,2}$/;
@@ -43,22 +54,23 @@ function mergeRecords(primary: PatentSearchResult, secondary: PatentSearchResult
 }
 
 /**
- * Canonical dedup key: country + number core, kind code stripped, so the same
- * publication reported as `US11027025` (ODP) and `US11027025B2` (PPUBS/GP)
- * merges into one record.
+ * Canonical dedup key: country + optional series letters + digit core, kind
+ * code and leading zeros stripped, so `US11027025` (ODP), `US01234567`
+ * (ODP-padded), and `US11027025B2` (PPUBS/GP) merge into one record.
  */
 function dedupKey(publicationNumber: string): string {
   const normalized = normalizePublicationNumber(publicationNumber);
-  const match = normalized.match(/^([A-Z]{2}(?:RE|PP|H)?\d+)/);
-  return match ? match[1] : normalized;
+  const match = normalized.match(/^([A-Z]{2}(?:RE|PP|[A-Z])?)0*(\d+)/);
+  if (!match) return normalized;
+  return `${match[1]}${match[2]}`;
 }
 
 /**
- * Deduplicate federated results by normalized publication number. For US
- * numbers the fresher official records (ODP/PPUBS) win; unique fields from
- * the other source are merged in.
+ * Deduplicate federated results by normalized publication number, capped at
+ * `limit` records. For US numbers the fresher official records (ODP/PPUBS)
+ * win; unique fields from the other source are merged in.
  */
-export function dedupPatents(patents: PatentSearchResult[]): PatentSearchResult[] {
+export function dedupPatents(patents: PatentSearchResult[], limit?: number): PatentSearchResult[] {
   const byNumber = new Map<string, PatentSearchResult>();
   const order: string[] = [];
 
@@ -76,5 +88,6 @@ export function dedupPatents(patents: PatentSearchResult[]): PatentSearchResult[
     }
   }
 
-  return order.map(k => byNumber.get(k)!);
+  const deduped = order.map(k => byNumber.get(k)!);
+  return limit !== undefined ? deduped.slice(0, limit) : deduped;
 }

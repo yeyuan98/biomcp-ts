@@ -117,7 +117,7 @@ export class PpubsClient {
   private async rawRequest(
     method: 'GET' | 'POST',
     path: string,
-    init: { body?: string; retrySession?: boolean }
+    init: { body?: string; sessionRetried?: boolean; rateRetried?: boolean }
   ): Promise<PpubsResponse> {
     await this.rateLimiter.acquire();
     const session = await this.getSession();
@@ -147,17 +147,28 @@ export class PpubsClient {
     }
 
     // Session expiry (observed as both 401 and 403) → refresh once and retry.
-    if ((data.status === 401 || data.status === 403) && init.retrySession !== false) {
+    if ((data.status === 401 || data.status === 403) && !init.sessionRetried) {
       this.session = null;
       const fresh = await this.getSession();
-      return this.rawRequest(method, path, { ...init, body: init.body?.replace(String(session.caseId), String(fresh.caseId)), retrySession: false });
+      let body = init.body;
+      if (body) {
+        try {
+          const parsed = JSON.parse(body);
+          if (parsed?.query && typeof parsed.query === 'object') {
+            parsed.query.caseId = fresh.caseId;
+            body = JSON.stringify(parsed);
+          }
+        } catch {
+          body = undefined;
+        }
+      }
+      return this.rawRequest(method, path, { body, sessionRetried: true, rateRetried: init.rateRetried });
     }
 
-    // Rate limit → honor retry-after header once.
-    if (data.status === 429 && init.retrySession !== false) {
+    if (data.status === 429 && !init.rateRetried) {
       const waitMs = Number(data.headers['x-rate-limit-retry-after-seconds'] || '5') * 1000;
       await new Promise(r => setTimeout(r, Math.min(waitMs, 30000)));
-      return this.rawRequest(method, path, { ...init, retrySession: false });
+      return this.rawRequest(method, path, { body: init.body, sessionRetried: init.sessionRetried, rateRetried: true });
     }
 
     return data;
