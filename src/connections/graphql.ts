@@ -80,7 +80,10 @@ export class GraphQLConnection implements IConnection<string, unknown> {
     });
     
     if (!response.ok) {
-      throw new HttpConnectionError(`HTTP ${response.status}: ${response.statusText}`, response.status);
+      throw new HttpConnectionError(
+        `HTTP ${response.status}: ${response.statusText} — URL: ${this.options.baseUrl} — Source: ${this.sourceId}`,
+        response.status
+      );
     }
     
     const payload = await response.json() as {
@@ -91,11 +94,13 @@ export class GraphQLConnection implements IConnection<string, unknown> {
     if (errors.length > 0) {
       const firstMessage = errors[0]?.message ?? 'unknown GraphQL error';
       if (payload.data == null) {
-        throw new HttpConnectionError(`GraphQL error from ${this.sourceId}: ${firstMessage}`);
+        throw new HttpConnectionError(`GraphQL error from ${this.sourceId}: ${firstMessage}`, undefined, false);
       }
       if (options?.rootField && payload.data[options.rootField] == null) {
         throw new HttpConnectionError(
-          `GraphQL error from ${this.sourceId}: root field '${options.rootField}' is null/missing: ${firstMessage}`
+          `GraphQL error from ${this.sourceId}: root field '${options.rootField}' is null/missing: ${firstMessage}`,
+          undefined,
+          false
         );
       }
     }

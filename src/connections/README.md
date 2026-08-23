@@ -1,6 +1,6 @@
 # connections
 
-API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a source registry, connection lifecycle management, and rate limiting for 61 bioinformatics data sources.
+API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a source registry, connection lifecycle management, and rate limiting for 36 bioinformatics data sources.
 
 ## Architecture
 
@@ -15,7 +15,7 @@ API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a sou
 Core types and the `IConnection` interface.
 
 ```ts
-type ProtocolType = 'rest' | 'graphql' | 'grpc' | 'local-file';
+type ProtocolType = 'rest' | 'graphql' | 'grpc';
 
 type AuthDeliveryMethod =
   | { type: 'header'; name: string }
@@ -102,8 +102,6 @@ class ConnectionManager {
 const connectionManager: ConnectionManager;
 ```
 
-`local-file` protocol throws `"Local file connection not yet implemented"`.
-
 ### `rest.ts`
 
 ```ts
@@ -123,7 +121,7 @@ Issues `GET` requests via `request()`. Issues `POST` requests with JSON body via
 
 ### Timeout layering
 
-Connection abort (`handling.timeoutMs`, 15s) < provider-level `withTimeout` (citation providers use `DEFAULT_PROVIDER_TIMEOUT_MS` = 10s, resolving null; federated search throws at 20s so `Promise.allSettled` records errors) < tool-level section timeout (30s). Both `withTimeout` modes live in `fetch-utils.ts`.
+From innermost to outermost: connection abort (`handling.timeoutMs`, typically 15s) → provider-level `withTimeout` (citation providers resolve null after `DEFAULT_PROVIDER_TIMEOUT_MS` = 10s; federated search throws after 20s so `Promise.allSettled` records the failure) → tool-level section timeout (30s). Both `withTimeout` modes live in `fetch-utils.ts`.
 
 ### `graphql.ts`
 
@@ -198,24 +196,22 @@ function withTimeout<T>(
 > EPO OPS (OAuth2 client-credentials) and USPTO PPUBS (session-token
 > handshake) live in `src/entities/patent/` as dedicated clients.
 
-### REST (51 sources)
+### REST (31 sources)
 
 | Category | Source IDs |
 |---|---|
-| Genomics | `mygene`, `myvariant`, `clingen`, `gtex`, `hpa`, `gwas`, `string` |
-| Proteins & Pathways | `uniprot`, `interpro`, `complexportal`, `reactome`, `reactome_analysis`, `kegg`, `wikipathways` |
-| Drugs & Pharmacology | `mychem`, `chembl`, `openfda`, `cpic`, `pharmgkb` |
-| Diseases | `mydisease`, `monarch`, `seer`, `medlineplus`, `hpo` |
+| Genomics | `mygene`, `myvariant`, `gtex`, `string` |
+| Proteins & Pathways | `uniprot`, `reactome`, `reactome_analysis` |
+| Drugs & Pharmacology | `mychem`, `openfda` |
+| Diseases | `mydisease`, `monarch`, `seer` |
 | Literature | `pubmed`, `pubtator`, `europepmc`, `semantic_scholar`, `litsense`, `ncbi_idconv`, `pmc_oa`, `crossref`, `opencitations` |
-| Clinical Trials | `clinicaltrials`, `nci_cts` |
-| Diagnostics & Registries | `vaers` |
-| Enrichment & Analysis | `enrichr`, `gprofiler`, `ols4`, `quickgo` |
+| Clinical Trials | `clinicaltrials` |
+| Ontologies & Analysis | `ols4` |
 | Funding & Research | `nih_reporter` |
 | Patents | `google_patents`, `uspto_odp` |
-| cBio Portal | `cbioportal`, `cbioportal_datahub` |
 | Oncology | `oncokb` |
 | Structural Biology | `pdb_data`, `pdb_search`, `pdb_files` |
-| Required Auth Keys | `disgenet`, `umls` |
+| Required Auth Keys | `disgenet` |
 
 ### GraphQL (4 sources)
 
@@ -224,10 +220,6 @@ function withTimeout<T>(
 ### gRPC (1 source)
 
 `alphagenome`
-
-### Local File (5 sources)
-
-`ema`, `who_pq`, `gtr`, `who_ivd`, `cvx`
 
 ## Rate Limiting
 

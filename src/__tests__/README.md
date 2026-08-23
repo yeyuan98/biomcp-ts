@@ -116,7 +116,7 @@ src/__tests__/
 
 ## Testing Approach
 
-### Unit Tests (540+ tests, `npm test`)
+### Unit Tests (597 tests, `npm test`)
 
 All unit tests use mocked `global.fetch` to avoid real network calls.
 

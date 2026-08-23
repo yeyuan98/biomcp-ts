@@ -107,7 +107,7 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   },
   
   // ==========================================
-  // LITERATURE - REST (8 sources)
+  // LITERATURE - REST (9 sources)
   // ==========================================
   pubmed: {
     sourceId: 'pubmed',
@@ -343,7 +343,7 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   },
 
   // ==========================================
-  // GRAPHQL (5 sources)
+  // GRAPHQL (4 sources)
   // ==========================================
   gnomad: {
     sourceId: 'gnomad',
