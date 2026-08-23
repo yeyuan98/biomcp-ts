@@ -1,6 +1,6 @@
 {
   "name": "biomcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "BioMCP - Biomedical MCP Server in TypeScript",
   "type": "module",
   "main": "dist/bundle.js",
@@ -9,7 +9,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/yeyuan98/biomcp-ts.git"
+    "url": "git+https://github.com/yeyuan98/biomcp-ts.git"
   },
   "exports": {
     ".": "./dist/bundle.js"
