@@ -106,27 +106,98 @@ export async function fetchPpubsCore(publicationNumber: string): Promise<PatentR
   };
 }
 
+/**
+ * Split already-stripped claims text on sequential `N.` claim starts.
+ * Markers are only accepted when they continue a 1,2,3... sequence, so
+ * references like "of claim 1." inside claim text never split a claim.
+ * Returns null when no believable split is found.
+ */
+export function splitPlainTextClaims(text: string): string[] | null {
+  const re = /(?:^|\s)(\d{1,3})[.)](?=\s|$)/g;
+  const marks: Array<{ num: number; start: number }> = [];
+  let expected = 1;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const num = Number(m[1]);
+    if (num === expected) {
+      marks.push({ num, start: m.index + m[0].indexOf(m[1]) });
+      expected++;
+    }
+  }
+  if (marks.length < 2) return null;
+  const claims: string[] = [];
+  for (let i = 0; i < marks.length; i++) {
+    const end = i + 1 < marks.length ? marks[i + 1].start : text.length;
+    const t = text.slice(marks[i].start, end).replace(/\s+/g, ' ').trim();
+    if (t) claims.push(t);
+  }
+  return claims.length >= 2 ? claims : null;
+}
+
+/**
+ * Split claimsHtml into numbered claims. Fallback chain:
+ * 1. `num="N"`-attributed claim divs (canonical PPUBS markup)
+ * 2. `id="CLM-NNNNNN"`-attributed divs (older markup)
+ * 3. sequential `N.` markers in the stripped plain text
+ * 4. single unparsed block (with `_warn`)
+ */
+function splitClaimsHtml(claimsHtml: string): { claims: string[]; method: 'num' | 'clm-id' | 'text' | 'blob' } {
+  const methods: Array<{ method: 'num' | 'clm-id'; re: RegExp }> = [
+    { method: 'num', re: /<(?:div|claim)\b[^>]*\snum="(\d+)"[^>]*>/gi },
+    { method: 'clm-id', re: /<(?:div|claim|li)\b[^>]*\sid="CLM-(\d+)"[^>]*>/gi },
+  ];
+  for (const { method, re } of methods) {
+    // Slice between marker boundaries (String.split with a capturing regex
+    // would splice the captures into the result array).
+    const matches = Array.from(claimsHtml.matchAll(re));
+    if (matches.length === 0) continue;
+    const seen = new Set<string>();
+    const claims: string[] = [];
+    matches.forEach((m, i) => {
+      const num = m[1];
+      if (!num || seen.has(num)) return;
+      const start = m.index + m[0].length;
+      const end = i + 1 < matches.length ? matches[i + 1].index : claimsHtml.length;
+      const stripped = stripHtml(claimsHtml.slice(start, end)).replace(/^\d+[.)]\s*/, '');
+      if (stripped) {
+        seen.add(num);
+        claims.push(`${Number(num)}. ${stripped}`.trim());
+      }
+    });
+    if (claims.length > 0) return { claims, method };
+  }
+
+  const textSplit = splitPlainTextClaims(stripHtml(claimsHtml));
+  if (textSplit) return { claims: textSplit, method: 'text' };
+
+  const blob = stripHtml(claimsHtml);
+  return { claims: blob ? [blob] : [], method: 'blob' };
+}
+
 export async function fetchPpubsClaims(publicationNumber: string): Promise<PatentClaimsSection> {
   const doc = await fetchPpubsDocument(publicationNumber);
   if (!doc.claimsHtml) {
     throw new Error(`No claims text available via USPTO Public Search for ${publicationNumber}.`);
   }
 
-  // claimsHtml contains numbered claim divs; split on full claim-start tags.
-  const CLAIM_START_RE = /<(?:div|claim)\b[^>]*\snum="(\d+)"[^>]*>/gi;
-  const numMatches = Array.from(doc.claimsHtml.matchAll(CLAIM_START_RE)).map(m => m[1]);
-  const claimBlocks = doc.claimsHtml.split(/<(?:div|claim)\b[^>]*\snum="\d+"[^>]*>/i).slice(1);
-  let claims: string[];
-  if (claimBlocks.length > 0) {
-    claims = claimBlocks.map((block, i) => {
-      const stripped = stripHtml(block).replace(/^\d+[.)]\s*/, '');
-      return `${numMatches[i] || i + 1}. ${stripped}`.trim();
-    });
-  } else {
-    claims = [stripHtml(doc.claimsHtml)];
+  const { claims: parsedClaims, method } = splitClaimsHtml(doc.claimsHtml);
+  if (parsedClaims.length === 0) {
+    throw new Error(`No claims text could be parsed via USPTO Public Search for ${publicationNumber}.`);
   }
 
+  // Never report a bogus count: the split path yields the true parsed count;
+  // a single unparsed blob trusts the upstream numberOfClaims when finite
+  // and reports undefined otherwise.
+  const upstreamCount = doc.numberOfClaims != null ? Number(doc.numberOfClaims) : undefined;
+  const number_of_claims = method === 'blob'
+    ? (Number.isFinite(upstreamCount) ? upstreamCount : undefined)
+    : parsedClaims.length;
+
+  let claims = parsedClaims;
   let warn: string | undefined;
+  if (method === 'blob') {
+    warn = 'Claims could not be split into numbered claims; returning full text as a single block.';
+  }
   const totalBytes = claims.reduce((sum, c) => sum + c.length, 0);
   if (totalBytes > CLAIMS_CAP_BYTES) {
     const kept: string[] = [];
@@ -136,13 +207,14 @@ export async function fetchPpubsClaims(publicationNumber: string): Promise<Paten
       kept.push(c);
       used += c.length;
     }
-    warn = `Claims truncated to ${kept.length} of ${claims.length} claims (~100 KB cap).`;
+    const truncationWarn = `Claims truncated to ${kept.length} of ${claims.length} claims (~100 KB cap).`;
+    warn = warn ? `${warn} ${truncationWarn}` : truncationWarn;
     claims = kept;
   }
 
   return {
     claims,
-    number_of_claims: doc.numberOfClaims ?? claims.length,
+    number_of_claims,
     source: 'ppubs',
     _warn: warn,
   };

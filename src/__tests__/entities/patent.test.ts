@@ -165,17 +165,18 @@ describe('patent search federation', () => {
     delete process.env.USPTO_API_KEY;
   });
 
-  test('selectSearchBackends: keyed sources preferred, GP omitted when OPS present', async () => {
+  test('selectSearchBackends: ppubs always the US default; GP omitted when OPS present', async () => {
     const { selectSearchBackends } = await import('../../entities/patent/search/index.js');
     expect(selectSearchBackends({})).toEqual(['google_patents', 'ppubs']);
     process.env.EPO_OPS_CONSUMER_KEY = 'k';
     process.env.EPO_OPS_CONSUMER_SECRET = 's';
     process.env.USPTO_API_KEY = 'u';
-    expect(selectSearchBackends({})).toEqual(['ops', 'uspto_odp']);
+    expect(selectSearchBackends({})).toEqual(['ops', 'ppubs']);
     expect(selectSearchBackends({ source: 'ppubs' })).toEqual(['ppubs']);
+    expect(selectSearchBackends({ source: 'uspto_odp' })).toEqual(['uspto_odp']);
   });
 
-  test('patentSearch appends _error element when a backend fails', async () => {
+  test('patentSearch falls back ppubs→odp on hard failure with _note provenance', async () => {
     process.env.USPTO_API_KEY = 'u';
     const gp = await import('../../entities/patent/search/google-patents.js');
     gp.resetGooglePatentsBreaker();
@@ -200,17 +201,159 @@ describe('patent search federation', () => {
           json: () => Promise.resolve(JSON.parse(payload)),
         });
       }
-      // google_patents live fetch (worldwide fallback without OPS creds)
+      // google_patents live fetch (worldwide fallback without OPS creds) and
+      // ppubs session handshake both fail hard.
       return Promise.reject(new Error('HTTP 503: Service Unavailable'));
     }) as any;
 
     const { patentSearch } = await import('../../entities/patent/search/index.js');
     const response = await patentSearch('crispr compositions', {});
-    expect(response.patents.some(p => p._error)).toBe(true);
     expect(response.patents.some(p => p.publication_number === 'US11027025')).toBe(true);
+    expect(response.patents.some(p => p._note && p._note.includes('ppubs') && p._note.includes('uspto_odp'))).toBe(true);
+    expect(response.patents.some(p => p._error && p._error.includes('google_patents'))).toBe(true);
     expect(response.total_hits?.uspto_odp).toBe(1);
+    expect(response.total_hits_basis?.uspto_odp).toBeDefined();
+    expect(response.total_hits_basis?.ppubs).toBeUndefined();
     gp.resetGooglePatentsBreaker();
     (await import('../../connections/manager.js')).connectionManager.closeAll();
+  });
+
+  test('patentSearch: no odp fallback without key; _error surfaces for ppubs', async () => {
+    const gp = await import('../../entities/patent/search/google-patents.js');
+    gp.resetGooglePatentsBreaker();
+    global.fetch = jest.fn().mockRejectedValue(new Error('HTTP 503: Service Unavailable')) as any;
+
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await patentSearch('crispr', {});
+    const markers = response.patents.filter(p => p._error || p._note || p._hint);
+    expect(markers.some(p => p._error?.includes("'ppubs' failed"))).toBe(true);
+    expect(markers.some(p => p._error?.includes("'google_patents' failed"))).toBe(true);
+    expect(markers.some(p => p._note)).toBe(false);
+    // no USPTO ODP endpoint hit (no key configured → no fallback attempt)
+    const calledUrls = (global.fetch as any).mock.calls.map((c: any[]) => String(c[0]));
+    expect(calledUrls.some(u => u.includes('api.uspto.gov'))).toBe(false);
+    gp.resetGooglePatentsBreaker();
+    (await import('../../connections/manager.js')).connectionManager.closeAll();
+  });
+
+  test('patentSearch: budget guard skips ppubs→odp fallback when elapsed > 12s', async () => {
+    process.env.USPTO_API_KEY = 'u';
+    const gp = await import('../../entities/patent/search/google-patents.js');
+    gp.resetGooglePatentsBreaker();
+    let now = 1_000;
+    const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    global.fetch = jest.fn().mockImplementation((url: any) => {
+      now = 20_000; // simulate time passing while backends run
+      return Promise.reject(new Error('HTTP 503: Service Unavailable'));
+    }) as any;
+
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await patentSearch('crispr', {});
+    expect(response.patents.some(p => p._error?.includes("'ppubs' failed"))).toBe(true);
+    expect(response.patents.some(p => p._note)).toBe(false);
+    const calledUrls = (global.fetch as any).mock.calls.map((c: any[]) => String(c[0]));
+    expect(calledUrls.some(u => u.includes('api.uspto.gov'))).toBe(false);
+    nowSpy.mockRestore();
+    gp.resetGooglePatentsBreaker();
+    (await import('../../connections/manager.js')).connectionManager.closeAll();
+  });
+
+  test('patentSearch: clean 0-hit search appends _hint guidance', async () => {
+    const gp = await import('../../entities/patent/search/google-patents.js');
+    gp.resetGooglePatentsBreaker();
+    const odpSearch = jest.fn().mockImplementation((url: any) => {
+      const u = String(url);
+      if (u.includes('/api/users/me/session')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'x-access-token': 'tok-1', 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ userCase: { caseId: 1 } })),
+        });
+      }
+      if (u.includes('/api/searches/searchWithBeFamily')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ patents: [], numberOfFamilies: 0 })),
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${u}`));
+    });
+    const gpSearch = jest.fn().mockImplementation(() => Promise.resolve({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({}),
+    }));
+    global.fetch = jest.fn().mockImplementation((url: any) => {
+      const u = String(url);
+      return u.includes('ppubs.uspto.gov') ? odpSearch(url) : gpSearch(url);
+    }) as any;
+
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await patentSearch('xyzzyplugh-nonexistent-concept', {});
+    expect(response.patents).toHaveLength(1);
+    expect(response.patents[0]._hint).toContain('quoting an exact concept phrase');
+    expect(response.patents[0].source).toBe('ppubs');
+    gp.resetGooglePatentsBreaker();
+    (await import('../../connections/manager.js')).connectionManager.closeAll();
+  });
+
+  test('patentSearch: exhausted relevance window (matches exist, page empty) gets a pagination hint', async () => {
+    const gp = await import('../../entities/patent/search/google-patents.js');
+    gp.resetGooglePatentsBreaker();
+    global.fetch = jest.fn().mockImplementation((url: any) => {
+      const u = String(url);
+      if (u.includes('/api/users/me/session')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'x-access-token': 'tok-1', 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ userCase: { caseId: 1 } })),
+        });
+      }
+      if (u.includes('/api/searches/searchWithBeFamily')) {
+        // matches exist (88k families) but the offset is beyond the bounded
+        // relevance batch → empty page
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ patents: [], numberOfFamilies: 88262 })),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({}),
+      });
+    }) as any;
+
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await patentSearch('mRNA display', { offset: 100 });
+    expect(response.patents).toHaveLength(1);
+    expect(response.patents[0]._hint).toContain('bounded relevance window');
+    expect(response.total_hits?.ppubs).toBe(88262);
+    gp.resetGooglePatentsBreaker();
+    (await import('../../connections/manager.js')).connectionManager.closeAll();
+  });
+
+  test('orderFederatedByRelevance: scored results first (desc, stable), unscored after', async () => {
+    const { orderFederatedByRelevance } = await import('../../entities/patent/search/index.js');
+    const unscoredA = { publication_number: 'EP1', source: 'ops' as const };
+    const unscoredB = { publication_number: 'EP2', source: 'ops' as const };
+    const scored = [
+      { publication_number: 'US1', relevance_score: 5, source: 'ppubs' as const },
+      { publication_number: 'US2', relevance_score: 20, source: 'ppubs' as const },
+      { publication_number: 'US3', relevance_score: 9, source: 'ppubs' as const },
+    ];
+    const ordered = orderFederatedByRelevance([unscoredA, ...scored, unscoredB]);
+    expect(ordered.map(p => p.publication_number)).toEqual(['US2', 'US3', 'US1', 'EP1', 'EP2']);
+    // No scores anywhere → order untouched
+    expect(orderFederatedByRelevance([unscoredA, unscoredB])).toEqual([unscoredA, unscoredB]);
   });
 
   test('google patents breaker opens on 503 and short-circuits subsequent calls', async () => {
@@ -594,10 +737,10 @@ describe('query builders (assert exact upstream request construction)', () => {
     delete process.env.USPTO_API_KEY;
   });
 
-  test('searchPpubs builds verified date syntax and field suffixes', async () => {
+  test('searchPpubs builds verified date syntax and field suffixes; relevance default maps to score desc', async () => {
     const { PpubsClient } = await import('../../entities/patent/ppubs-client.js');
     const client = new PpubsClient();
-    const bodies: string[] = [];
+    const bodies: Array<Record<string, unknown>> = [];
     global.fetch = jest.fn().mockImplementation((url: any, init?: any) => {
       const u = String(url);
       if (u.includes('/api/users/me/session')) {
@@ -608,16 +751,15 @@ describe('query builders (assert exact upstream request construction)', () => {
           text: () => Promise.resolve(JSON.stringify({ userCase: { caseId: 1 } })),
         });
       }
-      bodies.push(init.body);
+      bodies.push(JSON.parse(init.body));
       return Promise.resolve({
         ok: true,
         status: 200,
         headers: new Headers({ 'content-type': 'application/json' }),
-        text: () => Promise.resolve(JSON.stringify({ patents: [] })),
+        text: () => Promise.resolve(JSON.stringify({ patents: [], numberOfFamilies: 0 })),
       });
     }) as any;
 
-    await client.search('', {});
     const { searchPpubs } = await import('../../entities/patent/search/ppubs.js');
     await searchPpubs('crispr', {
       assignee: 'Moderna',
@@ -625,14 +767,67 @@ describe('query builders (assert exact upstream request construction)', () => {
       cpc: 'C12N15/11',
       date_range: '2020-01-01/2024-06-30',
     });
-    expect(JSON.parse(bodies[0]).query.q).toBe('');
-    expect(JSON.parse(bodies[1]).query.q).toBe(
+    expect((bodies[0] as any).query.q).toBe(
       'crispr AND (Moderna).as. AND (Hoge).in. AND (C12N15/11).cpc. AND @pd>=20200101<=20240630'
     );
+    // Default sort_by = relevance → score desc, always start: 0 (verified:
+    // server ignores `start` under score sort and pages client-side)
+    expect((bodies[0] as any).sort).toBe('score desc');
+    expect((bodies[0] as any).start).toBe(0);
+
+    await searchPpubs('crispr', { sort_by: 'recency', limit: 5, offset: 10 });
+    expect((bodies[1] as any).sort).toBe('date_publ desc');
+    expect((bodies[1] as any).start).toBe(10);
+    expect((bodies[1] as any).pageCount).toBe(5);
     client.close();
   });
 
-  test('searchOdp builds escaped Lucene with date range', async () => {
+  test('searchPpubs relevance mode slices client-side and prefers numberOfFamilies total', async () => {
+    const { PpubsClient } = await import('../../entities/patent/ppubs-client.js');
+    const client = new PpubsClient();
+    const docs = Array.from({ length: 12 }, (_, i) => ({
+      guid: `US-1102700${i}-B2`,
+      publicationReferenceDocumentNumber: `1102700${i}`,
+      type: 'USPAT',
+      inventionTitle: `Doc ${i}`,
+      score: 10 - i,
+    }));
+    global.fetch = jest.fn().mockImplementation((url: any, init?: any) => {
+      const u = String(url);
+      if (u.includes('/api/users/me/session')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'x-access-token': 'tok-1', 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ userCase: { caseId: 1 } })),
+        });
+      }
+      const body = JSON.parse(init.body);
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        text: () => Promise.resolve(JSON.stringify({
+          patents: docs.slice(0, body.pageCount),
+          totalResults: 12,
+          numberOfFamilies: 1830,
+          numFound: 12,
+        })),
+      });
+    }) as any;
+
+    const { searchPpubs } = await import('../../entities/patent/search/ppubs.js');
+    const page1 = await searchPpubs('mRNA display', { limit: 5 });
+    expect(page1.patents).toHaveLength(5);
+    expect(page1.patents[0].relevance_score).toBe(10);
+    expect(page1.total).toBe(1830);
+
+    const page2 = await searchPpubs('mRNA display', { limit: 5, offset: 5 });
+    expect(page2.patents.map(p => p.title)).toEqual(['Doc 5', 'Doc 6', 'Doc 7', 'Doc 8', 'Doc 9']);
+    client.close();
+  });
+
+  test('searchOdp AND-joins plain terms, preserves phrases, passes boolean syntax through', async () => {
     process.env.USPTO_API_KEY = 'u';
     const { connectionManager } = await import('../../connections/manager.js');
     connectionManager.closeAll();
@@ -647,17 +842,106 @@ describe('query builders (assert exact upstream request construction)', () => {
       });
     }) as any;
 
-    const { searchOdp } = await import('../../entities/patent/search/odp.js');
+    const { searchOdp, buildLuceneQueryClause } = await import('../../entities/patent/search/odp.js');
+
+    // The pain-point case: plain multi-word queries must AND-join (upstream
+    // default operator is OR — "mRNA display" matched 367k OLED patents)
+    expect(buildLuceneQueryClause('mRNA display')).toBe('(mRNA AND display)');
+    // User-quoted phrases survive verbatim
+    expect(buildLuceneQueryClause('"mRNA display"')).toBe('("mRNA display")');
+    expect(buildLuceneQueryClause('crispr "gene editing"')).toBe('(crispr AND "gene editing")');
+    // Explicit boolean/field/range syntax passes through untouched
+    expect(buildLuceneQueryClause('crispr OR cas9')).toBe('(crispr OR cas9)');
+    expect(buildLuceneQueryClause('applicationMetaData.patentNumber:"11027025"')).toBe('(applicationMetaData.patentNumber:"11027025")');
+
     await searchOdp('crispr "gene editing"', {
       assignee: 'Say "hi" Inc',
       date_range: '2023-01-01/2024-12-31',
     });
     expect(posts).toHaveLength(1);
     expect(posts[0].body.q).toBe(
-      '(crispr "gene editing") AND applicationMetaData.firstApplicantName:"Say \\"hi\\" Inc" AND applicationMetaData.filingDate:[2023-01-01 TO 2024-12-31]'
+      '(crispr AND "gene editing") AND applicationMetaData.firstApplicantName:"Say \\"hi\\" Inc" AND applicationMetaData.filingDate:[2023-01-01 TO 2024-12-31]'
     );
     expect(posts[0].body.pagination).toEqual({ offset: 0, limit: 10 });
     connectionManager.closeAll();
+  });
+
+  test('searchOps retries once on server-empty-with-total, then throws descriptive error', async () => {
+    process.env.EPO_OPS_CONSUMER_KEY = 'k';
+    process.env.EPO_OPS_CONSUMER_SECRET = 's';
+    const emptyWithTotal = () => Promise.resolve({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      text: () => Promise.resolve(JSON.stringify({
+        'ops:world-patent-data': {
+          'ops:biblio-search': {
+            '@total-result-count': '24',
+            'ops:search-result': { 'exchange-documents': { 'exchange-document': [] } },
+          },
+        },
+      })),
+    });
+    global.fetch = jest.fn()
+      .mockImplementationOnce(() => Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        text: () => Promise.resolve(JSON.stringify({ access_token: 'tok', expires_in: 1199 })),
+      }))
+      .mockImplementationOnce(emptyWithTotal as any)
+      .mockImplementationOnce(emptyWithTotal as any) as any;
+
+    const { searchOps } = await import('../../entities/patent/search/ops.js');
+    await expect(searchOps('crispr', { limit: 5 })).rejects.toThrow(/reported 24 total results but returned no documents/);
+    // token call + two search attempts (retry uses the same Range)
+    const searchCalls = (global.fetch as any).mock.calls.filter((c: any[]) => String(c[0]).includes('search/biblio'));
+    expect(searchCalls).toHaveLength(2);
+    expect(String(searchCalls[0][0])).toBe(String(searchCalls[1][0]));
+    (await import('../../entities/patent/ops-client.js')).opsClient.close();
+  });
+
+  test('searchOps: client-side filtered-to-empty is a valid empty result (no throw)', async () => {
+    process.env.EPO_OPS_CONSUMER_KEY = 'k';
+    process.env.EPO_OPS_CONSUMER_SECRET = 's';
+    const hit = {
+      '@country': 'US', '@doc-number': '11027025', '@kind': 'B2',
+      'bibliographic-data': {
+        'publication-reference': {
+          'document-id': [
+            { '@document-id-type': 'docdb', date: { '$': '20210608' } },
+          ],
+        },
+      },
+    };
+    global.fetch = jest.fn()
+      .mockImplementationOnce(() => Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        text: () => Promise.resolve(JSON.stringify({ access_token: 'tok', expires_in: 1199 })),
+      }))
+      .mockImplementation(() => Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        text: () => Promise.resolve(JSON.stringify({
+          'ops:world-patent-data': {
+            'ops:biblio-search': {
+              '@total-result-count': '24',
+              'ops:search-result': { 'exchange-documents': { 'exchange-document': hit } },
+            },
+          },
+        })),
+      })) as any;
+
+    const { searchOps } = await import('../../entities/patent/search/ops.js');
+    // date_range excludes the only doc → empty patents, no error, single fetch
+    const result = await searchOps('crispr', { date_range: '1990-01-01/1990-12-31' });
+    expect(result.patents).toEqual([]);
+    const searchCalls = (global.fetch as any).mock.calls.filter((c: any[]) => String(c[0]).includes('search/biblio'));
+    expect(searchCalls).toHaveLength(1);
+    (await import('../../entities/patent/ops-client.js')).opsClient.close();
   });
 
   test('searchOps builds grouped CQL (precedence-safe) and asserts auth headers', async () => {
@@ -683,7 +967,16 @@ describe('query builders (assert exact upstream request construction)', () => {
           'ops:world-patent-data': {
             'ops:biblio-search': {
               '@total-result-count': '7',
-              'ops:search-result': { 'exchange-documents': { 'exchange-document': [] } },
+              'ops:search-result': {
+                'exchange-documents': {
+                  'exchange-document': {
+                    '@country': { '$': 'US' },
+                    '@doc-number': { '$': '11027025' },
+                    '@kind': { '$': 'B2' },
+                    'bibliographic-data': {},
+                  },
+                },
+              },
             },
           },
         })),
@@ -767,6 +1060,223 @@ describe('fetchPpubsClaims splitting', () => {
     expect(claims.claims[0]).toBe('1. A composition.');
     expect(claims.claims[1]).toBe('2. The composition of claim 1.');
     client.close();
+  });
+
+  test('num= markup WITHOUT inline numbering still splits (pins the num-div path itself)', async () => {
+    const { PpubsClient } = await import('../../entities/patent/ppubs-client.js');
+    const client = new PpubsClient();
+    global.fetch = jest.fn().mockImplementation((url: any) => {
+      const u = String(url);
+      if (u.includes('/api/users/me/session')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'x-access-token': 'tok-1', 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ userCase: { caseId: 1 } })),
+        });
+      }
+      if (u.includes('/api/searches/searchWithBeFamily')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({
+            patents: [{ guid: 'US-6261804-B1', type: 'USPAT' }],
+          })),
+        });
+      }
+      if (u.includes('/api/patents/highlight/')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({
+            guid: 'US-6261804-B1',
+            type: 'USPAT',
+            claimsHtml: '<div class="claims"><div num="1" class="claim"><div class="claim-text">A composition comprising a peptide library.</div></div><div num="2" class="claim"><div class="claim-text">A method of screening the library.</div></div></div>',
+          })),
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${u}`));
+    }) as any;
+
+    const { fetchPpubsClaims } = await import('../../entities/patent/detail/ppubs.js');
+    const claims = await fetchPpubsClaims('US6261804B1');
+    // If the num-div splitter regresses, these divs have no inline "N." text,
+    // so the text-split fallback cannot rescue them — this assertion fails.
+    expect(claims.claims).toEqual([
+      '1. A composition comprising a peptide library.',
+      '2. A method of screening the library.',
+    ]);
+    expect(claims.number_of_claims).toBe(2);
+    expect(claims._warn).toBeUndefined();
+    client.close();
+  });
+
+  test('splits CLM-id markup when num= attributes are absent', async () => {
+    const { PpubsClient } = await import('../../entities/patent/ppubs-client.js');
+    const client = new PpubsClient();
+    global.fetch = jest.fn().mockImplementation((url: any, init?: any) => {
+      const u = String(url);
+      if (u.includes('/api/users/me/session')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'x-access-token': 'tok-1', 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ userCase: { caseId: 1 } })),
+        });
+      }
+      if (u.includes('/api/searches/searchWithBeFamily')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({
+            patents: [{ guid: 'US-6261804-B1', type: 'USPAT' }],
+          })),
+        });
+      }
+      if (u.includes('/api/patents/highlight/')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({
+            guid: 'US-6261804-B1',
+            type: 'USPAT',
+            claimsHtml: '<div class="claims"><div id="CLM-00001" class="claim">A fusion protein.</div><div id="CLM-00002" class="claim">An isolated nucleic acid encoding the protein of claim 1.</div></div>',
+          })),
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${u}`));
+    }) as any;
+
+    const { fetchPpubsClaims } = await import('../../entities/patent/detail/ppubs.js');
+    const claims = await fetchPpubsClaims('US6261804B1');
+    expect(claims.claims).toEqual([
+      '1. A fusion protein.',
+      '2. An isolated nucleic acid encoding the protein of claim 1.',
+    ]);
+    expect(claims.number_of_claims).toBe(2);
+    expect(claims._warn).toBeUndefined();
+    client.close();
+  });
+
+  test('splits unmarked claimsHtml via sequential text markers; references do not split claims', async () => {
+    const { PpubsClient } = await import('../../entities/patent/ppubs-client.js');
+    const client = new PpubsClient();
+    global.fetch = jest.fn().mockImplementation((url: any) => {
+      const u = String(url);
+      if (u.includes('/api/users/me/session')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'x-access-token': 'tok-1', 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ userCase: { caseId: 1 } })),
+        });
+      }
+      if (u.includes('/api/searches/searchWithBeFamily')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({
+            patents: [{ guid: 'US-6261804-B1', type: 'USPAT' }],
+          })),
+        });
+      }
+      if (u.includes('/api/patents/highlight/')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({
+            guid: 'US-6261804-B1',
+            type: 'USPAT',
+            claimsHtml: '<p>1. A composition comprising a peptide. 2. The composition of claim 1. 3. A method of screening. 4. The method of claim 3.</p>',
+          })),
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${u}`));
+    }) as any;
+
+    const { fetchPpubsClaims } = await import('../../entities/patent/detail/ppubs.js');
+    const claims = await fetchPpubsClaims('US6261804B1');
+    expect(claims.claims).toHaveLength(4);
+    expect(claims.claims[0]).toBe('1. A composition comprising a peptide.');
+    expect(claims.claims[2]).toBe('3. A method of screening.');
+    expect(claims.number_of_claims).toBe(4);
+    expect(claims._warn).toBeUndefined();
+    client.close();
+  });
+
+  test('unsplittable blob: single block + _warn; number_of_claims trusts upstream or undefined (never bogus 1)', async () => {
+    const { PpubsClient } = await import('../../entities/patent/ppubs-client.js');
+    const client = new PpubsClient();
+    let docCount: number | null = 12; // first call: upstream count present
+    global.fetch = jest.fn().mockImplementation((url: any) => {
+      const u = String(url);
+      if (u.includes('/api/users/me/session')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'x-access-token': 'tok-1', 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ userCase: { caseId: 1 } })),
+        });
+      }
+      if (u.includes('/api/searches/searchWithBeFamily')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({
+            patents: [{ guid: 'US-6261804-B1', type: 'USPAT' }],
+          })),
+        });
+      }
+      if (u.includes('/api/patents/highlight/')) {
+        const numberOfClaims = docCount;
+        docCount = null; // second call: upstream count absent
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({
+            guid: 'US-6261804-B1',
+            type: 'USPAT',
+            numberOfClaims,
+            claimsHtml: '<p>What is claimed is a continuous narrative without any numbering markers.</p>',
+          })),
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${u}`));
+    }) as any;
+
+    const { fetchPpubsClaims } = await import('../../entities/patent/detail/ppubs.js');
+    const withUpstream = await fetchPpubsClaims('US6261804B1');
+    expect(withUpstream.claims).toHaveLength(1);
+    expect(withUpstream.number_of_claims).toBe(12);
+    expect(withUpstream._warn).toContain('could not be split');
+
+    const withoutUpstream = await fetchPpubsClaims('US6261804B1');
+    expect(withoutUpstream.number_of_claims).toBeUndefined();
+    expect(withoutUpstream._warn).toContain('could not be split');
+    client.close();
+  });
+
+  test('splitPlainTextClaims unit: adjacency and reference immunity', async () => {
+    const { splitPlainTextClaims } = await import('../../entities/patent/detail/ppubs.js');
+    // adjacent markers with no space between period and next digit start
+    expect(splitPlainTextClaims('1. First claim. 2. Second claim. 3. Third.')).toEqual([
+      '1. First claim.',
+      '2. Second claim.',
+      '3. Third.',
+    ]);
+    // reference "of claim 1." must not break the sequence
+    expect(splitPlainTextClaims('1. Base. 2. Dependent of claim 1. 3. Method.')).toHaveLength(3);
+    // no believable sequence
+    expect(splitPlainTextClaims('A narrative with no claim markers at all.')).toBeNull();
+    expect(splitPlainTextClaims('99. Only one marker.')).toBeNull();
   });
 });
 
@@ -861,6 +1371,16 @@ describe('patentGet orchestration (chains)', () => {
     const { patentGet } = await import('../../entities/patent/detail/index.js');
     const result = await patentGet('US11027025B2', ['nonsense_section' as string]);
     expect(result.sections?.nonsense_section).toEqual({ error: expect.stringContaining('Unknown section') });
+  });
+
+  test('applyLimit slices only the claims array, never number_of_claims', async () => {
+    const { applyLimit } = await import('../../server/tools/utils.js');
+    const sections: Record<string, unknown> = {
+      claims: { claims: ['a', 'b', 'c'], number_of_claims: 3, source: 'ppubs' },
+    };
+    applyLimit(sections, ['claims'], {}, { claims: ['claims'] }, 2);
+    expect((sections.claims as any).claims).toEqual(['a', 'b']);
+    expect((sections.claims as any).number_of_claims).toBe(3);
   });
 
   test("'all' expands to every section", async () => {

@@ -44,11 +44,31 @@ patent/
 | Google Patents | none | worldwide | `google_patents` connection + Wayback fallback |
 
 `patentSearch` auto-selects: worldwide = OPS (if creds) else Google Patents
-(breaker-gated); US = ODP (if key) else PPUBS. With OPS configured, Google
-Patents search is opt-in only (`source: 'google_patents'`) — Google
-hard-IP-blocks automated clients (verified: 503 block page lasting 24h+), so
-it is never load-bearing. A failed backend appends a `{ _error }` element to
-results instead of failing the search.
+(breaker-gated); US = PPUBS always. PPUBS is keyless, full-text, and
+relevance-ranked (`sort: 'score desc'` by default — `sort_by: 'recency'`
+switches to `date_publ desc`), which makes it the right default for
+conceptual queries; USPTO ODP is bibliographic-only (file-wrapper metadata)
+and is opt-in via `source: 'uspto_odp'` (useful for inventor/CPC/continuity-
+rich metadata lookups). With OPS configured, Google Patents search is
+opt-in only (`source: 'google_patents'`) — Google hard-IP-blocks automated
+clients (verified: 503 block page lasting 24h+), so it is never load-bearing
+and there is no OPS→Google fallback. When the default PPUBS backend fails
+hard (never on 0 hits) and a USPTO ODP key exists, one budget-guarded retry
+(≤12s elapsed) runs on ODP and its results are tagged with a `{ _note }`
+provenance marker. A failed backend appends a `{ _error }` element to
+results instead of failing the search; a clean 0-hit search appends a
+`{ _hint }` with refinement guidance. Marker elements (`_error`/`_note`/
+`_hint`) never count toward `limit` or `total_hits`, and the response
+carries `total_hits_basis` documenting each backend's counting semantics.
+
+Federated results are deduplicated by publication number and, when any
+backend supplied `relevance_score` (ppubs `score desc`), re-ordered by score
+descending with unscored backends' results after. Queries with explicit
+boolean/Lucene syntax pass through verbatim on ODP; plain multi-word queries
+are AND-joined there (the upstream default operator is OR, which produced
+367k noise hits for "mRNA display"). EPO OPS retries once when it reports
+`total > 0` but returns an empty document array (observed live: "24 total
+hits, empty results").
 
 `patentGet` sections run per-section priority chains with auth-aware silent
 skip and fall-through (24s per source step; claims get 30s):
@@ -120,6 +140,18 @@ source code. Kept here so future maintainers don't re-verify from scratch.
 - Search: `POST /api/searches/searchWithBeFamily` with the exact template in
   `ppubs-client.ts` — one wrong key (e.g. `showDocFamilyPref` instead of
   `showDocPerFamilyPref`) returns HTTP 500. The counts call is NOT required.
+- **Sort (verified 2026-08-23): the `sort` body key is REQUIRED** — omitted
+  or empty → HTTP 400. Valid values: `'score desc'` (relevance; adds a
+  `score` field per patent record) and `'date_publ desc'` (recency).
+  `'relevance'` → HTTP 500 (invalid). Under `score desc` the server returns
+  one bounded top-N batch (observed 12–24 docs regardless of `pageCount`)
+  and **ignores `start`** — the webapp pages client-side
+  (`CUSTOM_SORT_PAGE_SIZE`), so relevance mode always fetches from `start: 0`
+  and slices `[offset, offset+limit)` locally.
+- **Count fields (verified): `numberOfFamilies` is the stable match count**
+  (e.g. 88,262 families for unquoted `mRNA display`); `totalResults` and
+  `numFound` are window/batch sizes that vary with sort mode (24 under
+  `score desc`) — never report them as the match count.
 - Field syntax: `("11027025").pn.`, `(pfizer).as.`, `(smith).in.`,
   `(C12N15/11).cpc.` (**full CPC symbols only** — truncated symbols silently
   return 0); dates `@pd>=YYYYMMDD<=YYYYMMDD`, `@ad>=`; combine as free-text +

@@ -12,6 +12,8 @@ interface PpubsRecord {
   cpcInventiveFlattened?: string | null;
   ipcCodeFlattened?: string | null;
   applicationFilingDate?: string[];
+  /** Solr relevance score, present when sorted with `score desc`. */
+  score?: number | null;
 }
 
 function firstDate(v: string[] | undefined): string | undefined {
@@ -43,6 +45,7 @@ export function transformPpubsResult(record: PpubsRecord): PatentSearchResult {
     applicant: record.applicantName?.filter(Boolean).length ? record.applicantName!.filter(Boolean) : undefined,
     cpc_codes: cpc.length > 0 ? cpc.slice(0, 10) : undefined,
     status,
+    relevance_score: typeof record.score === 'number' ? record.score : undefined,
     source: 'ppubs',
   };
 }
@@ -75,26 +78,47 @@ export async function searchPpubs(
   options: PatentSearchOptions = {}
 ): Promise<{ patents: PatentSearchResult[]; total?: number }> {
   const q = buildPpubsQuery(query, options);
-  const resp = await ppubsClient.search(q, {
-    start: options.offset ?? 0,
-    pageCount: options.limit ?? 10,
-    databases: databasesFor(options.status),
-  });
+  const relevance = (options.sort_by ?? 'relevance') === 'relevance';
+  const limit = options.limit ?? 10;
+  const offset = options.offset ?? 0;
+
+  // Verified upstream behavior: under `score desc` the server returns one
+  // bounded top-N batch and ignores `start` (the webapp pages client-side),
+  // so relevance mode always fetches from 0 and slices [offset, offset+limit)
+  // locally. Recency mode keeps server-side `start` paging.
+  const resp = relevance
+    ? await ppubsClient.search(q, {
+        start: 0,
+        pageCount: Math.min(offset + limit, 100),
+        databases: databasesFor(options.status),
+        sort: 'score desc',
+      })
+    : await ppubsClient.search(q, {
+        start: offset,
+        pageCount: limit,
+        databases: databasesFor(options.status),
+        sort: 'date_publ desc',
+      });
 
   if (resp.status !== 200) {
     throw new Error(`USPTO Public Search failed: HTTP ${resp.status} ${resp.body.slice(0, 200)}`);
   }
 
-  let parsed: { patents?: PpubsRecord[]; totalResults?: number; numFound?: number };
+  let parsed: { patents?: PpubsRecord[]; totalResults?: number; numFound?: number; numberOfFamilies?: number };
   try {
     parsed = JSON.parse(resp.body);
   } catch {
     throw new Error('USPTO Public Search returned malformed JSON.');
   }
 
-  const records = parsed.patents || [];
+  let records = parsed.patents || [];
+  if (relevance) {
+    records = records.slice(offset, offset + limit);
+  }
+  // numberOfFamilies is the stable match count; totalResults/numFound are
+  // window sizes that vary with sort mode.
   return {
     patents: records.map(transformPpubsResult),
-    total: parsed.totalResults ?? parsed.numFound,
+    total: parsed.numberOfFamilies ?? parsed.totalResults ?? parsed.numFound,
   };
 }

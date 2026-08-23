@@ -149,24 +149,40 @@ export async function searchOps(
   const cql = buildCql(query, options);
   const path = `/published-data/search/biblio?q=${encodeURIComponent(cql)}&Range=${begin}-${end}`;
 
-  const resp = await opsClient.get(path);
-  if (resp.status !== 200) {
-    throw new Error(`EPO OPS search failed: HTTP ${resp.status} ${resp.body.slice(0, 200)}`);
-  }
+  const fetchPage = async (): Promise<{ total?: number; docs: BadgerFish[] }> => {
+    const resp = await opsClient.get(path);
+    if (resp.status !== 200) {
+      throw new Error(`EPO OPS search failed: HTTP ${resp.status} ${resp.body.slice(0, 200)}`);
+    }
+    let parsed: BadgerFish;
+    try {
+      parsed = JSON.parse(resp.body);
+    } catch {
+      throw new Error('EPO OPS search returned malformed JSON.');
+    }
+    const world = (parsed['ops:world-patent-data'] || {}) as BadgerFish;
+    const biblioSearch = (world['ops:biblio-search'] || {}) as BadgerFish;
+    const total = Number(biblioSearch['@total-result-count']) || undefined;
+    const searchResult = (biblioSearch['ops:search-result'] || {}) as BadgerFish;
+    const exchangeDocs = (searchResult['exchange-documents'] || {}) as BadgerFish;
+    const docs = asArray(exchangeDocs['exchange-document'] as BadgerFish[]);
+    return { total, docs };
+  };
 
-  let parsed: BadgerFish;
-  try {
-    parsed = JSON.parse(resp.body);
-  } catch {
-    throw new Error('EPO OPS search returned malformed JSON.');
+  // Server-side inconsistency (observed live): total-result-count > 0 while
+  // the exchange-document array is empty. Retry the exact same Range once;
+  // a persistent mismatch is surfaced as an error instead of a silent
+  // "24 total hits, empty results".
+  let { total, docs } = await fetchPage();
+  if ((total ?? 0) > 0 && docs.length === 0) {
+    ({ total, docs } = await fetchPage());
+    if (docs.length === 0) {
+      throw new Error(
+        `EPO OPS reported ${total} total results but returned no documents for range ${begin}-${end} (retry failed). ` +
+        'Try source "ppubs" for US full-text search.',
+      );
+    }
   }
-
-  const world = (parsed['ops:world-patent-data'] || {}) as BadgerFish;
-  const biblioSearch = (world['ops:biblio-search'] || {}) as BadgerFish;
-  const total = Number(biblioSearch['@total-result-count']) || undefined;
-  const searchResult = (biblioSearch['ops:search-result'] || {}) as BadgerFish;
-  const exchangeDocs = (searchResult['exchange-documents'] || {}) as BadgerFish;
-  const docs = asArray(exchangeDocs['exchange-document'] as BadgerFish[]);
 
   let patents = docs.map(transformOpsSearchHit);
 

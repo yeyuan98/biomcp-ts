@@ -21,11 +21,15 @@ export function registerPatentTools(server: McpServer): void {
     {
       description:
         'Search patents worldwide (US, EP, WO, JP, and 100+ authorities). ' +
-        'Backends are auto-selected: EPO OPS (worldwide, needs EPO_OPS_CONSUMER_KEY/EPO_OPS_CONSUMER_SECRET) + ' +
-        'USPTO ODP (US, needs USPTO_API_KEY) or keyless fallbacks (USPTO Public Search, Google Patents best-effort). ' +
-        'Pass source to force a specific backend: "ops", "uspto_odp", "ppubs", "google_patents".',
+        'Quote exact multi-word concepts (e.g. "mRNA display") to avoid off-topic matches. ' +
+        'Backend characters: ppubs = USPTO Public Search full-text conceptual search (US only, keyless, relevance-ranked; default US backend) | ' +
+        'ops = EPO OPS worldwide bibliographic search over titles/abstracts (needs EPO_OPS_CONSUMER_KEY/EPO_OPS_CONSUMER_SECRET) | ' +
+        'uspto_odp = US application metadata, bibliographic only but inventor/CPC/continuity-rich (needs USPTO_API_KEY) | ' +
+        'google_patents = worldwide best-effort (often unavailable). ' +
+        'Auto mode queries worldwide + ppubs concurrently; if ppubs fails hard it falls back to uspto_odp once (tagged with _note). ' +
+        'Pass source to force a specific backend. Results are ranked by relevance by default (ppubs sort_by).',
       inputSchema: {
-        query: z.string().describe('Free-text query, e.g. "crispr cas9"'),
+        query: z.string().describe('Free-text query; quote exact multi-word concepts like "mRNA display" for precise matching'),
         assignee: z.string().optional().describe('Filter by assignee/applicant organization, e.g. "Moderna"'),
         inventor: z.string().optional().describe('Filter by inventor name'),
         cpc: z.string().optional().describe('Filter by CPC classification symbol (full symbol, e.g. "C12N15/11")'),
@@ -34,13 +38,16 @@ export function registerPatentTools(server: McpServer): void {
         limit: z.number().int().min(1).max(50).default(10).describe('Maximum results'),
         offset: z.number().int().min(0).default(0).describe('Result offset for pagination'),
         source: z.enum(['ops', 'uspto_odp', 'ppubs', 'google_patents']).optional().describe('Force a specific backend'),
+        sort_by: z.enum(['relevance', 'recency'])
+          .optional()
+          .describe('Result ranking: "relevance" (default, conceptual match ranking) or "recency" (newest first). Currently affects the ppubs backend only'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async ({ query, assignee, inventor, cpc, status, date_range, limit, offset, source }) => {
+    async ({ query, assignee, inventor, cpc, status, date_range, limit, offset, source, sort_by }) => {
       try {
         const response = await withToolTimeout(
-          patentSearch(query, { assignee, inventor, cpc, status, date_range, limit, offset, source }),
+          patentSearch(query, { assignee, inventor, cpc, status, date_range, limit, offset, source, sort_by }),
           SEARCH_TIMEOUT_MS,
         );
         return { content: [{ type: 'text', text: JSON.stringify(response) }] };

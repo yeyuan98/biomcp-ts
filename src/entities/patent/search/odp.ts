@@ -1,6 +1,7 @@
 import { connectionManager } from '../../../connections/manager.js';
 import { RestConnection } from '../../../connections/rest.js';
 import type { PatentSearchOptions, PatentSearchResult } from '../types.js';
+import { hasExplicitBooleanSyntax, parseQueryTerms, escapeLuceneTerm } from './query.js';
 
 export function hasOdpKey(): boolean {
   return !!process.env.USPTO_API_KEY;
@@ -55,9 +56,26 @@ export function transformOdpWrapper(wrapper: OdpWrapper): PatentSearchResult {
   };
 }
 
+/**
+ * Free-text clause for ODP Lucene. Plain term lists are AND-joined (the
+ * upstream default operator is OR, which turns "mRNA display" into 367k
+ * noise hits) and user-quoted phrases are preserved verbatim. Queries that
+ * already carry explicit boolean/field/range syntax pass through untouched.
+ */
+export function buildLuceneQueryClause(query: string): string {
+  const trimmed = query.trim();
+  if (!trimmed) return '';
+  if (hasExplicitBooleanSyntax(trimmed)) return `(${trimmed})`;
+  const tokens = parseQueryTerms(trimmed).map(t =>
+    t.phrase ? `"${t.text.replace(/"/g, '\\"')}"` : escapeLuceneTerm(t.text),
+  );
+  return tokens.length > 0 ? `(${tokens.join(' AND ')})` : '';
+}
+
 function buildLucene(query: string, options: PatentSearchOptions): string {
   const clauses: string[] = [];
-  if (query.trim()) clauses.push(`(${query.trim()})`);
+  const freeText = buildLuceneQueryClause(query);
+  if (freeText) clauses.push(freeText);
   if (options.assignee) clauses.push(`applicationMetaData.firstApplicantName:"${options.assignee.replace(/"/g, '\\"')}"`);
   if (options.inventor) clauses.push(`applicationMetaData.firstInventorName:"${options.inventor.replace(/"/g, '\\"')}"`);
   if (options.date_range) {

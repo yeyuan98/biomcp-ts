@@ -2,6 +2,8 @@ export type PatentSource = 'ops' | 'uspto_odp' | 'ppubs' | 'google_patents';
 
 export type PatentStatus = 'granted' | 'application';
 
+export type PatentSortBy = 'relevance' | 'recency';
+
 export interface PatentSearchOptions {
   source?: PatentSource;
   assignee?: string;
@@ -11,6 +13,7 @@ export interface PatentSearchOptions {
   date_range?: string;
   limit?: number;
   offset?: number;
+  sort_by?: PatentSortBy;
 }
 
 export interface PatentSearchResult {
@@ -26,14 +29,19 @@ export interface PatentSearchResult {
   cpc_codes?: string[];
   status?: PatentStatus;
   language?: string;
+  relevance_score?: number;
   source: PatentSource;
   also_found_in?: PatentSource[];
   _error?: string;
+  _note?: string;
+  _hint?: string;
 }
 
 export interface PatentSearchResponse {
   patents: PatentSearchResult[];
   total_hits?: Partial<Record<PatentSource, number>>;
+  /** Documents what each backend's total_hits number counts (per-backend semantics differ). */
+  total_hits_basis?: Partial<Record<PatentSource, string>>;
 }
 
 export interface PatentCitationEntry {

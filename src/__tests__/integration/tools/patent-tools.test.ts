@@ -46,6 +46,34 @@ describe('patent_search', () => {
     expectPatentSearchResult(response);
     expect(response.patents.length).toBeLessThanOrEqual(2);
   }, 120000);
+
+  it('ranks a quoted biotech concept by relevance on ppubs (mRNA display)', async () => {
+    const response = await retryOnRateLimit(() =>
+      harness.callTool('patent_search', { query: '"mRNA display"', source: 'ppubs', limit: 5 }));
+    expectPatentSearchResult(response);
+    const real = response.patents.filter((p: Record<string, unknown>) => !p._error && !p._hint);
+    expect(real.length).toBeGreaterThan(0);
+    // On-topic hit in the top 5: the mRNA display technique concerns
+    // selecting binding proteins/peptides from mRNA libraries (tolerant matcher).
+    const titles = real.map((p: Record<string, unknown>) => String(p.title || '')).join(' | ');
+    expect(titles).toMatch(/binding prot|mrna display|aptamer|display librar|sequence/i);
+    // Relevance mode surfaces scores and a family-based match count
+    expect(real.some((p: Record<string, unknown>) => typeof p.relevance_score === 'number')).toBe(true);
+    expect(response.total_hits?.ppubs).toBeDefined();
+    expect(response.total_hits_basis?.ppubs).toContain('families');
+  }, 120000);
+
+  it('falls back to recency sort when sort_by=recency', async () => {
+    const response = await retryOnRateLimit(() =>
+      harness.callTool('patent_search', { query: 'crispr cas9', source: 'ppubs', sort_by: 'recency', limit: 3 }));
+    expectPatentSearchResult(response);
+    const dates = response.patents
+      .filter((p: Record<string, unknown>) => !p._error && !p._hint)
+      .map((p: Record<string, unknown>) => String(p.publication_date || ''));
+    expect(dates.length).toBeGreaterThan(0);
+    const sorted = [...dates].sort().reverse();
+    expect(dates).toEqual(sorted);
+  }, 120000);
 });
 
 describe('patent_get', () => {

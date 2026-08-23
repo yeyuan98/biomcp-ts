@@ -18,11 +18,18 @@ interface PpubsResponse {
   body: string;
 }
 
-function searchBody(caseId: number, q: string, start: number, pageCount: number, databases: string[]): Record<string, unknown> {
+function searchBody(
+  caseId: number,
+  q: string,
+  start: number,
+  pageCount: number,
+  databases: string[],
+  sort: string,
+): Record<string, unknown> {
   return {
     start,
     pageCount,
-    sort: 'date_publ desc',
+    sort,
     docFamilyFiltering: 'familyIdFiltering',
     searchType: 1,
     familyIdEnglishOnly: true,
@@ -159,7 +166,7 @@ export class PpubsClient {
             body = JSON.stringify(parsed);
           }
         } catch {
-          body = undefined;
+          // Non-JSON body: retry with it unchanged rather than dropping it.
         }
       }
       return this.rawRequest(method, path, { body, sessionRetried: true, rateRetried: init.rateRetried });
@@ -177,8 +184,10 @@ export class PpubsClient {
   /**
    * Run a PPUBS search. `q` uses PPUBS field syntax (e.g. `crispr AND
    * (pfizer).as.`). `databases` defaults to applications + grants + OCR.
+   * `sort` is a required upstream body key — verified values are
+   * `'score desc'` (relevance) and `'date_publ desc'` (recency; default).
    */
-  async search(q: string, options: { start?: number; pageCount?: number; databases?: string[] } = {}): Promise<PpubsResponse> {
+  async search(q: string, options: { start?: number; pageCount?: number; databases?: string[]; sort?: string } = {}): Promise<PpubsResponse> {
     const session = await this.getSession();
     const body = searchBody(
       session.caseId,
@@ -186,6 +195,7 @@ export class PpubsClient {
       options.start ?? 0,
       Math.min(options.pageCount ?? 10, 100),
       options.databases ?? ['US-PGPUB', 'USPAT', 'USOCR'],
+      options.sort ?? 'date_publ desc',
     );
     return this.rawRequest('POST', '/api/searches/searchWithBeFamily', { body: JSON.stringify(body) });
   }

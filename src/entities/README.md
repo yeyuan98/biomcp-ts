@@ -422,9 +422,9 @@ normalizePublicationNumber(input: string): string
 
 ### Search Behavior
 
-Without `source`, backends are auto-selected: worldwide = EPO OPS when credentials exist (else Google Patents, circuit-breaker gated); US = USPTO ODP when keyed (else keyless PPUBS). With OPS configured, Google Patents is opt-in only — it hard-IP-blocks automated clients (verified). Results are deduplicated by publication number (kind-code-insensitive); US records prefer official sources. A failed backend appends a `{ _error }` element rather than failing the search.
+Without `source`, backends are auto-selected: worldwide = EPO OPS when credentials exist (else Google Patents, circuit-breaker gated); US = PPUBS always (keyless, full-text, relevance-ranked via `sort_by: 'relevance' | 'recency'`, default relevance). USPTO ODP is opt-in via `source` — bibliographic only, but metadata-rich. With OPS configured, Google Patents is opt-in only — it hard-IP-blocks automated clients (verified). Results are deduplicated by publication number (kind-code-insensitive) and re-ordered by `relevance_score` when any backend supplied scores. A failed backend appends a `{ _error }` element rather than failing the search; a hard ppubs failure falls back to uspto_odp once (budget-guarded, tagged `{ _note }`); clean 0-hit searches append a `{ _hint }`. Markers never count toward `limit`/`total_hits`, and `total_hits_basis` documents each backend's counting semantics.
 
-PPUBS queries combine free text with parenthesized field filters (`(pfizer).as.`, `(C12N15/11).cpc.` — full CPC symbols only); ODP uses Lucene (`applicationMetaData.patentNumber:"..."`, `.filingDate:[a TO b]`); OPS uses CQL (`ti=`, `pa=`, `cpc=`, `ct=`).
+PPUBS queries combine free text with parenthesized field filters (`(pfizer).as.`, `(C12N15/11).cpc.` — full CPC symbols only); ODP uses Lucene with plain terms AND-joined and explicit boolean syntax passed through verbatim (`applicationMetaData.patentNumber:"..."`, `.filingDate:[a TO b]`); OPS uses CQL (`ti=`, `pa=`, `cpc=`, `ct=`).
 
 ### Sections (per-section priority chains, auth-aware)
 
