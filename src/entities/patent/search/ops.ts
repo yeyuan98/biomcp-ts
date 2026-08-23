@@ -131,6 +131,24 @@ export function transformOpsSearchHit(doc: BadgerFish): PatentSearchResult {
   };
 }
 
+/**
+ * OPS returns `exchange-documents` in (at least) two shapes — verified live:
+ * `{"exchange-document": [doc, …]}` and a LIST of wrapped single-key objects
+ * `[{"exchange-document": doc}, …]` (observed for ti+ab queries; the second
+ * shape was silently discarded, causing "24 total hits, 0 documents").
+ * Normalize both to a flat doc array.
+ */
+export function normalizeExchangeDocuments(exchangeDocs: BadgerFish): BadgerFish[] {
+  const inner = exchangeDocs['exchange-document'];
+  if (inner !== undefined) return asArray(inner as BadgerFish | BadgerFish[]);
+  if (Array.isArray(exchangeDocs)) {
+    return exchangeDocs
+      .map(entry => (entry && typeof entry === 'object' ? (entry as BadgerFish)['exchange-document'] : undefined))
+      .filter((d): d is BadgerFish => d !== undefined && d !== null);
+  }
+  return [];
+}
+
 export async function searchOps(
   query: string,
   options: PatentSearchOptions = {}
@@ -165,7 +183,7 @@ export async function searchOps(
     const total = Number(biblioSearch['@total-result-count']) || undefined;
     const searchResult = (biblioSearch['ops:search-result'] || {}) as BadgerFish;
     const exchangeDocs = (searchResult['exchange-documents'] || {}) as BadgerFish;
-    const docs = asArray(exchangeDocs['exchange-document'] as BadgerFish[]);
+    const docs = normalizeExchangeDocuments(exchangeDocs);
     return { total, docs };
   };
 

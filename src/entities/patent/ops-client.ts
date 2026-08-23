@@ -4,8 +4,56 @@ import { fetchWithTimeout } from '../../connections/fetch-utils.js';
 const OPS_BASE = 'https://ops.epo.org/3.2';
 const TOKEN_TTL_MS = 18 * 60 * 1000;
 
+const OPS_BACKOFF_MS = 15 * 60 * 1000;
+const OPS_CONSECUTIVE_FAILURES = 2;
+
 export function hasOpsCredentials(): boolean {
   return !!(process.env.EPO_OPS_CONSUMER_KEY && process.env.EPO_OPS_CONSUMER_SECRET);
+}
+
+/**
+ * Auto-mode failure memory for OPS (mirrors the Google Patents breaker).
+ * Placeholder/expired credentials or quota exhaustion otherwise burn a
+ * failed call on every federated search. 2 consecutive failures — or any
+ * auth-class failure (401/403/quota/invalid credentials), which never
+ * self-heal — exclude OPS from auto selection for 15 minutes. Any success
+ * resets the counter. Explicit `source: 'ops'` bypasses the backoff.
+ */
+const opsBackoff: { failures: number; excludedUntil: number; lastReason?: string } = {
+  failures: 0,
+  excludedUntil: 0,
+};
+
+export function isOpsBackedOff(): boolean {
+  return Date.now() < opsBackoff.excludedUntil;
+}
+
+export function opsBackoffReason(): string | undefined {
+  return isOpsBackedOff() ? opsBackoff.lastReason : undefined;
+}
+
+export function resetOpsBackoff(): void {
+  opsBackoff.failures = 0;
+  opsBackoff.excludedUntil = 0;
+  opsBackoff.lastReason = undefined;
+}
+
+const AUTH_FAILURE_RE = /HTTP 40[13]|quota|invalid credential|EPO_OPS_CONSUMER/i;
+
+export function recordOpsFailure(message: string): void {
+  opsBackoff.lastReason = message.slice(0, 200);
+  if (AUTH_FAILURE_RE.test(message)) {
+    opsBackoff.failures = OPS_CONSECUTIVE_FAILURES;
+  } else {
+    opsBackoff.failures++;
+  }
+  if (opsBackoff.failures >= OPS_CONSECUTIVE_FAILURES) {
+    opsBackoff.excludedUntil = Date.now() + OPS_BACKOFF_MS;
+  }
+}
+
+export function recordOpsSuccess(): void {
+  if (opsBackoff.failures > 0 || opsBackoff.excludedUntil > 0) resetOpsBackoff();
 }
 
 interface TokenState {
@@ -65,6 +113,9 @@ export class OpsClient {
 
     if (error || !data || data.status !== 200) {
       const detail = error || (data ? `HTTP ${data.status}: ${data.text.slice(0, 200)}` : 'unknown');
+      // Auth failures never self-heal — trip the auto-mode backoff from ANY
+      // call site (search chains and detail chains alike).
+      recordOpsFailure(`EPO OPS authentication failed (${detail})`);
       throw new Error(`EPO OPS authentication failed. Verify EPO_OPS_CONSUMER_KEY / EPO_OPS_CONSUMER_SECRET. (${detail})`);
     }
 

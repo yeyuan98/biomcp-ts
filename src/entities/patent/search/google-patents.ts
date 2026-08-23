@@ -22,6 +22,26 @@ function tripBreaker(): void {
   breaker = { openedAt: Date.now() };
 }
 
+/**
+ * Network-level failures (proxy-less blocked environments, DNS outages,
+ * connect timeouts) must trip the breaker just like HTTP 503/429 blocks —
+ * verified live: without this, "fetch failed" repeated on every search
+ * forever, appending a fresh _error marker each round.
+ */
+const NETWORK_ERROR_RE = /fetch failed|ETIMEDOUT|ENETUNREACH|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket hang up/i;
+
+export function isNetworkError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const cause = (err.cause as { code?: string } | undefined)?.code ?? '';
+  return NETWORK_ERROR_RE.test(err.message) || NETWORK_ERROR_RE.test(cause);
+}
+
+export function breakerRemainingMinutes(): number {
+  if (!isGooglePatentsBlocked()) return 0;
+  const elapsed = Date.now() - breaker!.openedAt;
+  return Math.max(1, Math.ceil((BREAKER_OPEN_MS - elapsed) / 60_000));
+}
+
 function stripHtml(s: string | undefined): string | undefined {
   if (!s) return undefined;
   return s
@@ -100,7 +120,10 @@ export async function searchGooglePatents(
   options: PatentSearchOptions = {}
 ): Promise<{ patents: PatentSearchResult[]; total?: number }> {
   if (isGooglePatentsBlocked()) {
-    throw new Error('Google Patents is temporarily unavailable (rate-limit block detected). Try EPO OPS (ops), USPTO ODP (uspto_odp), or PPUBS (ppubs) sources instead.');
+    throw new Error(
+      `Google Patents is temporarily unavailable (rate-limit block or network unreachable detected; circuit open, ~${breakerRemainingMinutes()} min remaining). ` +
+      'Try EPO OPS (ops), USPTO ODP (uspto_odp), or PPUBS (ppubs) sources instead.',
+    );
   }
 
   const conn = connectionManager.getConnection('google_patents');
@@ -112,7 +135,7 @@ export async function searchGooglePatents(
     raw = await conn.request(path);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes('HTTP 503') || msg.includes('HTTP 429')) {
+    if (msg.includes('HTTP 503') || msg.includes('HTTP 429') || isNetworkError(err)) {
       tripBreaker();
     }
     throw err;

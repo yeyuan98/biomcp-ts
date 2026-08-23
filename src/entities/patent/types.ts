@@ -55,6 +55,7 @@ export interface PatentSearchResponse {
 export interface PatentSeminalEntry {
   publication_number: string;
   title?: string;
+  assignee?: string;
   co_cited_by: number;
   cited_by: string[];
   note?: string;

@@ -75,41 +75,57 @@ hits, empty results").
 ## Seminal Prior-Art Discovery (`search/seminal.ts`, default on)
 
 Foundational prior art whose vocabulary predates the query concept can never
-be retrieved by text matching — verified: US6261804B1 (Szostak, "Selection
-of proteins using RNA-protein fusions") contains "mRNA display" zero times
-and is absent from the entire relevance batch, but the top granted hits for
-`"mRNA display"` all cite it as `WO98/56915`. Co-citation mining closes that
-gap: it runs its own PPUBS relevance search (`pageCount` 100 — the score-desc
-batch scales with `pageCount`), fetches the backward references
-(`usRefPatentNumber`/`foreignRefPatentNumber`) of the first 8 granted docs
-concurrently (the client rate limiter paces them), and surfaces references
-cited by ≥ max(3, ⌈0.4·mined⌉) of them as `seminal_prior_art` (cap 5),
-excluding anything already on the visible page.
+be retrieved by text matching — verified: the Szostak mRNA-display family
+("Selection of proteins using RNA-protein fusions", US6261804B1 et al.)
+contains "mRNA display" zero times and is absent from the entire relevance
+batch. Co-citation mining closes that gap:
 
-Citation strings arrive in wildly variant raw forms (`WO98/56915`,
-`9856915`, `WO-2014180569`, `2015/103037`, `90/02809`, `5,034,506`);
-`parsePatentRef` canonicalizes to `{country, year, serial}` keys with WO
-year expansion — bare/slash numbers are WO forms on the foreign ref list and
-US numbers on the US list (lists are disjoint, so no cross-merge).
+1. Own PPUBS relevance search (`pageCount` 100 — the score-desc batch scales
+   with `pageCount`).
+2. **Diversity sampling**: up to 10 granted docs, max 2 per assignee.
+   Naive top-N mining fails on real data — one patent family's 4+ top hits
+   block-cite a 30+ reference blob that drowns foundational art (Szostak
+   PCT WO98/31700: count 2/8 naive vs 4 across 3 distinct assignees
+   diversity-sampled — rank #1).
+3. Backward references (`usRef*`/`foreignRef*`) fetched concurrently
+   (client rate limiter paces them); refs counted per canonical key
+   (`parsePatentRef` handles all observed raw forms: `WO98/56915`, bare
+   `9856915`, `WO-2014180569`, `2015/103037`, `90/02809`, `5,034,506`),
+   excluding anything already on the visible page.
+4. **Cross-assignee threshold**: cited by ≥ 3 sampled docs AND ≥ 2 distinct
+   assignees (single-family block-citation blobs never qualify); ranked by
+   assignee breadth then count; capped at 5 `seminal_prior_art` entries.
+5. WO→US resolution, deadline-bounded (~20 s total phase budget): EPO OPS
+   INPADOC family (earliest granted US member + title + assignee via
+   biblio) → Google Patents detail keylessly (PCT-kind variants A1/A2/
+   kindless, with **page-identity validation** — Google sometimes redirects
+   kindless WO URLs to unrelated documents, and 503-blocks shared proxy
+   exit IPs; a mismatched page is rejected) → WO display form + actionable
+   note (inventor-search fallback, patent_get pointer).
 
-With EPO OPS credentials the top ≤3 WO candidates resolve to their earliest
-granted US family member (own INPADOC parsing that keeps member dates — the
-shared `fetchOpsFamily` discards them — via classic epodoc `WO{yy}{serial}`
-with a padded 4-digit-year fallback) plus a title via `fetchOpsBiblio`.
-Keyless, candidates stay in `WO{year}/{serial}` form with an actionable
-note. The whole phase is deadline-bounded (12s, well under the 30s tool
-timeout) and failure-tolerant — it degrades to `seminal_note` hints (too few
-grants, no common refs, unquoted-query precision tip) and never breaks the
-main search. Opt out per call with `seminal: false` (fastest bibliographic
-lookups).
+`seminal: false` opts out. Failures degrade to `seminal_note` hints (too
+few grants, no common refs, unquoted-query precision tip, source
+unavailable) and never break the main search.
 
-Rejected alternatives (recorded for future maintainers): citation-weighted
-re-ranking of retrieved results and forward-citation `ct=` counting — both
-only re-rank the retrieved set, which never contains vocabulary-mismatched
-seminal art; semantic/embedding ranking — no keyless robust source (Lens
-needs a key/ToS, Google similar-docs is IP-block-prone) and heavy new
-infrastructure; the PPUBS citation-search overlay endpoint — undocumented
-internal API.
+## Proxy-aware fetch (`connections/proxy.ts`)
+
+Node's built-in fetch ignores `HTTP(S)_PROXY` env (verified live: direct
+TCP to patents.google.com / web.archive.org times out in proxied
+environments while the proxy carries them). A module-scope
+`setGlobalDispatcher(new EnvHttpProxyAgent())` (undici, in `dependencies`,
+`--external:undici` in the build) routes ALL fetch through the proxy when
+env is present and is a no-op otherwise (verified from undici source: no
+proxy env → plain Agent alias). `NO_PROXY` is honored; socks-only
+`ALL_PROXY` is not supported (http CONNECT only); Node ≥ 22.15 offers the
+zero-dependency `NODE_USE_ENV_PROXY=1` alternative. Engines floor is
+Node ≥ 20.18.1 (undici 8 requirement).
+
+Related resilience: the Google Patents search breaker now also trips on
+network errors (`fetch failed`/`ETIMEDOUT`/… — previously it retried and
+appended a fresh `_error` on every search forever); OPS auto-mode selection
+has 2-strike/15-min backoff (auth-class failures trip immediately; explicit
+`source: 'ops'` always attempts); when no worldwide backend remains, one
+`_note` explains the US-only coverage instead of silently dropping it.
 
 `patentGet` sections run per-section priority chains with auth-aware silent
 skip and fall-through (24s per source step; claims get 30s):

@@ -1,5 +1,5 @@
 import type { PatentSearchOptions, PatentSearchResponse, PatentSearchResult, PatentSource } from '../types.js';
-import { hasOpsCredentials } from '../ops-client.js';
+import { hasOpsCredentials, isOpsBackedOff, opsBackoffReason, recordOpsFailure, recordOpsSuccess, resetOpsBackoff } from '../ops-client.js';
 import { hasOdpKey } from './odp.js';
 import { isGooglePatentsBlocked } from './google-patents.js';
 import { dedupPatents } from './dedup.js';
@@ -31,17 +31,37 @@ export const TOTAL_HITS_BASIS: Record<PatentSource, string> = {
 
 /**
  * Select backends for a federated query:
- * - worldwide: EPO OPS when credentials exist; otherwise Google Patents
- *   (best-effort, circuit-breaker gated)
+ * - worldwide: EPO OPS when credentials exist and it is not in failure
+ *   backoff (placeholder/expired creds burn a call every search otherwise);
+ *   otherwise Google Patents (best-effort, circuit-breaker gated)
  * - US: PPUBS always — keyless, full-text, relevance-ranked. USPTO ODP is
  *   bibliographic (file-wrapper metadata) and therefore opt-in via `source`.
  */
 export function selectSearchBackends(options: PatentSearchOptions): PatentSource[] {
   if (options.source) return [options.source];
-  const worldwide: PatentSource[] = hasOpsCredentials()
+  const worldwide: PatentSource[] = hasOpsCredentials() && !isOpsBackedOff()
     ? ['ops']
     : (!isGooglePatentsBlocked() ? ['google_patents'] : []);
   return [...worldwide, 'ppubs'];
+}
+
+/**
+ * Human-readable explanation when auto mode has no worldwide backend left
+ * (OPS unavailable AND Google Patents breaker open) — coverage silently
+ * dropping to US-only is worse than an explicit note. Undefined when a
+ * worldwide backend (or a substitute) is still selectable.
+ */
+export function worldwideCoverageNote(): string | undefined {
+  if (hasOpsCredentials() && !isOpsBackedOff()) return undefined;
+  if (!isGooglePatentsBlocked()) return undefined; // GP substitutes for OPS
+  const reasons: string[] = [];
+  if (hasOpsCredentials() && isOpsBackedOff()) {
+    reasons.push(`ops excluded after repeated failures${opsBackoffReason() ? ` (${opsBackoffReason()})` : ''}`);
+  } else if (!hasOpsCredentials()) {
+    reasons.push('ops credentials not configured');
+  }
+  reasons.push('google_patents unreachable/blocked');
+  return `worldwide coverage unavailable (${reasons.join('; ')}); results are US-only`;
 }
 
 /**
@@ -119,9 +139,13 @@ export async function patentSearch(
     const result = settled[i];
     if (result.status === 'fulfilled') {
       record(source, result.value);
+      if (source === 'ops' && !options.source) recordOpsSuccess();
       continue;
     }
     const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+    // Feed the auto-mode failure memory (explicit `source: 'ops'` attempts
+    // always run and always report; only auto selection consults backoff).
+    if (source === 'ops' && !options.source) recordOpsFailure(message);
 
     // Failure-only fallback (never on 0 hits — those are legitimate
     // results): default ppubs → uspto_odp, once, budget-guarded. Explicit
@@ -157,6 +181,14 @@ export async function patentSearch(
   }
   for (const { source, message } of errors) {
     patents.push({ publication_number: '', _error: `Search on source '${source}' failed: ${message}`, source });
+  }
+  // Auto mode with no worldwide backend left (OPS backoff + GP breaker):
+  // say so once instead of silently returning US-only results.
+  if (!options.source) {
+    const coverageNote = worldwideCoverageNote();
+    if (coverageNote && !backends.includes('ops') && !backends.includes('google_patents')) {
+      patents.push({ publication_number: '', _note: coverageNote, source: 'ppubs' });
+    }
   }
   if (collected.length === 0 && errors.length === 0 && notes.length === 0) {
     const someMatches = Object.values(total_hits).some(t => (t ?? 0) > 0);

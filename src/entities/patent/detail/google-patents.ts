@@ -23,7 +23,11 @@ function looksLikeBlockPage(html: string): boolean {
  * aggressive clients (verified), so the fallback is mandatory.
  */
 export async function fetchGooglePatentDetail(publicationNumber: string): Promise<ParsedGooglePatent> {
-  const canonical = publicationNumber.replace(/\s+/g, '').toUpperCase();
+  // normalizePublicationNumber also strips "/" — latent 404 bug fixed:
+  // slash-form PCT numbers ("WO1998/056915") previously produced
+  // /patent/WO1998/056915/en, which 404s (Google uses WO1998056915A1).
+  const { normalizePublicationNumber } = await import('../search/dedup.js');
+  const canonical = normalizePublicationNumber(publicationNumber);
   const targetUrl = `https://patents.google.com/patent/${canonical}/en`;
 
   if (!isGooglePatentsDetailBlocked()) {

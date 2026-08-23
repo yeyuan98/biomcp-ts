@@ -84,20 +84,21 @@ describe('patent_search', () => {
     expect(Array.isArray(response.seminal_prior_art)).toBe(true);
     expect(typeof response.mined_count).toBe('number');
     if ((response.mined_count as number) >= 3) {
-      // The foundational Szostak art is co-cited by the top granted hits —
-      // as US6261804 (when OPS creds resolve the family) or its PCT
-      // WO9856915/WO1998/056915 forms (keyless). Tolerant matcher guards
-      // against live index drift.
+      // The foundational Szostak art is co-cited across assignees by the
+      // diversity-sampled top grants — resolved to a US family member
+      // (US6261804B1/US6207446B1, "Selection of proteins using RNA-protein
+      // fusions", General Hospital Corp) with OPS creds, or its PCT form
+      // WO98/31700 keylessly. Tolerant matcher guards against live drift.
       const seminal = (response.seminal_prior_art as Array<Record<string, unknown>>)
-        .map(e => `${e.publication_number} ${e.title || ''}`).join(' | ');
-      expect(seminal).toMatch(/6261804|WO.?98.?05?6915|WO1998\/056915/i);
+        .map(e => `${e.publication_number} ${e.title || ''} ${e.assignee || ''}`).join(' | ');
+      expect(seminal).toMatch(/6261804|6207446|31700|RNA-protein fusions/i);
       const szostak = (response.seminal_prior_art as Array<Record<string, unknown>>)
-        .find(e => /6261804|56915/i.test(String(e.publication_number)));
+        .find(e => /6261804|6207446|31700/i.test(String(e.publication_number)));
       expect(Number(szostak?.co_cited_by)).toBeGreaterThanOrEqual(2);
       expect(Array.isArray(szostak?.cited_by)).toBe(true);
     } else {
       // A thin pool must still be EXPLAINED, never silently empty.
-      expect(String(response.semnal_note)).toMatch(/too few|no commonly-cited|skipped|deadline/);
+      expect(String(response.seminal_note)).toMatch(/too few|no commonly-cited|skipped|deadline/);
     }
   }, 180000);
 });
@@ -175,4 +176,41 @@ odpDescribe('patent_get (USPTO ODP, keyed)', () => {
     expectPatentGetResult(result);
     expect(String(result.publication_number)).toMatch(/^US11027025/);
   }, 120000);
+});
+
+describe('patent_search resilience (live)', () => {
+  it('placeholder OPS creds: first search reports the failure, subsequent searches back off with a coverage note', async () => {
+    const { resetOpsBackoff, opsClient } = await import('../../../entities/patent/ops-client.js');
+    const savedKey = process.env.EPO_OPS_CONSUMER_KEY;
+    const savedSecret = process.env.EPO_OPS_CONSUMER_SECRET;
+    try {
+      resetOpsBackoff();
+      opsClient.close(); // drop any token cached from earlier tests
+      process.env.EPO_OPS_CONSUMER_KEY = 'placeholder-key';
+      process.env.EPO_OPS_CONSUMER_SECRET = 'placeholder-secret';
+      const first = await retryOnRateLimit(() =>
+        harness.callTool('patent_search', { query: 'crispr', limit: 3, seminal: false }));
+      // Auth failure surfaces as _error on the first search…
+      expect(first.patents.some((p: Record<string, unknown>) =>
+        String((p as any)._error || '').includes("'ops' failed"))).toBe(true);
+      // …and trips the auth-class backoff immediately.
+      const second = await retryOnRateLimit(() =>
+        harness.callTool('patent_search', { query: 'crispr', limit: 3, seminal: false }));
+      // No ops attempt (and hence no repeated ops _error) after the trip.
+      // If the worldwide substitute is also unavailable, a coverage note
+      // explains the US-only results instead (logic unit-pinned; live GP
+      // availability varies, so the note's presence is not asserted here).
+      const secondOpsError = second.patents.some((p: Record<string, unknown>) =>
+        String((p as any)._error || '').includes("'ops' failed"));
+      expect(secondOpsError).toBe(false);
+      // Still returns real ppubs results regardless of worldwide status.
+      expect(second.patents.some((p: Record<string, unknown>) =>
+        !(p as any)._error && !(p as any)._note && !(p as any)._hint)).toBe(true);
+    } finally {
+      process.env.EPO_OPS_CONSUMER_KEY = savedKey;
+      process.env.EPO_OPS_CONSUMER_SECRET = savedSecret;
+      resetOpsBackoff();
+      opsClient.close();
+    }
+  }, 180000);
 });

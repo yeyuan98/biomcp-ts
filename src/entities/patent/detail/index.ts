@@ -263,7 +263,12 @@ export async function patentGet(
 
   const coreOutcome = await runChain(chains.core, SECTION_TIMEOUT_MS * 3);
   if (coreOutcome.error || coreOutcome.value === undefined) {
-    throw new Error(`Patent '${normalized}' could not be fetched: ${coreOutcome.error}`);
+    const pointer = /^US/i.test(normalized)
+      ? ''
+      : ' Non-US publications need EPO OPS credentials (EPO_OPS_CONSUMER_KEY/EPO_OPS_CONSUMER_SECRET) or Google Patents reachability; PCT numbers (WO…) can also be patent_searched to find their US national-phase members or citing art.';
+    throw new Error(
+      `Patent '${normalized}' could not be fetched: ${coreOutcome.error}.${pointer}`,
+    );
   }
 
   const result = coreOutcome.value as PatentResult;

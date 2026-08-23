@@ -179,13 +179,15 @@ describe('seminal prior-art mining', () => {
   }
 
   // Real PPUBS shapes captured live on 2026-08-23 for "mRNA display".
+  // assigneeName matters: mining uses diversity sampling (max 2 docs per
+  // assignee) and cross-assignee co-citation ranking.
   const POOL_GRANTS = [
-    { guid: 'US-9347058-B2', type: 'USPAT', publicationReferenceDocumentNumber: '9347058', inventionTitle: 'Methods for the selection of binding proteins', score: 13.3 },
-    { guid: 'US-11060085-B2', type: 'USPAT', publicationReferenceDocumentNumber: '11060085', inventionTitle: 'Methods for the selection of binding proteins', score: 13.2 },
-    { guid: 'US-11913137-B2', type: 'USPAT', publicationReferenceDocumentNumber: '11913137', inventionTitle: 'Methods for the selection of binding proteins', score: 13.1 },
+    { guid: 'US-9347058-B2', type: 'USPAT', publicationReferenceDocumentNumber: '9347058', inventionTitle: 'Methods for the selection of binding proteins', score: 13.3, assigneeName: ['Bristol-Myers Squibb Company'] },
+    { guid: 'US-11060085-B2', type: 'USPAT', publicationReferenceDocumentNumber: '11060085', inventionTitle: 'Methods for the selection of binding proteins', score: 13.2, assigneeName: ['Bristol-Myers Squibb Company'] },
+    { guid: 'US-11913137-B2', type: 'USPAT', publicationReferenceDocumentNumber: '11913137', inventionTitle: 'Methods for the selection of binding proteins', score: 13.1, assigneeName: ['Compound Therapeutics Inc'] },
   ];
   const POOL_APPS = [
-    { guid: 'US-20140179551-A1', type: 'US-PGPUB', publicationReferenceDocumentNumber: '20140179551', inventionTitle: 'METHODS FOR THE SELECTION OF BINDING PROTEINS', score: 13.35 },
+    { guid: 'US-20140179551-A1', type: 'US-PGPUB', publicationReferenceDocumentNumber: '20140179551', inventionTitle: 'METHODS FOR THE SELECTION OF BINDING PROTEINS', score: 13.35, assigneeName: ['Bristol-Myers Squibb Company'] },
   ];
   // The three granted top hits all cite the Szostak PCT in three different
   // raw formats (verified live); two also share a US reference.
@@ -438,6 +440,9 @@ describe('seminal prior-art mining', () => {
                 { '$': 'Fusions d´acide nucléique et de protéines', '@lang': 'fr' },
                 { '$': 'Selection of proteins using RNA-protein fusions', '@lang': 'en' },
               ],
+              'parties': {
+                'applicants': { 'applicant': [{ 'applicant-name': { 'name': { '$': 'GEN HOSPITAL CORP [US]' } } }] },
+              },
             },
           },
         },
@@ -477,24 +482,175 @@ describe('seminal prior-art mining', () => {
     const entry = response.seminal_prior_art![0];
     expect(entry.publication_number).toBe('US6261804B1');
     expect(entry.title).toBe('Selection of proteins using RNA-protein fusions');
+    expect(entry.assignee).toBe('GEN HOSPITAL CORP [US]');
     expect(entry.note).toContain('WO1998/056915');
     expect(entry.co_cited_by).toBe(3);
     (await import('../../entities/patent/ops-client.js')).opsClient.close();
+  });
+
+  test('keyless GP resolution: correct page resolves; wrong-doc redirect is rejected', async () => {
+    const { mineSeminalPriorArt } = await import('../../entities/patent/search/seminal.js');
+    const { resetGooglePatentsBreaker } = await import('../../entities/patent/search/google-patents.js');
+    resetGooglePatentsBreaker();
+    // Two mined grants from different assignees both cite WO1999/060835.
+    const pool = [
+      { guid: 'US-11112222-B2', type: 'USPAT', assigneeName: ['Alpha Bio'] },
+      { guid: 'US-22223333-B2', type: 'USPAT', assigneeName: ['Beta Bio'] },
+      { guid: 'US-33334444-B2', type: 'USPAT', assigneeName: ['Alpha Bio'] },
+    ];
+    const docs = {
+      'US-11112222-B2': { foreignRefPatentNumber: ['WO99/60835'] },
+      'US-22223333-B2': { foreignRefPatentNumber: ['WO1999/060835'] },
+      'US-33334444-B2': { foreignRefPatentNumber: ['WO99/60835'] },
+    };
+    const gpPage = (pubNum: string, title: string, family: string[], assignee: string) => `
+      <meta name="DC.title" content="${title}">
+      <meta name="DC.contributor" content="${assignee}" scheme="assignee">
+      <span itemprop="publicationNumber">${pubNum}</span>
+      ${family.map(m => `<tr itemprop="docdbFamily"><td><span itemprop="publicationNumber">${m}</span></td></tr>`).join('')}
+    `;
+    // First candidate (WO1998/031700 variant attempts) hits a wrong-doc page
+    // (publicationNumber is a different patent, family does not contain it) —
+    // must be rejected; the second candidate gets the correct page.
+    let detailCalls = 0;
+    global.fetch = jest.fn().mockImplementation((url: any) => {
+      const u = String(url);
+      if (u.includes('/api/users/me/session')) {
+        return jsonResp({ userCase: { caseId: 1 } }, { 'x-access-token': 'tok-1', 'content-type': 'application/json' });
+      }
+      if (u.includes('/api/searches/searchWithBeFamily')) {
+        return jsonResp({ patents: pool, numberOfFamilies: 50 });
+      }
+      if (u.includes('/api/patents/highlight/')) {
+        for (const [guid, doc] of Object.entries(docs)) {
+          if (u.includes(guid)) return jsonResp(doc);
+        }
+      }
+      if (u.includes('patents.google.com/patent/')) {
+        detailCalls++;
+        if (u.includes('WO1999060835A2')) {
+          // second variant attempt: correct page identifying as WO1999060835A2
+          return { ok: true, status: 200, headers: new Headers({ 'content-type': 'text/html' }), text: () => Promise.resolve(gpPage('WO1999060835A2', 'Cyclic peptide libraries', ['US6500888B1', 'EP1122334A1'], 'Gamma Mol')) };
+        }
+        // first variant attempt (A1): Google redirect served an UNRELATED doc
+        return { ok: true, status: 200, headers: new Headers({ 'content-type': 'text/html' }), text: () => Promise.resolve(gpPage('US9999000B2', 'Unrelated patent', ['US9999000B2'], 'WrongCorp')) };
+      }
+      return Promise.reject(new Error(`unexpected ${u}`));
+    }) as any;
+
+    const outcome = await mineSeminalPriorArt('cyclic peptide display', [
+      { publication_number: 'US11112222B2', source: 'ppubs' },
+    ]);
+    expect(outcome.entries).toHaveLength(1);
+    const entry = outcome.entries[0];
+    // wrong-doc pages rejected → resolved via the identity-validated page
+    expect(entry.publication_number).toBe('US6500888B1');
+    expect(entry.title).toBe('Cyclic peptide libraries');
+    expect(entry.assignee).toBe('Gamma Mol');
+    expect(entry.note).toContain('resolved via Google Patents');
+    expect(detailCalls).toBeGreaterThanOrEqual(2);
+    resetGooglePatentsBreaker();
   });
 });
 
 describe('patent search federation', () => {
   let originalFetch: typeof global.fetch;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     originalFetch = global.fetch;
+    (await import('../../entities/patent/ops-client.js')).resetOpsBackoff();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     global.fetch = originalFetch;
     delete process.env.EPO_OPS_CONSUMER_KEY;
     delete process.env.EPO_OPS_CONSUMER_SECRET;
     delete process.env.USPTO_API_KEY;
+    (await import('../../entities/patent/ops-client.js')).resetOpsBackoff();
+    (await import('../../entities/patent/search/google-patents.js')).resetGooglePatentsBreaker();
+  });
+
+  test('OPS backoff: 2 consecutive failures exclude ops from auto mode; auth failures trip immediately; success resets', async () => {
+    const ops = await import('../../entities/patent/ops-client.js');
+    const { selectSearchBackends, worldwideCoverageNote } = await import('../../entities/patent/search/index.js');
+    const gp = await import('../../entities/patent/search/google-patents.js');
+    process.env.EPO_OPS_CONSUMER_KEY = 'k';
+    process.env.EPO_OPS_CONSUMER_SECRET = 's';
+
+    ops.recordOpsFailure('EPO OPS search failed: HTTP 500 upstream error');
+    expect(selectSearchBackends({})).toEqual(['ops', 'ppubs']); // 1 strike: still selected
+    ops.recordOpsFailure('EPO OPS search failed: HTTP 500 upstream error');
+    expect(ops.isOpsBackedOff()).toBe(true); // 2 strikes: excluded 15 min
+    expect(selectSearchBackends({})).toEqual(['google_patents', 'ppubs']); // GP substitutes
+    expect(selectSearchBackends({ source: 'ops' })).toEqual(['ops']); // explicit source bypasses
+
+    ops.resetOpsBackoff();
+    ops.recordOpsFailure('EPO OPS authentication failed. Verify EPO_OPS_CONSUMER_KEY / EPO_OPS_CONSUMER_SECRET. (HTTP 401)');
+    expect(ops.isOpsBackedOff()).toBe(true); // auth-class: immediate trip
+
+    // coverage note fires only when BOTH worldwide backends are out
+    gp.resetGooglePatentsBreaker();
+    expect(worldwideCoverageNote()).toBeUndefined(); // GP substitutes → no US-only note yet
+    // simulate GP breaker open by tripping it through a network failure
+    const { connectionManager } = await import('../../connections/manager.js');
+    connectionManager.closeAll();
+    global.fetch = jest.fn().mockRejectedValue(Object.assign(new Error('fetch failed'), { cause: { code: 'ETIMEDOUT' } })) as any;
+    await expect(gp.searchGooglePatents('crispr', {})).rejects.toThrow();
+    expect(gp.isGooglePatentsBlocked()).toBe(true);
+    const note = worldwideCoverageNote();
+    expect(note).toMatch(/worldwide coverage unavailable/);
+    expect(note).toMatch(/US-only/);
+    connectionManager.closeAll();
+  });
+
+  test('patentSearch appends the US-only coverage note when ops backed off AND GP breaker open', async () => {
+    const ops = await import('../../entities/patent/ops-client.js');
+    const gp = await import('../../entities/patent/search/google-patents.js');
+    process.env.EPO_OPS_CONSUMER_KEY = 'k';
+    process.env.EPO_OPS_CONSUMER_SECRET = 's';
+    ops.recordOpsFailure('x');
+    ops.recordOpsFailure('y'); // backoff active
+
+    const { connectionManager } = await import('../../connections/manager.js');
+    connectionManager.closeAll();
+    global.fetch = jest.fn().mockImplementation((url: any) => {
+      const u = String(url);
+      if (u.includes('api.uspto.gov')) {
+        return Promise.resolve({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ count: 0, patentFileWrapperDataBag: [] })),
+        });
+      }
+      return Promise.reject(Object.assign(new Error('fetch failed'), { cause: { code: 'ETIMEDOUT' } }));
+    }) as any;
+    // Trip the GP breaker first (network error path)
+    await expect(gp.searchGooglePatents('x', {})).rejects.toThrow();
+
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await patentSearch('crispr', { seminal: false });
+    expect(response.patents.some(p => p._note?.includes('worldwide coverage unavailable'))).toBe(true);
+    expect(response.patents.some(p => p._error?.includes("'google_patents' failed"))).toBe(false); // breaker short-circuited, no burned call
+    connectionManager.closeAll();
+  });
+
+  test('google_patents breaker trips on network errors (fetch failed / ETIMEDOUT)', async () => {
+    const gp = await import('../../entities/patent/search/google-patents.js');
+    const { connectionManager } = await import('../../connections/manager.js');
+    connectionManager.closeAll();
+    gp.resetGooglePatentsBreaker();
+    const fetchCalls: string[] = [];
+    global.fetch = jest.fn().mockImplementation((url: any) => {
+      fetchCalls.push(String(url));
+      return Promise.reject(Object.assign(new Error('fetch failed'), { cause: { code: 'ETIMEDOUT', errno: -110 } }));
+    }) as any;
+
+    await expect(gp.searchGooglePatents('crispr', {})).rejects.toThrow(/fetch failed/);
+    expect(gp.isGooglePatentsBlocked()).toBe(true);
+    await expect(gp.searchGooglePatents('crispr', {})).rejects.toThrow(/circuit open|unavailable/);
+    expect(fetchCalls).toHaveLength(1); // short-circuit: second call hit no network
+    connectionManager.closeAll();
+    gp.resetGooglePatentsBreaker();
   });
 
   test('selectSearchBackends: ppubs always the US default; GP omitted when OPS present', async () => {
@@ -1055,6 +1211,21 @@ describe('wayback fallback', () => {
   });
 });
 
+describe('proxy-aware global fetch', () => {
+  test('proxy module self-initializes safely and reports status', async () => {
+    const { proxyStatus, configureProxyDispatcher } = await import('../../connections/proxy.js');
+    // In CI/dev environments with proxy env set (this repo's environment
+    // has HTTPS_PROXY), the module-scope init must have installed the
+    // dispatcher; without proxy env it stays a no-op. Either way: no throw,
+    // and a descriptive status.
+    const hasProxyEnv = !!(process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy);
+    expect(proxyStatus.configured).toBe(hasProxyEnv);
+    expect(proxyStatus.detail).toBeTruthy();
+    // Re-running init is idempotent and never throws
+    expect(() => configureProxyDispatcher()).not.toThrow();
+  });
+});
+
 describe('query builders (assert exact upstream request construction)', () => {
   let originalFetch: typeof global.fetch;
 
@@ -1196,6 +1367,70 @@ describe('query builders (assert exact upstream request construction)', () => {
     );
     expect(posts[0].body.pagination).toEqual({ offset: 0, limit: 10 });
     connectionManager.closeAll();
+  });
+
+  test('normalizeExchangeDocuments handles both live response shapes (dict-of-array and list-of-wrapped)', async () => {
+    const { normalizeExchangeDocuments } = await import('../../entities/patent/search/ops.js');
+    const doc = (n: string) => ({ '@country': { '$': 'US' }, '@doc-number': { '$': n }, '@kind': { '$': 'B2' } });
+    // shape 1: {"exchange-document": [doc, doc]}
+    expect(normalizeExchangeDocuments({ 'exchange-document': [doc('1'), doc('2')] })).toHaveLength(2);
+    // shape 2 (verified live, ti+ab queries): [{exchange-document: doc}, ...]
+    expect(normalizeExchangeDocuments([
+      { 'exchange-document': doc('3') },
+      { 'exchange-document': doc('4') },
+      { 'exchange-document': doc('5') },
+    ])).toHaveLength(3);
+    // single doc (not array) and empty/garbage shapes
+    expect(normalizeExchangeDocuments({ 'exchange-document': doc('6') })).toHaveLength(1);
+    expect(normalizeExchangeDocuments({})).toEqual([]);
+    expect(normalizeExchangeDocuments([{ 'other-key': {} }, null as any])).toEqual([]);
+  });
+
+  test('searchOps parses the list-of-wrapped exchange-documents shape (evaluator repro)', async () => {
+    process.env.EPO_OPS_CONSUMER_KEY = 'k';
+    process.env.EPO_OPS_CONSUMER_SECRET = 's';
+    const wrappedDoc = (c: string, n: string, kind: string) => ({
+      'exchange-document': {
+        '@country': c, '@doc-number': n, '@kind': kind,
+        'bibliographic-data': {
+          'invention-title': { '$': `Title ${n}`, '@lang': 'en' },
+          'publication-reference': {
+            'document-id': [{ '@document-id-type': 'docdb', country: { '$': c }, 'doc-number': { '$': n }, kind: { '$': kind }, date: { '$': '20250101' } }],
+          },
+        },
+      },
+    });
+    global.fetch = jest.fn()
+      .mockImplementationOnce(() => Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        text: () => Promise.resolve(JSON.stringify({ access_token: 'tok', expires_in: 1199 })),
+      }))
+      .mockImplementation(() => Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        text: () => Promise.resolve(JSON.stringify({
+          'ops:world-patent-data': {
+            'ops:biblio-search': {
+              '@total-result-count': '24',
+              'ops:search-result': {
+                // the shape observed live that previously parsed as 0 docs
+                'exchange-documents': [wrappedDoc('CN', '120624583', 'A'), wrappedDoc('WO', '2025006976', 'A1')],
+              },
+            },
+          },
+        })),
+      })) as any;
+
+    const { searchOps } = await import('../../entities/patent/search/ops.js');
+    const result = await searchOps('mRNA display', { limit: 5 });
+    expect(result.patents).toHaveLength(2);
+    expect(result.total).toBe(24);
+    expect(result.patents[0].publication_number).toBe('CN120624583A');
+    expect(result.patents[1].publication_number).toBe('WO2025006976A1');
+    (await import('../../entities/patent/ops-client.js')).opsClient.close();
   });
 
   test('searchOps retries once on server-empty-with-total, then throws descriptive error', async () => {

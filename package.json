@@ -20,7 +20,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc && esbuild dist/server/index.js --bundle --platform=node --format=esm --minify --outfile=dist/bundle.js",
+    "build": "tsc && esbuild dist/server/index.js --bundle --platform=node --format=esm --minify --external:undici --outfile=dist/bundle.js",
     "build:bundle": "npm run build",
     "prepack": "npm run build",
     "start": "node dist/bundle.js",
@@ -46,7 +46,10 @@
     "zod": "^3.25.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.18.1"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "undici": "^8.10.0"
+  }
 }

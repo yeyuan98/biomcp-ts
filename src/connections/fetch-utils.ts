@@ -1,3 +1,7 @@
+// Side-effect import: proxy-aware global fetch for any code path that uses
+// fetchWithTimeout without going through connections/manager.js.
+import './proxy.js';
+
 export async function fetchWithTimeout<T>(fn: (signal?: AbortSignal) => Promise<T>, timeoutMs: number): Promise<{ data?: T; error?: string }> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);

@@ -4,22 +4,25 @@ import { kindToStatus } from './dedup.js';
 import type { PatentSearchResult, PatentSeminalEntry } from '../types.js';
 
 const MINING_POOL_PAGECOUNT = 100;
-const MINING_DOC_COUNT = 8;
+const MINING_DOC_COUNT = 10;
+const MAX_DOCS_PER_ASSIGNEE = 2;
 const MIN_GRANTS = 3;
 const MAX_ENTRIES = 5;
 const RESOLVE_TOP_N = 3;
 const RESOLUTION_MIN_REMAINING_MS = 3_000;
 
 /**
- * Overall budget for the whole seminal phase, independent of (and well
- * under) the tool-level timeout — a mining blowup must degrade to a note,
- * never destroy the main search results.
+ * Overall budget for the whole seminal phase (mining + resolution),
+ * independent of (and under) the tool-level timeout — a mining blowup must
+ * degrade to a note, never destroy the main search results. Mining alone
+ * paces ~10s (1 req/s limiter over 9 calls); OPS/GP resolution needs ~3-6s
+ * more, so 20s leaves margin under the 30s tool timeout.
  */
-export const SEMINAL_DEADLINE_MS = 12_000;
+export const SEMINAL_DEADLINE_MS = 20_000;
 
 const KEYLESS_RESOLUTION_NOTE =
-  'PCT publication; national-phase equivalents (e.g. US grants) exist — resolve via patent_get "family" ' +
-  'when EPO OPS credentials are configured, or search this number externally.';
+  'PCT publication; national-phase equivalents (e.g. US grants) could not be resolved automatically. ' +
+  'Try patent_get with "family", patent_search on the inventor name, or search this number externally.';
 
 // ---------- reference canonicalization ----------
 
@@ -142,16 +145,6 @@ async function fetchFamilyMembers(pn: string): Promise<FamilyMember[]> {
   return members;
 }
 
-async function fetchTitle(pub: string): Promise<string | undefined> {
-  try {
-    const { fetchOpsBiblio } = await import('../detail/ops.js');
-    const biblio = await fetchOpsBiblio(pub);
-    return biblio.title || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 async function resolveEntryUsEquivalent(
   entry: PatentSeminalEntry,
   canonical: RefCanonical,
@@ -174,7 +167,78 @@ async function resolveEntryUsEquivalent(
     if (chosenKey && visibleKeys.has(refKey(chosenKey))) return; // already on the visible page
     entry.publication_number = chosen.pub;
     entry.note = `US family member of ${displayNumber(canonical)} (the co-cited PCT form).`;
-    entry.title = await fetchTitle(chosen.pub);
+    await enrichFromOpsBiblio(entry, chosen.pub);
+    return;
+  }
+}
+
+async function enrichFromOpsBiblio(entry: PatentSeminalEntry, pub: string): Promise<void> {
+  try {
+    const { fetchOpsBiblio } = await import('../detail/ops.js');
+    const biblio = await fetchOpsBiblio(pub);
+    if (biblio.title) entry.title = biblio.title;
+    if (biblio.assignee && biblio.assignee.length > 0) entry.assignee = biblio.assignee[0];
+  } catch {
+    // title/assignee are best-effort enrichments
+  }
+}
+
+function pickGrantedUsMember(familyMembers: string[]): string | undefined {
+  const usMembers = familyMembers.filter(m => /^US[A-Z]{0,2}\d+/i.test(m));
+  const kindOf = (pub: string) => pub.match(/([A-Z]\d?)$/)?.[1] || '';
+  const granted = usMembers.filter(m => kindToStatus(kindOf(m)) === 'granted');
+  return granted[0] || usMembers[0];
+}
+
+function kindlessPublicationNumber(pub: string): string {
+  // strip trailing kind code (letter + optional digit): US6261804B1 → US6261804
+  return pub.toUpperCase().replace(/([A-Z]\d?)$/, '');
+}
+
+/**
+ * Keyless WO→US resolution via Google Patents detail pages: the PCT page's
+ * "Also Published As" (docdbFamily) carries the US national-phase members
+ * and the page itself has title + assignee. Depends on Google Patents /
+ * Wayback reachability (proxy-aware fetch).
+ *
+ * Robustness (verified live): kindless WO URLs (`/patent/WO1998056915/en`)
+ * sometimes redirect to UNRELATED documents, and Google aggressively
+ * 503-blocks detail pages on shared proxy exit IPs. Therefore: (1) try
+ * PCT-kind variants (A1, then A2, then kindless); (2) require the fetched
+ * page to identify as the requested publication (or list it as a family
+ * member) — a mismatched page is rejected, keeping the entry in WO form
+ * with an actionable note instead of poisoning it with wrong data.
+ */
+async function resolveEntryViaGooglePatents(
+  entry: PatentSeminalEntry,
+  canonical: RefCanonical,
+  visibleKeys: Set<string>,
+): Promise<void> {
+  if (canonical.country !== 'WO' || canonical.year === undefined) return;
+  const base = `WO${canonical.year}${canonical.serial.padStart(6, '0')}`;
+  const { fetchGooglePatentDetail } = await import('../detail/google-patents.js');
+  for (const pn of [`${base}A1`, `${base}A2`, base]) {
+    let parsed;
+    try {
+      parsed = await fetchGooglePatentDetail(pn);
+    } catch {
+      continue; // blocked/unavailable — try next variant
+    }
+    const pageIds = new Set<string>([kindlessPublicationNumber(parsed.publication_number || '')]);
+    const normalizedFamily = (parsed.family_members || []).map(kindlessPublicationNumber);
+    for (const m of normalizedFamily) pageIds.add(m);
+    if (!pageIds.has(base)) continue; // page is a different document — reject
+    const usMember = pickGrantedUsMember(parsed.family_members);
+    const usKey = usMember ? parsePatentRef(usMember) : undefined;
+    if (usMember && usKey && visibleKeys.has(refKey(usKey))) return; // already on the visible page
+    if (usMember) {
+      entry.publication_number = usMember;
+      entry.note = `US family member of ${displayNumber(canonical)} (the co-cited PCT form), resolved via Google Patents.`;
+    } else {
+      entry.note = `${displayNumber(canonical)} (PCT publication; no US family member listed on Google Patents).`;
+    }
+    if (parsed.title) entry.title = parsed.title;
+    if (parsed.assignee && parsed.assignee.length > 0) entry.assignee = parsed.assignee[0];
     return;
   }
 }
@@ -184,6 +248,8 @@ async function resolveEntryUsEquivalent(
 interface PpubsPoolRecord {
   guid?: string;
   type?: string;
+  assigneeName?: string[] | null;
+  applicantName?: string[] | null;
 }
 
 interface PpubsDocRecord {
@@ -194,6 +260,7 @@ interface PpubsDocRecord {
 interface Candidate {
   canonical: RefCanonical;
   citedBy: Set<string>;
+  citedByAssignees: Set<string>;
 }
 
 function timeoutReject(ms: number): Promise<never> {
@@ -211,16 +278,53 @@ export interface SeminalOutcome {
 }
 
 /**
+ * Diversity sampling: at most MAX_DOCS_PER_ASSIGNEE granted docs per
+ * assignee. Verified live: without this, one patent family's 4+ top hits
+ * dominate the first 8 grants and their block-cited reference blob (30+
+ * refs at count 3 within ONE family) drowns the true foundational art,
+ * which is cited once per family but ACROSS many families (the Szostak
+ * mRNA-display PCT WO98/31700: count 2/8 under naive top-8, but count 4
+ * across 3 distinct assignees under diversity sampling — rank #1).
+ */
+function sampleDiverseGrants(pool: PpubsPoolRecord[], maxDocs: number): PpubsPoolRecord[] {
+  const grants = pool.filter(r => r.guid && r.type === 'USPAT');
+  // Defensive: if the pool carries NO assignee metadata at all (not expected
+  // — live ppubs records include assigneeName), the per-assignee cap would
+  // collapse everything into one 'unknown' bucket; fall back to naive top-N.
+  const anyAssignee = grants.some(r => r.assigneeName?.find(Boolean) || r.applicantName?.find(Boolean));
+  if (!anyAssignee) return grants.slice(0, maxDocs);
+  const perAssignee = new Map<string, number>();
+  const sampled: PpubsPoolRecord[] = [];
+  for (const r of grants) {
+    const assignee = (r.assigneeName?.find(Boolean) || r.applicantName?.find(Boolean) || 'unknown')
+      .toLowerCase().slice(0, 40);
+    const n = perAssignee.get(assignee) || 0;
+    if (n >= MAX_DOCS_PER_ASSIGNEE) continue;
+    perAssignee.set(assignee, n + 1);
+    sampled.push(r);
+    if (sampled.length >= maxDocs) break;
+  }
+  return sampled;
+}
+
+function assigneeOf(record: PpubsPoolRecord): string {
+  return (record.assigneeName?.find(Boolean) || record.applicantName?.find(Boolean) || 'unknown')
+    .toLowerCase().slice(0, 40);
+}
+
+/**
  * Co-citation mining for foundational prior art: references cited by many
  * of the top granted results are seminal to the query concept even when
- * their own vocabulary predates it (verified: US6261804B1, the Szostak
- * mRNA-display patent, never says "mRNA display" but is cited as
- * WO98/56915 by the top hits). Runs its own PPUBS relevance search
- * (pageCount 100 — the score-desc batch scales with pageCount), fetches
- * backward references of the first MINING_DOC_COUNT granted docs
- * concurrently (the client rate limiter paces them), and optionally
- * resolves WO candidates to US family members via EPO OPS. The entire
- * phase is deadline-bounded and failure-tolerant.
+ * their own vocabulary predates it (verified: the Szostak mRNA-display
+ * patent family never says "mRNA display"). Runs its own PPUBS relevance
+ * search (pageCount 100 — the score-desc batch scales with pageCount),
+ * diversity-samples granted docs (max 2 per assignee), fetches their
+ * backward references concurrently (the client rate limiter paces them),
+ * and surfaces references cited by >= 3 sampled docs from >= 2 distinct
+ * assignees — cross-assignee co-citation, which suppresses single-family
+ * block-citation blobs. WO candidates resolve to US family members via
+ * EPO OPS (creds) or Google Patents (keyless). The entire phase is
+ * deadline-bounded and failure-tolerant.
  */
 export async function mineSeminalPriorArt(
   query: string,
@@ -250,7 +354,7 @@ export async function mineSeminalPriorArt(
   } catch {
     throw new Error('PPUBS mining-pool search returned malformed JSON.');
   }
-  const grants = pool.filter(r => r.guid && r.type === 'USPAT').slice(0, MINING_DOC_COUNT);
+  const grants = sampleDiverseGrants(pool, MINING_DOC_COUNT);
   if (grants.length < MIN_GRANTS) {
     return { entries: [], mined: grants.length, note: 'too few granted documents in the top results to mine reliably' };
   }
@@ -272,6 +376,7 @@ export async function mineSeminalPriorArt(
     }
     mined++;
     const docId = grants[i].guid!.replace(/-/g, '');
+    const docAssignee = assigneeOf(grants[i]);
     const refs = new Map<string, RefCanonical>();
     for (const raw of doc.usRefPatentNumber || []) {
       const c = parsePatentRef(raw, 'us');
@@ -285,10 +390,11 @@ export async function mineSeminalPriorArt(
       if (visibleKeys.has(key)) continue;
       let cand = counts.get(key);
       if (!cand) {
-        cand = { canonical, citedBy: new Set() };
+        cand = { canonical, citedBy: new Set(), citedByAssignees: new Set() };
         counts.set(key, cand);
       }
       cand.citedBy.add(docId);
+      cand.citedByAssignees.add(docAssignee);
     }
   });
 
@@ -296,10 +402,12 @@ export async function mineSeminalPriorArt(
     return { entries: [], mined, note: 'too few granted documents yielded reference data' };
   }
 
-  const threshold = Math.max(3, Math.ceil(0.4 * mined));
+  // Cross-assignee co-citation: >= 3 citing docs AND >= 2 distinct assignees
+  // (a single family block-citing 30 refs never qualifies). Rank by
+  // distinct-assignee breadth first, then raw count.
   const top = Array.from(counts.values())
-    .filter(c => c.citedBy.size >= threshold)
-    .sort((a, b) => b.citedBy.size - a.citedBy.size)
+    .filter(c => c.citedBy.size >= 3 && c.citedByAssignees.size >= 2)
+    .sort((a, b) => b.citedByAssignees.size - a.citedByAssignees.size || b.citedBy.size - a.citedBy.size)
     .slice(0, MAX_ENTRIES);
   if (top.length === 0) {
     return { entries: [], mined, note: 'no commonly-cited reference found — the query may be too broad; try quoting an exact concept phrase' };
@@ -323,6 +431,24 @@ export async function mineSeminalPriorArt(
       ]);
     } catch {
       // keep unresolved WO display forms
+    }
+  }
+  // Keyless fallback (and OPS-miss fallback): Google Patents detail pages
+  // carry the US family members plus title/assignee. Only entries still in
+  // WO display form are attempted.
+  if (timeLeft() > RESOLUTION_MIN_REMAINING_MS) {
+    const unresolved = pairs
+      .slice(0, RESOLVE_TOP_N)
+      .filter(p => p.canonical.country === 'WO' && p.entry.publication_number.startsWith('WO'));
+    if (unresolved.length > 0) {
+      try {
+        await Promise.race([
+          Promise.all(unresolved.map(p => resolveEntryViaGooglePatents(p.entry, p.canonical, visibleKeys))),
+          timeoutReject(timeLeft()),
+        ]);
+      } catch {
+        // keep WO display form + actionable note
+      }
     }
   }
 
