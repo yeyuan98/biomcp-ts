@@ -4,7 +4,7 @@ API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a sou
 
 ## Architecture
 
-- **Strategy pattern** — `ConnectionManager` dispatches to `RestConnection`, `GraphQLConnection`, or `GrpcConnection` based on `protocol` in `ConnectionOptions`. All implement `IConnection`.
+- **Strategy pattern** — `ConnectionManager` dispatches to `RestConnection` or `GraphQLConnection` based on `protocol` in `ConnectionOptions`. All implement `IConnection`.
 - **Lazy initialization** — `ConnectionManager.getConnection(sourceId)` creates the connection on first access and caches it in a `Map`.
 - **Module singleton** — `connectionManager` is the pre-instantiated `ConnectionManager` exported from `manager.ts`.
 

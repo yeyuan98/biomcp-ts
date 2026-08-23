@@ -35,7 +35,7 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
 | `gene_search` | `query: string`, `chromosome?: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for genes by symbol, name, or keyword | readOnly, openWorld |
-| `gene_get` | `symbol: string`, `sections?: ("pathways" \| "ontology" \| "diseases" \| "protein" \| "go" \| "interactions" \| "clinical_evidence" \| "expression" \| "protein_atlas" \| "druggability" \| "dosage_sensitivity" \| "constraint" \| "disease_associations" \| "funding" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed gene information by symbol | readOnly, openWorld |
+| `gene_get` | `symbol: string`, `sections?: ("pathways" \| "ontology" \| "diseases" \| "protein" \| "go" \| "interactions" \| "clinical_evidence" \| "expression" \| "protein_atlas" \| "druggability" \| "dosage_sensitivity" \| "constraint" \| "disease_associations" \| "funding" \| "all")[]`, `limit?: number (1-100, default 20)`, `smart?: boolean (default false — auto-resolve gene aliases, e.g. "HER2" → "ERBB2")` | Get detailed gene information by symbol | readOnly, openWorld |
 | `gene_diseases` | `symbol: string`, `limit?: number (1-50, default 10)` | Get diseases associated with a gene. Requires `DISGENET_API_KEY`; falls back to OpenTargets | readOnly, openWorld |
 | `gene_drugs` | `symbol: string` | Find drugs targeting a gene | readOnly |
 | `gene_trials` | `symbol: string` | Find clinical trials for a gene | readOnly |
@@ -55,7 +55,7 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
-| `drug_search` | `query: string`, `source?: string (mychem, chembl, openfda)`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for drugs by name, mechanism, or keyword | readOnly, openWorld |
+| `drug_search` | `query: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for drugs by name, mechanism, or keyword | readOnly, openWorld |
 | `drug_get` | `name: string`, `sections?: ("core" \| "us_regulatory" \| "eu_regulatory" \| "who_regulatory" \| "safety" \| "targets" \| "indications" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed drug information by name | readOnly, openWorld |
 | `drug_trials` | `drug: string` | Find clinical trials for a drug | readOnly |
 

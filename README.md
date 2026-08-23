@@ -70,7 +70,7 @@ Full tool schemas (params, enums, defaults) live in [src/server/README.md](src/s
 | Tool | Description |
 |------|-------------|
 | `gene_search` | Search genes by symbol, name, or keyword with chromosome filter |
-| `gene_get` | Get detailed gene info by HGNC symbol with optional sections (core, pathways, protein, ontology, GO, interactions, expression, protein_atlas, constraint, druggability, dosage_sensitivity, clinical evidence, disease associations, diseases, funding). Set `smart=true` to auto-resolve gene aliases (e.g., "HER2" → "ERBB2") |
+| `gene_get` | Get detailed gene info by HGNC symbol with optional sections (core, pathways, protein, ontology, go, interactions, expression, protein_atlas, constraint, druggability, dosage_sensitivity, clinical_evidence, disease_associations, diseases, funding). Set `smart=true` to auto-resolve gene aliases (e.g., "HER2" → "ERBB2") |
 | `gene_diseases` | Get diseases associated with a gene (DisGeNET / OpenTargets) |
 | `gene_drugs` | Find drugs targeting a gene (OpenTargets) |
 | `gene_trials` | Find clinical trials for a gene |

@@ -4,7 +4,6 @@ import { fetchWithTimeout } from '../connections/fetch-utils.js';
 const SECTION_TIMEOUT_MS = 8000;
 
 export interface DrugSearchOptions {
-  source?: string;
   limit?: number;
   offset?: number;
 }
@@ -40,7 +39,7 @@ export async function drugSearch(
   query: string,
   options: DrugSearchOptions = {}
 ): Promise<DrugSearchResult[]> {
-  const { source, limit = 10, offset = 0 } = options;
+  const { limit = 10, offset = 0 } = options;
 
   const conn = connectionManager.getConnection('mychem');
 

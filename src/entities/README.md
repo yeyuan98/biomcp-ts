@@ -10,7 +10,7 @@ The business logic layer for biomcp-ts. Each entity module (gene, variant, drug,
 
 All entity `get` functions use the same pattern (patent is the exception — per-section priority chains, see `patent/README.md`):
 
-- Sections are dispatched via `Promise.allSettled` with an **8-second timeout** per section (`fetchWithTimeout`, `SECTION_TIMEOUT_MS = 8000`) and a 30s overall abort guard
+- Sections are dispatched via `Promise.allSettled` with an **8-second timeout** per section (`fetchWithTimeout`, `SECTION_TIMEOUT_MS = 8000`); `geneGet` additionally guards the whole call with a 30s overall abort
 - Fulfilled sections populate `result.sections[<name>]`
 - Failed sections (timeout, network error, auth missing) populate `result.sections[<name>] = { error: "..." }`
 - Section fetchers return `{ _error: "..." }` as a single-element array or object when the upstream source itself fails (e.g., `{ _error: "Pathway lookup failed (source: reactome): ..." }`)
