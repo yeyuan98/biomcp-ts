@@ -23,6 +23,8 @@ patent/
 │   ├── odp.ts          USPTO ODP Lucene search
 │   ├── ppubs.ts        USPTO PPUBS full-text search
 │   ├── google-patents.ts  Google Patents XHR (circuit-breaker gated)
+│   ├── query.ts        Shared free-text tokenizer (terms vs quoted phrases)
+│   ├── seminal.ts      Co-citation mining for foundational prior art
 │   └── dedup.ts        Publication-number normalization + federated dedup
 └── detail/
     ├── index.ts        patentGet() per-section priority chains
@@ -69,6 +71,45 @@ are AND-joined there (the upstream default operator is OR, which produced
 367k noise hits for "mRNA display"). EPO OPS retries once when it reports
 `total > 0` but returns an empty document array (observed live: "24 total
 hits, empty results").
+
+## Seminal Prior-Art Discovery (`search/seminal.ts`, default on)
+
+Foundational prior art whose vocabulary predates the query concept can never
+be retrieved by text matching — verified: US6261804B1 (Szostak, "Selection
+of proteins using RNA-protein fusions") contains "mRNA display" zero times
+and is absent from the entire relevance batch, but the top granted hits for
+`"mRNA display"` all cite it as `WO98/56915`. Co-citation mining closes that
+gap: it runs its own PPUBS relevance search (`pageCount` 100 — the score-desc
+batch scales with `pageCount`), fetches the backward references
+(`usRefPatentNumber`/`foreignRefPatentNumber`) of the first 8 granted docs
+concurrently (the client rate limiter paces them), and surfaces references
+cited by ≥ max(3, ⌈0.4·mined⌉) of them as `seminal_prior_art` (cap 5),
+excluding anything already on the visible page.
+
+Citation strings arrive in wildly variant raw forms (`WO98/56915`,
+`9856915`, `WO-2014180569`, `2015/103037`, `90/02809`, `5,034,506`);
+`parsePatentRef` canonicalizes to `{country, year, serial}` keys with WO
+year expansion — bare/slash numbers are WO forms on the foreign ref list and
+US numbers on the US list (lists are disjoint, so no cross-merge).
+
+With EPO OPS credentials the top ≤3 WO candidates resolve to their earliest
+granted US family member (own INPADOC parsing that keeps member dates — the
+shared `fetchOpsFamily` discards them — via classic epodoc `WO{yy}{serial}`
+with a padded 4-digit-year fallback) plus a title via `fetchOpsBiblio`.
+Keyless, candidates stay in `WO{year}/{serial}` form with an actionable
+note. The whole phase is deadline-bounded (12s, well under the 30s tool
+timeout) and failure-tolerant — it degrades to `seminal_note` hints (too few
+grants, no common refs, unquoted-query precision tip) and never breaks the
+main search. Opt out per call with `seminal: false` (fastest bibliographic
+lookups).
+
+Rejected alternatives (recorded for future maintainers): citation-weighted
+re-ranking of retrieved results and forward-citation `ct=` counting — both
+only re-rank the retrieved set, which never contains vocabulary-mismatched
+seminal art; semantic/embedding ranking — no keyless robust source (Lens
+needs a key/ToS, Google similar-docs is IP-block-prone) and heavy new
+infrastructure; the PPUBS citation-search overlay endpoint — undocumented
+internal API.
 
 `patentGet` sections run per-section priority chains with auth-aware silent
 skip and fall-through (24s per source step; claims get 30s):
@@ -144,10 +185,11 @@ source code. Kept here so future maintainers don't re-verify from scratch.
   or empty → HTTP 400. Valid values: `'score desc'` (relevance; adds a
   `score` field per patent record) and `'date_publ desc'` (recency).
   `'relevance'` → HTTP 500 (invalid). Under `score desc` the server returns
-  one bounded top-N batch (observed 12–24 docs regardless of `pageCount`)
-  and **ignores `start`** — the webapp pages client-side
-  (`CUSTOM_SORT_PAGE_SIZE`), so relevance mode always fetches from `start: 0`
-  and slices `[offset, offset+limit)` locally.
+  one bounded relevance batch that **scales with `pageCount`** (verified:
+  12 docs @ `pageCount` 5; ~104 @ 50; ~107 unquoted @ 50) and **ignores
+  `start`** — the webapp pages client-side (`CUSTOM_SORT_PAGE_SIZE`), so
+  relevance mode always fetches from `start: 0` and slices
+  `[offset, offset+limit)` locally.
 - **Count fields (verified): `numberOfFamilies` is the stable match count**
   (e.g. 88,262 families for unquoted `mRNA display`); `totalResults` and
   `numFound` are window/batch sizes that vary with sort mode (24 under

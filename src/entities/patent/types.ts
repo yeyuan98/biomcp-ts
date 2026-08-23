@@ -14,6 +14,8 @@ export interface PatentSearchOptions {
   limit?: number;
   offset?: number;
   sort_by?: PatentSortBy;
+  /** Co-citation mining for foundational prior art (default: true). */
+  seminal?: boolean;
 }
 
 export interface PatentSearchResult {
@@ -42,6 +44,20 @@ export interface PatentSearchResponse {
   total_hits?: Partial<Record<PatentSource, number>>;
   /** Documents what each backend's total_hits number counts (per-backend semantics differ). */
   total_hits_basis?: Partial<Record<PatentSource, string>>;
+  /** Foundational prior art co-cited by the top results (seminal mining; default on). */
+  seminal_prior_art?: PatentSeminalEntry[];
+  /** How many granted documents were reference-mined (denominator for co_cited_by). */
+  mined_count?: number;
+  /** Degradation/context notes from seminal mining (GIGO advice, partial results). */
+  seminal_note?: string;
+}
+
+export interface PatentSeminalEntry {
+  publication_number: string;
+  title?: string;
+  co_cited_by: number;
+  cited_by: string[];
+  note?: string;
 }
 
 export interface PatentCitationEntry {

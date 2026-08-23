@@ -151,6 +151,338 @@ describe('patent dedup and normalization', () => {
   });
 });
 
+describe('seminal prior-art mining', () => {
+  let originalFetch: typeof global.fetch;
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+  });
+
+  afterEach(async () => {
+    global.fetch = originalFetch;
+    delete process.env.EPO_OPS_CONSUMER_KEY;
+    delete process.env.EPO_OPS_CONSUMER_SECRET;
+    // Reset the ppubs singleton so later describes (notably the Date.now
+    // budget-guard test) never inherit a cached session / limiter state.
+    const { ppubsClient } = await import('../../entities/patent/ppubs-client.js');
+    ppubsClient.close();
+  });
+
+  function jsonResp(payload: unknown, headers: Record<string, string> = { 'content-type': 'application/json' }) {
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      headers: new Headers(headers),
+      text: () => Promise.resolve(JSON.stringify(payload)),
+      json: () => Promise.resolve(payload),
+    });
+  }
+
+  // Real PPUBS shapes captured live on 2026-08-23 for "mRNA display".
+  const POOL_GRANTS = [
+    { guid: 'US-9347058-B2', type: 'USPAT', publicationReferenceDocumentNumber: '9347058', inventionTitle: 'Methods for the selection of binding proteins', score: 13.3 },
+    { guid: 'US-11060085-B2', type: 'USPAT', publicationReferenceDocumentNumber: '11060085', inventionTitle: 'Methods for the selection of binding proteins', score: 13.2 },
+    { guid: 'US-11913137-B2', type: 'USPAT', publicationReferenceDocumentNumber: '11913137', inventionTitle: 'Methods for the selection of binding proteins', score: 13.1 },
+  ];
+  const POOL_APPS = [
+    { guid: 'US-20140179551-A1', type: 'US-PGPUB', publicationReferenceDocumentNumber: '20140179551', inventionTitle: 'METHODS FOR THE SELECTION OF BINDING PROTEINS', score: 13.35 },
+  ];
+  // The three granted top hits all cite the Szostak PCT in three different
+  // raw formats (verified live); two also share a US reference.
+  const DOC_REFS: Record<string, unknown> = {
+    'US-9347058-B2': { foreignRefPatentNumber: ['WO98/56915', 'WO2008/031098'], usRefPatentNumber: ['5,034,506'] },
+    'US-11060085-B2': { foreignRefPatentNumber: ['9856915', 'WO99/36569'], usRefPatentNumber: ['5034506'] },
+    'US-11913137-B2': { foreignRefPatentNumber: ['WO1998/056915', '2001/64942'], usRefPatentNumber: ['US5034506'] },
+  };
+
+  function ppubsSeminalMock(opts: {
+    pool: unknown[];
+    docs: Record<string, unknown>;
+    mainPatents?: unknown[];
+    searchCalls?: { count: number };
+  }) {
+    return jest.fn().mockImplementation((url: any, init?: any) => {
+      const u = String(url);
+      if (u.includes('patents.google.com')) {
+        return Promise.reject(new Error('no network')); // google_patents leg fails softly
+      }
+      if (u.includes('/api/users/me/session')) {
+        return jsonResp({ userCase: { caseId: 1 } }, { 'x-access-token': 'tok-1', 'content-type': 'application/json' });
+      }
+      if (u.includes('/api/searches/searchWithBeFamily')) {
+        const body = JSON.parse(init.body);
+        if (opts.searchCalls) opts.searchCalls.count++;
+        if (body.pageCount >= 100) return jsonResp({ patents: opts.pool, numberOfFamilies: 100 });
+        return jsonResp({ patents: opts.mainPatents ?? opts.pool.slice(0, 2), numberOfFamilies: 100 });
+      }
+      if (u.includes('/api/patents/highlight/')) {
+        for (const [guid, doc] of Object.entries(opts.docs)) {
+          if (u.includes(guid)) return jsonResp(doc);
+        }
+      }
+      return Promise.reject(new Error(`unexpected ${u}`));
+    });
+  }
+
+  test('parsePatentRef canonicalizes all real PPUBS citation formats', async () => {
+    const { parsePatentRef, refKey } = await import('../../entities/patent/search/seminal.js');
+    const k = (raw: string, origin: 'us' | 'foreign' = 'foreign') => refKey(parsePatentRef(raw, origin)!);
+    // every observed raw form of the Szostak PCT canonicalizes identically
+    expect(k('WO98/56915')).toBe('WO:1998:56915');
+    expect(k('9856915')).toBe('WO:1998:56915');
+    expect(k('WO1998/056915')).toBe('WO:1998:56915');
+    // other observed formats
+    expect(k('WO-2014180569')).toBe('WO:2014:180569');
+    expect(k('2015/103037')).toBe('WO:2015:103037');
+    expect(k('2019/060835')).toBe('WO:2019:60835');
+    expect(k('90/02809')).toBe('WO:1990:2809');
+    expect(k('2001/64942')).toBe('WO:2001:64942');
+    expect(k('WO02/32925')).toBe('WO:2002:32925');
+    expect(k('WO2008/031098')).toBe('WO:2008:31098');
+    // US refs and publication numbers
+    expect(k('5,034,506', 'us')).toBe('US:5034506');
+    expect(k('US5034506', 'us')).toBe('US:5034506');
+    expect(refKey(parsePatentRef('US9347058B2')!)).toBe('US:9347058');
+    expect(refKey(parsePatentRef('WO2015006747A2')!)).toBe('WO:2015:6747');
+    expect(refKey(parsePatentRef('EP3904939B1')!)).toBe('EP:3904939');
+    // negatives: origin matters, serials distinguish, junk rejected
+    expect(k('9856915', 'us')).toBe('US:9856915');
+    expect(k('9856915', 'us')).not.toBe(k('9856915', 'foreign'));
+    expect(k('WO98/56916')).not.toBe(k('WO98/56915'));
+    expect(parsePatentRef('crispr')).toBeNull();
+    expect(parsePatentRef('')).toBeNull();
+  });
+
+  test('patentSearch default-on mines co-cited seminal art (keyless: WO form + actionable note)', async () => {
+    const searchCalls = { count: 0 };
+    global.fetch = ppubsSeminalMock({
+      pool: [...POOL_APPS, ...POOL_GRANTS],
+      docs: DOC_REFS,
+      mainPatents: [POOL_GRANTS[0], POOL_APPS[0]],
+      searchCalls,
+    }) as any;
+
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await patentSearch('"mRNA display"', { limit: 5 });
+    // main page intact (2 real results + gp _error marker)
+    expect(response.patents.filter(p => !p._error)).toHaveLength(2);
+    // one extra ppubs search for the mining pool
+    expect(searchCalls.count).toBe(2);
+    // co-citation entries: shared US ref + the Szostak PCT in all raw formats
+    expect(response.seminal_prior_art).toHaveLength(2);
+    const wo = response.seminal_prior_art!.find(e => e.publication_number.startsWith('WO'));
+    expect(wo?.publication_number).toBe('WO1998/056915');
+    expect(wo?.co_cited_by).toBe(3);
+    expect(wo?.cited_by).toEqual(['US9347058B2', 'US11060085B2', 'US11913137B2']);
+    expect(wo?.note).toContain('externally');
+    const us = response.seminal_prior_art!.find(e => e.publication_number === 'US5034506');
+    expect(us?.co_cited_by).toBe(3);
+    expect(us?.note).toBeUndefined();
+    expect(response.mined_count).toBe(3);
+    // quoted query → no GIGO tip
+    expect(response.seminal_note ?? '').not.toContain('quote');
+  });
+
+  test('seminal: false skips mining entirely (single ppubs search, no seminal fields)', async () => {
+    const searchCalls = { count: 0 };
+    global.fetch = ppubsSeminalMock({
+      pool: [...POOL_APPS, ...POOL_GRANTS],
+      docs: DOC_REFS,
+      mainPatents: [POOL_GRANTS[0]],
+      searchCalls,
+    }) as any;
+
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await patentSearch('"mRNA display"', { seminal: false });
+    expect(searchCalls.count).toBe(1);
+    expect(response.seminal_prior_art).toBeUndefined();
+    expect(response.mined_count).toBeUndefined();
+  });
+
+  test('unquoted multi-word query appends the precision tip to seminal_note', async () => {
+    global.fetch = ppubsSeminalMock({
+      pool: [...POOL_APPS, ...POOL_GRANTS],
+      docs: DOC_REFS,
+      mainPatents: [POOL_GRANTS[0]],
+    }) as any;
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await patentSearch('mRNA display', {});
+    expect(response.seminal_note).toContain('quote an exact concept phrase');
+  });
+
+  test('too few granted docs in pool → empty entries + explanatory note', async () => {
+    global.fetch = ppubsSeminalMock({
+      pool: POOL_APPS, // applications only
+      docs: {},
+      mainPatents: [POOL_APPS[0]],
+    }) as any;
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await patentSearch('"mRNA display"', {});
+    expect(response.patents.filter(p => !p._error)).toHaveLength(1);
+    expect(response.seminal_prior_art).toEqual([]);
+    expect(response.seminal_note).toContain('too few granted');
+    expect(response.mined_count).toBe(0);
+  });
+
+  test('no commonly-cited reference → empty entries + precision note', async () => {
+    global.fetch = ppubsSeminalMock({
+      pool: POOL_GRANTS,
+      docs: {
+        'US-9347058-B2': { foreignRefPatentNumber: ['WO2008/031098'] },
+        'US-11060085-B2': { foreignRefPatentNumber: ['WO99/36569'] },
+        'US-11913137-B2': { foreignRefPatentNumber: ['2001/64942'] },
+      },
+      mainPatents: [POOL_GRANTS[0]],
+    }) as any;
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await patentSearch('"mRNA display"', {});
+    expect(response.seminal_prior_art).toEqual([]);
+    expect(response.seminal_note).toContain('no commonly-cited reference');
+  });
+
+  test('references already on the visible page are excluded from entries', async () => {
+    global.fetch = ppubsSeminalMock({
+      pool: POOL_GRANTS,
+      docs: DOC_REFS,
+      // the shared US reference IS a visible result here
+      mainPatents: [POOL_GRANTS[0], { guid: 'US-5034506-A', type: 'USPAT', publicationReferenceDocumentNumber: '5034506', inventionTitle: 'Nucleotide delivery', score: 12 }],
+    }) as any;
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await patentSearch('"mRNA display"', {});
+    expect(response.seminal_prior_art!.map(e => e.publication_number)).toEqual(['WO1998/056915']);
+  });
+
+  test('mining failures degrade to a note without breaking the search', async () => {
+    global.fetch = jest.fn().mockImplementation((url: any) => {
+      const u = String(url);
+      if (u.includes('patents.google.com')) return Promise.reject(new Error('no network'));
+      if (u.includes('/api/users/me/session')) {
+        return jsonResp({ userCase: { caseId: 1 } }, { 'x-access-token': 'tok-1', 'content-type': 'application/json' });
+      }
+      if (u.includes('/api/searches/searchWithBeFamily')) {
+        return jsonResp({ patents: POOL_GRANTS, numberOfFamilies: 100 });
+      }
+      return Promise.reject(new Error(`unexpected ${u}`)); // getDocument fails
+    }) as any;
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await patentSearch('"mRNA display"', {});
+    expect(response.patents.filter(p => !p._error)).toHaveLength(3);
+    expect(response.seminal_prior_art).toEqual([]);
+    expect(response.seminal_note).toContain('too few granted documents yielded reference data');
+  });
+
+  test('non-200 getDocument bodies do not inflate the mined denominator', async () => {
+    global.fetch = jest.fn().mockImplementation((url: any) => {
+      const u = String(url);
+      if (u.includes('patents.google.com')) return Promise.reject(new Error('no network'));
+      if (u.includes('/api/users/me/session')) {
+        return jsonResp({ userCase: { caseId: 1 } }, { 'x-access-token': 'tok-1', 'content-type': 'application/json' });
+      }
+      if (u.includes('/api/searches/searchWithBeFamily')) {
+        return jsonResp({ patents: POOL_GRANTS, numberOfFamilies: 100 });
+      }
+      if (u.includes('/api/patents/highlight/')) {
+        // 9347058: OK + refs; the other two: HTTP 500 with a JSON error body
+        // (would parse fine but must NOT count as mined docs).
+        if (u.includes('US-9347058-B2')) return jsonResp(DOC_REFS['US-9347058-B2']);
+        return {
+          ok: false,
+          status: 500,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ error: 'boom' })),
+        };
+      }
+      return Promise.reject(new Error(`unexpected ${u}`));
+    }) as any;
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await patentSearch('"mRNA display"', {});
+    expect(response.mined_count).toBe(1);
+    expect(response.seminal_prior_art).toEqual([]);
+    expect(response.seminal_note).toContain('too few granted documents yielded reference data');
+  });
+
+  test('with OPS creds, WO candidates resolve to the earliest granted US family member', async () => {
+    process.env.EPO_OPS_CONSUMER_KEY = 'k';
+    process.env.EPO_OPS_CONSUMER_SECRET = 's';
+    const familyPayload = {
+      'ops:world-patent-data': {
+        'ops:patent-family': {
+          'ops:family-member': [
+            {
+              'publication-reference': {
+                'document-id': [{
+                  '@document-id-type': 'docdb',
+                  country: { '$': 'US' }, 'doc-number': { '$': '6261804' }, kind: { '$': 'B1' }, date: { '$': '20010717' },
+                }],
+              },
+            },
+            {
+              'publication-reference': {
+                'document-id': [{
+                  '@document-id-type': 'docdb',
+                  country: { '$': 'US' }, 'doc-number': { '$': '20010044108' }, kind: { '$': 'A1' }, date: { '$': '20011122' },
+                }],
+              },
+            },
+          ],
+        },
+      },
+    };
+    const biblioPayload = {
+      'ops:world-patent-data': {
+        'exchange-documents': {
+          'exchange-document': {
+            '@country': 'US', '@doc-number': '6261804', '@kind': 'B1',
+            'bibliographic-data': {
+              'invention-title': [
+                { '$': 'Fusions d´acide nucléique et de protéines', '@lang': 'fr' },
+                { '$': 'Selection of proteins using RNA-protein fusions', '@lang': 'en' },
+              ],
+            },
+          },
+        },
+      },
+    };
+    global.fetch = jest.fn().mockImplementation((url: any, init?: any) => {
+      const u = String(url);
+      if (u.includes('accesstoken')) {
+        return jsonResp({ access_token: 'tok', expires_in: 1199 });
+      }
+      if (u.includes('/family/publication/epodoc/WO9856915')) {
+        expect(init.headers['Authorization']).toBe('Bearer tok');
+        return jsonResp(familyPayload, {});
+      }
+      if (u.includes('/published-data/publication/epodoc/US6261804/biblio')) {
+        return jsonResp(biblioPayload, {});
+      }
+      if (u.includes('patents.google.com')) return Promise.reject(new Error('no network'));
+      if (u.includes('ppubs.uspto.gov')) {
+        // ppubs legs: no shared US ref this time (pure WO candidate)
+        return ppubsSeminalMock({
+          pool: POOL_GRANTS,
+          docs: {
+            'US-9347058-B2': { foreignRefPatentNumber: ['WO98/56915'] },
+            'US-11060085-B2': { foreignRefPatentNumber: ['9856915'] },
+            'US-11913137-B2': { foreignRefPatentNumber: ['WO1998/056915'] },
+          },
+          mainPatents: [POOL_GRANTS[0]],
+        })(url, init);
+      }
+      return Promise.reject(new Error(`unexpected ${u}`));
+    }) as any;
+
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await patentSearch('"mRNA display"', {});
+    expect(response.seminal_prior_art).toHaveLength(1);
+    const entry = response.seminal_prior_art![0];
+    expect(entry.publication_number).toBe('US6261804B1');
+    expect(entry.title).toBe('Selection of proteins using RNA-protein fusions');
+    expect(entry.note).toContain('WO1998/056915');
+    expect(entry.co_cited_by).toBe(3);
+    (await import('../../entities/patent/ops-client.js')).opsClient.close();
+  });
+});
+
 describe('patent search federation', () => {
   let originalFetch: typeof global.fetch;
 

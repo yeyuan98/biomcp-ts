@@ -426,6 +426,8 @@ Without `source`, backends are auto-selected: worldwide = EPO OPS when credentia
 
 PPUBS queries combine free text with parenthesized field filters (`(pfizer).as.`, `(C12N15/11).cpc.` — full CPC symbols only); ODP uses Lucene with plain terms AND-joined and explicit boolean syntax passed through verbatim (`applicationMetaData.patentNumber:"..."`, `.filingDate:[a TO b]`); OPS uses CQL (`ti=`, `pa=`, `cpc=`, `ct=`).
 
+Foundational prior-art discovery runs by default after every search with results (`seminal: false` opts out): co-citation mining over the backward references of the top granted ppubs hits surfaces seminal documents whose vocabulary predates the query concept (e.g. the Szostak mRNA-display patent US6261804B1 / WO98/56915 for "mRNA display"), returned as `seminal_prior_art` with `co_cited_by`/`cited_by`/`mined_count` and deadline-bounded degradation notes. See `src/entities/patent/README.md`.
+
 ### Sections (per-section priority chains, auth-aware)
 
 | Section | Upstream chain | Auth | Notes |

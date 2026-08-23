@@ -27,7 +27,9 @@ export function registerPatentTools(server: McpServer): void {
         'uspto_odp = US application metadata, bibliographic only but inventor/CPC/continuity-rich (needs USPTO_API_KEY) | ' +
         'google_patents = worldwide best-effort (often unavailable). ' +
         'Auto mode queries worldwide + ppubs concurrently; if ppubs fails hard it falls back to uspto_odp once (tagged with _note). ' +
-        'Pass source to force a specific backend. Results are ranked by relevance by default (ppubs sort_by).',
+        'Pass source to force a specific backend. Results are ranked by relevance by default (ppubs sort_by). ' +
+        'Foundational prior art is auto-discovered via co-citation mining of the top results and returned in seminal_prior_art ' +
+        '(surfaces seminal documents whose own vocabulary predates the query concept).',
       inputSchema: {
         query: z.string().describe('Free-text query; quote exact multi-word concepts like "mRNA display" for precise matching'),
         assignee: z.string().optional().describe('Filter by assignee/applicant organization, e.g. "Moderna"'),
@@ -41,13 +43,15 @@ export function registerPatentTools(server: McpServer): void {
         sort_by: z.enum(['relevance', 'recency'])
           .optional()
           .describe('Result ranking: "relevance" (default, conceptual match ranking) or "recency" (newest first). Currently affects the ppubs backend only'),
+        seminal: z.boolean().optional()
+          .describe('Discover foundational prior art via co-citation analysis of the top results (default: true; adds ~5-15s; set false for the fastest bibliographic lookups)'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async ({ query, assignee, inventor, cpc, status, date_range, limit, offset, source, sort_by }) => {
+    async ({ query, assignee, inventor, cpc, status, date_range, limit, offset, source, sort_by, seminal }) => {
       try {
         const response = await withToolTimeout(
-          patentSearch(query, { assignee, inventor, cpc, status, date_range, limit, offset, source, sort_by }),
+          patentSearch(query, { assignee, inventor, cpc, status, date_range, limit, offset, source, sort_by, seminal }),
           SEARCH_TIMEOUT_MS,
         );
         return { content: [{ type: 'text', text: JSON.stringify(response) }] };

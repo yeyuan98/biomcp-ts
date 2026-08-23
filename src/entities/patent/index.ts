@@ -1,9 +1,11 @@
 export type {
   PatentSource,
   PatentStatus,
+  PatentSortBy,
   PatentSearchOptions,
   PatentSearchResult,
   PatentSearchResponse,
+  PatentSeminalEntry,
   PatentCitationEntry,
   PatentClaimsSection,
   PatentCitationsSection,

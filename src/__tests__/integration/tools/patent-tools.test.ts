@@ -18,7 +18,7 @@ afterAll(async () => {
 
 describe('patent_search', () => {
   it('returns patents from auto-selected backends', async () => {
-    const response = await retryOnRateLimit(() => harness.callTool('patent_search', { query: 'crispr cas9', limit: 5 }));
+    const response = await retryOnRateLimit(() => harness.callTool('patent_search', { query: 'crispr cas9', limit: 5, seminal: false }));
     expectPatentSearchResult(response);
     const real = response.patents.filter((p: Record<string, unknown>) => !(p as any)._error);
     expect(real.length).toBeGreaterThan(0);
@@ -26,7 +26,7 @@ describe('patent_search', () => {
 
   it('returns US results via keyless ppubs source', async () => {
     const response = await retryOnRateLimit(() =>
-      harness.callTool('patent_search', { query: 'crispr', source: 'ppubs', limit: 3 }));
+      harness.callTool('patent_search', { query: 'crispr', source: 'ppubs', limit: 3, seminal: false }));
     expectPatentSearchResult(response);
     expect(response.patents.length).toBeGreaterThan(0);
     expect(response.patents[0].source).toBe('ppubs');
@@ -35,16 +35,17 @@ describe('patent_search', () => {
 
   it('applies assignee filter (stable identity: Moderna crispr filings exist)', async () => {
     const response = await retryOnRateLimit(() =>
-      harness.callTool('patent_search', { query: 'crispr', assignee: 'Moderna', source: 'ppubs', limit: 5 }));
+      harness.callTool('patent_search', { query: 'crispr', assignee: 'Moderna', source: 'ppubs', limit: 5, seminal: false }));
     expectPatentSearchResult(response);
     expect(response.patents.length).toBeGreaterThan(0);
   }, 120000);
 
   it('respects limit parameter', async () => {
     const response = await retryOnRateLimit(() =>
-      harness.callTool('patent_search', { query: 'cancer immunotherapy', source: 'ppubs', limit: 2 }));
+      harness.callTool('patent_search', { query: 'cancer immunotherapy', source: 'ppubs', limit: 2, seminal: false }));
     expectPatentSearchResult(response);
     expect(response.patents.length).toBeLessThanOrEqual(2);
+    expect(response.seminal_prior_art).toBeUndefined();
   }, 120000);
 
   it('ranks a quoted biotech concept by relevance on ppubs (mRNA display)', async () => {
@@ -65,7 +66,7 @@ describe('patent_search', () => {
 
   it('falls back to recency sort when sort_by=recency', async () => {
     const response = await retryOnRateLimit(() =>
-      harness.callTool('patent_search', { query: 'crispr cas9', source: 'ppubs', sort_by: 'recency', limit: 3 }));
+      harness.callTool('patent_search', { query: 'crispr cas9', source: 'ppubs', sort_by: 'recency', limit: 3, seminal: false }));
     expectPatentSearchResult(response);
     const dates = response.patents
       .filter((p: Record<string, unknown>) => !p._error && !p._hint)
@@ -74,6 +75,31 @@ describe('patent_search', () => {
     const sorted = [...dates].sort().reverse();
     expect(dates).toEqual(sorted);
   }, 120000);
+
+  it('discovers seminal prior art for a vocabulary-mismatched concept (mRNA display → Szostak)', async () => {
+    const response = await retryOnRateLimit(() =>
+      harness.callTool('patent_search', { query: '"mRNA display"', limit: 5 }));
+    expectPatentSearchResult(response);
+    // Default-on: seminal fields present whenever real results exist.
+    expect(Array.isArray(response.seminal_prior_art)).toBe(true);
+    expect(typeof response.mined_count).toBe('number');
+    if ((response.mined_count as number) >= 3) {
+      // The foundational Szostak art is co-cited by the top granted hits —
+      // as US6261804 (when OPS creds resolve the family) or its PCT
+      // WO9856915/WO1998/056915 forms (keyless). Tolerant matcher guards
+      // against live index drift.
+      const seminal = (response.seminal_prior_art as Array<Record<string, unknown>>)
+        .map(e => `${e.publication_number} ${e.title || ''}`).join(' | ');
+      expect(seminal).toMatch(/6261804|WO.?98.?05?6915|WO1998\/056915/i);
+      const szostak = (response.seminal_prior_art as Array<Record<string, unknown>>)
+        .find(e => /6261804|56915/i.test(String(e.publication_number)));
+      expect(Number(szostak?.co_cited_by)).toBeGreaterThanOrEqual(2);
+      expect(Array.isArray(szostak?.cited_by)).toBe(true);
+    } else {
+      // A thin pool must still be EXPLAINED, never silently empty.
+      expect(String(response.semnal_note)).toMatch(/too few|no commonly-cited|skipped|deadline/);
+    }
+  }, 180000);
 });
 
 describe('patent_get', () => {

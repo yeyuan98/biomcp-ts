@@ -51,6 +51,8 @@ export class TokenBucketRateLimiter {
   private refill(): void {
     const now = Date.now();
     const elapsed = now - this.lastRefill;
+    if (elapsed <= 0) return; // clock regression: no refill, never negative tokens
+    
     const tokensToAdd = elapsed * this.refillRate;
     
     this.tokens = Math.min(this.capacity, this.tokens + tokensToAdd);

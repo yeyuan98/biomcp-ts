@@ -169,7 +169,39 @@ export async function patentSearch(
     total_hits_basis[source] = TOTAL_HITS_BASIS[source];
   }
 
-  return { patents, total_hits, total_hits_basis };
+  // Foundational prior-art discovery via co-citation mining. Default-on
+  // (opt out with seminal: false); runs only when real results exist and
+  // degrades to a note on any failure — it must never break the search.
+  const response: PatentSearchResponse = { patents, total_hits };
+  if (total_hits_basis && Object.keys(total_hits_basis).length > 0) {
+    response.total_hits_basis = total_hits_basis;
+  }
+  if (options.seminal ?? true) {
+    const hasRealResults = patents.some(
+      p => p.publication_number && !p._error && !p._note && !p._hint,
+    );
+    if (hasRealResults) {
+      let seminal_note: string | undefined;
+      try {
+        const { mineSeminalPriorArt } = await import('./seminal.js');
+        const outcome = await mineSeminalPriorArt(query, patents);
+        response.seminal_prior_art = outcome.entries;
+        response.mined_count = outcome.mined;
+        seminal_note = outcome.note;
+      } catch {
+        seminal_note = 'seminal prior-art discovery skipped (mining source unavailable)';
+      }
+      if (!/"[^"]+"/.test(query) && query.trim().split(/\s+/).length > 1) {
+        seminal_note = [
+          seminal_note,
+          'for more precise mining, quote an exact concept phrase (e.g. "mRNA display")',
+        ].filter(Boolean).join('; ');
+      }
+      if (seminal_note) response.seminal_note = seminal_note;
+    }
+  }
+
+  return response;
 }
 
 export { dedupPatents, normalizePublicationNumber, isValidPublicationNumber } from './dedup.js';
