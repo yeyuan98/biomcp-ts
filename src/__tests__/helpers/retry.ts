@@ -16,6 +16,18 @@ function isRetryable(error: unknown): boolean {
   return false;
 }
 
+const NETWORK_ROW_RE = /fetch failed|timeout|timed out|econnreset|etimedout/i;
+
+function hasTransientErrorRow(result: unknown): boolean {
+  if (!Array.isArray(result)) return false;
+  return result.some(
+    (r: any) =>
+      r?._error !== undefined &&
+      typeof r._error === 'string' &&
+      NETWORK_ROW_RE.test(r._error),
+  );
+}
+
 export async function retryOnRateLimit<T>(
   fn: () => Promise<T>,
   retries = MAX_RETRIES,
@@ -23,11 +35,17 @@ export async function retryOnRateLimit<T>(
 ): Promise<T> {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      return await fn();
+      const result = await fn();
+      if (attempt < retries && hasTransientErrorRow(result)) {
+        console.warn(`[retry] Result contains transient network error rows, retrying in ${delay}ms...`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      return result;
     } catch (error) {
       if (attempt < retries && isRetryable(error)) {
         console.warn(
-          `[retry] Attempt ${attempt + 1}/${retries} failed with rate limit, retrying in ${delay}ms...`,
+          `[retry] Attempt ${attempt + 1}/${retries} failed with retryable error, retrying in ${delay}ms...`,
         );
         await new Promise((r) => setTimeout(r, delay));
       } else {
@@ -35,4 +53,5 @@ export async function retryOnRateLimit<T>(
       }
     }
   }
+  return fn();
 }

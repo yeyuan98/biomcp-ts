@@ -259,7 +259,7 @@ export async function variantGet(
   const variant: VariantResult = {
     id: response.dbsnp?.rsid || response._id || id,
     gene: response.dbsnp?.gene?.symbol || ann?.genename || (response as any).dbnsfp?.gene?.genename,
-    hgvs_p: ann?.hgvs_p,
+    hgvs_p: ann?.hgvs_p ? normalizeProteinChange(ann.hgvs_p) : undefined,
     hgvs_c: ann?.hgvs_c,
     rsid: response.dbsnp?.rsid,
     cosmic_id: response.cosmic?.cosmic_id,
@@ -729,6 +729,8 @@ const AA3_TO_1: Record<string, string> = {
   Ala: 'A', Arg: 'R', Asn: 'N', Asp: 'D', Cys: 'C', Gln: 'Q', Glu: 'E', Gly: 'G',
   His: 'H', Ile: 'I', Leu: 'L', Lys: 'K', Met: 'M', Phe: 'F', Pro: 'P', Ser: 'S',
   Thr: 'T', Trp: 'W', Tyr: 'Y', Val: 'V',
+  // Stop codons: HGVS writes Ter, CIViC/OncoKB write *
+  Ter: '*',
 };
 
 /**

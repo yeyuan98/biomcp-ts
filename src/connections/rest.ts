@@ -199,7 +199,8 @@ export class RestConnection implements IConnection<string, unknown> {
     for (const group of this.handling.envQueryParams ?? []) {
       if (!process.env[group.envVar]) continue;
       for (const [name, value] of Object.entries(group.params)) {
-        url.searchParams.set(name, value.startsWith('$') ? (process.env[value.slice(1)] || '') : value);
+        const resolved = value.startsWith('$') ? (process.env[value.slice(1)] || '') : value;
+        if (resolved) url.searchParams.set(name, resolved);
       }
     }
 

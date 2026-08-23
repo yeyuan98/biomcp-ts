@@ -737,6 +737,8 @@ describe('normalizeProteinChange', () => {
     ['p.Val600Glu ', 'V600E'],
     ['Thr599_Val600insThr', 'T599_V600INST'],
     ['v600e', 'V600E'],
+    ['p.Gly12Ter', 'G12*'],
+    ['p.Val600*', 'V600*'],
   ])('normalizeProteinChange(%s) -> %s', (input, expected) => {
     expect(normalizeProteinChange(input)).toBe(expected);
   });
