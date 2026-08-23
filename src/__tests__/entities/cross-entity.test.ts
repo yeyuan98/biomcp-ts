@@ -875,21 +875,14 @@ describe('diseaseToDrugs', () => {
       return Promise.resolve({
         ok: true,
         json: () => {
-          // First call: OpenTargets search (returns no hits)
-          if (callCount === 1) {
+          // Call 1: MyDisease MONDO label resolve (search-shaped mock: harmless)
+          // Call 2: OpenTargets search (returns no hits)
+          if (callCount === 2) {
             return Promise.resolve({
               data: { search: { hits: [] } },
             });
           }
-          // Second call: EFO probe with MONDO_ format
-          if (callCount === 2) {
-            return Promise.resolve({
-              data: {
-                disease: { id: 'EFO_0003869', name: 'breast cancer' },
-              },
-            });
-          }
-          // Third call: drug query
+          // Call 3+: EFO probe / drug queries resolve a disease
           return Promise.resolve({
             data: {
               disease: {
@@ -911,10 +904,15 @@ describe('diseaseToDrugs', () => {
 
     expect(results).toHaveLength(1);
     expect(results[0].drug_name).toBe('Test Drug');
-    // Verify the EFO probe used MONDO_ format
+    // The fallback probe must query OpenTargets with the MONDO_ EFO ID format.
     const calls = (global.fetch as any).mock.calls;
-    const efoCall = calls[1];
-    expect(efoCall).toBeDefined();
+    const efoProbe = calls.find((c: any[]) =>
+      typeof c[1]?.body === 'string' &&
+      c[1].body.includes('MONDO_0007254') &&
+      c[1].body.includes('disease(efoId')
+    );
+    expect(efoProbe).toBeDefined();
+    expect(String(efoProbe[0])).toContain('opentargets');
   });
 });
 

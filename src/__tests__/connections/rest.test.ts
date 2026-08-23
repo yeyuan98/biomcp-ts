@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals';
 import { RestConnection } from '../../connections/rest.js';
+import { HttpConnectionError } from '../../connections/errors.js';
 import type { ConnectionOptions } from '../../connections/base.js';
 
 jest.mock('../../connections/rate-limiter.js', () => ({
@@ -190,7 +191,11 @@ describe('RestConnection', () => {
       await conn.request('/test');
       fail('Expected an error to be thrown');
     } catch (error) {
-      const msg = (error as Error).message;
+      expect(error).toBeInstanceOf(HttpConnectionError);
+      const err = error as HttpConnectionError;
+      expect(err.status).toBe(400);
+      expect(err.retryable).toBe(false);
+      const msg = err.message;
       expect(msg).toContain('The request was rejected by mygene');
       expect(msg).toContain('may not be indexed yet');
     }
@@ -208,7 +213,11 @@ describe('RestConnection', () => {
       await conn.request('/test');
       fail('Expected an error to be thrown');
     } catch (error) {
-      const msg = (error as Error).message;
+      expect(error).toBeInstanceOf(HttpConnectionError);
+      const err = error as HttpConnectionError;
+      expect(err.status).toBe(404);
+      expect(err.retryable).toBe(false);
+      const msg = err.message;
       expect(msg).toContain('Resource not found at mygene');
       expect(msg).toContain('Verify the ID');
     }
@@ -226,7 +235,11 @@ describe('RestConnection', () => {
       await conn.request('/test');
       fail('Expected an error to be thrown');
     } catch (error) {
-      const msg = (error as Error).message;
+      expect(error).toBeInstanceOf(HttpConnectionError);
+      const err = error as HttpConnectionError;
+      expect(err.status).toBe(429);
+      expect(err.retryable).toBe(true);
+      const msg = err.message;
       expect(msg).toContain('Rate limited by mygene');
       expect(msg).toContain('Wait a few seconds and retry');
       expect(msg).toContain('API key in environment variables');
@@ -245,7 +258,11 @@ describe('RestConnection', () => {
       await conn.request('/test');
       fail('Expected an error to be thrown');
     } catch (error) {
-      expect((error as Error).message).toContain('Authentication required or forbidden by mygene');
+      expect(error).toBeInstanceOf(HttpConnectionError);
+      const err = error as HttpConnectionError;
+      expect(err.status).toBe(401);
+      expect(err.retryable).toBe(false);
+      expect(err.message).toContain('Authentication required or forbidden by mygene');
     }
   });
 
@@ -261,7 +278,11 @@ describe('RestConnection', () => {
       await conn.request('/test');
       fail('Expected an error to be thrown');
     } catch (error) {
-      expect((error as Error).message).toContain('Authentication required or forbidden by mygene');
+      expect(error).toBeInstanceOf(HttpConnectionError);
+      const err = error as HttpConnectionError;
+      expect(err.status).toBe(403);
+      expect(err.retryable).toBe(false);
+      expect(err.message).toContain('Authentication required or forbidden by mygene');
     }
   });
 
@@ -277,7 +298,11 @@ describe('RestConnection', () => {
       await conn.request('/test');
       fail('Expected an error to be thrown');
     } catch (error) {
-      const msg = (error as Error).message;
+      expect(error).toBeInstanceOf(HttpConnectionError);
+      const err = error as HttpConnectionError;
+      expect(err.status).toBe(500);
+      expect(err.retryable).toBe(true);
+      const msg = err.message;
       expect(msg).toContain('Server error from mygene');
       expect(msg).toContain('temporarily unavailable');
     }
@@ -295,11 +320,150 @@ describe('RestConnection', () => {
       await conn.request('/test');
       fail('Expected an error to be thrown');
     } catch (error) {
-      const msg = (error as Error).message;
+      expect(error).toBeInstanceOf(HttpConnectionError);
+      const err = error as HttpConnectionError;
+      expect(err.status).toBe(418);
+      expect(err.retryable).toBe(false);
+      const msg = err.message;
       expect(msg).toContain('HTTP 418');
       expect(msg).not.toContain('— The request');
       expect(msg).not.toContain('Rate limited');
       expect(msg).not.toContain('Server error');
     }
+  });
+
+  test('request() throws a typed error on 3xx when followRedirects is false', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 301,
+      statusText: 'Moved Permanently',
+      headers: new Headers({ location: 'https://dead-host.example/index/api/v1/metadata' }),
+    }) as any;
+
+    const conn = new RestConnection({ ...baseOptions, followRedirects: false });
+    try {
+      await conn.request('/metadata/10.1093/nar/gkl999');
+      fail('Expected an error to be thrown');
+    } catch (error) {
+      expect(error).toBeInstanceOf(HttpConnectionError);
+      const err = error as HttpConnectionError;
+      expect(err.status).toBe(301);
+      expect(err.retryable).toBe(false);
+      expect(err.message).toContain('Unexpected redirect');
+      expect(err.message).toContain('dead-host.example');
+    }
+    expect((global.fetch as any).mock.calls[0][1].redirect).toBe('manual');
+  });
+
+  test('request() follows redirects by default', async () => {
+    // Simulates fetch's built-in redirect handling: with redirect:'follow'
+    // the caller only ever sees the final 200; only a manual redirect mode
+    // would surface the 301 (and then rest.ts would throw).
+    global.fetch = jest.fn().mockImplementation(async (_url: any, init: any) => {
+      if (init.redirect === 'manual') {
+        return {
+          ok: false,
+          status: 301,
+          statusText: 'Moved Permanently',
+          headers: new Headers({ location: 'https://mygene.info/v3/test' }),
+        };
+      }
+      return { ok: true, json: () => Promise.resolve({ data: 'followed' }) };
+    }) as any;
+
+    const conn = new RestConnection(baseOptions);
+    const result = await conn.request('/test');
+
+    expect(result).toEqual({ data: 'followed' });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect((global.fetch as any).mock.calls[0][1].redirect).toBe('follow');
+  });
+
+  test('post() with a string body sends text/plain verbatim (Reactome AnalysisService shape)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({ pathways: [] }),
+    }) as any;
+
+    const conn = new RestConnection(baseOptions);
+    const result = await conn.post('/identifiers/projection', 'TP53\nEGFR\nKRAS');
+
+    const [, init] = (global.fetch as any).mock.calls[0];
+    expect(init.method).toBe('POST');
+    expect(init.headers.get('Content-Type')).toBe('text/plain');
+    expect(init.body).toBe('TP53\nEGFR\nKRAS');
+    expect(result).toEqual({ pathways: [] });
+  });
+
+  describe('registry-driven retry', () => {
+    const retryOptions: ConnectionOptions = {
+      ...baseOptions,
+      retry: { attempts: 3, backoffMs: 1 },
+    };
+
+    test('request() retries a retryable failure (503) and succeeds', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: 'recovered' }) }) as any;
+
+      const conn = new RestConnection(retryOptions);
+      const result = await conn.request('/test');
+
+      expect(result).toEqual({ data: 'recovered' });
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    test('request() does not retry a non-retryable failure (400)', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+      }) as any;
+
+      const conn = new RestConnection(retryOptions);
+      await expect(conn.request('/test')).rejects.toBeInstanceOf(HttpConnectionError);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    test('request() exhausts attempts on persistent retryable failure', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+      }) as any;
+
+      const conn = new RestConnection(retryOptions);
+      await expect(conn.request('/test')).rejects.toThrow('HTTP 503');
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+    });
+
+    test('source without retry config makes a single attempt', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+      }) as any;
+
+      const conn = new RestConnection(baseOptions);
+      await expect(conn.request('/test')).rejects.toThrow('HTTP 503');
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    test('post() retries a retryable failure and succeeds', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ data: 'recovered' }),
+        }) as any;
+
+      const conn = new RestConnection(retryOptions);
+      const result = await conn.post('/test', { q: 'brca1' });
+
+      expect(result).toEqual({ data: 'recovered' });
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
   });
 });

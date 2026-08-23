@@ -1,4 +1,5 @@
 import type { ArticleSearchOptions, Article, ParsedDateRange } from '../types.js';
+import { withTimeout } from '../../../connections/fetch-utils.js';
 import { deduplicateAndRank } from './dedup.js';
 import { searchPubMed } from './pubmed.js';
 import { searchEuropePMC } from './europepmc.js';
@@ -7,16 +8,6 @@ import { searchPubTator } from './pubtator.js';
 import { searchLitSense } from './litsense.js';
 
 const FEDERATED_SEARCH_TIMEOUT_MS = 20000;
-
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>;
-  return Promise.race([
-    promise.finally(() => clearTimeout(timer)),
-    new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-    }),
-  ]);
-}
 
 export function parseDateRange(dateRange: string): ParsedDateRange {
   const [from, to] = dateRange.split('/');
@@ -46,18 +37,20 @@ async function federatedSearch(
   offset: number,
   dateRange?: ParsedDateRange
 ): Promise<Article[]> {
+  // Throw-on-timeout invariant: a hung backend must REJECT so Promise.allSettled
+  // records it as an error result — a null would crash `allArticles.push(...null)`.
   const backends = dateRange
     ? [
-        withTimeout(searchPubMed(query, limit, offset, dateRange), FEDERATED_SEARCH_TIMEOUT_MS, 'PubMed search'),
-        withTimeout(searchEuropePMC(query, limit, offset, undefined, dateRange), FEDERATED_SEARCH_TIMEOUT_MS, 'EuropePMC search'),
-        withTimeout(searchSemanticScholar(query, limit, offset, dateRange), FEDERATED_SEARCH_TIMEOUT_MS, 'SemanticScholar search'),
+        withTimeout(searchPubMed(query, limit, offset, dateRange), FEDERATED_SEARCH_TIMEOUT_MS, { onTimeout: 'throw', label: 'PubMed search' }),
+        withTimeout(searchEuropePMC(query, limit, offset, undefined, dateRange), FEDERATED_SEARCH_TIMEOUT_MS, { onTimeout: 'throw', label: 'EuropePMC search' }),
+        withTimeout(searchSemanticScholar(query, limit, offset, dateRange), FEDERATED_SEARCH_TIMEOUT_MS, { onTimeout: 'throw', label: 'SemanticScholar search' }),
       ]
     : [
-        withTimeout(searchPubMed(query, limit, offset), FEDERATED_SEARCH_TIMEOUT_MS, 'PubMed search'),
-        withTimeout(searchEuropePMC(query, limit, offset), FEDERATED_SEARCH_TIMEOUT_MS, 'EuropePMC search'),
-        withTimeout(searchSemanticScholar(query, limit, offset), FEDERATED_SEARCH_TIMEOUT_MS, 'SemanticScholar search'),
-        withTimeout(searchPubTator(query, limit, offset), FEDERATED_SEARCH_TIMEOUT_MS, 'PubTator search'),
-        withTimeout(searchLitSense(query, limit, offset), FEDERATED_SEARCH_TIMEOUT_MS, 'LitSense search'),
+        withTimeout(searchPubMed(query, limit, offset), FEDERATED_SEARCH_TIMEOUT_MS, { onTimeout: 'throw', label: 'PubMed search' }),
+        withTimeout(searchEuropePMC(query, limit, offset), FEDERATED_SEARCH_TIMEOUT_MS, { onTimeout: 'throw', label: 'EuropePMC search' }),
+        withTimeout(searchSemanticScholar(query, limit, offset), FEDERATED_SEARCH_TIMEOUT_MS, { onTimeout: 'throw', label: 'SemanticScholar search' }),
+        withTimeout(searchPubTator(query, limit, offset), FEDERATED_SEARCH_TIMEOUT_MS, { onTimeout: 'throw', label: 'PubTator search' }),
+        withTimeout(searchLitSense(query, limit, offset), FEDERATED_SEARCH_TIMEOUT_MS, { onTimeout: 'throw', label: 'LitSense search' }),
       ];
 
   const results = await Promise.allSettled(backends);

@@ -119,6 +119,12 @@ class RestConnection implements IConnection<string, unknown> {
 
 Issues `GET` requests via `request()`. Issues `POST` requests with JSON body via `post()` (handles 204 No Content by returning null). Auth credentials are read from `process.env` at construction time (`hasAuth` is snapshot). Static extra headers from `handling.headers` (e.g. `User-Agent`) are merged into every request. Response content type is auto-detected from the `content-type` header — JSON is parsed, everything else returned as text. Supports `timeoutMs` via `AbortSignal.timeout`.
 
+`request()`/`post()` honor the registry-level `retry` config (`{ attempts, backoffMs }`, attempts = total tries): retryable failures (network errors, 429, 5xx) are retried with exponential backoff; sources without a `retry` entry get a single attempt. Domain-specific retries (EPO OPS throttle, USPTO PPUBS session refresh) stay inside their own clients.
+
+### Timeout layering
+
+Connection abort (`handling.timeoutMs`, 15s) < provider-level `withTimeout` (citation providers use `DEFAULT_PROVIDER_TIMEOUT_MS` = 10s, resolving null; federated search throws at 20s so `Promise.allSettled` records errors) < tool-level section timeout (30s). Both `withTimeout` modes live in `fetch-utils.ts`.
+
 ### `graphql.ts`
 
 ```ts
@@ -174,9 +180,17 @@ function fetchWithTimeout<T>(
   fn: (signal?: AbortSignal) => Promise<T>,
   timeoutMs: number
 ): Promise<{ data?: T; error?: string }>;
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  opts: { onTimeout: 'null' | 'throw'; label?: string }
+): Promise<T | null>;
 ```
 
-Wraps any async function with an `AbortController`-based timeout. Returns `{ data }` on success or `{ error }` on failure/abort.
+`fetchWithTimeout` wraps any async function with an `AbortController`-based timeout. Returns `{ data }` on success or `{ error }` on failure/abort.
+
+`withTimeout` races a promise against a timer: `onTimeout: 'null'` resolves null (optional lookups, e.g. citation providers via `DEFAULT_PROVIDER_TIMEOUT_MS`); `onTimeout: 'throw'` rejects with `<label> timed out after <ms>ms` (federated search).
 
 ## Registry — Sources by Protocol
 

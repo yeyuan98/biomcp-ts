@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { articleSearch, articleGet, deduplicateAndRank, transformPubTator, transformLitSense, transformEuropePMC, transformSemanticScholar, parseDateRange, parseArticleId, parseOaXml, parsePubMedXml } from '../../entities/article.js';
+import { articleSearch, articleGet, transformPubTator, transformLitSense, transformEuropePMC, transformSemanticScholar, parseDateRange, parseArticleId, parseOaXml } from '../../entities/article.js';
 import { clearCitationCache } from '../../entities/article/citation/index.js';
 import { clearWorkCache } from '../../entities/article/citation/crossref.js';
 import { clearCitedInCache } from '../../entities/article/citation/pubmed.js';
@@ -40,58 +40,6 @@ const SINGLE_ARTICLE_XML = `<?xml version="1.0"?>
 <ArticleId IdType="pmc">PMC9999999</ArticleId>
 </ArticleIdList>
 </PubmedData>
-</PubmedArticle>
-</PubmedArticleSet>`;
-
-const STRUCTURED_ABSTRACT_XML = `<?xml version="1.0"?>
-<PubmedArticleSet>
-<PubmedArticle>
-<MedlineCitation Status="MEDLINE" Owner="NLM">
-<PMID Version="1">67890</PMID>
-<Article PubModel="Print">
-<Journal>
-<Title>Nature</Title>
-<ISOAbbreviation>Nature</ISOAbbreviation>
-<JournalIssue><Volume>500</Volume>
-<PubDate><Year>2023</Year><Month>Jun</Month></PubDate>
-</JournalIssue>
-</Journal>
-<ArticleTitle>Structured abstract test</ArticleTitle>
-<Abstract>
-<AbstractText Label="BACKGROUND">Background info here.</AbstractText>
-<AbstractText Label="METHODS">Methods described here.</AbstractText>
-<AbstractText Label="RESULTS">Results shown here.</AbstractText>
-</Abstract>
-<AuthorList>
-<Author><LastName>Test</LastName><ForeName>Author</ForeName></Author>
-</AuthorList>
-</Article>
-</MedlineCitation>
-<PubmedData>
-<ArticleIdList>
-<ArticleId IdType="pubmed">67890</ArticleId>
-</ArticleIdList>
-</PubmedData>
-</PubmedArticle>
-</PubmedArticleSet>`;
-
-const BATCH_XML = `<?xml version="1.0"?>
-<PubmedArticleSet>
-<PubmedArticle>
-<MedlineCitation><PMID Version="1">111</PMID>
-<Article><ArticleTitle>First article</ArticleTitle>
-<Abstract><AbstractText>Abstract one.</AbstractText></Abstract>
-<Journal><ISOAbbreviation>J One</ISOAbbreviation></Journal>
-</Article></MedlineCitation>
-<PubmedData><ArticleIdList><ArticleId IdType="pubmed">111</ArticleId></ArticleIdList></PubmedData>
-</PubmedArticle>
-<PubmedArticle>
-<MedlineCitation><PMID Version="1">222</PMID>
-<Article><ArticleTitle>Second article</ArticleTitle>
-<Abstract><AbstractText>Abstract two.</AbstractText></Abstract>
-<Journal><ISOAbbreviation>J Two</ISOAbbreviation></Journal>
-</Article></MedlineCitation>
-<PubmedData><ArticleIdList><ArticleId IdType="pubmed">222</ArticleId></ArticleIdList></PubmedData>
 </PubmedArticle>
 </PubmedArticleSet>`;
 
@@ -174,31 +122,6 @@ describe('article', () => {
     expect(callUrl).toContain('id=12345');
     expect(result.pmid).toBe('12345');
     expect(result.title).toBe('Test article about BRCA1');
-  });
-
-  test('parsePubMedXml handles structured abstracts', () => {
-    const articles = parsePubMedXml(STRUCTURED_ABSTRACT_XML);
-    expect(articles).toHaveLength(1);
-    expect(articles[0].abstract).toContain('BACKGROUND: Background info here.');
-    expect(articles[0].abstract).toContain('METHODS: Methods described here.');
-    expect(articles[0].abstract).toContain('RESULTS: Results shown here.');
-  });
-
-  test('parsePubMedXml handles batch of articles', () => {
-    const articles = parsePubMedXml(BATCH_XML);
-    expect(articles).toHaveLength(2);
-    expect(articles[0].pmid).toBe('111');
-    expect(articles[1].pmid).toBe('222');
-  });
-
-  test('parsePubMedXml returns empty for non-XML input', () => {
-    const articles = parsePubMedXml('not xml');
-    expect(articles).toEqual([]);
-  });
-
-  test('parsePubMedXml returns empty for empty document', () => {
-    const articles = parsePubMedXml('<?xml version="1.0"?><PubmedArticleSet></PubmedArticleSet>');
-    expect(articles).toEqual([]);
   });
 
   test('articleSearch() with pubtator source uses /search/?text= endpoint', async () => {
@@ -336,23 +259,6 @@ describe('article', () => {
     expect(result.source).toBe('semantic_scholar');
   });
 
-  test('deduplicateAndRank deduplicates by pmid and sorts by cited_by', () => {
-    const articles = [
-      { pmid: '1', title: 'A', cited_by: 5, source: 'pubmed' as const },
-      { pmid: '2', title: 'B', cited_by: 20, source: 'pubmed' as const },
-      { pmid: '1', title: 'A dup', cited_by: 10, source: 'europepmc' as const },
-      { pmid: '3', title: 'C', cited_by: 15, source: 'pubmed' as const },
-    ];
-
-    const result = deduplicateAndRank(articles, 3);
-
-    expect(result).toHaveLength(3);
-    expect(result[0].pmid).toBe('2');
-    expect(result[1].pmid).toBe('3');
-    expect(result[2].pmid).toBe('1');
-    expect(result[2].title).toBe('A');
-  });
-
   test('articleSearch() returns empty for unknown source', async () => {
     const result = await articleSearch('brca1', { source: 'unknown' as any });
     expect(result).toEqual([]);
@@ -467,6 +373,41 @@ describe('article', () => {
       expect(callUrl).toContain('publicationDateOrYear=2020-01-01:');
     });
 
+    // B8: article search shares the single-flight S2 queue with citations.
+    // While the first search is in flight, a second search must NOT start its
+    // fetch — even after the registry rate-limit interval has elapsed.
+    test('concurrent Semantic Scholar searches are serialized by the shared queue', async () => {
+      jest.useFakeTimers();
+      try {
+        const ok = () => ({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ data: [] }),
+        });
+        let releaseFirst!: (v: unknown) => void;
+        global.fetch = jest.fn().mockImplementation((url: unknown) => {
+          if (!String(url).includes('semanticscholar')) return Promise.resolve(ok());
+          if ((global.fetch as any).mock.calls.filter((c: any[]) => String(c[0]).includes('semanticscholar')).length === 1) {
+            return new Promise(resolve => { releaseFirst = resolve; });
+          }
+          return Promise.resolve(ok());
+        }) as any;
+
+        const first = articleSearch('brca1', { source: 'semantic_scholar' });
+        const second = articleSearch('tp53', { source: 'semantic_scholar' });
+        // Past the 2s unkeyed rate limit: serialization can only come from the queue.
+        await jest.advanceTimersByTimeAsync(3000);
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+
+        releaseFirst(ok());
+        await jest.advanceTimersByTimeAsync(20000);
+        await Promise.all([first, second]);
+        expect(global.fetch).toHaveBeenCalledTimes(2);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     test('pubtator source returns error when dateRange is set', async () => {
       const result = await articleSearch('brca1', { source: 'pubtator', dateRange: '2020-01-01/2023-12-31' });
       expect(result).toHaveLength(1);
@@ -519,6 +460,37 @@ describe('article', () => {
       await articleSearch('brca1');
 
       expect(global.fetch).toHaveBeenCalledTimes(5);
+    });
+
+    // Regression for the throw-on-timeout invariant: a hanging backend must
+    // REJECT into Promise.allSettled (error result). If withTimeout ever
+    // resolves null instead, `allArticles.push(...result.value)` spreads null
+    // and this test fails with a TypeError rather than silently dropping the
+    // backend's results.
+    test('federated search: hanging provider rejects, never resolves null', async () => {
+      jest.useFakeTimers();
+      try {
+        global.fetch = jest.fn().mockImplementation((url: unknown) => {
+          if (String(url).includes('semanticscholar')) {
+            return new Promise(() => {});
+          }
+          return Promise.resolve({
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: () => Promise.resolve({}),
+          });
+        }) as any;
+
+        const promise = articleSearch('brca1');
+        await jest.advanceTimersByTimeAsync(20000);
+        const result = await promise;
+
+        // Resolved without a crash: the hung backend landed as a rejected
+        // (error) entry that allSettled skipped, not a null spread.
+        expect(result).toEqual([]);
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 

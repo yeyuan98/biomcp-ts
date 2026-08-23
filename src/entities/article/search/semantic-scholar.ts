@@ -1,6 +1,7 @@
 import { connectionManager } from '../../../connections/manager.js';
+import { withTimeout } from '../../../connections/fetch-utils.js';
 import type { Article, ParsedDateRange } from '../types.js';
-import { withRetry } from '../../../connections/retry.js';
+import { s2RequestQueue } from '../semantic-scholar-queue.js';
 
 export interface SemanticScholarPaper {
   title?: string;
@@ -51,30 +52,28 @@ export function transformSemanticScholar(a: SemanticScholarPaper): Article {
   };
 }
 
-// Retry configuration for Semantic Scholar
-// Use shorter delays with API key, longer without
-function getRetryConfig() {
-  return {
-    maxRetries: 1,
-    baseDelayMs: process.env.S2_API_KEY ? 200 : 500,
-    logger: { warn: (msg: string) => console.warn(`[semantic_scholar] ${msg}`) }
-  };
-}
-
+// Retry policy lives on the registry 'semantic_scholar' source config; the
+// shared S2 queue serializes this traffic with citation lookups.
 export async function searchSemanticScholar(query: string, limit: number, offset: number, dateRange?: ParsedDateRange): Promise<Article[]> {
   try {
-    const response = await withRetry(async () => {
-      const conn = connectionManager.getConnection('semantic_scholar');
+    const conn = connectionManager.getConnection('semantic_scholar');
 
-      let searchUrl = `/graph/v1/paper/search?query=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}&fields=title,abstract,authors,year,venue,citationCount,isOpenAccess,externalIds`;
-      if (dateRange?.from || dateRange?.to) {
-        const from = dateRange.from || '';
-        const to = dateRange.to || '';
-        searchUrl += `&publicationDateOrYear=${from}:${to}`;
-      }
+    let searchUrl = `/graph/v1/paper/search?query=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}&fields=title,abstract,authors,year,venue,citationCount,isOpenAccess,externalIds`;
+    if (dateRange?.from || dateRange?.to) {
+      const from = dateRange.from || '';
+      const to = dateRange.to || '';
+      searchUrl += `&publicationDateOrYear=${from}:${to}`;
+    }
 
-      return await conn.request(searchUrl) as SemanticScholarResponse;
-    }, getRetryConfig());
+    // withTimeout INSIDE the queue slot: a hung fetch must release the queue
+    // for the next S2 caller instead of poisoning it.
+    const response = await s2RequestQueue.enqueue(
+      () => withTimeout(
+        conn.request(searchUrl) as Promise<SemanticScholarResponse>,
+        15000,
+        { onTimeout: 'throw', label: 'SemanticScholar search' }
+      )
+    );
 
     return (response.data || []).map(transformSemanticScholar);
   } catch (error) {

@@ -1,3 +1,5 @@
+import { HttpConnectionError } from './errors.js';
+
 /**
  * Retry infrastructure for handling transient failures in external API calls.
  *
@@ -51,90 +53,40 @@ export interface RetryOptions {
 }
 
 /**
- * Client (4xx) HTTP error codes that should NOT be retried.
- * These indicate client errors (bad request, unauthorized, not found, etc.)
- * and retrying won't help.
+ * Network-level failure signatures produced by fetch itself (transport
+ * resets, DNS, timeouts/aborts). Matched against the error message and,
+ * when Node wraps a socket error, the `cause.code`. Deliberately free of
+ * digit patterns so numbers inside messages never trigger retries.
+ */
+const NETWORK_ERROR_RE =
+  /fetch failed|network|timeout|timed out|aborted|econnreset|etimedout|econnrefused|enotfound|enetunreach|eai_again|socket hang up/i;
+
+/**
+ * Determines if an error is retryable.
  *
- * Note: 429 (Too Many Requests) is intentionally excluded from this list as it
- * is retryable - it represents rate limiting which should be retried with backoff.
- */
-const NON_RETRYABLE_4XX_PATTERNS = [
-  '400',
-  '401',
-  '402',
-  '403',
-  '404',
-  '405',
-  '406',
-  '407',
-  '408',
-  '409',
-  '410',
-  '411',
-  '412',
-  '413',
-  '414',
-  '415',
-  '416',
-  '417',
-  '418',
-  '421',
-  '422',
-  '423',
-  '424',
-  '425',
-  '426',
-  '428',
-];
-
-/**
- * Retryable error patterns.
- * 429 is explicitly retryable (rate limiting).
- * 5xx server errors are retryable (server-side issues).
- * Network errors are retryable (transient connectivity issues).
- */
-const RETRYABLE_PATTERNS = [
-  '429',
-  'too many requests',
-  'rate limit',
-  '5', // 5xx server errors
-  'network',
-  'timeout',
-  'econnreset',
-  'etimedout',
-  'econnrefused',
-  'enotfound',
-  'socket hang up',
-];
-
-/**
- * Determines if an error is retryable based on its message content.
+ * `HttpConnectionError` (thrown by the connection layer) is classified by
+ * its typed status: 429 and 5xx (and status-less network failures) retry;
+ * other 4xx do not. Plain errors thrown by fetch fall back to a curated
+ * network-signature match.
  *
  * @param error - The error to evaluate (typically an Error object)
  * @returns `true` if the error indicates a transient failure that may succeed on retry
  *
  * @example
  * ```ts
- * isRetryableError(new Error('HTTP 429 Too Many Requests')); // true
- * isRetryableError(new Error('HTTP 500 Internal Server Error')); // true
- * isRetryableError(new Error('HTTP 400 Bad Request')); // false
+ * isRetryableError(new HttpConnectionError('HTTP 429 ...', 429)); // true
+ * isRetryableError(new HttpConnectionError('HTTP 400 ...', 400)); // false
  * isRetryableError(new Error('ECONNRESET')); // true
+ * isRetryableError(new Error('HTTP 418 id 5123')); // false
  * ```
  */
 export function isRetryableError(error: unknown): boolean {
+  if (error instanceof HttpConnectionError) {
+    return error.retryable;
+  }
   if (error instanceof Error) {
-    const msg = error.message.toLowerCase();
-
-    // First check for non-retryable 4xx errors (except 429)
-    // Must check before retryable patterns since 429 starts with '4'
-    for (const pattern of NON_RETRYABLE_4XX_PATTERNS) {
-      if (msg.includes(pattern)) {
-        return false;
-      }
-    }
-
-    // Then check for retryable patterns
-    return RETRYABLE_PATTERNS.some(pattern => msg.includes(pattern));
+    const cause = (error.cause as { code?: string } | undefined)?.code ?? '';
+    return NETWORK_ERROR_RE.test(error.message) || NETWORK_ERROR_RE.test(cause);
   }
   return false;
 }

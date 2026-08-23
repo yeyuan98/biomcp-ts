@@ -25,8 +25,6 @@ src/__tests__/
   helpers/
     mcp-harness.ts       # In-process MCP client harness (InMemoryTransport)
     assertions.ts        # Structural validators for each entity type
-  fixtures/
-    ground-truth/         # Cached ground truth for stable identity assertions
   connections/
     fetch-utils.test.ts
     graphql.test.ts
@@ -41,7 +39,6 @@ src/__tests__/
     citation.test.ts
     citation/
       cache.test.ts
-      timeout.test.ts
     cross-entity.test.ts
     dedup.test.ts
     disease.test.ts
@@ -54,7 +51,6 @@ src/__tests__/
     trial.test.ts
     variant.test.ts
   integration/
-    tool-registration.test.ts   # Verifies tool registration counts
     tools/
       gene-tools.test.ts        # Integration: real gene API calls
       drug-tools.test.ts        # Integration: real drug API calls
@@ -67,6 +63,7 @@ src/__tests__/
       patent-tools.test.ts      # Integration: patent search + get (keyed cases auto-skip)
   server/
     errors.test.ts
+    tool-registration.test.ts   # Verifies tool registration counts (mocked, unit)
     tool-utils.test.ts       # Shared tool utility functions (applyLimit, sliceArraysRecursive)
     validation.test.ts
   transform/
@@ -78,30 +75,28 @@ src/__tests__/
 
 | Module | File | Tests |
 |---|---|---|
-| connections | fetch-utils.test.ts | 3 |
-| connections | graphql.test.ts | 5 |
+| connections | fetch-utils.test.ts | 13 |
+| connections | graphql.test.ts | 12 |
 | connections | grpc.test.ts | 2 |
 | connections | manager.test.ts | 2 |
-| connections | rate-limiter.test.ts | 8 |
+| connections | rate-limiter.test.ts | 7 |
 | connections | registry.test.ts | 7 |
-| connections | rest.test.ts | 17 |
+| connections | rest.test.ts | 25 |
 | connections | retry.test.ts | 20 |
-| entities | article.test.ts | 66 |
+| entities | article.test.ts | 63 |
 | entities | citation.test.ts | 35 |
 | entities | citation/cache.test.ts | 17 |
-| entities | citation/timeout.test.ts | 10 |
 | entities | cross-entity.test.ts | 35 |
 | entities | dedup.test.ts | 13 |
 | entities | disease.test.ts | 4 |
 | entities | drug.test.ts | 18 |
-| entities | gene.test.ts | 45 |
+| entities | gene.test.ts | 44 |
 | entities | id-resolution.test.ts | 22 |
 | entities | patent.test.ts | 32 |
 | entities | pdb.test.ts | 31 |
 | entities | pubmed-transform.test.ts | 27 |
 | entities | trial.test.ts | 13 |
 | entities | variant.test.ts | 34 |
-| integration | tool-registration.test.ts | 11 |
 | integration | gene-tools.test.ts | 14 |
 | integration | drug-tools.test.ts | 8 |
 | integration | variant-tools.test.ts | 8 |
@@ -112,11 +107,12 @@ src/__tests__/
 | integration | pdb-tools.test.ts | 25 |
 | integration | patent-tools.test.ts | 10 |
 | server | errors.test.ts | 19 |
+| server | tool-registration.test.ts | 11 |
 | server | tool-utils.test.ts | 16 |
 | server | validation.test.ts | 35 |
 | transform | gene.test.ts | 4 |
 | transform | pdb.test.ts | 3 |
-| **Total (unit)** | | **543** (+104 integration) |
+| **Total (unit)** | | **597** (+93 integration) |
 
 ## Testing Approach
 

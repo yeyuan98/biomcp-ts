@@ -462,6 +462,10 @@ async function fetchExpression(geneSymbol: string, signal?: AbortSignal): Promis
 
 async function fetchHpa(geneSymbol: string, signal?: AbortSignal): Promise<{ subcellular?: Array<{ location: string; confidence: string }> }> {
   try {
+    // Deliberately a raw fetch, NOT a connectionManager source: HPA serves a
+    // pre-gzipped file (content-type application/gzip) on top of transport
+    // gzip, so the body needs the manual gunzip below — RestConnection's
+    // json()/text() parsing cannot handle it.
     const url = `https://www.proteinatlas.org/api/search_download.php?search=${encodeURIComponent(geneSymbol)}&format=json&columns=g,scl`;
     const rawResponse = await fetch(url, { signal });
     if (!rawResponse.ok) {

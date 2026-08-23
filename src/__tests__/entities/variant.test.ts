@@ -343,12 +343,14 @@ describe('variant', () => {
   });
 
   test('variantGet() with section fetch failure returns partial result with _error', async () => {
-    let callCount = 0;
+    delete process.env.ALPHAGENOME_API_KEY;
+    // Main variant fetch succeeds; the alphagenome section genuinely REJECTS
+    // (fetchAlphaGenomeSection throws without an API key) — the section must
+    // land as an _error entry while the core section still resolves.
     global.fetch = jest.fn().mockImplementation(() => {
-      callCount++;
-      // Main variant fetch succeeds
       return Promise.resolve({
         ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
         json: () => Promise.resolve({
           _id: 'vcf123',
           dbsnp: { rsid: 'rs123' },
@@ -356,11 +358,11 @@ describe('variant', () => {
       });
     }) as any;
 
-    const result = await variantGet('rs123', ['core']);
+    const result = await variantGet('rs123', ['core', 'alphagenome']);
 
-    // Core section should exist (it's built from variant data, no extra fetch needed)
     expect(result.sections).toBeDefined();
-    expect(result.sections!.core).toBeDefined();
+    expect(result.sections!.core).toEqual(expect.objectContaining({ id: 'rs123' }));
+    expect((result.sections!.alphagenome as any)._error).toContain('ALPHAGENOME_API_KEY');
   });
 
   test('variantGet() maps alphagenome_scores alias to alphagenome section', async () => {

@@ -60,8 +60,7 @@ describe('variant_get', () => {
 });
 
 describe('variant_oncokb', () => {
-  it('returns annotation for BRAF V600E', async () => {
-    if (!process.env.ONCOKB_TOKEN) return;
+  it.skip('returns annotation for BRAF V600E (requires ONCOKB_TOKEN)', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('variant_oncokb', { gene: 'BRAF', protein_change: 'V600E' }));
     expect(result).toBeDefined();
   }, 60000);

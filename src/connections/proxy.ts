@@ -46,6 +46,7 @@ export function configureProxyDispatcher(): void {
     proxyStatus.detail = `proxy env present (${proxy}) but undici dispatcher setup failed: ${
       err instanceof Error ? err.message : String(err)
     } — fetch remains direct`;
+    console.error('[biomcp] proxy init failed:', proxyStatus.detail);
   }
 }
 

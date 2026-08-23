@@ -2,7 +2,7 @@ import { ConnectionOptions } from './base.js';
 
 export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   // ==========================================
-  // GENOMICS - REST (14 sources)
+  // GENOMICS - REST (4 sources)
   // ==========================================
   mygene: {
     sourceId: 'mygene',
@@ -18,30 +18,9 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
   },
-  clingen: {
-    sourceId: 'clingen',
-    baseUrl: 'https://search.clinicalgenome.org',
-    protocol: 'rest',
-    handling: { timeoutMs: 15000 },
-    rateLimit: { intervalMs: 100 },
-  },
   gtex: {
     sourceId: 'gtex',
     baseUrl: 'https://gtexportal.org',
-    protocol: 'rest',
-    handling: { timeoutMs: 15000 },
-    rateLimit: { intervalMs: 100 },
-  },
-  hpa: {
-    sourceId: 'hpa',
-    baseUrl: 'https://www.proteinatlas.org',
-    protocol: 'rest',
-    handling: { timeoutMs: 15000 },
-    rateLimit: { intervalMs: 100 },
-  },
-  gwas: {
-    sourceId: 'gwas',
-    baseUrl: 'https://www.ebi.ac.uk/gwas/rest/api',
     protocol: 'rest',
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
@@ -53,29 +32,15 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
   },
-  
+
   // ==========================================
-  // PROTEINS & PATHWAYS - REST (6 sources)
+  // PROTEINS & PATHWAYS - REST (3 sources)
   // ==========================================
   uniprot: {
     sourceId: 'uniprot',
     baseUrl: 'https://rest.uniprot.org',
     protocol: 'rest',
     handling: { streaming: true, timeoutMs: 15000 },
-    rateLimit: { intervalMs: 100 },
-  },
-  interpro: {
-    sourceId: 'interpro',
-    baseUrl: 'https://www.ebi.ac.uk/interpro/api',
-    protocol: 'rest',
-    handling: { timeoutMs: 15000 },
-    rateLimit: { intervalMs: 100 },
-  },
-  complexportal: {
-    sourceId: 'complexportal',
-    baseUrl: 'https://www.ebi.ac.uk/intact/complex-ws',
-    protocol: 'rest',
-    handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
   },
   reactome: {
@@ -92,34 +57,13 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
   },
-  kegg: {
-    sourceId: 'kegg',
-    baseUrl: 'https://rest.kegg.jp',
-    protocol: 'rest',
-    handling: { contentType: 'text', timeoutMs: 15000 },
-    rateLimit: { intervalMs: 334 },
-  },
-  wikipathways: {
-    sourceId: 'wikipathways',
-    baseUrl: 'https://www.wikipathways.org/json',
-    protocol: 'rest',
-    handling: { timeoutMs: 15000 },
-    rateLimit: { intervalMs: 100 },
-  },
-  
+
   // ==========================================
-  // DRUGS & PHARMACOLOGY - REST (7 sources)
+  // DRUGS & PHARMACOLOGY - REST (2 sources)
   // ==========================================
   mychem: {
     sourceId: 'mychem',
     baseUrl: 'https://mychem.info/v1',
-    protocol: 'rest',
-    handling: { timeoutMs: 15000 },
-    rateLimit: { intervalMs: 100 },
-  },
-  chembl: {
-    sourceId: 'chembl',
-    baseUrl: 'https://www.ebi.ac.uk/chembl/api/data',
     protocol: 'rest',
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
@@ -136,37 +80,9 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     },
     rateLimit: { intervalMs: 100 },
   },
-  cpic: {
-    sourceId: 'cpic',
-    baseUrl: 'https://api.cpicpgx.org/v1',
-    protocol: 'rest',
-    handling: { timeoutMs: 15000 },
-    rateLimit: { intervalMs: 250 },
-  },
-  pharmgkb: {
-    sourceId: 'pharmgkb',
-    baseUrl: 'https://api.pharmgkb.org/v1',
-    protocol: 'rest',
-    handling: { timeoutMs: 15000 },
-    rateLimit: { intervalMs: 500 },
-  },
-  ema: {
-    sourceId: 'ema',
-    baseUrl: 'https://www.ema.europa.eu/en/documents/report',
-    protocol: 'local-file',
-    handling: { staleHours: 72 },
-    rateLimit: { intervalMs: 0 },
-  },
-  who_pq: {
-    sourceId: 'who_pq',
-    baseUrl: 'https://extranet.who.int/prequal/medicines/prequalified/',
-    protocol: 'local-file',
-    handling: { staleHours: 72 },
-    rateLimit: { intervalMs: 0 },
-  },
-  
+
   // ==========================================
-  // DISEASES - REST (5 sources)
+  // DISEASES - REST (3 sources)
   // ==========================================
   mydisease: {
     sourceId: 'mydisease',
@@ -185,20 +101,6 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   seer: {
     sourceId: 'seer',
     baseUrl: 'https://seer.cancer.gov/statistics-network/explorer/source/content_writers',
-    protocol: 'rest',
-    handling: { timeoutMs: 15000 },
-    rateLimit: { intervalMs: 100 },
-  },
-  medlineplus: {
-    sourceId: 'medlineplus',
-    baseUrl: 'https://wsearch.nlm.nih.gov',
-    protocol: 'rest',
-    handling: { contentType: 'xml', timeoutMs: 15000 },
-    rateLimit: { intervalMs: 100 },
-  },
-  hpo: {
-    sourceId: 'hpo',
-    baseUrl: 'https://ontology.jax.org/api/hp',
     protocol: 'rest',
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
@@ -223,6 +125,7 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
       fallbackRateLimitMs: 334,
       keyedRateLimitMs: 100,
     },
+    retry: { attempts: 4, backoffMs: 500 },
   },
   pubtator: {
     sourceId: 'pubtator',
@@ -247,6 +150,7 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     protocol: 'rest',
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
+    retry: { attempts: 3, backoffMs: 200 },
   },
   semantic_scholar: {
     sourceId: 'semantic_scholar',
@@ -264,6 +168,9 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
       fallbackRateLimitMs: 2000,
       keyedRateLimitMs: 1000,
     },
+    // Compromise between the former per-call-site wrappers: search retried
+    // once, citations up to 3 times (429-prone source).
+    retry: { attempts: 3, backoffMs: 500 },
   },
   litsense: {
     sourceId: 'litsense',
@@ -302,17 +209,21 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     protocol: 'rest',
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
+    retry: { attempts: 3, backoffMs: 100 },
   },
   opencitations: {
     sourceId: 'opencitations',
     baseUrl: 'https://opencitations.net/index/api',
     protocol: 'rest',
     handling: { timeoutMs: 15000 },
+    // v1 endpoints 301 to a dead host — fail loudly instead of returning
+    // empty until the v2 migration lands.
+    followRedirects: false,
     rateLimit: { intervalMs: 1000 },
   },
   
   // ==========================================
-  // CLINICAL TRIALS - REST (2 sources)
+  // CLINICAL TRIALS - REST (1 source)
   // ==========================================
   clinicaltrials: {
     sourceId: 'clinicaltrials',
@@ -321,68 +232,10 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
   },
-  nci_cts: {
-    sourceId: 'nci_cts',
-    baseUrl: 'https://clinicaltrialsapi.cancer.gov/api/v2',
-    protocol: 'rest',
-    handling: { timeoutMs: 15000 },
-    auth: {
-      envVar: 'NCI_API_KEY',
-      required: false,
-      delivery: { type: 'header', name: 'X-API-KEY' },
-    },
-    rateLimit: { intervalMs: 100 },
-  },
-  
+
   // ==========================================
-  // DIAGNOSTICS & REGISTRIES - REST + Local
+  // ONTOLOGIES & ANALYSIS - REST (1 source)
   // ==========================================
-  vaers: {
-    sourceId: 'vaers',
-    baseUrl: 'https://wonder.cdc.gov',
-    protocol: 'rest',
-    handling: { timeoutMs: 15000 },
-    rateLimit: { intervalMs: 100 },
-  },
-  gtr: {
-    sourceId: 'gtr',
-    baseUrl: 'https://ftp.ncbi.nlm.nih.gov/pub/GTR/data/',
-    protocol: 'local-file',
-    handling: { staleHours: 168 },
-    rateLimit: { intervalMs: 0 },
-  },
-  who_ivd: {
-    sourceId: 'who_ivd',
-    baseUrl: 'https://extranet.who.int/prequal/vitro-diagnostics/prequalified/in-vitro-diagnostics/export',
-    protocol: 'local-file',
-    handling: { staleHours: 72 },
-    rateLimit: { intervalMs: 0 },
-  },
-  cvx: {
-    sourceId: 'cvx',
-    baseUrl: 'https://www2.cdc.gov/vaccines/iis/iisstandards/downloads/',
-    protocol: 'local-file',
-    handling: { staleHours: 720 },
-    rateLimit: { intervalMs: 0 },
-  },
-  
-  // ==========================================
-  // ENRICHMENT & ANALYSIS - REST (4 sources)
-  // ==========================================
-  enrichr: {
-    sourceId: 'enrichr',
-    baseUrl: 'https://maayanlab.cloud/Enrichr',
-    protocol: 'rest',
-    handling: { timeoutMs: 15000 },
-    rateLimit: { intervalMs: 100 },
-  },
-  gprofiler: {
-    sourceId: 'gprofiler',
-    baseUrl: 'https://biit.cs.ut.ee/gprofiler/api',
-    protocol: 'rest',
-    handling: { timeoutMs: 15000 },
-    rateLimit: { intervalMs: 0 },
-  },
   ols4: {
     sourceId: 'ols4',
     baseUrl: 'https://www.ebi.ac.uk/ols4',
@@ -390,14 +243,7 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
   },
-  quickgo: {
-    sourceId: 'quickgo',
-    baseUrl: 'https://www.ebi.ac.uk/QuickGO/services',
-    protocol: 'rest',
-    handling: { timeoutMs: 15000 },
-    rateLimit: { intervalMs: 100 },
-  },
-  
+
   // ==========================================
   // FUNDING & RESEARCH - REST (1 source)
   // ==========================================
@@ -407,24 +253,6 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     protocol: 'rest',
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 1000 },
-  },
-  
-  // ==========================================
-  // CBIO PORTAL - REST (2 sources)
-  // ==========================================
-  cbioportal: {
-    sourceId: 'cbioportal',
-    baseUrl: 'https://www.cbioportal.org/api',
-    protocol: 'rest',
-    handling: { timeoutMs: 15000 },
-    rateLimit: { intervalMs: 100 },
-  },
-  cbioportal_datahub: {
-    sourceId: 'cbioportal_datahub',
-    baseUrl: 'https://datahub.assets.cbioportal.org',
-    protocol: 'rest',
-    handling: { timeoutMs: 15000 },
-    rateLimit: { intervalMs: 0 },
   },
   
   // ==========================================
@@ -444,7 +272,7 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   },
   
   // ==========================================
-  // REQUIRED KEYS - REST (2 sources)
+  // REQUIRED KEYS - REST (1 source)
   // ==========================================
   disgenet: {
     sourceId: 'disgenet',
@@ -455,18 +283,6 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
       envVar: 'DISGENET_API_KEY',
       required: true,
       delivery: { type: 'authorization' },
-    },
-    rateLimit: { intervalMs: 100 },
-  },
-  umls: {
-    sourceId: 'umls',
-    baseUrl: 'https://uts-ws.nlm.nih.gov',
-    protocol: 'rest',
-    handling: { timeoutMs: 15000 },
-    auth: {
-      envVar: 'UMLS_API_KEY',
-      required: true,
-      delivery: { type: 'query-param', name: 'apiKey' },
     },
     rateLimit: { intervalMs: 100 },
   },

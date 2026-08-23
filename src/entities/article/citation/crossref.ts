@@ -1,7 +1,6 @@
 import { connectionManager } from '../../../connections/manager.js';
 import type { ArticleId, CitationRecord, CitationCount } from './types.js';
-import { withTimeout, DEFAULT_PROVIDER_TIMEOUT_MS } from './timeout.js';
-import { withRetry } from '../../../connections/retry.js';
+import { withTimeout, DEFAULT_PROVIDER_TIMEOUT_MS } from '../../../connections/fetch-utils.js';
 
 interface CrossrefWorkResponse {
   status?: string;
@@ -31,8 +30,6 @@ interface CrossrefForwardResponse {
   };
 }
 
-const CROSSREF_RETRY_CONFIG = { maxRetries: 2, baseDelayMs: 100 };
-
 interface CachedWork {
   references: CitationRecord[];
   count: CitationCount | null;
@@ -50,7 +47,8 @@ async function getCachedWorkData(id: ArticleId): Promise<CachedWork | null> {
         const conn = connectionManager.getConnection('crossref');
         const response = await withTimeout(
           conn.request(`/works/${encodeURIComponent(key)}`) as Promise<CrossrefWorkResponse>,
-          DEFAULT_PROVIDER_TIMEOUT_MS
+          DEFAULT_PROVIDER_TIMEOUT_MS,
+          { onTimeout: 'null' }
         );
 
         if (!response?.message) return null;
@@ -105,13 +103,12 @@ export async function getForwardCitations(id: ArticleId, limit: number): Promise
   if (!doi) return [];
 
   try {
-    const response = await withRetry(async () => {
-      const conn = connectionManager.getConnection('crossref');
-      return await withTimeout(
-        conn.request(`/works?filter=references:${encodeURIComponent(doi)}&rows=${limit}`) as Promise<CrossrefForwardResponse>,
-        DEFAULT_PROVIDER_TIMEOUT_MS
-      );
-    }, CROSSREF_RETRY_CONFIG);
+    const conn = connectionManager.getConnection('crossref');
+    const response = await withTimeout(
+      conn.request(`/works?filter=references:${encodeURIComponent(doi)}&rows=${limit}`) as Promise<CrossrefForwardResponse>,
+      DEFAULT_PROVIDER_TIMEOUT_MS,
+      { onTimeout: 'null' }
+    );
 
     if (!response) return [];
     const items = response.message?.items || [];

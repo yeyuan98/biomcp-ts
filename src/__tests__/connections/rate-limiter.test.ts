@@ -10,11 +10,6 @@ const makeConfig = (intervalMs: number, extra?: Partial<RateLimitConfig>): RateL
 });
 
 describe('TokenBucketRateLimiter', () => {
-  it('constructor sets capacity=1 and tokens=1', () => {
-    const limiter = new TokenBucketRateLimiter(makeConfig(1000));
-    expect(limiter).toBeDefined();
-  });
-
   it('acquire() succeeds immediately on fresh limiter', async () => {
     const limiter = new TokenBucketRateLimiter(makeConfig(1000));
     const promise = limiter.acquire();

@@ -1,10 +1,12 @@
-import { 
-  IConnection, 
-  ConnectionOptions, 
+import {
+  IConnection,
+  ConnectionOptions,
   ConnectionHandling,
-  ProtocolType 
+  ProtocolType
 } from './base.js';
 import { TokenBucketRateLimiter, RateLimiterFactory } from './rate-limiter.js';
+import { withRetry } from './retry.js';
+import { HttpConnectionError } from './errors.js';
 
 function getHttpStatusHint(status: number, sourceId: string): string {
   if (status === 400) {
@@ -50,6 +52,10 @@ export class RestConnection implements IConnection<string, unknown> {
   }
   
   async request(path: string, _variables?: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<unknown> {
+    return this.withSourceRetry(() => this.requestOnce(path, options));
+  }
+
+  private async requestOnce(path: string, options?: { signal?: AbortSignal }): Promise<unknown> {
     await this.rateLimiter.acquire();
 
     const url = this.buildUrl(path);
@@ -64,11 +70,15 @@ export class RestConnection implements IConnection<string, unknown> {
       method: 'GET',
       headers,
       signal,
+      redirect: this.options.followRedirects === false ? 'manual' : 'follow',
     });
     
     if (!response.ok) {
+      if (this.options.followRedirects === false) {
+        this.throwIfUnexpectedRedirect(response, url);
+      }
       const hint = getHttpStatusHint(response.status, this.sourceId);
-      throw new Error(`HTTP ${response.status}: ${response.statusText} — URL: ${url} — Source: ${this.sourceId}${hint}`);
+      throw new HttpConnectionError(`HTTP ${response.status}: ${response.statusText} — URL: ${url} — Source: ${this.sourceId}${hint}`, response.status);
     }
     
     const contentType = response.headers?.get?.('content-type') || '';
@@ -78,12 +88,18 @@ export class RestConnection implements IConnection<string, unknown> {
     return response.text();
   }
 
-  async post(path: string, body: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<unknown> {
+  /** `body` may be a plain string — sent verbatim as text/plain (e.g. Reactome
+   *  AnalysisService identifier posts); objects are sent as JSON. */
+  async post(path: string, body: Record<string, unknown> | string, options?: { signal?: AbortSignal }): Promise<unknown> {
+    return this.withSourceRetry(() => this.postOnce(path, body, options));
+  }
+
+  private async postOnce(path: string, body: Record<string, unknown> | string, options?: { signal?: AbortSignal }): Promise<unknown> {
     await this.rateLimiter.acquire();
 
     const url = this.buildUrl(path);
     const headers = this.buildHeaders();
-    headers.set('Content-Type', 'application/json');
+    headers.set('Content-Type', typeof body === 'string' ? 'text/plain' : 'application/json');
 
     const signals: AbortSignal[] = [];
     if (this.handling.timeoutMs) signals.push(AbortSignal.timeout(this.handling.timeoutMs));
@@ -93,22 +109,24 @@ export class RestConnection implements IConnection<string, unknown> {
     const response = await fetch(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify(body),
+      body: typeof body === 'string' ? body : JSON.stringify(body),
       signal,
+      redirect: this.options.followRedirects === false ? 'manual' : 'follow',
     });
 
     if (response.status === 204) return null;
 
     if (!response.ok) {
+      if (this.options.followRedirects === false) {
+        this.throwIfUnexpectedRedirect(response, url);
+      }
       const hint = getHttpStatusHint(response.status, this.sourceId);
-      throw new Error(`HTTP ${response.status}: ${response.statusText} — URL: ${url} — Source: ${this.sourceId}${hint}`);
+      throw new HttpConnectionError(`HTTP ${response.status}: ${response.statusText} — URL: ${url} — Source: ${this.sourceId}${hint}`, response.status);
     }
 
     const contentType = response.headers?.get?.('content-type') || '';
     if (!contentType || contentType.includes('json')) {
-      const text = await response.text();
-      if (!text.trim()) return null;
-      return JSON.parse(text);
+      return response.json();
     }
     return response.text();
   }
@@ -132,6 +150,28 @@ export class RestConnection implements IConnection<string, unknown> {
   
   close(): void {
     // No persistent connections to close for fetch-based client
+  }
+  
+  private withSourceRetry<T>(fn: () => Promise<T>): Promise<T> {
+    const retry = this.options.retry;
+    if (!retry) {
+      return fn();
+    }
+    return withRetry(fn, {
+      maxRetries: Math.max((retry.attempts ?? 2) - 1, 0),
+      baseDelayMs: retry.backoffMs ?? 1000,
+      logger: { warn: (msg: string) => console.warn(`[${this.sourceId}] ${msg}`) },
+    });
+  }
+
+  private throwIfUnexpectedRedirect(response: Response, url: string): void {
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers?.get?.('location');
+      throw new HttpConnectionError(
+        `Unexpected redirect (HTTP ${response.status}) from ${this.sourceId}${location ? ` — Location: ${location}` : ''} — URL: ${url}`,
+        response.status
+      );
+    }
   }
   
   private buildUrl(path: string, query?: Record<string, string>): string {

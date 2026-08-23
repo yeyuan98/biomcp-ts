@@ -24,6 +24,24 @@ function mockXml(xml: string) {
   };
 }
 
+// Await a promise that internally sleeps on module timers (token-bucket rate
+// limiters, registry retry backoffs) under jest fake timers, stepping the
+// clock until the promise settles. Same pattern as patent.test.ts.
+async function advanceUntilSettled<T>(p: Promise<T>): Promise<T> {
+  let settled = false;
+  let value: T | undefined;
+  let failure: { error: unknown } | undefined;
+  p.then(
+    v => { value = v; settled = true; },
+    e => { failure = { error: e }; settled = true; },
+  );
+  while (!settled) {
+    await jest.advanceTimersByTimeAsync(250);
+  }
+  if (failure) throw failure.error;
+  return value as T;
+}
+
 jest.setTimeout(30000);
 
 describe('citation module', () => {
@@ -124,12 +142,22 @@ describe('citation module', () => {
   });
 
   describe('getCitations', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
     test('returns federated result structure', async () => {
       global.fetch = jest.fn().mockResolvedValue(mockJson({})) as any;
 
-      const result = await getCitations(
-        { pmid: '12345', doi: '10.1/test' },
-        { limit: 5 }
+      const result = await advanceUntilSettled(
+        getCitations(
+          { pmid: '12345', doi: '10.1/test' },
+          { limit: 5 }
+        )
       );
 
       expect(result.article_id).toEqual({ pmid: '12345', doi: '10.1/test' });
@@ -142,9 +170,11 @@ describe('citation module', () => {
     test('queries specific source when source option provided', async () => {
       global.fetch = jest.fn().mockResolvedValue(mockJson({})) as any;
 
-      const result = await getCitations(
-        { pmid: '12345', doi: '10.1/test' },
-        { source: 'pubmed' }
+      const result = await advanceUntilSettled(
+        getCitations(
+          { pmid: '12345', doi: '10.1/test' },
+          { source: 'pubmed' }
+        )
       );
 
       expect(result.source_results).toHaveLength(1);
@@ -154,9 +184,11 @@ describe('citation module', () => {
     test('full mode queries all 5 providers', async () => {
       global.fetch = jest.fn().mockResolvedValue(mockJson({})) as any;
 
-      const result = await getCitations(
-        { pmid: '12345', doi: '10.1/test' },
-        { full: true }
+      const result = await advanceUntilSettled(
+        getCitations(
+          { pmid: '12345', doi: '10.1/test' },
+          { full: true }
+        )
       );
 
       expect(result.article_id).toEqual({ pmid: '12345', doi: '10.1/test' });
@@ -480,12 +512,22 @@ describe('citation module', () => {
   });
 
   describe('Semantic Scholar provider', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
     test('getForwardCitations uses PMCID as query ID', async () => {
       global.fetch = jest.fn().mockResolvedValue(mockJson({
         data: [{ citationPaper: { paperId: 'abc', title: 'Paper', authors: [{ name: 'A' }], year: 2023, venue: 'Science', externalIds: { DOI: '10.1/a' } } }],
       })) as any;
 
-      const result = await semanticScholarProvider.getForwardCitations({ pmcid: 'PMC123' }, 10);
+      const result = await advanceUntilSettled(
+        semanticScholarProvider.getForwardCitations({ pmcid: 'PMC123' }, 10)
+      );
 
       expect(result).toHaveLength(1);
       const callUrl = (global.fetch as any).mock.calls[0][0] as string;
@@ -497,15 +539,21 @@ describe('citation module', () => {
       expect(result).toEqual([]);
     });
 
-    test('handles 429 rate limiting gracefully', async () => {
+    test('handles 429 rate limiting gracefully (registry-driven retry)', async () => {
       global.fetch = jest.fn().mockResolvedValue({
         ok: false,
         status: 429,
         statusText: 'Too Many Requests',
       }) as any;
 
-      const result = await semanticScholarProvider.getForwardCitations({ pmid: '123' }, 10);
+      // Registry 'semantic_scholar' entry: attempts 3, backoffMs 500 —
+      // exactly 3 tries total (single retry policy, no per-call-site wrapper).
+      const result = await advanceUntilSettled(
+        semanticScholarProvider.getForwardCitations({ pmid: '123' }, 10)
+      );
+
       expect(result).toEqual([]);
+      expect(global.fetch).toHaveBeenCalledTimes(3);
     });
   });
 });

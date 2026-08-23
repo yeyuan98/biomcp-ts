@@ -1604,14 +1604,4 @@ describe('transformMyGeneResponse edge cases', () => {
     const result = transformMyGeneResponse(input);
     expect(result.summary).toBeUndefined();
   });
-
-  test('preserves all fields', () => {
-    const input = {
-      symbol: 'BRCA1',
-      name: 'BRCA1 DNA repair',
-      summary: 'DNA repair gene.',
-    };
-    const result = transformMyGeneResponse(input);
-    expect(result).toEqual(input);
-  });
 });

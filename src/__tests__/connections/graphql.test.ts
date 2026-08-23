@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals';
 import { GraphQLConnection } from '../../connections/graphql.js';
+import { HttpConnectionError } from '../../connections/errors.js';
 import type { ConnectionOptions } from '../../connections/base.js';
 
 jest.mock('../../connections/rate-limiter.js', () => ({
@@ -104,5 +105,111 @@ describe('GraphQLConnection', () => {
     const conn = new GraphQLConnection(baseOptions);
     await conn.healthCheck();
     expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('request() passes through partial data despite errors[]', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        data: { gene: { name: 'BRCA1' }, otherRoot: { ok: true } },
+        errors: [{ message: 'field unavailable' }],
+      }),
+    }) as any;
+
+    const conn = new GraphQLConnection(baseOptions);
+    const result = await conn.request('{ gene { name } }') as any;
+
+    expect(result.data.gene.name).toBe('BRCA1');
+    expect(result.errors).toHaveLength(1);
+  });
+
+  test('request() throws typed error when errors[] accompany null data', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        data: null,
+        errors: [{ message: 'internal server error' }],
+      }),
+    }) as any;
+
+    const conn = new GraphQLConnection(baseOptions);
+    const promise = conn.request('{ gene { name } }');
+    await expect(promise).rejects.toBeInstanceOf(HttpConnectionError);
+    await expect(promise).rejects.toThrow('GraphQL error from gnomad: internal server error');
+  });
+
+  test('request() throws when rootField is null alongside errors[]', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        data: { gene: null, otherRoot: { ok: true } },
+        errors: [{ message: 'could not resolve gene' }],
+      }),
+    }) as any;
+
+    const conn = new GraphQLConnection(baseOptions);
+    await expect(
+      conn.request('{ gene { name } }', undefined, { rootField: 'gene' })
+    ).rejects.toThrow("root field 'gene' is null/missing: could not resolve gene");
+
+    const result = await conn.request('{ gene { name } otherRoot { ok } }', undefined, {
+      rootField: 'otherRoot',
+    }) as any;
+    expect(result.data.gene).toBeNull();
+  });
+
+  test('request() returns data unchanged when no errors[]', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ data: { gene: null } }),
+    }) as any;
+
+    const conn = new GraphQLConnection(baseOptions);
+    const result = await conn.request('{ gene { name } }', undefined, { rootField: 'gene' }) as any;
+
+    expect(result).toEqual({ data: { gene: null } });
+  });
+
+  describe('registry-driven retry', () => {
+    const retryOptions: ConnectionOptions = {
+      ...baseOptions,
+      retry: { attempts: 3, backoffMs: 1 },
+    };
+
+    test('request() retries a retryable failure (503) and succeeds', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: { gene: { name: 'BRCA1' } } }) }) as any;
+
+      const conn = new GraphQLConnection(retryOptions);
+      const result = await conn.request('{ gene { name } }') as any;
+
+      expect(result.data.gene.name).toBe('BRCA1');
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    test('request() does not retry a non-retryable failure (400)', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+      }) as any;
+
+      const conn = new GraphQLConnection(retryOptions);
+      await expect(conn.request('{ gene { name } }')).rejects.toBeInstanceOf(HttpConnectionError);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    test('source without retry config makes a single attempt', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+      }) as any;
+
+      const conn = new GraphQLConnection(baseOptions);
+      await expect(conn.request('{ gene { name } }')).rejects.toThrow('HTTP 503');
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
   });
 });

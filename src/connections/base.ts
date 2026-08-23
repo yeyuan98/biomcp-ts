@@ -1,4 +1,4 @@
-export type ProtocolType = 'rest' | 'graphql' | 'grpc' | 'local-file';
+export type ProtocolType = 'rest' | 'graphql' | 'grpc';
 
 export type AuthDeliveryMethod =
   | { type: 'header'; name: string }
@@ -32,6 +32,19 @@ export interface ConnectionHandling {
   headers?: Record<string, string>;
 }
 
+export interface RetryConfig {
+  /**
+   * Total tries per request (initial attempt + retries).
+   * @default 2
+   */
+  attempts?: number;
+  /**
+   * Base backoff delay in ms before the first retry; doubles per retry.
+   * @default 1000
+   */
+  backoffMs?: number;
+}
+
 export interface ConnectionOptions {
   sourceId: string;
   baseUrl: string;
@@ -39,6 +52,12 @@ export interface ConnectionOptions {
   auth?: AuthConfig;
   rateLimit: RateLimitConfig;
   handling?: ConnectionHandling;
+  followRedirects?: boolean;
+  /**
+   * Connection-layer retry policy. Absent = single attempt (no retry);
+   * only retryable failures (network errors, 429, 5xx) are retried.
+   */
+  retry?: RetryConfig;
 }
 
 export interface IConnection<TRequest = string, TResponse = unknown> {
@@ -47,6 +66,7 @@ export interface IConnection<TRequest = string, TResponse = unknown> {
   effectiveRateLimitMs: number;
   
   request(req: TRequest, variables?: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<TResponse>;
+  post?(path: string, body: Record<string, unknown> | string, options?: { signal?: AbortSignal }): Promise<TResponse>;
   batch?(requests: TRequest[]): Promise<TResponse[]>;
   healthCheck(): Promise<boolean>;
   close(): void;

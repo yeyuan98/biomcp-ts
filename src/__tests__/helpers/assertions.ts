@@ -107,7 +107,3 @@ export function expectPatentGetResult(data: unknown): asserts data is Record<str
   expect(data).toHaveProperty('publication_number');
   expect(typeof (data as Record<string, unknown>).publication_number).toBe('string');
 }
-
-export function expectToolError(fn: () => Promise<unknown>, toolName: string): Promise<void> {
-  return expect(fn()).rejects.toThrow(toolName);
-}

@@ -1,8 +1,7 @@
 import { connectionManager } from '../../../connections/manager.js';
 import { parsePubMedXml } from '../transform/pubmed.js';
 import type { ArticleId, CitationRecord, CitationCount } from './types.js';
-import { withTimeout, DEFAULT_PROVIDER_TIMEOUT_MS } from './timeout.js';
-import { withRetry } from '../../../connections/retry.js';
+import { withTimeout, DEFAULT_PROVIDER_TIMEOUT_MS } from '../../../connections/fetch-utils.js';
 
 interface PubMedLinkResponse {
   linksets?: Array<{
@@ -21,18 +20,15 @@ function extractLinks(response: PubMedLinkResponse, linkName: string): string[] 
 
 const citedInCache = new Map<string, { promise: Promise<string[]>; cleanup: ReturnType<typeof setTimeout> }>();
 
-const PUBMED_RETRY_CONFIG = { maxRetries: 3, baseDelayMs: 500 };
-
 async function fetchCitedInLinks(pmid: string): Promise<string[]> {
-  return await withRetry(async () => {
-    const conn = connectionManager.getConnection('pubmed');
-    const response = await withTimeout(
-      conn.request(`/elink.fcgi?dbfrom=pubmed&linkname=pubmed_pubmed_citedin&id=${pmid}&retmode=json`) as Promise<PubMedLinkResponse>,
-      DEFAULT_PROVIDER_TIMEOUT_MS
-    );
-    if (!response) return [];
-    return extractLinks(response, 'pubmed_pubmed_citedin');
-  }, PUBMED_RETRY_CONFIG);
+  const conn = connectionManager.getConnection('pubmed');
+  const response = await withTimeout(
+    conn.request(`/elink.fcgi?dbfrom=pubmed&linkname=pubmed_pubmed_citedin&id=${pmid}&retmode=json`) as Promise<PubMedLinkResponse>,
+    DEFAULT_PROVIDER_TIMEOUT_MS,
+    { onTimeout: 'null' }
+  );
+  if (!response) return [];
+  return extractLinks(response, 'pubmed_pubmed_citedin');
 }
 
 function getCachedCitedInLinks(pmid: string): Promise<string[]> {
@@ -58,12 +54,10 @@ async function enrichPmids(pmids: string[]): Promise<Map<string, CitationRecord>
 
   try {
     const conn = connectionManager.getConnection('pubmed');
-    const xmlString = await withRetry(
-      async () => await withTimeout(
-        conn.request(`/efetch.fcgi?db=pubmed&id=${pmids.join(',')}&rettype=abstract`) as Promise<string>,
-        DEFAULT_PROVIDER_TIMEOUT_MS
-      ),
-      PUBMED_RETRY_CONFIG
+    const xmlString = await withTimeout(
+      conn.request(`/efetch.fcgi?db=pubmed&id=${pmids.join(',')}&rettype=abstract`) as Promise<string>,
+      DEFAULT_PROVIDER_TIMEOUT_MS,
+      { onTimeout: 'null' }
     );
 
     if (!xmlString) return recordMap;
@@ -119,12 +113,10 @@ export async function getBackwardReferences(id: ArticleId, limit: number, articl
   try {
     const conn = connectionManager.getConnection('pubmed');
 
-    const response = await withRetry(
-      async () => await withTimeout(
-        conn.request(`/elink.fcgi?dbfrom=pubmed&linkname=pubmed_pubmed_refs&id=${id.pmid}&retmode=json`) as Promise<PubMedLinkResponse>,
-        DEFAULT_PROVIDER_TIMEOUT_MS
-      ),
-      PUBMED_RETRY_CONFIG
+    const response = await withTimeout(
+      conn.request(`/elink.fcgi?dbfrom=pubmed&linkname=pubmed_pubmed_refs&id=${id.pmid}&retmode=json`) as Promise<PubMedLinkResponse>,
+      DEFAULT_PROVIDER_TIMEOUT_MS,
+      { onTimeout: 'null' }
     );
 
     if (!response) return [];

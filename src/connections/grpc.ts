@@ -37,7 +37,7 @@ export class GrpcConnection implements IConnection<GrpcRequest, unknown> {
       headers['x-goog-api-key'] = this.apiKey;
     }
     
-    const [host, port] = this.options.baseUrl.split(':');
+    const [host] = this.options.baseUrl.split(':');
     
     try {
       const response = await fetch(`https://${host}/v1/scoreVariant:scoreVariant`, {

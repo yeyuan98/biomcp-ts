@@ -1,4 +1,4 @@
-.PHONY: help install build build-bundle typecheck test test-unit test-integration test-all test-coverage test-update-fixtures clean publish publish-alpha
+.PHONY: help install build build-bundle typecheck test test-unit test-integration test-all test-coverage clean publish publish-alpha
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -28,9 +28,6 @@ test-all: ## Run all tests (unit + integration)
 
 test-coverage: ## Run unit tests with coverage report
 	npm run test:coverage
-
-test-update-fixtures: ## Refresh ground-truth fixtures from live APIs
-	npm run test:update-fixtures
 
 clean: ## Remove build artifacts
 	rm -rf dist

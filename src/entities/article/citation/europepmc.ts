@@ -1,7 +1,6 @@
 import { connectionManager } from '../../../connections/manager.js';
 import type { ArticleId, CitationRecord, CitationCount } from './types.js';
-import { withTimeout, DEFAULT_PROVIDER_TIMEOUT_MS } from './timeout.js';
-import { withRetry } from '../../../connections/retry.js';
+import { withTimeout, DEFAULT_PROVIDER_TIMEOUT_MS } from '../../../connections/fetch-utils.js';
 
 interface EuropePMCCitationHit {
   pmid?: string;
@@ -33,8 +32,6 @@ interface EuropePMCSearchResponse {
   };
 }
 
-const EUROPE_PMC_RETRY_CONFIG = { maxRetries: 2, baseDelayMs: 200 };
-
 async function resolveToPMID(id: ArticleId): Promise<string | null> {
   if (id.pmid) return id.pmid;
 
@@ -42,13 +39,12 @@ async function resolveToPMID(id: ArticleId): Promise<string | null> {
   if (!query) return null;
 
   try {
-    const response = await withRetry(async () => {
-      const conn = connectionManager.getConnection('europepmc');
-      return await withTimeout(
-        conn.request(`/search?query=${encodeURIComponent(query)}&resulttype=lite&format=json&pageSize=1`),
-        DEFAULT_PROVIDER_TIMEOUT_MS
-      ) as { resultList?: { result?: Array<{ pmid?: string }> } };
-    }, EUROPE_PMC_RETRY_CONFIG);
+    const conn = connectionManager.getConnection('europepmc');
+    const response = await withTimeout(
+      conn.request(`/search?query=${encodeURIComponent(query)}&resulttype=lite&format=json&pageSize=1`),
+      DEFAULT_PROVIDER_TIMEOUT_MS,
+      { onTimeout: 'null' }
+    ) as { resultList?: { result?: Array<{ pmid?: string }> } } | null;
 
     return response?.resultList?.result?.[0]?.pmid || null;
   } catch {
@@ -79,13 +75,12 @@ export async function getForwardCitations(id: ArticleId, limit: number): Promise
   const requestPageSize = Math.max(limit * 3, 10);
 
   try {
-    const response = await withRetry(async () => {
-      const conn = connectionManager.getConnection('europepmc');
-      return await withTimeout(
-        conn.request(`/${idPath}/citations?format=json&pageSize=${requestPageSize}`) as Promise<EuropePMCCitationsResponse>,
-        DEFAULT_PROVIDER_TIMEOUT_MS
-      );
-    }, EUROPE_PMC_RETRY_CONFIG);
+    const conn = connectionManager.getConnection('europepmc');
+    const response = await withTimeout(
+      conn.request(`/${idPath}/citations?format=json&pageSize=${requestPageSize}`) as Promise<EuropePMCCitationsResponse>,
+      DEFAULT_PROVIDER_TIMEOUT_MS,
+      { onTimeout: 'null' }
+    );
 
     if (!response) return [];
     return (response.citationsArray?.citation || [])
@@ -108,13 +103,12 @@ export async function getBackwardReferences(id: ArticleId, limit: number, articl
   const requestPageSize = Math.max(limit * 3, 10);
 
   try {
-    const response = await withRetry(async () => {
-      const conn = connectionManager.getConnection('europepmc');
-      return await withTimeout(
-        conn.request(`/${idPath}/references?format=json&pageSize=${requestPageSize}`) as Promise<EuropePMCReferencesResponse>,
-        DEFAULT_PROVIDER_TIMEOUT_MS
-      );
-    }, EUROPE_PMC_RETRY_CONFIG);
+    const conn = connectionManager.getConnection('europepmc');
+    const response = await withTimeout(
+      conn.request(`/${idPath}/references?format=json&pageSize=${requestPageSize}`) as Promise<EuropePMCReferencesResponse>,
+      DEFAULT_PROVIDER_TIMEOUT_MS,
+      { onTimeout: 'null' }
+    );
 
     if (!response) return [];
     let records = (response.referencesArray?.reference || [])
@@ -142,13 +136,12 @@ export async function getCitationCount(id: ArticleId): Promise<CitationCount | n
   const query = `PMID:${pmid}`;
 
   try {
-    const response = await withRetry(async () => {
-      const conn = connectionManager.getConnection('europepmc');
-      return await withTimeout(
-        conn.request(`/search?query=${encodeURIComponent(query)}&resulttype=lite&format=json&pageSize=1`) as Promise<EuropePMCSearchResponse>,
-        DEFAULT_PROVIDER_TIMEOUT_MS
-      );
-    }, EUROPE_PMC_RETRY_CONFIG);
+    const conn = connectionManager.getConnection('europepmc');
+    const response = await withTimeout(
+      conn.request(`/search?query=${encodeURIComponent(query)}&resulttype=lite&format=json&pageSize=1`) as Promise<EuropePMCSearchResponse>,
+      DEFAULT_PROVIDER_TIMEOUT_MS,
+      { onTimeout: 'null' }
+    );
 
     if (!response) return null;
     const count = response.resultList?.result?.[0]?.citedByCount;

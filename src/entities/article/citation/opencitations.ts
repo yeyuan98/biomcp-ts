@@ -1,6 +1,6 @@
 import { connectionManager } from '../../../connections/manager.js';
 import type { ArticleId, CitationRecord, CitationCount } from './types.js';
-import { withTimeout, DEFAULT_PROVIDER_TIMEOUT_MS } from './timeout.js';
+import { withTimeout, DEFAULT_PROVIDER_TIMEOUT_MS } from '../../../connections/fetch-utils.js';
 
 interface OpenCitationsCitation {
   citing?: string;
@@ -22,7 +22,8 @@ export async function getForwardCitations(id: ArticleId, limit: number): Promise
 
     const response = await withTimeout(
       conn.request(`/v2/citations/${encodeURIComponent(id.doi)}`) as Promise<OpenCitationsCitation[]>,
-      DEFAULT_PROVIDER_TIMEOUT_MS
+      DEFAULT_PROVIDER_TIMEOUT_MS,
+      { onTimeout: 'null' }
     );
 
     if (!response || !Array.isArray(response)) return [];
@@ -45,7 +46,8 @@ export async function getBackwardReferences(id: ArticleId, limit: number, articl
 
     const response = await withTimeout(
       conn.request(`/references/${encodeURIComponent(id.doi)}`) as Promise<OpenCitationsReference[]>,
-      DEFAULT_PROVIDER_TIMEOUT_MS
+      DEFAULT_PROVIDER_TIMEOUT_MS,
+      { onTimeout: 'null' }
     );
 
     if (!response || !Array.isArray(response)) return [];
@@ -70,7 +72,8 @@ export async function getCitationCount(id: ArticleId): Promise<CitationCount | n
 
     const response = await withTimeout(
       conn.request(`/citation-count/${encodeURIComponent(id.doi)}`) as Promise<Array<{ count?: number }>>,
-      DEFAULT_PROVIDER_TIMEOUT_MS
+      DEFAULT_PROVIDER_TIMEOUT_MS,
+      { onTimeout: 'null' }
     );
 
     if (!response || !Array.isArray(response) || response.length === 0) return null;

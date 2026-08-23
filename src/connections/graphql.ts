@@ -5,6 +5,8 @@ import {
   ProtocolType 
 } from './base.js';
 import { TokenBucketRateLimiter, RateLimiterFactory } from './rate-limiter.js';
+import { withRetry } from './retry.js';
+import { HttpConnectionError } from './errors.js';
 
 export class GraphQLConnection implements IConnection<string, unknown> {
   readonly sourceId: string;
@@ -28,7 +30,35 @@ export class GraphQLConnection implements IConnection<string, unknown> {
     );
   }
   
-  async request(query: string, variables?: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<unknown> {
+  /**
+   * Execute a GraphQL query. When `rootField` is provided and the response
+   * carries errors, a null/missing `data[rootField]` throws (GraphQL APIs
+   * legitimately return partial data + errors, so only the requested field
+   * gates). Without `rootField`, only a nullish `data` alongside errors
+   * throws; partial data is returned as-is.
+   */
+  async request(
+    query: string,
+    variables?: Record<string, unknown>,
+    options?: { signal?: AbortSignal; rootField?: string }
+  ): Promise<unknown> {
+    const retry = this.options.retry;
+    const fn = () => this.requestOnce(query, variables, options);
+    if (!retry) {
+      return fn();
+    }
+    return withRetry(fn, {
+      maxRetries: Math.max((retry.attempts ?? 2) - 1, 0),
+      baseDelayMs: retry.backoffMs ?? 1000,
+      logger: { warn: (msg: string) => console.warn(`[${this.sourceId}] ${msg}`) },
+    });
+  }
+
+  private async requestOnce(
+    query: string,
+    variables?: Record<string, unknown>,
+    options?: { signal?: AbortSignal; rootField?: string }
+  ): Promise<unknown> {
     await this.rateLimiter.acquire();
 
     const body: Record<string, unknown> = { query };
@@ -50,10 +80,26 @@ export class GraphQLConnection implements IConnection<string, unknown> {
     });
     
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      throw new HttpConnectionError(`HTTP ${response.status}: ${response.statusText}`, response.status);
     }
     
-    return response.json();
+    const payload = await response.json() as {
+      data?: Record<string, unknown> | null;
+      errors?: Array<{ message?: string }>;
+    };
+    const errors = Array.isArray(payload.errors) ? payload.errors : [];
+    if (errors.length > 0) {
+      const firstMessage = errors[0]?.message ?? 'unknown GraphQL error';
+      if (payload.data == null) {
+        throw new HttpConnectionError(`GraphQL error from ${this.sourceId}: ${firstMessage}`);
+      }
+      if (options?.rootField && payload.data[options.rootField] == null) {
+        throw new HttpConnectionError(
+          `GraphQL error from ${this.sourceId}: root field '${options.rootField}' is null/missing: ${firstMessage}`
+        );
+      }
+    }
+    return payload;
   }
   
   async batch(queries: string[]): Promise<unknown[]> {

@@ -1,6 +1,36 @@
 import { jest } from '@jest/globals';
+import { HttpConnectionError } from '../../connections/errors.js';
 
 const REQUIRED_TEMPLATE_KEY = 'showDocPerFamilyPref';
+
+// Await a promise that internally sleeps on module timers (token-bucket rate
+// limiters, throttle backoffs) under jest fake timers, stepping the clock
+// until the promise settles.
+async function advanceUntilSettled<T>(p: Promise<T>): Promise<T> {
+  let settled = false;
+  let value: T | undefined;
+  let failure: { error: unknown } | undefined;
+  p.then(
+    v => { value = v; settled = true; },
+    e => { failure = { error: e }; settled = true; },
+  );
+  while (!settled) {
+    await jest.advanceTimersByTimeAsync(250);
+  }
+  if (failure) throw failure.error;
+  return value as T;
+}
+
+// The token-bucket rate limiters only advance their lastRefill when the
+// clock moves forward, so every install must start later than both real
+// time (singleton clients construct their limiters at import) and any fake
+// time a previous test reached.
+const REAL_TIME_AT_LOAD = Date.now();
+let fakeTimersInstalled = 0;
+function installFakeTimers(): void {
+  fakeTimersInstalled++;
+  jest.useFakeTimers({ now: REAL_TIME_AT_LOAD + fakeTimersInstalled * 3_600_000 });
+}
 
 describe('patent search transforms', () => {
   test('transformGooglePatentsResult strips HTML and maps fields', async () => {
@@ -156,9 +186,11 @@ describe('seminal prior-art mining', () => {
 
   beforeEach(() => {
     originalFetch = global.fetch;
+    installFakeTimers();
   });
 
   afterEach(async () => {
+    jest.useRealTimers();
     global.fetch = originalFetch;
     delete process.env.EPO_OPS_CONSUMER_KEY;
     delete process.env.EPO_OPS_CONSUMER_SECRET;
@@ -265,7 +297,7 @@ describe('seminal prior-art mining', () => {
     }) as any;
 
     const { patentSearch } = await import('../../entities/patent/search/index.js');
-    const response = await patentSearch('"mRNA display"', { limit: 5 });
+    const response = await advanceUntilSettled(patentSearch('"mRNA display"', { limit: 5 }));
     // main page intact (2 real results + gp _error marker)
     expect(response.patents.filter(p => !p._error)).toHaveLength(2);
     // one extra ppubs search for the mining pool
@@ -295,7 +327,7 @@ describe('seminal prior-art mining', () => {
     }) as any;
 
     const { patentSearch } = await import('../../entities/patent/search/index.js');
-    const response = await patentSearch('"mRNA display"', { seminal: false });
+    const response = await advanceUntilSettled(patentSearch('"mRNA display"', { seminal: false }));
     expect(searchCalls.count).toBe(1);
     expect(response.seminal_prior_art).toBeUndefined();
     expect(response.mined_count).toBeUndefined();
@@ -308,7 +340,7 @@ describe('seminal prior-art mining', () => {
       mainPatents: [POOL_GRANTS[0]],
     }) as any;
     const { patentSearch } = await import('../../entities/patent/search/index.js');
-    const response = await patentSearch('mRNA display', {});
+    const response = await advanceUntilSettled(patentSearch('mRNA display', {}));
     expect(response.seminal_note).toContain('quote an exact concept phrase');
   });
 
@@ -319,7 +351,7 @@ describe('seminal prior-art mining', () => {
       mainPatents: [POOL_APPS[0]],
     }) as any;
     const { patentSearch } = await import('../../entities/patent/search/index.js');
-    const response = await patentSearch('"mRNA display"', {});
+    const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
     expect(response.patents.filter(p => !p._error)).toHaveLength(1);
     expect(response.seminal_prior_art).toEqual([]);
     expect(response.seminal_note).toContain('too few granted');
@@ -337,7 +369,7 @@ describe('seminal prior-art mining', () => {
       mainPatents: [POOL_GRANTS[0]],
     }) as any;
     const { patentSearch } = await import('../../entities/patent/search/index.js');
-    const response = await patentSearch('"mRNA display"', {});
+    const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
     expect(response.seminal_prior_art).toEqual([]);
     expect(response.seminal_note).toContain('no commonly-cited reference');
   });
@@ -350,7 +382,7 @@ describe('seminal prior-art mining', () => {
       mainPatents: [POOL_GRANTS[0], { guid: 'US-5034506-A', type: 'USPAT', publicationReferenceDocumentNumber: '5034506', inventionTitle: 'Nucleotide delivery', score: 12 }],
     }) as any;
     const { patentSearch } = await import('../../entities/patent/search/index.js');
-    const response = await patentSearch('"mRNA display"', {});
+    const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
     expect(response.seminal_prior_art!.map(e => e.publication_number)).toEqual(['WO1998/056915']);
   });
 
@@ -367,7 +399,7 @@ describe('seminal prior-art mining', () => {
       return Promise.reject(new Error(`unexpected ${u}`)); // getDocument fails
     }) as any;
     const { patentSearch } = await import('../../entities/patent/search/index.js');
-    const response = await patentSearch('"mRNA display"', {});
+    const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
     expect(response.patents.filter(p => !p._error)).toHaveLength(3);
     expect(response.seminal_prior_art).toEqual([]);
     expect(response.seminal_note).toContain('too few granted documents yielded reference data');
@@ -397,7 +429,7 @@ describe('seminal prior-art mining', () => {
       return Promise.reject(new Error(`unexpected ${u}`));
     }) as any;
     const { patentSearch } = await import('../../entities/patent/search/index.js');
-    const response = await patentSearch('"mRNA display"', {});
+    const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
     expect(response.mined_count).toBe(1);
     expect(response.seminal_prior_art).toEqual([]);
     expect(response.seminal_note).toContain('too few granted documents yielded reference data');
@@ -477,7 +509,7 @@ describe('seminal prior-art mining', () => {
     }) as any;
 
     const { patentSearch } = await import('../../entities/patent/search/index.js');
-    const response = await patentSearch('"mRNA display"', {});
+    const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
     expect(response.seminal_prior_art).toHaveLength(1);
     const entry = response.seminal_prior_art![0];
     expect(entry.publication_number).toBe('US6261804B1');
@@ -538,9 +570,9 @@ describe('seminal prior-art mining', () => {
       return Promise.reject(new Error(`unexpected ${u}`));
     }) as any;
 
-    const outcome = await mineSeminalPriorArt('cyclic peptide display', [
+    const outcome = await advanceUntilSettled(mineSeminalPriorArt('cyclic peptide display', [
       { publication_number: 'US11112222B2', source: 'ppubs' },
-    ]);
+    ]));
     expect(outcome.entries).toHaveLength(1);
     const entry = outcome.entries[0];
     // wrong-doc pages rejected → resolved via the identity-validated page
@@ -559,9 +591,11 @@ describe('patent search federation', () => {
   beforeEach(async () => {
     originalFetch = global.fetch;
     (await import('../../entities/patent/ops-client.js')).resetOpsBackoff();
+    installFakeTimers();
   });
 
   afterEach(async () => {
+    jest.useRealTimers();
     global.fetch = originalFetch;
     delete process.env.EPO_OPS_CONSUMER_KEY;
     delete process.env.EPO_OPS_CONSUMER_SECRET;
@@ -628,7 +662,7 @@ describe('patent search federation', () => {
     await expect(gp.searchGooglePatents('x', {})).rejects.toThrow();
 
     const { patentSearch } = await import('../../entities/patent/search/index.js');
-    const response = await patentSearch('crispr', { seminal: false });
+    const response = await advanceUntilSettled(patentSearch('crispr', { seminal: false }));
     expect(response.patents.some(p => p._note?.includes('worldwide coverage unavailable'))).toBe(true);
     expect(response.patents.some(p => p._error?.includes("'google_patents' failed"))).toBe(false); // breaker short-circuited, no burned call
     connectionManager.closeAll();
@@ -690,12 +724,12 @@ describe('patent search federation', () => {
         });
       }
       // google_patents live fetch (worldwide fallback without OPS creds) and
-      // ppubs session handshake both fail hard.
-      return Promise.reject(new Error('HTTP 503: Service Unavailable'));
+      // ppubs session handshake both fail hard (typed 503 → GP breaker).
+      return Promise.reject(new HttpConnectionError('HTTP 503: Service Unavailable', 503));
     }) as any;
 
     const { patentSearch } = await import('../../entities/patent/search/index.js');
-    const response = await patentSearch('crispr compositions', {});
+    const response = await advanceUntilSettled(patentSearch('crispr compositions', {}));
     expect(response.patents.some(p => p.publication_number === 'US11027025')).toBe(true);
     expect(response.patents.some(p => p._note && p._note.includes('ppubs') && p._note.includes('uspto_odp'))).toBe(true);
     expect(response.patents.some(p => p._error && p._error.includes('google_patents'))).toBe(true);
@@ -709,10 +743,10 @@ describe('patent search federation', () => {
   test('patentSearch: no odp fallback without key; _error surfaces for ppubs', async () => {
     const gp = await import('../../entities/patent/search/google-patents.js');
     gp.resetGooglePatentsBreaker();
-    global.fetch = jest.fn().mockRejectedValue(new Error('HTTP 503: Service Unavailable')) as any;
+    global.fetch = jest.fn().mockRejectedValue(new HttpConnectionError('HTTP 503: Service Unavailable', 503)) as any;
 
     const { patentSearch } = await import('../../entities/patent/search/index.js');
-    const response = await patentSearch('crispr', {});
+    const response = await advanceUntilSettled(patentSearch('crispr', {}));
     const markers = response.patents.filter(p => p._error || p._note || p._hint);
     expect(markers.some(p => p._error?.includes("'ppubs' failed"))).toBe(true);
     expect(markers.some(p => p._error?.includes("'google_patents' failed"))).toBe(true);
@@ -732,11 +766,11 @@ describe('patent search federation', () => {
     const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
     global.fetch = jest.fn().mockImplementation((url: any) => {
       now = 20_000; // simulate time passing while backends run
-      return Promise.reject(new Error('HTTP 503: Service Unavailable'));
+      return Promise.reject(new HttpConnectionError('HTTP 503: Service Unavailable', 503));
     }) as any;
 
     const { patentSearch } = await import('../../entities/patent/search/index.js');
-    const response = await patentSearch('crispr', {});
+    const response = await advanceUntilSettled(patentSearch('crispr', {}));
     expect(response.patents.some(p => p._error?.includes("'ppubs' failed"))).toBe(true);
     expect(response.patents.some(p => p._note)).toBe(false);
     const calledUrls = (global.fetch as any).mock.calls.map((c: any[]) => String(c[0]));
@@ -781,7 +815,7 @@ describe('patent search federation', () => {
     }) as any;
 
     const { patentSearch } = await import('../../entities/patent/search/index.js');
-    const response = await patentSearch('xyzzyplugh-nonexistent-concept', {});
+    const response = await advanceUntilSettled(patentSearch('xyzzyplugh-nonexistent-concept', {}));
     expect(response.patents).toHaveLength(1);
     expect(response.patents[0]._hint).toContain('quoting an exact concept phrase');
     expect(response.patents[0].source).toBe('ppubs');
@@ -821,7 +855,7 @@ describe('patent search federation', () => {
     }) as any;
 
     const { patentSearch } = await import('../../entities/patent/search/index.js');
-    const response = await patentSearch('mRNA display', { offset: 100 });
+    const response = await advanceUntilSettled(patentSearch('mRNA display', { offset: 100 }));
     expect(response.patents).toHaveLength(1);
     expect(response.patents[0]._hint).toContain('bounded relevance window');
     expect(response.total_hits?.ppubs).toBe(88262);
@@ -859,7 +893,7 @@ describe('patent search federation', () => {
       text: () => Promise.resolve('Sorry... automated queries'),
     }) as any;
 
-    await expect(gp.searchGooglePatents('crispr', {})).rejects.toThrow();
+    await expect(gp.searchGooglePatents('crispr', {})).rejects.toBeInstanceOf(HttpConnectionError);
     expect(gp.isGooglePatentsBlocked()).toBe(true);
     await expect(gp.searchGooglePatents('crispr', {})).rejects.toThrow(/temporarily unavailable/);
     // Second call must not hit fetch again (short-circuit)
@@ -895,9 +929,11 @@ describe('OpsClient', () => {
     originalFetch = global.fetch;
     process.env.EPO_OPS_CONSUMER_KEY = 'test-key';
     process.env.EPO_OPS_CONSUMER_SECRET = 'test-secret';
+    installFakeTimers();
   });
 
   afterEach(() => {
+    jest.useRealTimers();
     global.fetch = originalFetch;
     delete process.env.EPO_OPS_CONSUMER_KEY;
     delete process.env.EPO_OPS_CONSUMER_SECRET;
@@ -959,7 +995,7 @@ describe('OpsClient', () => {
         text: () => Promise.resolve('{"ok":true}'),
       }) as any;
 
-    const resp = await client.get('/published-data/search?q=x');
+    const resp = await advanceUntilSettled(client.get('/published-data/search?q=x'));
     expect(resp.status).toBe(200);
     expect(resp.body).toBe('{"ok":true}');
     client.close();
@@ -984,9 +1020,11 @@ describe('PpubsClient', () => {
 
   beforeEach(() => {
     originalFetch = global.fetch;
+    installFakeTimers();
   });
 
   afterEach(() => {
+    jest.useRealTimers();
     global.fetch = originalFetch;
   });
 
@@ -1023,8 +1061,8 @@ describe('PpubsClient', () => {
       return Promise.reject(new Error(`unexpected url: ${u}`));
     }) as any;
 
-    await client.search('crispr', { pageCount: 5 });
-    await client.search('crispr AND (moderna).as.', { pageCount: 5 });
+    await advanceUntilSettled(client.search('crispr', { pageCount: 5 }));
+    await advanceUntilSettled(client.search('crispr AND (moderna).as.', { pageCount: 5 }));
 
     expect(sessionCalls).toBe(1); // cached session
     expect(searchBodies).toHaveLength(2);
@@ -1071,7 +1109,7 @@ describe('PpubsClient', () => {
       });
     }) as any;
 
-    const resp = await client.search('crispr', {});
+    const resp = await advanceUntilSettled(client.search('crispr', {}));
     expect(resp.status).toBe(200);
     client.close();
   });
@@ -1231,9 +1269,11 @@ describe('query builders (assert exact upstream request construction)', () => {
 
   beforeEach(() => {
     originalFetch = global.fetch;
+    installFakeTimers();
   });
 
   afterEach(() => {
+    jest.useRealTimers();
     global.fetch = originalFetch;
     delete process.env.EPO_OPS_CONSUMER_KEY;
     delete process.env.EPO_OPS_CONSUMER_SECRET;
@@ -1264,12 +1304,12 @@ describe('query builders (assert exact upstream request construction)', () => {
     }) as any;
 
     const { searchPpubs } = await import('../../entities/patent/search/ppubs.js');
-    await searchPpubs('crispr', {
+    await advanceUntilSettled(searchPpubs('crispr', {
       assignee: 'Moderna',
       inventor: 'Hoge',
       cpc: 'C12N15/11',
       date_range: '2020-01-01/2024-06-30',
-    });
+    }));
     expect((bodies[0] as any).query.q).toBe(
       'crispr AND (Moderna).as. AND (Hoge).in. AND (C12N15/11).cpc. AND @pd>=20200101<=20240630'
     );
@@ -1278,7 +1318,7 @@ describe('query builders (assert exact upstream request construction)', () => {
     expect((bodies[0] as any).sort).toBe('score desc');
     expect((bodies[0] as any).start).toBe(0);
 
-    await searchPpubs('crispr', { sort_by: 'recency', limit: 5, offset: 10 });
+    await advanceUntilSettled(searchPpubs('crispr', { sort_by: 'recency', limit: 5, offset: 10 }));
     expect((bodies[1] as any).sort).toBe('date_publ desc');
     expect((bodies[1] as any).start).toBe(10);
     expect((bodies[1] as any).pageCount).toBe(5);
@@ -1320,12 +1360,12 @@ describe('query builders (assert exact upstream request construction)', () => {
     }) as any;
 
     const { searchPpubs } = await import('../../entities/patent/search/ppubs.js');
-    const page1 = await searchPpubs('mRNA display', { limit: 5 });
+    const page1 = await advanceUntilSettled(searchPpubs('mRNA display', { limit: 5 }));
     expect(page1.patents).toHaveLength(5);
     expect(page1.patents[0].relevance_score).toBe(10);
     expect(page1.total).toBe(1830);
 
-    const page2 = await searchPpubs('mRNA display', { limit: 5, offset: 5 });
+    const page2 = await advanceUntilSettled(searchPpubs('mRNA display', { limit: 5, offset: 5 }));
     expect(page2.patents.map(p => p.title)).toEqual(['Doc 5', 'Doc 6', 'Doc 7', 'Doc 8', 'Doc 9']);
     client.close();
   });
@@ -1337,11 +1377,10 @@ describe('query builders (assert exact upstream request construction)', () => {
     const posts: Array<Record<string, unknown>> = [];
     global.fetch = jest.fn().mockImplementation((url: any, init?: any) => {
       posts.push({ url: String(url), body: JSON.parse(init.body) });
-      const payload = JSON.stringify({ count: 0, patentFileWrapperDataBag: [] });
       return Promise.resolve({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
-        text: () => Promise.resolve(payload),
+        json: () => Promise.resolve({ count: 0, patentFileWrapperDataBag: [] }),
       });
     }) as any;
 
@@ -1425,7 +1464,7 @@ describe('query builders (assert exact upstream request construction)', () => {
       })) as any;
 
     const { searchOps } = await import('../../entities/patent/search/ops.js');
-    const result = await searchOps('mRNA display', { limit: 5 });
+    const result = await advanceUntilSettled(searchOps('mRNA display', { limit: 5 }));
     expect(result.patents).toHaveLength(2);
     expect(result.total).toBe(24);
     expect(result.patents[0].publication_number).toBe('CN120624583A');
@@ -1460,7 +1499,7 @@ describe('query builders (assert exact upstream request construction)', () => {
       .mockImplementationOnce(emptyWithTotal as any) as any;
 
     const { searchOps } = await import('../../entities/patent/search/ops.js');
-    await expect(searchOps('crispr', { limit: 5 })).rejects.toThrow(/reported 24 total results but returned no documents/);
+    await expect(advanceUntilSettled(searchOps('crispr', { limit: 5 }))).rejects.toThrow(/reported 24 total results but returned no documents/);
     // token call + two search attempts (retry uses the same Range)
     const searchCalls = (global.fetch as any).mock.calls.filter((c: any[]) => String(c[0]).includes('search/biblio'));
     expect(searchCalls).toHaveLength(2);
@@ -1504,7 +1543,7 @@ describe('query builders (assert exact upstream request construction)', () => {
 
     const { searchOps } = await import('../../entities/patent/search/ops.js');
     // date_range excludes the only doc → empty patents, no error, single fetch
-    const result = await searchOps('crispr', { date_range: '1990-01-01/1990-12-31' });
+    const result = await advanceUntilSettled(searchOps('crispr', { date_range: '1990-01-01/1990-12-31' }));
     expect(result.patents).toEqual([]);
     const searchCalls = (global.fetch as any).mock.calls.filter((c: any[]) => String(c[0]).includes('search/biblio'));
     expect(searchCalls).toHaveLength(1);
@@ -1551,7 +1590,7 @@ describe('query builders (assert exact upstream request construction)', () => {
     }) as any;
 
     const { searchOps } = await import('../../entities/patent/search/ops.js');
-    const result = await searchOps('crispr cas9', { assignee: 'moderna', limit: 5, offset: 10 });
+    const result = await advanceUntilSettled(searchOps('crispr cas9', { assignee: 'moderna', limit: 5, offset: 10 }));
     expect(result.total).toBe(7);
     const searchCall = calls.find(c => c.url.includes('search/biblio'));
     expect(searchCall?.url).toContain(encodeURIComponent('(ti="crispr cas9" OR ab="crispr cas9") AND pa="moderna"'));
@@ -1570,9 +1609,11 @@ describe('fetchPpubsClaims splitting', () => {
 
   beforeEach(() => {
     originalFetch = global.fetch;
+    installFakeTimers();
   });
 
   afterEach(() => {
+    jest.useRealTimers();
     global.fetch = originalFetch;
   });
 
@@ -1620,7 +1661,7 @@ describe('fetchPpubsClaims splitting', () => {
     }) as any;
 
     const { fetchPpubsClaims } = await import('../../entities/patent/detail/ppubs.js');
-    const claims = await fetchPpubsClaims('US11027025B2');
+    const claims = await advanceUntilSettled(fetchPpubsClaims('US11027025B2'));
     expect(searchQueries).toEqual(['("11027025").pn.']);
     expect(claims.number_of_claims).toBe(3);
     expect(claims.claims).toHaveLength(3);
@@ -1668,7 +1709,7 @@ describe('fetchPpubsClaims splitting', () => {
     }) as any;
 
     const { fetchPpubsClaims } = await import('../../entities/patent/detail/ppubs.js');
-    const claims = await fetchPpubsClaims('US6261804B1');
+    const claims = await advanceUntilSettled(fetchPpubsClaims('US6261804B1'));
     // If the num-div splitter regresses, these divs have no inline "N." text,
     // so the text-split fallback cannot rescue them — this assertion fails.
     expect(claims.claims).toEqual([
@@ -1719,7 +1760,7 @@ describe('fetchPpubsClaims splitting', () => {
     }) as any;
 
     const { fetchPpubsClaims } = await import('../../entities/patent/detail/ppubs.js');
-    const claims = await fetchPpubsClaims('US6261804B1');
+    const claims = await advanceUntilSettled(fetchPpubsClaims('US6261804B1'));
     expect(claims.claims).toEqual([
       '1. A fusion protein.',
       '2. An isolated nucleic acid encoding the protein of claim 1.',
@@ -1768,7 +1809,7 @@ describe('fetchPpubsClaims splitting', () => {
     }) as any;
 
     const { fetchPpubsClaims } = await import('../../entities/patent/detail/ppubs.js');
-    const claims = await fetchPpubsClaims('US6261804B1');
+    const claims = await advanceUntilSettled(fetchPpubsClaims('US6261804B1'));
     expect(claims.claims).toHaveLength(4);
     expect(claims.claims[0]).toBe('1. A composition comprising a peptide.');
     expect(claims.claims[2]).toBe('3. A method of screening.');
@@ -1820,12 +1861,12 @@ describe('fetchPpubsClaims splitting', () => {
     }) as any;
 
     const { fetchPpubsClaims } = await import('../../entities/patent/detail/ppubs.js');
-    const withUpstream = await fetchPpubsClaims('US6261804B1');
+    const withUpstream = await advanceUntilSettled(fetchPpubsClaims('US6261804B1'));
     expect(withUpstream.claims).toHaveLength(1);
     expect(withUpstream.number_of_claims).toBe(12);
     expect(withUpstream._warn).toContain('could not be split');
 
-    const withoutUpstream = await fetchPpubsClaims('US6261804B1');
+    const withoutUpstream = await advanceUntilSettled(fetchPpubsClaims('US6261804B1'));
     expect(withoutUpstream.number_of_claims).toBeUndefined();
     expect(withoutUpstream._warn).toContain('could not be split');
     client.close();
@@ -1852,9 +1893,11 @@ describe('patentGet orchestration (chains)', () => {
 
   beforeEach(() => {
     originalFetch = global.fetch;
+    installFakeTimers();
   });
 
   afterEach(() => {
+    jest.useRealTimers();
     global.fetch = originalFetch;
     delete process.env.EPO_OPS_CONSUMER_KEY;
     delete process.env.EPO_OPS_CONSUMER_SECRET;
@@ -1919,7 +1962,7 @@ describe('patentGet orchestration (chains)', () => {
   test('US core falls through GP(blocked) → wayback(miss) → PPUBS', async () => {
     global.fetch = ppubsMock({ abstractHtml: '<p>The present invention.</p>' }) as any;
     const { patentGet } = await import('../../entities/patent/detail/index.js');
-    const result = await patentGet('US11027025B2');
+    const result = await advanceUntilSettled(patentGet('US11027025B2'));
     expect(result.publication_number).toBe('US11027025B2');
     expect(result.title).toBe('Compositions comprising synthetic polynucleotides');
     expect(result.abstract).toBe('The present invention.');
@@ -1929,14 +1972,14 @@ describe('patentGet orchestration (chains)', () => {
     // citations section: no OPS creds; GP blocked; wayback miss; PPUBS doc has no usRef data
     global.fetch = ppubsMock({ usRefPatentNumber: [], foreignRefPatentNumber: [] }) as any;
     const { patentGet } = await import('../../entities/patent/detail/index.js');
-    const result = await patentGet('US11027025B2', ['citations']);
+    const result = await advanceUntilSettled(patentGet('US11027025B2', ['citations']));
     expect(result.sections?.citations).toEqual({ error: expect.stringContaining('All sources failed') });
   });
 
   test('unknown section yields explicit error entry', async () => {
     global.fetch = ppubsMock({}) as any;
     const { patentGet } = await import('../../entities/patent/detail/index.js');
-    const result = await patentGet('US11027025B2', ['nonsense_section' as string]);
+    const result = await advanceUntilSettled(patentGet('US11027025B2', ['nonsense_section' as string]));
     expect(result.sections?.nonsense_section).toEqual({ error: expect.stringContaining('Unknown section') });
   });
 
@@ -1960,7 +2003,7 @@ describe('patentGet orchestration (chains)', () => {
       patentFamilyMembers: ['EP3019619A2'],
     }) as any;
     const { patentGet } = await import('../../entities/patent/detail/index.js');
-    const result = await patentGet('US11027025B2', ['all']);
+    const result = await advanceUntilSettled(patentGet('US11027025B2', ['all']));
     for (const section of ['abstract', 'claims', 'citations', 'family', 'classifications']) {
       expect(result.sections?.[section]).toBeDefined();
       expect((result.sections?.[section] as any).error).toBeUndefined();

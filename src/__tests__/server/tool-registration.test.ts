@@ -153,7 +153,7 @@ describe('Tool registration', () => {
     expect(mockRegisterTool).toHaveBeenCalledTimes(1);
   });
 
-  it('total registerTool calls across all registrations = 25', () => {
+  it('total registerTool calls across all registrations = 27', () => {
     registerGeneTools(mockServer);
     registerDrugTools(mockServer);
     registerVariantTools(mockServer);

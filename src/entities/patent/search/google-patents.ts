@@ -1,4 +1,5 @@
 import { connectionManager } from '../../../connections/manager.js';
+import { HttpConnectionError } from '../../../connections/errors.js';
 import type { PatentSearchOptions, PatentSearchResult } from '../types.js';
 import { kindToStatus } from './dedup.js';
 
@@ -134,8 +135,10 @@ export async function searchGooglePatents(
   try {
     raw = await conn.request(path);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes('HTTP 503') || msg.includes('HTTP 429') || isNetworkError(err)) {
+    if (
+      (err instanceof HttpConnectionError && (err.status === 503 || err.status === 429)) ||
+      isNetworkError(err)
+    ) {
       tripBreaker();
     }
     throw err;

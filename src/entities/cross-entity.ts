@@ -1,4 +1,5 @@
 import { connectionManager } from '../connections/manager.js';
+import { RestConnection } from '../connections/rest.js';
 import { fetchWithTimeout } from '../connections/fetch-utils.js';
 import { geneSearch, GeneSearchResult } from './gene.js';
 import { variantSearch, VariantSearchResult } from './variant.js';
@@ -371,21 +372,10 @@ export async function geneEnrichment(geneSymbols: string[]): Promise<PathwayEnri
   }
   
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-    
-    const response = await fetch('https://reactome.org/AnalysisService/identifiers/projection', {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: geneSymbols.join('\n'),
-      signal: controller.signal,
-    }).finally(() => clearTimeout(timeoutId));
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    
-    const data = await response.json() as ReactomeAnalysisResponse;
+    // Registry 'reactome_analysis' connection supplies rate limiting, timeout
+    // and retry. The AnalysisService takes a plain-text identifier list, not JSON.
+    const conn = connectionManager.getConnection('reactome_analysis') as RestConnection;
+    const data = await conn.post('/identifiers/projection', geneSymbols.join('\n')) as ReactomeAnalysisResponse;
     const pathways = data?.pathways || [];
     
     return pathways.slice(0, 30).map((p: { stId?: string; name?: string; entities?: { pValue?: number; found?: number; total?: number } }) => ({

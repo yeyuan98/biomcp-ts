@@ -31,10 +31,7 @@ export class ConnectionManager {
       
       case 'grpc':
         return new GrpcConnection(config);
-      
-      case 'local-file':
-        throw new Error('Local file connection not yet implemented');
-      
+
       default:
         throw new Error(`Unsupported protocol: ${config.protocol}`);
     }
