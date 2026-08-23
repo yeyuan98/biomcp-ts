@@ -64,13 +64,13 @@ export function registerArticleTools(server: McpServer): void {
   server.registerTool(
     'article_get',
     {
-      description: 'Get article by PMID/PMCID/DOI. Citation: fast mode (~4s, auto-fallback to PubMed) or full mode (~15-30s, all 5 providers). Provider coverage depends on ID type.',
+      description: 'Get article by PMID/PMCID/DOI. Citation: fast mode (~4s, 4 providers, auto-fallback to PubMed) or full mode (~15-30s, all 5 providers incl. PubMed). Forward citation lists come from Europe PMC, Semantic Scholar, and OpenCitations; Crossref provides counts and references only.',
       inputSchema: {
         id: z.string().describe('Article identifier: PMID (numeric, e.g. "12345"), PMCID (e.g. "PMC1234567"), or DOI (e.g. "10.1038/s41586-021-03819-2")'),
         sections: z.array(z.enum(ARTICLE_SECTIONS)).optional().describe('Sections to include. Use ["citation"] for citation data, ["all"] for everything.'),
         limit: z.number().int().min(1).max(100).default(20).describe('Maximum items per section (e.g., 20 citations)'),
         citation_mode: z.enum(['fast', 'full']).optional().default('fast').describe(
-          'Fast: Europe PMC, Semantic Scholar, Crossref (~4s). Full: All 5 providers (~15-30s). ' +
+          'Fast: Europe PMC, Semantic Scholar, OpenCitations, Crossref counts/references (~4s). Full: All 5 providers incl. PubMed (~15-30s). ' +
           'Fast mode auto-falls back to PubMed when other providers return no items.'
         ),
         citation_direction: z.enum(['forward', 'backward', 'both']).optional().default('both').describe('Citation direction: "forward" (articles citing this one), "backward" (references), "both" (default)'),

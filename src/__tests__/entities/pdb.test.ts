@@ -207,7 +207,7 @@ describe('pdbSearch', () => {
     expect(mockPost).toHaveBeenCalledWith('/query', expect.objectContaining({
       request_options: {
         paginate: { start: 10, rows: 5 },
-        results_verbosity: 'compact',
+        results_verbosity: 'verbose',
       },
     }));
 

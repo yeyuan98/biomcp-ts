@@ -1,11 +1,10 @@
-export type ProtocolType = 'rest' | 'graphql' | 'grpc';
+export type ProtocolType = 'rest' | 'graphql';
 
 export type AuthDeliveryMethod =
   | { type: 'header'; name: string }
   | { type: 'bearer' }
   | { type: 'authorization'; prefix?: string }
-  | { type: 'query-param'; name: string }
-  | { type: 'grpc-metadata'; name: string };
+  | { type: 'query-param'; name: string };
 
 export interface AuthConfig {
   envVar: string;
@@ -30,6 +29,12 @@ export interface ConnectionHandling {
   contentType?: 'json' | 'xml' | 'text' | 'binary';
   staleHours?: number;
   headers?: Record<string, string>;
+  /**
+   * Query params appended to every request, but only while the referenced
+   * env var is set (e.g. NCBI E-utilities tool/email identification). A
+   * param value of the form '$ENV_VAR' resolves to that env var's value.
+   */
+  envQueryParams?: Array<{ envVar: string; params: Record<string, string> }>;
 }
 
 export interface RetryConfig {
@@ -65,7 +70,7 @@ export interface IConnection<TRequest = string, TResponse = unknown> {
   readonly protocol: ProtocolType;
   effectiveRateLimitMs: number;
   
-  request(req: TRequest, variables?: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<TResponse>;
+  request(req: TRequest, variables?: Record<string, unknown>, options?: { signal?: AbortSignal; rootField?: string }): Promise<TResponse>;
   post?(path: string, body: Record<string, unknown> | string, options?: { signal?: AbortSignal }): Promise<TResponse>;
   batch?(requests: TRequest[]): Promise<TResponse[]>;
   healthCheck(): Promise<boolean>;

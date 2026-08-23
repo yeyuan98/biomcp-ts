@@ -195,13 +195,24 @@ export class RestConnection implements IConnection<string, unknown> {
         process.env[this.options.auth.envVar] || ''
       );
     }
-    
+
+    for (const group of this.handling.envQueryParams ?? []) {
+      if (!process.env[group.envVar]) continue;
+      for (const [name, value] of Object.entries(group.params)) {
+        url.searchParams.set(name, value.startsWith('$') ? (process.env[value.slice(1)] || '') : value);
+      }
+    }
+
     return url.toString();
   }
   
   private buildHeaders(): Headers {
     const headers = new Headers();
-    
+
+    // Some APIs (e.g. OpenTargets) reject Node's implicit `user-agent: node`
+    // at their edge; send an identifying UA unless the source overrides it.
+    headers.set('User-Agent', 'biomcp-ts/0.2.3');
+
     const acceptMap: Record<string, string> = {
       json: 'application/json',
       xml: 'text/xml, application/xml',
@@ -234,7 +245,8 @@ export class RestConnection implements IConnection<string, unknown> {
     }
     
     if (delivery.type === 'authorization') {
-      headers.set('Authorization', `${delivery.prefix || 'app_key '}${process.env[this.options.auth.envVar]}`);
+      const prefix = delivery.prefix ? `${delivery.prefix} ` : '';
+      headers.set('Authorization', `${prefix}${process.env[this.options.auth.envVar]}`);
     }
     
     return headers;

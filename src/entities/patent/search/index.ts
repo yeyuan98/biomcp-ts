@@ -20,12 +20,13 @@ const WINDOW_HINT =
 /**
  * Documented counting basis per backend (surfaced as total_hits_basis).
  * ppubs counts US document families; ODP counts US applications (bibliographic);
- * OPS counts worldwide matches capped at 10000; Google Patents is approximate.
+ * OPS counts worldwide matches but deep paging is capped at 2000, so matches
+ * beyond that are unreachable; Google Patents is approximate.
  */
 export const TOTAL_HITS_BASIS: Record<PatentSource, string> = {
   ppubs: 'matching US document families',
   uspto_odp: 'matching US applications (bibliographic)',
-  ops: 'worldwide matches, capped at 10000',
+  ops: 'worldwide matches, deep paging capped at 2000 (matches beyond are unreachable)',
   google_patents: 'approximate',
 };
 

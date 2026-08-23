@@ -1,7 +1,6 @@
-import { IConnection, ConnectionOptions, ProtocolType } from './base.js';
+import { IConnection, ConnectionOptions } from './base.js';
 import { RestConnection } from './rest.js';
 import { GraphQLConnection } from './graphql.js';
-import { GrpcConnection } from './grpc.js';
 import { getSourceConfig } from './registry.js';
 // Side-effect import: proxy-aware global fetch (no-op without proxy env).
 import './proxy.js';
@@ -28,9 +27,6 @@ export class ConnectionManager {
       
       case 'graphql':
         return new GraphQLConnection(config, config.auth);
-      
-      case 'grpc':
-        return new GrpcConnection(config);
 
       default:
         throw new Error(`Unsupported protocol: ${config.protocol}`);

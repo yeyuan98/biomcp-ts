@@ -43,16 +43,15 @@ export function registerGeneTools(server: McpServer): void {
       description: 'Search for genes by symbol, name, or keyword',
       inputSchema: {
         query: z.string().describe('Gene symbol, name, or keyword to search for'),
-        gene_type: z.enum(['protein-coding', 'ncRNA', 'pseudo']).optional().describe('Filter by gene type'),
         chromosome: z.string().optional().describe('Filter by chromosome (e.g., "7", "X")'),
         limit: z.number().int().min(1).max(50).default(10).describe('Maximum results'),
         offset: z.number().int().min(0).default(0).describe('Result offset'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
-    async ({ query, gene_type, chromosome, limit, offset }) => {
+    async ({ query, chromosome, limit, offset }) => {
       try {
-        const results = await geneSearch(query, { gene_type, chromosome, limit, offset });
+        const results = await geneSearch(query, { chromosome, limit, offset });
         return { content: [{ type: 'text', text: JSON.stringify(results) }] };
       } catch (error) {
         return { 

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { patentSearch, patentGet, PATENT_GET_SECTIONS } from '../../entities/patent/index.js';
 import { applyLimit, withToolTimeout } from './utils.js';
 
-const SEARCH_TIMEOUT_MS = 30000;
+const SEARCH_TIMEOUT_MS = 60000;
 const GET_TIMEOUT_MS = 120000;
 
 const PATENT_ALL_SECTIONS = ['abstract', 'claims', 'citations', 'family', 'classifications'];

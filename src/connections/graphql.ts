@@ -131,6 +131,7 @@ export class GraphQLConnection implements IConnection<string, unknown> {
   private buildHeaders(): Headers {
     const headers = new Headers();
     headers.set('Content-Type', 'application/json');
+    headers.set('User-Agent', 'biomcp-ts/0.2.3');
     
     if (!this.auth || !process.env[this.auth.envVar]) {
       return headers;

@@ -24,29 +24,15 @@ jest.mock('../../connections/graphql.js', () => ({
   })),
 }));
 
-jest.mock('../../connections/grpc.js', () => ({
-  GrpcConnection: jest.fn().mockImplementation((config: any) => ({
-    sourceId: config.sourceId,
-    protocol: 'grpc',
-    effectiveRateLimitMs: 0,
-    request: jest.fn().mockResolvedValue({}),
-    healthCheck: jest.fn().mockResolvedValue(true),
-    close: jest.fn(),
-    batch: jest.fn().mockResolvedValue([]),
-  })),
-}));
-
 jest.mock('../../connections/registry.js', () => ({
   SOURCE_REGISTRY: {
     mygene: { sourceId: 'mygene', baseUrl: 'https://mygene.info/v3', protocol: 'rest', rateLimit: { intervalMs: 100 } },
     opentargets: { sourceId: 'opentargets', baseUrl: 'https://api.platform.opentargets.org/api/v4', protocol: 'graphql', rateLimit: { intervalMs: 500 } },
-    alphagenome: { sourceId: 'alphagenome', baseUrl: 'gdmscience.googleapis.com:443', protocol: 'grpc', rateLimit: { intervalMs: 0 } },
   },
   getSourceConfig: jest.fn().mockImplementation((id: any) => {
     const registry: Record<string, any> = {
       mygene: { sourceId: 'mygene', baseUrl: 'https://mygene.info/v3', protocol: 'rest', rateLimit: { intervalMs: 100 } },
       opentargets: { sourceId: 'opentargets', baseUrl: 'https://api.platform.opentargets.org/api/v4', protocol: 'graphql', rateLimit: { intervalMs: 500 } },
-      alphagenome: { sourceId: 'alphagenome', baseUrl: 'gdmscience.googleapis.com:443', protocol: 'grpc', rateLimit: { intervalMs: 0 } },
     };
     return registry[id];
   }),

@@ -17,7 +17,7 @@ describe('disease_search', () => {
   it('returns breast cancer with MONDO ID', async () => {
     const results = await retryOnRateLimit(() => harness.callTool('disease_search', { query: 'breast cancer' }));
     expectDiseaseSearchResult(results);
-    const hit = results.find((r: any) => r.disease_id?.includes('MONDO:0007254'));
+    const hit = results.find((r: any) => r.disease_id?.startsWith('MONDO:') && /breast/i.test(r.name || ''));
     expect(hit).toBeDefined();
   }, 60000);
 

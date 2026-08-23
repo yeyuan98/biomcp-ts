@@ -16,20 +16,6 @@ interface CrossrefWorkResponse {
   };
 }
 
-interface CrossrefForwardResponse {
-  status?: string;
-  message?: {
-    items?: Array<{
-      DOI?: string;
-      title?: string[];
-      author?: Array<{ family?: string; given?: string }>;
-      'published-print'?: { 'date-parts'?: number[][] };
-      'container-title'?: string[];
-    }>;
-    'total-results'?: number;
-  };
-}
-
 interface CachedWork {
   references: CitationRecord[];
   count: CitationCount | null;
@@ -98,34 +84,11 @@ export function clearWorkCache(): void {
   workCache.clear();
 }
 
-export async function getForwardCitations(id: ArticleId, limit: number): Promise<CitationRecord[]> {
-  const doi = id.doi;
-  if (!doi) return [];
-
-  try {
-    const conn = connectionManager.getConnection('crossref');
-    const response = await withTimeout(
-      conn.request(`/works?filter=references:${encodeURIComponent(doi)}&rows=${limit}`) as Promise<CrossrefForwardResponse>,
-      DEFAULT_PROVIDER_TIMEOUT_MS,
-      { onTimeout: 'null' }
-    );
-
-    if (!response) return [];
-    const items = response.message?.items || [];
-    return items.map((item) => ({
-      doi: item.DOI,
-      title: item.title?.[0],
-      authors: item.author?.map((a: { family?: string; given?: string }) =>
-        [a.given, a.family].filter(Boolean).join(' ')
-      ),
-      journal: item['container-title']?.[0],
-      year: item['published-print']?.['date-parts']?.[0]?.[0],
-      source: 'crossref',
-    }));
-  } catch (error) {
-    console.error('[crossref/getForwardCitations] Error:', error);
-    return [];
-  }
+// Crossref removed the `references` filter from the REST API, so forward
+// citation lists are served by Europe PMC / OpenCitations / Semantic Scholar.
+// Crossref remains a count + backward-references provider via /works/{doi}.
+export async function getForwardCitations(_id: ArticleId, _limit: number): Promise<CitationRecord[]> {
+  return [];
 }
 
 export async function getBackwardReferences(id: ArticleId, limit: number, articleYear?: number): Promise<CitationRecord[]> {

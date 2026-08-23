@@ -161,8 +161,8 @@ describe('citation module', () => {
       );
 
       expect(result.article_id).toEqual({ pmid: '12345', doi: '10.1/test' });
-      // Fast mode uses 3 providers (Europe PMC, Semantic Scholar, Crossref)
-      expect(result.source_results).toHaveLength(3);
+      // Fast mode uses 4 providers (Europe PMC, Semantic Scholar, Crossref, OpenCitations)
+      expect(result.source_results).toHaveLength(4);
       expect(Array.isArray(result.forward_citations)).toBe(true);
       expect(Array.isArray(result.backward_references)).toBe(true);
     });
@@ -219,9 +219,9 @@ describe('citation module', () => {
         },
       };
       const citationsResponse = {
-        citationsArray: {
+        citationList: {
           citation: [
-            { pmid: '111', doi: '10.1/cited1', title: 'Cited Paper', authorString: 'Smith J', journalTitle: 'Nature', pubYear: '2023' },
+            { id: '111', source: 'MED', title: 'Cited Paper', authorString: 'Smith J', journalAbbreviation: 'Nature', pubYear: 2023 },
           ],
         },
       };
@@ -236,7 +236,11 @@ describe('citation module', () => {
       const result = await europepmcProvider.getForwardCitations({ doi: '10.1/test' }, 10);
 
       expect(result).toHaveLength(1);
+      expect(result[0].pmid).toBe('111');
       expect(result[0].title).toBe('Cited Paper');
+      expect(result[0].journal).toBe('Nature');
+      expect(result[0].year).toBe(2023);
+      expect(result[0].source).toBe('europepmc');
 
       const calls = (global.fetch as any).mock.calls;
       expect(calls[0][0]).toContain('query=');
@@ -251,7 +255,7 @@ describe('citation module', () => {
         },
       };
       const citationsResponse = {
-        citationsArray: {
+        citationList: {
           citation: [],
         },
       };
@@ -270,6 +274,88 @@ describe('citation module', () => {
       expect(calls[1][0]).toContain('MED/12345/citations');
     });
 
+    test('getForwardCitations maps pmid only for MED source and keeps ID-less entries with titles', async () => {
+      const citationsResponse = {
+        citationList: {
+          citation: [
+            { id: '9', source: 'AGR', title: 'Non-MED entry', journalAbbreviation: 'Plant J', pubYear: '2020' },
+            { id: '222', source: 'MED', title: 'MED entry' },
+            { title: 'No ID at all' },
+          ],
+        },
+      };
+
+      global.fetch = jest.fn().mockResolvedValue(mockJson(citationsResponse)) as any;
+
+      const result = await europepmcProvider.getForwardCitations({ pmid: '12345' }, 10);
+
+      expect(result).toHaveLength(3);
+      expect(result[0].pmid).toBeUndefined();
+      expect(result[0].title).toBe('Non-MED entry');
+      expect(result[0].journal).toBe('Plant J');
+      expect(result[0].year).toBe(2020);
+      expect(result[1].pmid).toBe('222');
+      expect(result[2].title).toBe('No ID at all');
+    });
+
+    test('getForwardCitations falls back to legacy citationsArray shape', async () => {
+      const citationsResponse = {
+        citationsArray: {
+          citation: [
+            { id: '111', source: 'MED', title: 'Legacy Paper', journalAbbreviation: 'Nature', pubYear: 2023 },
+          ],
+        },
+      };
+
+      global.fetch = jest.fn().mockResolvedValue(mockJson(citationsResponse)) as any;
+
+      const result = await europepmcProvider.getForwardCitations({ pmid: '12345' }, 10);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].title).toBe('Legacy Paper');
+    });
+
+    test('getBackwardReferences uses MED source path and referenceList shape', async () => {
+      const referencesResponse = {
+        referenceList: {
+          reference: [
+            { id: '10592235', source: 'MED', title: 'The Protein Data Bank.', authorString: 'Berman HM, Westbrook J', journalAbbreviation: 'Nucleic Acids Res', pubYear: 2000 },
+            { id: '999', source: 'MED', title: 'Future ref', pubYear: 2030 },
+          ],
+        },
+      };
+
+      global.fetch = jest.fn().mockResolvedValue(mockJson(referencesResponse)) as any;
+
+      const result = await europepmcProvider.getBackwardReferences({ pmid: '17145705' }, 10);
+
+      const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(callUrl).toContain('MED/17145705/references');
+      expect(result).toHaveLength(2);
+      expect(result[0].pmid).toBe('10592235');
+      expect(result[0].journal).toBe('Nucleic Acids Res');
+      expect(result[0].authors).toEqual(['Berman HM', 'Westbrook J']);
+      expect(result[1].title).toBe('Future ref');
+    });
+
+    test('getBackwardReferences filters by article year', async () => {
+      const referencesResponse = {
+        referenceList: {
+          reference: [
+            { id: '1', source: 'MED', title: 'Old', pubYear: 2000 },
+            { id: '2', source: 'MED', title: 'Too new', pubYear: 2030 },
+          ],
+        },
+      };
+
+      global.fetch = jest.fn().mockResolvedValue(mockJson(referencesResponse)) as any;
+
+      const result = await europepmcProvider.getBackwardReferences({ pmid: '12345' }, 10, 2007);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].title).toBe('Old');
+    });
+
     test('returns empty when PMID resolution fails', async () => {
       global.fetch = jest.fn().mockResolvedValue(mockJson({ resultList: { result: [] } })) as any;
 
@@ -284,9 +370,9 @@ describe('citation module', () => {
 
     test('uses PMID directly when available', async () => {
       const citationsResponse = {
-        citationsArray: {
+        citationList: {
           citation: [
-            { pmid: '111', title: 'Cited Paper' },
+            { id: '111', source: 'MED', title: 'Cited Paper' },
           ],
         },
       };
@@ -304,34 +390,41 @@ describe('citation module', () => {
   });
 
   describe('Crossref provider', () => {
-    test('getForwardCitations queries references filter', async () => {
-      const crossrefForwardResponse = {
-        message: {
-          items: [
-            { DOI: '10.1/citing1', title: ['Citing Paper'], author: [{ family: 'Smith', given: 'John' }], 'container-title': ['Science'] },
-          ],
-        },
-      };
-
-      global.fetch = jest.fn().mockResolvedValue(mockJson(crossrefForwardResponse)) as any;
+    test('getForwardCitations makes no request (references filter removed from Crossref API)', async () => {
+      global.fetch = jest.fn().mockResolvedValue(mockJson({})) as any;
 
       const result = await crossrefProvider.getForwardCitations({ doi: '10.1/test' }, 10);
 
-      expect(result).toHaveLength(1);
-      expect(result[0].doi).toBe('10.1/citing1');
-      expect(result[0].title).toBe('Citing Paper');
-      expect(result[0].authors).toEqual(['John Smith']);
-      expect(result[0].journal).toBe('Science');
-      expect(result[0].source).toBe('crossref');
-
-      const callUrl = (global.fetch as any).mock.calls[0][0] as string;
-      expect(callUrl).toContain('filter=references:');
-      expect(callUrl).toContain('rows=10');
+      expect(result).toEqual([]);
+      expect(global.fetch).not.toHaveBeenCalled();
     });
 
     test('getForwardCitations returns empty when no DOI', async () => {
       const result = await crossrefProvider.getForwardCitations({ pmid: '123' }, 10);
       expect(result).toEqual([]);
+    });
+
+    test('appends mailto param when CROSSREF_EMAIL is set', async () => {
+      process.env.CROSSREF_EMAIL = 'researcher@example.org';
+      try {
+        global.fetch = jest.fn().mockResolvedValue(mockJson({ message: { 'is-referenced-by-count': 3, reference: [] } })) as any;
+
+        await crossrefProvider.getCitationCount({ doi: '10.1/test' });
+
+        const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+        expect(callUrl).toContain('mailto=researcher%40example.org');
+      } finally {
+        delete process.env.CROSSREF_EMAIL;
+      }
+    });
+
+    test('omits mailto param when CROSSREF_EMAIL is unset', async () => {
+      global.fetch = jest.fn().mockResolvedValue(mockJson({ message: { 'is-referenced-by-count': 3, reference: [] } })) as any;
+
+      await crossrefProvider.getCitationCount({ doi: '10.1/test' });
+
+      const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(callUrl).not.toContain('mailto=');
     });
 
     test('getCitationCount shares work cache with getBackwardReferences', async () => {
@@ -484,25 +577,49 @@ describe('citation module', () => {
   });
 
   describe('OpenCitations provider', () => {
-    test('getForwardCitations returns citing DOIs', async () => {
+    test('getForwardCitations calls v2 API with doi-prefixed path and parses PID strings', async () => {
       global.fetch = jest.fn().mockResolvedValue(mockJson([
-        { citing: '10.1/citing1', cited: '10.1/test' },
-        { citing: '10.1/citing2', cited: '10.1/test' },
+        { citing: 'omid:br/06202413427 doi:10.1021/ci2003126 openalex:W2079223054 pmid:22145975', cited: 'omid:br/061601349566 doi:10.1093/nar/gkl999' },
+        { citing: 'omid:br/06330144817 doi:10.1101/2023.06.21.545851 openalex:W438189127', cited: 'omid:br/061601349566 doi:10.1093/nar/gkl999' },
       ])) as any;
 
-      const result = await opencitationsProvider.getForwardCitations({ doi: '10.1/test' }, 10);
+      const result = await opencitationsProvider.getForwardCitations({ doi: '10.1093/nar/gkl999' }, 10);
 
       expect(result).toHaveLength(2);
-      expect(result[0].doi).toBe('10.1/citing1');
+      expect(result[0].doi).toBe('10.1021/ci2003126');
+      expect(result[0].pmid).toBe('22145975');
       expect(result[0].source).toBe('opencitations');
+      expect(result[1].doi).toBe('10.1101/2023.06.21.545851');
+      expect(result[1].pmid).toBeUndefined();
+
+      const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(callUrl).toContain('https://api.opencitations.net/index/v2/citations/doi:10.1093%2Fnar%2Fgkl999');
     });
 
-    test('getCitationCount returns count', async () => {
-      global.fetch = jest.fn().mockResolvedValue(mockJson([{ count: 15 }])) as any;
+    test('getBackwardReferences parses cited PID strings', async () => {
+      global.fetch = jest.fn().mockResolvedValue(mockJson([
+        { citing: 'omid:br/061601349566 doi:10.1093/nar/gkl999', cited: 'omid:br/0650243709 doi:10.1021/jm048957q pmid:15943484' },
+      ])) as any;
+
+      const result = await opencitationsProvider.getBackwardReferences({ doi: '10.1093/nar/gkl999' }, 10);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].doi).toBe('10.1021/jm048957q');
+      expect(result[0].pmid).toBe('15943484');
+
+      const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(callUrl).toContain('https://api.opencitations.net/index/v2/references/doi:10.1093%2Fnar%2Fgkl999');
+    });
+
+    test('getCitationCount parses string count from v2 API', async () => {
+      global.fetch = jest.fn().mockResolvedValue(mockJson([{ count: '1974' }])) as any;
 
       const result = await opencitationsProvider.getCitationCount({ doi: '10.1/test' });
 
-      expect(result).toEqual({ total: 15, source: 'opencitations' });
+      expect(result).toEqual({ total: 1974, source: 'opencitations' });
+
+      const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(callUrl).toContain('https://api.opencitations.net/index/v2/citation-count/doi:10.1%2Ftest');
     });
 
     test('returns empty when no DOI', async () => {

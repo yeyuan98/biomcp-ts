@@ -7,6 +7,7 @@ import { drugSearch, DrugSearchResult } from './drug.js';
 import { diseaseSearch, DiseaseSearchResult } from './disease.js';
 import { trialSearch } from './trial.js';
 import { articleSearch, Article } from './article/index.js';
+import { fetchDisgenetGdaSummary } from './disgenet.js';
 
 const SECTION_TIMEOUT_MS = 8000;
 
@@ -20,7 +21,7 @@ export async function geneToDrugs(geneSymbol: string): Promise<Array<{ drug_name
       }
     }`;
     
-    const searchRaw = await conn.request(searchQuery, { symbol: geneSymbol }) as any;
+    const searchRaw = await conn.request(searchQuery, { symbol: geneSymbol }, { rootField: 'search' }) as any;
     const searchData = JSON.parse(JSON.stringify(searchRaw));
     const targetId = searchData?.data?.search?.hits?.[0]?.id;
     
@@ -36,7 +37,7 @@ export async function geneToDrugs(geneSymbol: string): Promise<Array<{ drug_name
       }
     }`;
     
-    const drugRaw = await conn.request(drugQuery, { ensemblId: targetId }) as any;
+    const drugRaw = await conn.request(drugQuery, { ensemblId: targetId }, { rootField: 'target' }) as any;
     const drugData = JSON.parse(JSON.stringify(drugRaw));
     const rows = drugData?.data?.target?.drugAndClinicalCandidates?.rows || [];
     
@@ -182,7 +183,7 @@ export async function drugToGenes(drugName: string): Promise<Array<{ gene_symbol
       }
     }`;
     
-    const searchRaw = await conn.request(searchQuery, { name: drugName }) as any;
+    const searchRaw = await conn.request(searchQuery, { name: drugName }, { rootField: 'search' }) as any;
     const searchData = JSON.parse(JSON.stringify(searchRaw));
     const chemblId = searchData?.data?.search?.hits?.[0]?.id;
     
@@ -199,7 +200,7 @@ export async function drugToGenes(drugName: string): Promise<Array<{ gene_symbol
       }
     }`;
     
-    const drugRaw = await conn.request(drugQuery, { chemblId }) as any;
+    const drugRaw = await conn.request(drugQuery, { chemblId }, { rootField: 'drug' }) as any;
     const drugData = JSON.parse(JSON.stringify(drugRaw));
     const rows = drugData?.data?.drug?.mechanismsOfAction?.rows || [];
     
@@ -283,7 +284,7 @@ export async function diseaseToDrugs(diseaseQuery: string): Promise<Array<{ drug
       }
     }`;
     
-    const searchRaw = await conn.request(searchQuery, { name: searchTerm }) as any;
+    const searchRaw = await conn.request(searchQuery, { name: searchTerm }, { rootField: 'search' }) as any;
     const searchData = JSON.parse(JSON.stringify(searchRaw));
     let diseaseId = searchData?.data?.search?.hits?.[0]?.id;
 
@@ -292,7 +293,7 @@ export async function diseaseToDrugs(diseaseQuery: string): Promise<Array<{ drug
       const efoProbe = `query($efoId: String!) {
         disease(efoId: $efoId) { id name }
       }`;
-      const efoRaw = await conn.request(efoProbe, { efoId }) as any;
+      const efoRaw = await conn.request(efoProbe, { efoId }, { rootField: 'disease' }) as any;
       const efoData = JSON.parse(JSON.stringify(efoRaw));
       if (efoData?.data?.disease?.id) {
         diseaseId = efoData.data.disease.id;
@@ -312,7 +313,7 @@ export async function diseaseToDrugs(diseaseQuery: string): Promise<Array<{ drug
       }
     }`;
     
-    const drugRaw = await conn.request(drugQuery, { efoId: diseaseId }) as any;
+    const drugRaw = await conn.request(drugQuery, { efoId: diseaseId }, { rootField: 'disease' }) as any;
     const drugData = JSON.parse(JSON.stringify(drugRaw));
     const rows = drugData?.data?.disease?.drugAndClinicalCandidates?.rows || [];
     
@@ -329,16 +330,12 @@ export async function diseaseToDrugs(diseaseQuery: string): Promise<Array<{ drug
 
 export async function diseaseToGenes(diseaseId: string): Promise<Array<{ gene_symbol: string; name: string; source: string; score?: number }>> {
   try {
-    const conn = connectionManager.getConnection('disgenet');
-    
-    const response = await conn.request(
-      `/api/v1/disease/${encodeURIComponent(diseaseId)}?format=json`
-    ) as DisgenetGeneResponse;
-    
-    return (response.results || []).slice(0, 20).map(r => ({
-      gene_symbol: r.geneSymbol,
-      name: r.geneName,
-      source: r.geneDatasource,
+    const rows = await fetchDisgenetGdaSummary({ disease: diseaseId });
+
+    return rows.slice(0, 20).map(r => ({
+      gene_symbol: r.gene_symbol || '',
+      name: r.gene_symbol || '',
+      source: 'disgenet',
       score: r.score,
     }));
   } catch (error) {
@@ -653,15 +650,6 @@ interface ChemblMechanismResponse {
 interface OpenFDAEventResponse {
   results?: Array<{
     reactions?: Array<{ reactionmeddrapt?: string }>;
-  }>;
-}
-
-interface DisgenetGeneResponse {
-  results?: Array<{
-    geneSymbol: string;
-    geneName: string;
-    geneDatasource: string;
-    score?: number;
   }>;
 }
 

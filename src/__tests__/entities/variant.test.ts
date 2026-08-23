@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { variantSearch, variantGet, transformMyVariantHit, getVariantSearchFilters, getVariantGetSections } from '../../entities/variant.js';
+import { variantSearch, variantGet, transformMyVariantHit, getVariantSearchFilters, getVariantGetSections, fetchOncoKbAnnotation, normalizeProteinChange } from '../../entities/variant.js';
 import { connectionManager } from '../../connections/manager.js';
 
 describe('variant', () => {
@@ -41,7 +41,7 @@ describe('variant', () => {
           dbsnp: { rsid: 'rs123', gene: { symbol: 'BRCA1' } },
           snpeff: { ann: [{ hgvs_p: 'p.Val600Glu', hgvs_c: 'c.1799T>A', genename: 'BRCA1' }] },
           clinvar: { rcv: [{ clinical_significance: 'Pathogenic', review_status: 'reviewed by expert panel' }] },
-          gnomad: { af: 0.001 },
+          gnomad_exome: { af: { af: 0.001 } },
         }],
       }),
     }) as any;
@@ -51,7 +51,7 @@ describe('variant', () => {
     expect(results).toHaveLength(1);
     expect(results[0].id).toBe('rs123');
     expect(results[0].gene).toBe('BRCA1');
-    expect(results[0].hgvs_p).toBe('p.Val600Glu');
+    expect(results[0].hgvs_p).toBe('V600E');
     expect(results[0].significance).toBe('Pathogenic');
     expect(results[0].gnomad_af).toBe(0.001);
   });
@@ -80,7 +80,7 @@ describe('variant', () => {
       dbsnp: { rsid: 'rs123', gene: { symbol: 'BRCA1' } },
       snpeff: { ann: [{ hgvs_p: 'p.Val600Glu', hgvs_c: 'c.1799T>A', genename: 'BRCA1' }] },
       clinvar: { rcv: [{ clinical_significance: 'Pathogenic', review_status: 'reviewed by expert panel' }] },
-      gnomad: { af: 0.001 },
+      gnomad_exome: { af: { af: 0.001 } },
     };
 
     const result = transformMyVariantHit(input);
@@ -88,7 +88,7 @@ describe('variant', () => {
     expect(result).toEqual({
       id: 'rs123',
       gene: 'BRCA1',
-      hgvs_p: 'p.Val600Glu',
+      hgvs_p: 'V600E',
       hgvs_c: 'c.1799T>A',
       significance: 'Pathogenic',
       clinvar_stars: undefined,
@@ -197,7 +197,7 @@ describe('variant', () => {
     expect(callUrl).toContain('cadd.phred:[20 TO *]');
   });
 
-  test('variantSearch() with max_frequency includes gnomad_af range in query', async () => {
+  test('variantSearch() with max_frequency uses real gnomad AF fields in OR-clause', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
@@ -206,7 +206,9 @@ describe('variant', () => {
     await variantSearch({ max_frequency: 0.01 });
 
     const callUrl = decodeURIComponent((global.fetch as any).mock.calls[0][0] as string).replace(/\+/g, ' ');
-    expect(callUrl).toContain('gnomad_af:[* TO 0.01]');
+    expect(callUrl).toContain('(gnomad_exome.af.af:[* TO 0.01] OR gnomad_genome.af.af:[* TO 0.01])');
+    expect(callUrl).not.toContain('gnomad_af:');
+    expect(callUrl).toContain('fields=dbsnp,snpeff,clinvar,gnomad_exome,gnomad_genome,cadd,dbnsfp');
   });
 
   test('variantSearch() with rs123 query rewrites to dbsnp.rsid', async () => {
@@ -342,27 +344,25 @@ describe('variant', () => {
     await expect(variantGet('nonexistent')).rejects.toThrow('not found');
   });
 
-  test('variantGet() with section fetch failure returns partial result with _error', async () => {
-    delete process.env.ALPHAGENOME_API_KEY;
-    // Main variant fetch succeeds; the alphagenome section genuinely REJECTS
-    // (fetchAlphaGenomeSection throws without an API key) — the section must
-    // land as an _error entry while the core section still resolves.
-    global.fetch = jest.fn().mockImplementation(() => {
-      return Promise.resolve({
-        ok: true,
-        headers: new Headers({ 'content-type': 'application/json' }),
-        json: () => Promise.resolve({
-          _id: 'vcf123',
-          dbsnp: { rsid: 'rs123' },
-        }),
-      });
+  test('variantGet() alphagenome section returns honest stub without network call', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({
+        _id: 'vcf123',
+        dbsnp: { rsid: 'rs123' },
+      }),
     }) as any;
 
     const result = await variantGet('rs123', ['core', 'alphagenome']);
 
-    expect(result.sections).toBeDefined();
+    // Only the MyVariant.info core fetch happens — the former fabricated
+    // gRPC-over-HTTP transport is gone and the section fails honestly.
+    expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(result.sections!.core).toEqual(expect.objectContaining({ id: 'rs123' }));
-    expect((result.sections!.alphagenome as any)._error).toContain('ALPHAGENOME_API_KEY');
+    expect(result.sections!.alphagenome).toEqual({
+      _error: expect.stringContaining('temporarily unavailable'),
+    });
   });
 
   test('variantGet() maps alphagenome_scores alias to alphagenome section', async () => {
@@ -407,16 +407,21 @@ describe('variant', () => {
     expect(result.significance).toBe('Pathogenic');
   });
 
-  test('transformMyVariantHit() maps gnomad_af correctly', () => {
-    const input = {
+  test('transformMyVariantHit() maps gnomad_af from exome, falling back to genome', () => {
+    const fromExome = transformMyVariantHit({
       _id: 'vcf123',
-      gnomad: { af: 0.005 },
+      gnomad_exome: { af: { af: 0.005 } },
+      gnomad_genome: { af: { af: 0.002 } },
       snpeff: { ann: [] },
-    };
+    });
+    expect(fromExome.gnomad_af).toBe(0.005);
 
-    const result = transformMyVariantHit(input);
-
-    expect(result.gnomad_af).toBe(0.005);
+    const genomeOnly = transformMyVariantHit({
+      _id: 'vcf124',
+      gnomad_genome: { af: { af: 0.002 } },
+      snpeff: { ann: [] },
+    });
+    expect(genomeOnly.gnomad_af).toBe(0.002);
   });
 
   test('transformMyVariantHit() with minimal data uses _id as fallback', () => {
@@ -551,5 +556,188 @@ describe('variant', () => {
     const callUrl = (global.fetch as any).mock.calls[0][0] as string;
     expect(callUrl).toContain('size=5');
     expect(callUrl).toContain('from=10');
+  });
+});
+
+// ============================================================
+// variantGet clinical section — CIViC lookup (schema-valid query)
+// ============================================================
+describe('variantGet clinical section — CIViC lookup', () => {
+  let originalFetch: typeof global.fetch;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    originalFetch = global.fetch;
+    connectionManager.closeAll();
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    global.fetch = originalFetch;
+  });
+
+  function mockConnections(civicResponse: unknown) {
+    const civicRequest = jest.fn().mockResolvedValue(civicResponse);
+    const realGetConnection = connectionManager.getConnection.bind(connectionManager);
+    jest.spyOn(connectionManager, 'getConnection').mockImplementation((sourceId: string) => {
+      if (sourceId === 'civic') {
+        return { request: civicRequest } as any;
+      }
+      return realGetConnection(sourceId);
+    });
+    return civicRequest;
+  }
+
+  function mockMyVariantGet() {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({
+        _id: 'chr7:140453136:A:T',
+        dbsnp: { rsid: 'rs113488022', gene: { symbol: 'BRAF' } },
+        snpeff: { ann: [{ genename: 'BRAF', hgvs_p: 'p.Val600Glu', hgvs_c: 'c.1799T>A' }] },
+      }),
+    }) as any;
+  }
+
+  test('queries gene(entrezSymbol)/variants with rootField and filters protein match client-side', async () => {
+    const civicRequest = mockConnections({
+      data: {
+        gene: {
+          variants: {
+            nodes: [
+              { id: 704, name: 'V600E+V600K', clinicalSignificanceCounts: [], singleVariantMolecularProfile: { molecularProfileScore: 0, evidenceItems: { totalCount: 0 } } },
+              { id: 12, name: 'V600E', clinicalSignificanceCounts: [{ significance: 'ONCOGENIC', count: 3 }], singleVariantMolecularProfile: { molecularProfileScore: 1471.5, evidenceItems: { totalCount: 213 } } },
+            ],
+          },
+        },
+      },
+    });
+    mockMyVariantGet();
+
+    const result = await variantGet('rs113488022', ['clinical']);
+
+    expect(civicRequest).toHaveBeenCalledTimes(1);
+    const [query, variables, options] = civicRequest.mock.calls[0];
+    // Schema-valid query shape (live-verified against civicdb.org/api/graphql)
+    expect(query).toContain('gene(entrezSymbol: $gene)');
+    expect(query).toContain('variants(');
+    expect(query).not.toContain('variants(gene:');
+    // Protein change normalized from snpeff's "p.Val600Glu" to CIViC's "V600E"
+    expect(variables).toEqual({ gene: 'BRAF', hgvsp: 'V600E' });
+    // Phase-1 B2 payoff: schema drift on the gene root throws instead of silent null
+    expect(options).toEqual({ rootField: 'gene' });
+
+    // Client-side exact match: "V600E+V600K" must NOT match, "V600E" must
+    const civic = (result.sections!.clinical as any).civic;
+    expect(civic).toEqual({
+      id: 12,
+      name: 'V600E',
+      clinical_significance: 'ONCOGENIC(3)',
+      evidence_score: 1471.5,
+      evidence_count: 213,
+    });
+  });
+
+  test('omits civic entry when no node matches the protein change exactly', async () => {
+    const civicRequest = mockConnections({
+      data: {
+        gene: {
+          variants: {
+            nodes: [
+              { id: 563, name: 'V600K', clinicalSignificanceCounts: [], singleVariantMolecularProfile: { molecularProfileScore: 1, evidenceItems: { totalCount: 2 } } },
+            ],
+          },
+        },
+      },
+    });
+    mockMyVariantGet();
+
+    const result = await variantGet('rs113488022', ['clinical']);
+
+    expect(civicRequest).toHaveBeenCalledTimes(1);
+    // No exact match -> no civic entry -> clinical section resolves null
+    expect(result.sections!.clinical).toBeNull();
+  });
+});
+
+// ============================================================
+// OncoKB annotation (hugoSymbol params + IndicatorAnnotationResp mapping)
+// ============================================================
+describe('fetchOncoKbAnnotation', () => {
+  let originalFetch: typeof global.fetch;
+  const originalToken = process.env.ONCOKB_TOKEN;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    originalFetch = global.fetch;
+    connectionManager.closeAll();
+    process.env.ONCOKB_TOKEN = 'test-token';
+  });
+
+  afterEach(() => {
+    if (originalToken) process.env.ONCOKB_TOKEN = originalToken;
+    else delete process.env.ONCOKB_TOKEN;
+    global.fetch = originalFetch;
+  });
+
+  test('sends hugoSymbol + normalized alteration, never legacy gene/byProteinChange params', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        geneExist: true,
+        variantExist: true,
+        hugoSymbol: 'BRAF',
+        oncogenic: 'Oncogenic',
+        highestLevel: 'LEVEL_1',
+        mutationEffect: { knownEffect: 'Gain-of-function' },
+        treatments: [
+          { level: 'LEVEL_1', drugs: [{ drugName: 'Vemurafenib' }, { drugName: 'Dabrafenib' }] },
+        ],
+      }),
+    }) as any;
+
+    const result = await fetchOncoKbAnnotation('BRAF', 'p.Val600Glu');
+
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(callUrl).toContain('/annotate/mutations/byProteinChange?');
+    expect(callUrl).toContain('hugoSymbol=BRAF');
+    expect(callUrl).toContain('alteration=V600E');
+    expect(callUrl).not.toContain('gene=');
+    expect(callUrl).not.toContain('byProteinChange=');
+
+    // IndicatorAnnotationResp mapping (conservative renames of mapped fields)
+    expect(result).toEqual({
+      oncogenic: 'Oncogenic',
+      level: 'LEVEL_1',
+      effect: 'Gain-of-function',
+      therapies: [{ name: 'Vemurafenib, Dabrafenib', level: 'LEVEL_1' }],
+    });
+  });
+
+  test('returns null annotation payload for empty OncoKB response object', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ geneExist: false, variantExist: false }),
+    }) as any;
+
+    const result = await fetchOncoKbAnnotation('BRAF', 'V600E');
+
+    expect(result).toEqual({ oncogenic: undefined, level: undefined, effect: undefined, therapies: [] });
+  });
+});
+
+// ============================================================
+// normalizeProteinChange
+// ============================================================
+describe('normalizeProteinChange', () => {
+  test.each([
+    ['V600E', 'V600E'],
+    ['p.Val600Glu', 'V600E'],
+    ['p.Val600Glu ', 'V600E'],
+    ['Thr599_Val600insThr', 'T599_V600INST'],
+    ['v600e', 'V600E'],
+  ])('normalizeProteinChange(%s) -> %s', (input, expected) => {
+    expect(normalizeProteinChange(input)).toBe(expected);
   });
 });

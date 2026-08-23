@@ -82,7 +82,7 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   },
 
   // ==========================================
-  // DISEASES - REST (3 sources)
+  // DISEASES - REST (2 sources)
   // ==========================================
   mydisease: {
     sourceId: 'mydisease',
@@ -98,14 +98,7 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
   },
-  seer: {
-    sourceId: 'seer',
-    baseUrl: 'https://seer.cancer.gov/statistics-network/explorer/source/content_writers',
-    protocol: 'rest',
-    handling: { timeoutMs: 15000 },
-    rateLimit: { intervalMs: 100 },
-  },
-  
+
   // ==========================================
   // LITERATURE - REST (9 sources)
   // ==========================================
@@ -113,7 +106,12 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     sourceId: 'pubmed',
     baseUrl: 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils',
     protocol: 'rest',
-    handling: { timeoutMs: 15000 },
+    handling: {
+      timeoutMs: 15000,
+      // NCBI asks E-utility clients to identify themselves (tool + email)
+      // on every request; applied only when NCBI_EMAIL is configured.
+      envQueryParams: [{ envVar: 'NCBI_EMAIL', params: { tool: 'biomcp-ts', email: '$NCBI_EMAIL' } }],
+    },
     auth: {
       envVar: 'NCBI_API_KEY',
       required: false,
@@ -208,16 +206,21 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     baseUrl: 'https://api.crossref.org',
     protocol: 'rest',
     handling: { timeoutMs: 15000 },
+    // Polite pool (optional)
+    auth: {
+      envVar: 'CROSSREF_EMAIL',
+      required: false,
+      delivery: { type: 'query-param', name: 'mailto' },
+    },
     rateLimit: { intervalMs: 100 },
     retry: { attempts: 3, backoffMs: 100 },
   },
   opencitations: {
     sourceId: 'opencitations',
-    baseUrl: 'https://opencitations.net/index/api',
+    baseUrl: 'https://api.opencitations.net/index/v2',
     protocol: 'rest',
     handling: { timeoutMs: 15000 },
-    // v1 endpoints 301 to a dead host — fail loudly instead of returning
-    // empty until the v2 migration lands.
+    // Fail loudly on unexpected redirects instead of silently following them.
     followRedirects: false,
     rateLimit: { intervalMs: 1000 },
   },
@@ -276,7 +279,7 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   // ==========================================
   disgenet: {
     sourceId: 'disgenet',
-    baseUrl: 'https://api.disgenet.com',
+    baseUrl: 'https://api.disgenet.com/api/v1',
     protocol: 'rest',
     handling: { timeoutMs: 15000 },
     auth: {
@@ -372,21 +375,6 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     protocol: 'graphql',
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 500 },
-  },
-  
-  // ==========================================
-  // GRPC (1 source)
-  // ==========================================
-  alphagenome: {
-    sourceId: 'alphagenome',
-    baseUrl: 'gdmscience.googleapis.com:443',
-    protocol: 'grpc',
-    auth: {
-      envVar: 'ALPHAGENOME_API_KEY',
-      required: true,
-      delivery: { type: 'grpc-metadata', name: 'x-goog-api-key' },
-    },
-    rateLimit: { intervalMs: 0 },
   },
 };
 

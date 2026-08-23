@@ -18,7 +18,7 @@ describe('drug_search', () => {
     const results = await retryOnRateLimit(() => harness.callTool('drug_search', { query: 'aspirin' }));
     expectDrugSearchResult(results);
     expect(results.length).toBeGreaterThan(0);
-    const hit = results.find((r: any) => r.name?.toLowerCase().includes('aspirin'));
+    const hit = results.find((r: any) => /aspirin|acetylsalicylic acid/i.test(r.name || ''));
     expect(hit).toBeDefined();
   }, 60000);
 

@@ -5,10 +5,10 @@ import { connectionManager } from '../../connections/manager.js';
 import { applyLimit } from './utils.js';
 
 const DISEASE_SECTIONS = [
-  'core', 'gene_associations', 'phenotypes', 'pathways', 'survival', 'all'
+  'core', 'gene_associations', 'phenotypes', 'pathways', 'all'
 ] as const;
 
-const DISEASE_ALL_SECTIONS = ['gene_associations', 'phenotypes', 'pathways', 'survival'];
+const DISEASE_ALL_SECTIONS = ['gene_associations', 'phenotypes', 'pathways'];
 const DISEASE_STORAGE_KEYS: Record<string, string> = {};
 const DISEASE_ARRAY_KEYS: Record<string, string[]> = {
   gene_associations: [],
@@ -43,15 +43,14 @@ export function registerDiseaseTools(server: McpServer): void {
       description: 'Search for diseases by name, phenotype, or keyword',
       inputSchema: {
         query: z.string().describe('Disease name, phenotype, or keyword to search for'),
-        disease_type: z.string().optional().describe('Filter by disease type'),
         limit: z.number().int().min(1).max(50).default(10).describe('Maximum results'),
         offset: z.number().int().min(0).default(0).describe('Result offset'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
-    async ({ query, disease_type, limit, offset }) => {
+    async ({ query, limit, offset }) => {
       try {
-        const results = await diseaseSearch(query, { disease_type, limit, offset });
+        const results = await diseaseSearch(query, { limit, offset });
         return { content: [{ type: 'text', text: JSON.stringify(results) }] };
       } catch (error) {
         return { 

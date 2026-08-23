@@ -16,9 +16,11 @@ export async function searchPubMed(query: string, limit: number, offset: number,
   try {
     let searchUrl = `/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=${limit}&retstart=${offset}&retmode=json`;
     if (dateRange?.from || dateRange?.to) {
+      // NBK25499: mindate/maxdate must be used together — default the
+      // missing bound so esearch always receives a complete range.
       searchUrl += `&datetype=pdat`;
-      if (dateRange.from) searchUrl += `&mindate=${formatPubMedDate(dateRange.from)}`;
-      if (dateRange.to) searchUrl += `&maxdate=${formatPubMedDate(dateRange.to)}`;
+      searchUrl += `&mindate=${dateRange.from ? formatPubMedDate(dateRange.from) : '1600/01/01'}`;
+      searchUrl += `&maxdate=${dateRange.to ? formatPubMedDate(dateRange.to) : '3000/12/31'}`;
     }
 
     // Retry policy lives on the registry 'pubmed' source config.

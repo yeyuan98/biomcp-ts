@@ -6,6 +6,8 @@ interface WaybackAvailability {
     closest?: {
       url?: string;
       timestamp?: string;
+      status?: string;
+      available?: boolean;
     };
   };
 }
@@ -37,6 +39,11 @@ export async function findWaybackSnapshot(
 
   const closest = parsed.archived_snapshots?.closest;
   if (!closest?.url || !closest.timestamp) return null;
+
+  // A snapshot that is not available, or whose capture is a 4xx/5xx status
+  // page, can never serve playable original bytes — skip the doomed fetch.
+  const status = Number(closest.status);
+  if (closest.available === false || !(status >= 200 && status < 400)) return null;
 
   return {
     idUrl: `https://web.archive.org/web/${closest.timestamp}id_/${targetUrl}`,

@@ -34,7 +34,7 @@ export async function searchLitSense(query: string, limit: number, _offset: numb
     const conn = connectionManager.getConnection('litsense');
 
     const response = await conn.request(
-      `/sentences/?query=${encodeURIComponent(query)}&size=${limit}`
+      `/sentences/?query=${encodeURIComponent(query)}&limit=${limit}`
     ) as LitSenseResponse;
 
     return (Array.isArray(response) ? response : []).slice(0, limit).map(transformLitSense);

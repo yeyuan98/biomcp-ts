@@ -932,11 +932,12 @@ describe('OpsClient', () => {
     installFakeTimers();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     jest.useRealTimers();
     global.fetch = originalFetch;
     delete process.env.EPO_OPS_CONSUMER_KEY;
     delete process.env.EPO_OPS_CONSUMER_SECRET;
+    (await import('../../entities/patent/ops-client.js')).resetOpsBackoff();
   });
 
   test('token fetch: single-flight under concurrency, cached until expiry', async () => {
@@ -972,7 +973,7 @@ describe('OpsClient', () => {
     client.close();
   });
 
-  test('get() retries once on 403 quota rejection and surfaces final status', async () => {
+  test('get() retries once on 403 rate-limit rejection and succeeds', async () => {
     const { OpsClient } = await import('../../entities/patent/ops-client.js');
     const client = new OpsClient();
     global.fetch = jest.fn()
@@ -985,7 +986,7 @@ describe('OpsClient', () => {
       .mockResolvedValueOnce({
         ok: false,
         status: 403,
-        headers: new Headers({ 'x-rejection-reason': 'IndividualQuotaPerHour' }),
+        headers: new Headers({ 'x-rejection-reason': 'individualRateLimitExceeded' }),
         text: () => Promise.resolve('violation of Fair Use policy'),
       })
       .mockResolvedValueOnce({
@@ -998,6 +999,88 @@ describe('OpsClient', () => {
     const resp = await advanceUntilSettled(client.get('/published-data/search?q=x'));
     expect(resp.status).toBe(200);
     expect(resp.body).toBe('{"ok":true}');
+    expect(global.fetch).toHaveBeenCalledTimes(3); // token + throttled + retried
+    client.close();
+  });
+
+  test('get() on 403 quota-class rejection does NOT retry, records failure, throws with reason', async () => {
+    const ops = await import('../../entities/patent/ops-client.js');
+    const client = new ops.OpsClient();
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        text: () => Promise.resolve(JSON.stringify({ access_token: 'tok', expires_in: 1199 })),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        headers: new Headers({ 'x-rejection-reason': 'userHoursQuotaExceeded' }),
+        text: () => Promise.resolve('quota exhausted'),
+      }) as any;
+
+    await expect(advanceUntilSettled(client.get('/published-data/search?q=x')))
+      .rejects.toThrow(/userHoursQuotaExceeded/);
+    // No retry: exactly token + one throttled request.
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    // Quota-class failures never self-heal: immediate auto-mode exclusion.
+    expect(ops.isOpsBackedOff()).toBe(true);
+    client.close();
+  });
+
+  test('get() on HTTP 429 retries once and succeeds', async () => {
+    const { OpsClient } = await import('../../entities/patent/ops-client.js');
+    const client = new OpsClient();
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        text: () => Promise.resolve(JSON.stringify({ access_token: 'tok', expires_in: 1199 })),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        headers: new Headers(),
+        text: () => Promise.resolve('too many requests'),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        text: () => Promise.resolve('{"ok":true}'),
+      }) as any;
+
+    const resp = await advanceUntilSettled(client.get('/published-data/search?q=x'));
+    expect(resp.status).toBe(200);
+    expect(resp.body).toBe('{"ok":true}');
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    client.close();
+  });
+
+  test('get() on repeated HTTP 429 records failure and throws', async () => {
+    const ops = await import('../../entities/patent/ops-client.js');
+    const client = new ops.OpsClient();
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        text: () => Promise.resolve(JSON.stringify({ access_token: 'tok', expires_in: 1199 })),
+      })
+      .mockResolvedValue({
+        ok: false,
+        status: 429,
+        headers: new Headers(),
+        text: () => Promise.resolve('too many requests'),
+      }) as any;
+
+    await expect(advanceUntilSettled(client.get('/published-data/search?q=x')))
+      .rejects.toThrow(/rate limit/i);
+    expect(global.fetch).toHaveBeenCalledTimes(3); // token + throttled + one retry
+    // Rate-limit exhaustion is a soft failure (1 strike), not an auth-class trip.
+    expect(ops.isOpsBackedOff()).toBe(false);
     client.close();
   });
 
@@ -1234,6 +1317,40 @@ describe('wayback fallback', () => {
       text: () => Promise.resolve(JSON.stringify({ archived_snapshots: {} })),
     }) as any;
     expect(await findWaybackSnapshot('https://patents.google.com/patent/EP3904939B1/en')).toBeNull();
+  });
+
+  test('findWaybackSnapshot returns null for a 404 capture without fetching playback', async () => {
+    const { findWaybackSnapshot } = await import('../../entities/patent/detail/wayback.js');
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      text: () => Promise.resolve(JSON.stringify({
+        archived_snapshots: {
+          closest: {
+            url: 'https://web.archive.org/web/20260215174326/https://patents.google.com/patent/US11027025B2/en',
+            timestamp: '20260215174326',
+            status: '404',
+            available: true,
+          },
+        },
+      })),
+    }) as any;
+    expect(await findWaybackSnapshot('https://patents.google.com/patent/US11027025B2/en')).toBeNull();
+    // Only the availability API was hit — no doomed web.archive.org playback fetch.
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(String((global.fetch as any).mock.calls[0][0])).toContain('archive.org/wayback/available');
+  });
+
+  test('findWaybackSnapshot returns null when the snapshot is marked unavailable', async () => {
+    const { findWaybackSnapshot } = await import('../../entities/patent/detail/wayback.js');
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      text: () => Promise.resolve(JSON.stringify({
+        archived_snapshots: { closest: { url: 'x', timestamp: '20260215174326', status: '200', available: false } },
+      })),
+    }) as any;
+    expect(await findWaybackSnapshot('https://patents.google.com/patent/US11027025B2/en')).toBeNull();
   });
 
   test('fetchWaybackOriginal gunzips magic-byte gzip payloads', async () => {
@@ -2047,7 +2164,7 @@ describe('fetchGooglePatentDetail block-page detection', () => {
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
           text: () => Promise.resolve(JSON.stringify({
-            archived_snapshots: { closest: { url: 'x', timestamp: '20260215174326' } },
+            archived_snapshots: { closest: { url: 'x', timestamp: '20260215174326', status: '200' } },
           })),
         });
       }

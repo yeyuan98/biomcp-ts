@@ -140,6 +140,8 @@ describe('article', () => {
     const callUrl = (global.fetch as any).mock.calls[0][0] as string;
     expect(callUrl).toContain('/search/?text=');
     expect(callUrl).toContain('brca1');
+    expect(callUrl).toContain('page=1');
+    expect(callUrl).toContain('size=10');
     expect(result).toHaveLength(1);
     expect(result[0].pmid).toBe('34083286');
     expect(result[0].pmcid).toBe('PMC999');
@@ -147,6 +149,39 @@ describe('article', () => {
     expect(result[0].journal).toBe('Nature');
     expect(result[0].doi).toBe('10.1234/test');
     expect(result[0].source).toBe('pubtator');
+  });
+
+  test('articleSearch() pubtator paginates server-side for offset windows', async () => {
+    const page = Array.from({ length: 15 }, (_, i) => ({
+      _id: String(34083286 + i), pmid: 34083286 + i, title: `Article ${i}`,
+    }));
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({ results: page }),
+    }) as any;
+
+    // Window [10,15): page 1 sized to cover the window, sliced to it.
+    const result = await articleSearch('brca1', { source: 'pubtator', limit: 5, offset: 10 });
+
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(callUrl).toContain('page=1');
+    expect(callUrl).toContain('size=15');
+    expect(result).toHaveLength(5);
+    expect(result.map(r => r.pmid)).toEqual(['34083296', '34083297', '34083298', '34083299', '34083300']);
+  });
+
+  test('articleSearch() pubtator requests a larger size when limit exceeds the API default', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({ results: [] }),
+    }) as any;
+
+    await articleSearch('brca1', { source: 'pubtator', limit: 15 });
+
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(callUrl).toContain('size=15');
   });
 
   test('articleSearch() with litsense source uses /sentences/?query= endpoint', async () => {
@@ -163,6 +198,8 @@ describe('article', () => {
     const callUrl = (global.fetch as any).mock.calls[0][0] as string;
     expect(callUrl).toContain('/sentences/?query=');
     expect(callUrl).toContain('brca1');
+    expect(callUrl).toContain('limit=');
+    expect(callUrl).not.toContain('size=');
     expect(result).toHaveLength(1);
     expect(result[0].pmid).toBe('12345');
     expect(result[0].abstract).toBe('This is a relevant sentence.');
@@ -213,8 +250,8 @@ describe('article', () => {
 
   test('transformEuropePMC maps fields correctly', () => {
     const result = transformEuropePMC({
-      pubmedId: '12345',
-      pmcId: 'PMC999',
+      pmid: '12345',
+      pmcid: 'PMC999',
       doi: '10.1234/test',
       title: 'Europe PMC Article',
       authorString: 'Smith J, Doe A',
@@ -302,7 +339,7 @@ describe('article', () => {
       expect(searchCallUrl).toContain('maxdate=2023/12/31');
     });
 
-    test('PubMed search with open-ended from-only dateRange', async () => {
+    test('PubMed search with open-ended from-only dateRange sends both bounds (defaulted maxdate)', async () => {
       global.fetch = jest.fn()
         .mockResolvedValueOnce({
           ok: true,
@@ -315,7 +352,23 @@ describe('article', () => {
       const searchCallUrl = (global.fetch as any).mock.calls[0][0] as string;
       expect(searchCallUrl).toContain('datetype=pdat');
       expect(searchCallUrl).toContain('mindate=2020/01/01');
-      expect(searchCallUrl).not.toContain('maxdate');
+      expect(searchCallUrl).toContain('maxdate=3000/12/31');
+    });
+
+    test('PubMed search with open-ended to-only dateRange sends both bounds (defaulted mindate)', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ esearchresult: { idlist: [] } }),
+        }) as any;
+
+      await articleSearch('brca1', { source: 'pubmed', dateRange: '/2023-12-31' });
+
+      const searchCallUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(searchCallUrl).toContain('datetype=pdat');
+      expect(searchCallUrl).toContain('mindate=1600/01/01');
+      expect(searchCallUrl).toContain('maxdate=2023/12/31');
     });
 
     test('Europe PMC search appends date range in query', async () => {

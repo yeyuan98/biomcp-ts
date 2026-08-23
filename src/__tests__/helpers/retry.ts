@@ -7,7 +7,10 @@ function isRetryable(error: unknown): boolean {
     return (
       msg.includes('429') ||
       msg.includes('too many requests') ||
-      msg.includes('rate limit')
+      msg.includes('rate limit') ||
+      msg.includes('fetch failed') ||
+      msg.includes('econnreset') ||
+      msg.includes('etimedout')
     );
   }
   return false;

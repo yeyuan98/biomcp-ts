@@ -2,7 +2,7 @@ import { jest } from '@jest/globals';
 import {
   geneEnrichment, discover, searchAll, batchGet, variantToTrials,
   geneToDrugs, geneToTrials, drugToGenes, drugToTrials,
-  drugToAdverseEvents, diseaseToDrugs,
+  drugToAdverseEvents, diseaseToDrugs, diseaseToGenes,
 } from '../../entities/cross-entity.js';
 import { connectionManager } from '../../connections/manager.js';
 
@@ -913,6 +913,91 @@ describe('diseaseToDrugs', () => {
     );
     expect(efoProbe).toBeDefined();
     expect(String(efoProbe[0])).toContain('opentargets');
+  });
+});
+
+// ============================================================
+// diseaseToGenes (DisGeNET gda/summary)
+// ============================================================
+describe('diseaseToGenes', () => {
+  let originalFetch: typeof global.fetch;
+  let originalEnv: string | undefined;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    originalFetch = global.fetch;
+    originalEnv = process.env.DISGENET_API_KEY;
+    process.env.DISGENET_API_KEY = 'test-disgenet-key';
+    connectionManager.closeAll();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    if (originalEnv !== undefined) {
+      process.env.DISGENET_API_KEY = originalEnv;
+    } else {
+      delete process.env.DISGENET_API_KEY;
+    }
+  });
+
+  test('queries gda/summary with normalized disease code and raw Authorization key', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        payload: [
+          {
+            symbolOfGene: 'BRCA1',
+            geneNcbiID: 672,
+            diseaseName: 'Breast carcinoma',
+            diseaseUMLSCUI: 'C0006142',
+            score: 0.9,
+            numPMIDs: 120,
+          },
+          {
+            symbolOfGene: 'TP53',
+            geneNcbiID: 7157,
+            diseaseName: 'Breast carcinoma',
+            diseaseUMLSCUI: 'C0006142',
+            score: 0.8,
+            numPMIDs: 80,
+          },
+        ],
+        warnings: [],
+        pageNum: 0,
+        pageSize: 10,
+        pageCount: 1,
+        totalEntries: 2,
+      }),
+      headers: new Headers({ 'content-type': 'application/json' }),
+    }) as any;
+
+    const results = await diseaseToGenes('C0006142');
+
+    expect(results).toHaveLength(2);
+    expect(results[0]).toEqual({ gene_symbol: 'BRCA1', name: 'BRCA1', source: 'disgenet', score: 0.9 });
+
+    const calls = (global.fetch as any).mock.calls;
+    expect(calls.length).toBe(1);
+    const url = new URL(calls[0][0] as string);
+    expect(url.origin + url.pathname).toBe('https://api.disgenet.com/api/v1/gda/summary');
+    expect(url.searchParams.get('disease')).toBe('UMLS_C0006142');
+    expect(url.searchParams.get('page_number')).toBe('0');
+    // Raw (unprefixed) API key in Authorization header.
+    expect((calls[0][1].headers as Headers).get('Authorization')).toBe('test-disgenet-key');
+  });
+
+  test('normalizes colon-form MONDO ids to DisGeNET underscore form', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ payload: [], warnings: [] }),
+      headers: new Headers({ 'content-type': 'application/json' }),
+    }) as any;
+
+    const results = await diseaseToGenes('MONDO:0007254');
+
+    expect(results).toEqual([]);
+    const url = new URL((global.fetch as any).mock.calls[0][0] as string);
+    expect(url.searchParams.get('disease')).toBe('MONDO_0007254');
   });
 });
 

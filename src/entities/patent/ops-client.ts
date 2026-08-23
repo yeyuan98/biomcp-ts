@@ -1,5 +1,6 @@
 import { TokenBucketRateLimiter } from '../../connections/rate-limiter.js';
 import { fetchWithTimeout } from '../../connections/fetch-utils.js';
+import { HttpConnectionError } from '../../connections/errors.js';
 
 const OPS_BASE = 'https://ops.epo.org/3.2';
 const TOKEN_TTL_MS = 18 * 60 * 1000;
@@ -73,7 +74,7 @@ interface OpsResponse {
  * OPS uses OAuth2 client-credentials auth with ~20-minute tokens, which does
  * not fit the static registry AuthConfig, so this client is entity-managed.
  * Throttling on OPS manifests as HTTP 403 with an X-Rejection-Reason header
- * (not 429), so retry logic keys on that header.
+ * (and occasionally HTTP 429); `get()` branches on the rejection reason.
  */
 export class OpsClient {
   private tokenState: TokenState | null = null;
@@ -135,13 +136,16 @@ export class OpsClient {
 
   /**
    * GET a /rest-services path with auth + retry on OPS-style throttling
-   * (403 + X-Rejection-Reason quota headers). Returns raw text.
+   * (403 with an X-Rejection-Reason rate-limit header, or HTTP 429).
+   * Transient rate limits (reason containing "RateLimit", or 429) are
+   * retried once after a backoff; quota-class rejections are not retried —
+   * they record an auto-mode failure and throw. Returns raw text.
    */
   async get(path: string, timeoutMs = 20000): Promise<OpsResponse> {
-    await this.rateLimiter.acquire();
     let lastError: string | null = null;
 
     for (let attempt = 0; attempt < 2; attempt++) {
+      await this.rateLimiter.acquire();
       const token = await this.getToken();
       const { data, error } = await fetchWithTimeout(async (signal) => {
         const resp = await fetch(`${OPS_BASE}/rest-services${path}`, {
@@ -170,9 +174,19 @@ export class OpsClient {
       }
 
       const rejection = data.headers['x-rejection-reason'] || data.headers['X-Rejection-Reason'];
-      if (data.status === 403 && rejection && attempt === 0) {
-        await new Promise(r => setTimeout(r, 2000));
-        continue;
+      const throttled = data.status === 429 || (data.status === 403 && !!rejection);
+      if (throttled) {
+        const reason = rejection || 'rate limit exceeded';
+        const transient = data.status === 429 || /RateLimit/i.test(reason);
+        if (transient && attempt === 0) {
+          await new Promise(r => setTimeout(r, 2000));
+          continue;
+        }
+        const message = transient
+          ? `EPO OPS rate limited (${reason}); still throttled after retry`
+          : `EPO OPS quota rejection: ${reason} (retry will not help until the quota window resets)`;
+        recordOpsFailure(message);
+        throw new HttpConnectionError(message, data.status, false);
       }
       return data;
     }

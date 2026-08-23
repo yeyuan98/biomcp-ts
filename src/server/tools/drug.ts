@@ -22,16 +22,15 @@ export function registerDrugTools(server: McpServer): void {
       description: 'Search for drugs by name, mechanism, or keyword',
       inputSchema: {
         query: z.string().describe('Drug name, mechanism, or keyword to search for'),
-        drug_type: z.string().optional().describe('Filter by drug type'),
         source: z.string().optional().describe('Filter by source (mychem, chembl, openfda)'),
         limit: z.number().int().min(1).max(50).default(10).describe('Maximum results'),
         offset: z.number().int().min(0).default(0).describe('Result offset'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
-    async ({ query, drug_type, source, limit, offset }) => {
+    async ({ query, source, limit, offset }) => {
       try {
-        const results = await drugSearch(query, { drug_type, source, limit, offset });
+        const results = await drugSearch(query, { source, limit, offset });
         return { content: [{ type: 'text', text: JSON.stringify(results) }] };
       } catch (error) {
         return { 

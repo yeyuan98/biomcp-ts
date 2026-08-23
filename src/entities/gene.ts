@@ -4,11 +4,11 @@ import { RestConnection } from '../connections/rest.js';
 import { fetchWithTimeout } from '../connections/fetch-utils.js';
 import { withRetry, isRetryableError } from '../connections/retry.js';
 import { transformMyGeneHit } from '../transform/gene.js';
+import { fetchDisgenetGdaSummary } from './disgenet.js';
 
 const SECTION_TIMEOUT_MS = 8000;
 
 export interface GeneSearchOptions {
-  gene_type?: 'protein-coding' | 'ncRNA' | 'pseudo';
   chromosome?: string;
   limit?: number;
   offset?: number;
@@ -44,10 +44,10 @@ export async function geneSearch(
   query: string,
   options: GeneSearchOptions = {}
 ): Promise<GeneSearchResult[]> {
-  const { gene_type, chromosome, limit = 10, offset = 0 } = options;
-  
+  const { chromosome, limit = 10, offset = 0 } = options;
+
   const conn = connectionManager.getConnection('mygene');
-  
+
   const queryParams = new URLSearchParams({
     q: query,
     species: 'human',
@@ -55,11 +55,7 @@ export async function geneSearch(
     size: String(limit),
     from: String(offset),
   });
-  
-  if (gene_type) {
-    queryParams.set('type', gene_type);
-  }
-  
+
   if (chromosome) {
     queryParams.set('chr', chromosome);
   }
@@ -392,7 +388,7 @@ async function fetchCivic(geneSymbol: string, signal?: AbortSignal): Promise<{ v
   }
 }`;
 
-    const response = await conn.request(query, { symbol: geneSymbol }, signal ? { signal } : undefined) as unknown as CivicResponse;
+    const response = await conn.request(query, { symbol: geneSymbol }, { signal, rootField: 'gene' }) as unknown as CivicResponse;
 
     const gene = response.data?.gene;
     const variants = (gene?.variants?.nodes || []).slice(0, 20).map((v: { id: number; name: string }) => ({
@@ -515,8 +511,8 @@ async function fetchDruggability(geneSymbol: string, signal?: AbortSignal): Prom
 
     // Start both queries in parallel
     const [rawDgidb, searchRaw] = await Promise.allSettled([
-      dgidbConn.request(dgidbQuery, { names: [geneSymbol] }, signal ? { signal } : undefined),
-      otConn.request(searchQuery, { symbol: geneSymbol }, signal ? { signal } : undefined),
+      dgidbConn.request(dgidbQuery, { names: [geneSymbol] }, { signal, rootField: 'genes' }),
+      otConn.request(searchQuery, { symbol: geneSymbol }, { signal, rootField: 'search' }),
     ]);
 
     // Process DGIdb results
@@ -543,7 +539,7 @@ async function fetchDruggability(geneSymbol: string, signal?: AbortSignal): Prom
               tractability { label value }
             }
           }`;
-          const targetRaw = await otConn.request(targetQuery, { ensemblId }, signal ? { signal } : undefined) as any;
+          const targetRaw = await otConn.request(targetQuery, { ensemblId }, { signal, rootField: 'target' }) as any;
           const t = targetRaw?.data?.target;
           if (t) {
             opentargetsData = {
@@ -588,7 +584,7 @@ async function fetchConstraint(geneSymbol: string, signal?: AbortSignal): Promis
     }`;
     const vars = { symbol: geneSymbol, refGenome: 'GRCh38' };
 
-    const rawResponse = await conn.request(query, vars, signal ? { signal } : undefined) as any;
+    const rawResponse = await conn.request(query, vars, { signal, rootField: 'gene' }) as any;
     const response = JSON.parse(JSON.stringify(rawResponse));
     const data = response.data?.gene?.gnomad_constraint;
     
@@ -609,26 +605,21 @@ async function fetchConstraint(geneSymbol: string, signal?: AbortSignal): Promis
   }
 }
 
-async function fetchDisgenet(geneSymbol: string, signal?: AbortSignal): Promise<{ associations?: Array<{ disease_name: string; score: number; source: string }> }> {
+async function fetchDisgenet(geneSymbol: string, signal?: AbortSignal): Promise<{ associations?: Array<{ disease_name: string; score?: number; pmids?: number; source: string }> }> {
   try {
     if (!process.env.DISGENET_API_KEY) {
       return { _error: `Gene-disease association lookup failed (source: disgenet): DISGENET_API_KEY environment variable is not set. DisGeNET requires an API key. Obtain one at https://www.disgenet.org/ and set it in your environment.` } as any;
     }
 
-    const conn = connectionManager.getConnection('disgenet');
+    const rows = await fetchDisgenetGdaSummary({ gene_symbol: geneSymbol }, signal);
 
-    const response = await conn.request(
-      `/api/v1/gene/${encodeURIComponent(geneSymbol)}?format=json`,
-      undefined,
-      signal ? { signal } : undefined
-    ) as DisgenetResponse;
-    
-    const associations = (response.results || []).slice(0, 20).map(r => ({
-      disease_name: r.diseaseName,
+    const associations = rows.slice(0, 20).map(r => ({
+      disease_name: r.disease_name || '',
       score: r.score,
-      source: r.diseaseDatasource,
+      pmids: r.pmids,
+      source: 'disgenet',
     }));
-    
+
     return { associations };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -646,7 +637,7 @@ async function fetchDiseases(geneSymbol: string, signal?: AbortSignal): Promise<
         hits { id name entity }
       }
     }`;
-    const searchRaw = await otConn.request(searchQuery, { symbol: geneSymbol }, signal ? { signal } : undefined) as any;
+    const searchRaw = await otConn.request(searchQuery, { symbol: geneSymbol }, { signal, rootField: 'search' }) as any;
     const ensemblId = searchRaw?.data?.search?.hits?.[0]?.id;
     if (!ensemblId) {
       return { _error: `Could not resolve Ensembl ID for '${geneSymbol}' via OpenTargets. Gene symbol may be invalid.` } as any;
@@ -659,7 +650,7 @@ async function fetchDiseases(geneSymbol: string, signal?: AbortSignal): Promise<
         }
       }
     }`;
-    const targetRaw = await otConn.request(targetQuery, { ensemblId }, signal ? { signal } : undefined) as any;
+    const targetRaw = await otConn.request(targetQuery, { ensemblId }, { signal, rootField: 'target' }) as any;
     const rows = targetRaw?.data?.target?.associatedDiseases?.rows || [];
     
     const diseases = rows.map((r: any) => ({
@@ -845,14 +836,6 @@ interface GnomadConstraintResponse {
       oe_score: number;
     };
   };
-}
-
-interface DisgenetResponse {
-  results: Array<{
-    diseaseName: string;
-    score: number;
-    diseaseDatasource: string;
-  }>;
 }
 
 interface NIHReporterResponse {

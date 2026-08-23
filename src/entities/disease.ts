@@ -1,10 +1,10 @@
 import { connectionManager } from '../connections/manager.js';
 import { fetchWithTimeout } from '../connections/fetch-utils.js';
+import { fetchDisgenetGdaSummary } from './disgenet.js';
 
 const SECTION_TIMEOUT_MS = 8000;
 
 export interface DiseaseSearchOptions {
-  disease_type?: string;
   limit?: number;
   offset?: number;
 }
@@ -32,21 +32,17 @@ export async function diseaseSearch(
   query: string,
   options: DiseaseSearchOptions = {}
 ): Promise<DiseaseSearchResult[]> {
-  const { disease_type, limit = 10, offset = 0 } = options;
-  
+  const { limit = 10, offset = 0 } = options;
+
   const conn = connectionManager.getConnection('mydisease');
-  
+
   const queryParams = new URLSearchParams({
     q: query,
     fields: 'mondo.label,mondo.id,disease_ontology.name,disease_ontology.doid',
     size: String(limit),
     from: String(offset),
   });
-  
-  if (disease_type) {
-    queryParams.set('type', disease_type);
-  }
-  
+
   const response = await conn.request(`/query?${queryParams.toString()}`) as MyDiseaseSearchResponse;
   
   const hits = (response.hits || []).map(transformMyDiseaseHit);
@@ -58,55 +54,52 @@ export async function diseaseSearch(
   });
 }
 
+/** Alternate curie separator form: MONDO_0007254 ↔ MONDO:0007254. */
+function altCurieForm(id: string): string | undefined {
+  let match = /^([A-Za-z]{2,8})_(\d+)$/.exec(id);
+  if (match) return `${match[1]}:${match[2]}`;
+  match = /^([A-Za-z]{2,8}):(\d+)$/.exec(id);
+  if (match) return `${match[1]}_${match[2]}`;
+  return undefined;
+}
+
 export async function diseaseGet(
   diseaseId: string,
   sections?: string[]
 ): Promise<DiseaseResult> {
   const sectionConfig = sections || ['core'];
-  
+
   const conn = connectionManager.getConnection('mydisease');
-  
+
   let disease: MyDiseaseRecord | null = null;
-  
-  try {
-    const directResponse = await conn.request(`/disease/${encodeURIComponent(diseaseId)}`) as any;
-    if (directResponse && directResponse._id) {
-      const doData = directResponse.disease_ontology || {};
-      const mondoData = directResponse.mondo || {};
-      disease = {
-        name: mondoData.label || doData.name || diseaseId,
-        diseaseid: directResponse._id || diseaseId,
-        description: doData.def || '',
-        ontology: mondoData.label ? 'mondo' : 'disease_ontology',
-      };
+
+  // Primary /disease/{id} lookup, retrying the alternate curie separator
+  // form (the API keys records as MONDO:0007254 but DisGeNET-style callers
+  // often paste MONDO_0007254, and vice versa). A free-text `q=<id>` query
+  // returns 0 hits for IDs, so it is not used as a fallback.
+  const candidates = altCurieForm(diseaseId) ? [diseaseId, altCurieForm(diseaseId)!] : [diseaseId];
+  for (const candidate of candidates) {
+    try {
+      const directResponse = await conn.request(`/disease/${encodeURIComponent(candidate)}`) as any;
+      if (directResponse && directResponse._id) {
+        const doData = directResponse.disease_ontology || {};
+        const mondoData = directResponse.mondo || {};
+        disease = {
+          name: mondoData.label || doData.name || diseaseId,
+          diseaseid: directResponse._id || diseaseId,
+          description: doData.def || '',
+          ontology: mondoData.label ? 'mondo' : 'disease_ontology',
+        };
+        break;
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(`[diseaseGet] Direct lookup for '${candidate}' failed: ${msg}`);
     }
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error(`[diseaseGet] Direct lookup for '${diseaseId}' failed: ${msg}`);
   }
-  
+
   if (!disease) {
-    const queryParams = new URLSearchParams({
-      q: diseaseId,
-      fields: 'mondo.label,mondo.id,disease_ontology.name,disease_ontology.doid,disease_ontology.def',
-      size: '1',
-    });
-    
-    const response = await conn.request(`/query?${queryParams.toString()}`) as MyDiseaseGetResponse;
-    
-    if (!response.hits || response.hits.length === 0) {
-      throw new Error(`Disease '${diseaseId}' not found. Try disease_search to find valid disease IDs. Supported ID formats: MONDO:XXXXXXX, DOID:XXXXXXX, OMIM:XXXXXX.`);
-    }
-    
-    const hit = response.hits[0];
-    const hitMondo = hit.mondo as Record<string, unknown> | undefined;
-    const hitDo = hit.disease_ontology as Record<string, unknown> | undefined;
-    disease = {
-      name: (hitMondo?.label || hitDo?.name || diseaseId) as string,
-      diseaseid: (hit._id as string) || diseaseId,
-      description: (hitDo?.def as string) || '',
-      ontology: hitMondo ? 'mondo' : hitDo ? 'disease_ontology' : undefined,
-    };
+    throw new Error(`Disease '${diseaseId}' not found. Try disease_search to find valid disease IDs. Supported ID formats: MONDO:XXXXXXX, DOID:XXXXXXX, OMIM:XXXXXX.`);
   }
   const result: DiseaseResult = {
     name: disease.name,
@@ -115,8 +108,8 @@ export async function diseaseGet(
     ontology: disease.ontology,
   };
   
-  const sectionsToFetch = sectionConfig.includes('all') 
-    ? ['gene_associations', 'phenotypes', 'pathways', 'survival']
+  const sectionsToFetch = sectionConfig.includes('all')
+    ? ['gene_associations', 'phenotypes', 'pathways']
     : sectionConfig.filter(s => s !== 'core');
 
   if (sectionsToFetch.length > 0) {
@@ -126,7 +119,6 @@ export async function diseaseGet(
           case 'gene_associations': return { section: 'gene_associations', data: await fetchGeneAssociations(disease.diseaseid) };
           case 'phenotypes': return { section: 'phenotypes', data: await fetchPhenotypes(disease.diseaseid) };
           case 'pathways': return { section: 'pathways', data: await fetchPathways(disease.diseaseid) };
-          case 'survival': return { section: 'survival', data: await fetchSurvival(disease.diseaseid) };
           default: return { section, data: null };
         }
       }, SECTION_TIMEOUT_MS);
@@ -157,23 +149,21 @@ export async function diseaseGet(
   return result;
 }
 
-async function fetchGeneAssociations(diseaseId: string): Promise<Array<{ gene_symbol: string; name: string; score: number; source: string }>> {
+async function fetchGeneAssociations(diseaseId: string): Promise<Array<{ gene_symbol: string; name: string; disease_name?: string; score?: number; pmids?: number; source: string }>> {
   try {
     if (!process.env.DISGENET_API_KEY) {
       return [{ _error: `Gene association lookup failed (source: disgenet): DISGENET_API_KEY environment variable is not set. DisGeNET requires an API key for gene-disease associations. Obtain one at https://www.disgenet.org/ and set it in your environment.` } as any];
     }
 
-    const conn = connectionManager.getConnection('disgenet');
-    
-    const response = await conn.request(
-      `/api/v1/disease/${encodeURIComponent(diseaseId)}?format=json`
-    ) as DisgenetDiseaseResponse;
-    
-    return (response.results || []).slice(0, 20).map(r => ({
-      gene_symbol: r.geneSymbol,
-      name: r.geneName,
+    const rows = await fetchDisgenetGdaSummary({ disease: diseaseId });
+
+    return rows.slice(0, 20).map(r => ({
+      gene_symbol: r.gene_symbol || '',
+      name: r.gene_symbol || '',
+      disease_name: r.disease_name,
       score: r.score,
-      source: r.geneDatasource,
+      pmids: r.pmids,
+      source: 'disgenet',
     }));
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -229,29 +219,7 @@ async function fetchPathways(diseaseId: string): Promise<Array<{ pathway_id: str
   }
 }
 
-async function fetchSurvival(diseaseId: string): Promise<{ median_overall?: number; median_progression?: number }> {
-  try {
-    const conn = connectionManager.getConnection('seer');
-    
-    const response = await conn.request(
-      `/disease/${encodeURIComponent(diseaseId)}?format=json`
-    ) as SEERResponse;
-    
-    return {
-      median_overall: response.median_overall,
-      median_progression: response.median_progression,
-    };
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return { _error: `Survival data lookup failed (source: seer): ${msg}. The data source may be temporarily unavailable.` } as any;
-  }
-}
-
 interface MyDiseaseSearchResponse {
-  hits: Array<Record<string, unknown>>;
-}
-
-interface MyDiseaseGetResponse {
   hits: Array<Record<string, unknown>>;
 }
 
@@ -260,15 +228,6 @@ interface MyDiseaseRecord {
   diseaseid: string;
   description?: string;
   ontology?: string;
-}
-
-interface DisgenetDiseaseResponse {
-  results: Array<{
-    geneSymbol: string;
-    geneName: string;
-    score: number;
-    geneDatasource: string;
-  }>;
 }
 
 interface MonarchPhenotypesResponse {
@@ -283,11 +242,6 @@ interface ReactomeDiseaseResponse {
     stId: string;
     name: string;
   }>;
-}
-
-interface SEERResponse {
-  median_overall?: number;
-  median_progression?: number;
 }
 
 export function transformMyDiseaseHit(hit: Record<string, unknown>): DiseaseSearchResult {

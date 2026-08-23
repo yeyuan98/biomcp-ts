@@ -89,18 +89,12 @@ export interface ClinicalSection {
   };
   civic?: {
     id?: number;
+    name?: string;
     clinical_significance?: string;
     evidence_score?: number;
+    evidence_count?: number;
   };
   gwas?: Array<{ trait: string; p_value?: number }>;
-}
-
-export interface AlphaGenomeSection {
-  expression_lfc?: Record<string, number>;
-  splice_score?: Record<string, number>;
-  chromatin_score?: Record<string, number>;
-  top_gene?: string;
-  scorers?: string[];
 }
 
 export interface OncoKbAnnotation {
@@ -136,7 +130,7 @@ export async function variantSearch(
   const queryParams = new URLSearchParams({
     size: String(limit),
     from: String(offset),
-    fields: 'dbsnp,snpeff,clinvar,gnomad,cadd,dbnsfp',
+    fields: 'dbsnp,snpeff,clinvar,gnomad_exome,gnomad_genome,cadd,dbnsfp',
   });
   
   const qParts: string[] = [];
@@ -188,7 +182,7 @@ export async function variantSearch(
   }
   
   if (max_frequency !== undefined) {
-    qParts.push(`gnomad_af:[* TO ${max_frequency}]`);
+    qParts.push(`(gnomad_exome.af.af:[* TO ${max_frequency}] OR gnomad_genome.af.af:[* TO ${max_frequency}])`);
   }
   
   if (qParts.length > 0) {
@@ -306,7 +300,7 @@ export async function variantGet(
         case 'clinical':
           return { section: 'clinical', data: await fetchClinicalSection(response, variant.gene) };
         case 'alphagenome':
-          return { section: 'alphagenome', data: await fetchAlphaGenomeSection(variant) };
+          return { section: 'alphagenome', data: fetchAlphaGenomeSection() };
         default:
           return { section, data: null };
       }
@@ -480,101 +474,74 @@ async function fetchClinicalSection(variant: MyVariantGetResponse, gene?: string
   }
   
   if (gene) {
-    try {
-      const civicConn = connectionManager.getConnection('civic');
-      const civicQuery = `query($gene: String!, $hgvsp: String!) {
-        variants(gene: $gene, proteinChange: $hgvsp) {
-          id
-          clinicalSignificance
-          evidenceScore
+    // MyVariant's top-level `hgvs` is not among the requested fields; the
+    // snpeff annotation carries the protein change (e.g. "p.Val600Glu").
+    const proteinChange = variant.hgvs?.p || asArray(variant.snpeff?.ann)[0]?.hgvs_p;
+
+    if (proteinChange) {
+      try {
+        const civicConn = connectionManager.getConnection('civic');
+        const civicQuery = `query($gene: String!, $hgvsp: String!) {
+  gene(entrezSymbol: $gene) {
+    variants(name: $hgvsp, first: 20) {
+      nodes {
+        id
+        name
+        clinicalSignificanceCounts { significance count }
+        singleVariantMolecularProfile {
+          molecularProfileScore
+          evidenceItems { totalCount }
         }
-      }`;
-      const civicVars = { gene, hgvsp: variant.hgvs?.p || '' };
-      const civicRaw = await civicConn.request(civicQuery, civicVars) as CivicVariantResponse;
-      const civicParsed = JSON.parse(JSON.stringify(civicRaw));
-      const civicData = civicParsed.data?.variants?.[0];
-      if (civicData) {
-        result.civic = {
-          id: civicData.id,
-          clinical_significance: civicData.clinicalSignificance,
-          evidence_score: civicData.evidenceScore,
-        };
       }
-    } catch {
-      // CIViC not available
     }
   }
-  
-  if (gene && variant.hgvs?.p) {
-    try {
-      const oncokbResult = await fetchOncoKbAnnotation(gene, variant.hgvs.p);
-      if (oncokbResult) {
-        result.cancer = {
-          oncogenic: oncokbResult.oncogenic,
-          effect: oncokbResult.effect,
-          therapies: oncokbResult.therapies || [],
-        };
+}`;
+        // CIViC variant names are one-letter protein changes ("V600E"); the
+        // `name` arg is a server-side substring pre-filter, the exact match
+        // happens client-side below (both sides normalized identically).
+        const hgvsp = normalizeProteinChange(proteinChange);
+        const civicRaw = await civicConn.request(civicQuery, { gene, hgvsp }, { rootField: 'gene' }) as CivicVariantResponse;
+        const civicData = (civicRaw.data?.gene?.variants?.nodes || [])
+          .find(v => normalizeProteinChange(v.name || '') === hgvsp);
+        if (civicData) {
+          const significance = (civicData.clinicalSignificanceCounts || [])
+            .map(c => `${c.significance}(${c.count})`)
+            .join(', ');
+          result.civic = {
+            id: civicData.id,
+            name: civicData.name,
+            clinical_significance: significance || undefined,
+            evidence_score: civicData.singleVariantMolecularProfile?.molecularProfileScore,
+            evidence_count: civicData.singleVariantMolecularProfile?.evidenceItems?.totalCount,
+          };
+        }
+      } catch {
+        // CIViC not available
       }
-    } catch {
-      // OncoKB not available
+
+      try {
+        const oncokbResult = await fetchOncoKbAnnotation(gene, proteinChange);
+        if (oncokbResult) {
+          result.cancer = {
+            oncogenic: oncokbResult.oncogenic,
+            effect: oncokbResult.effect,
+            therapies: oncokbResult.therapies || [],
+          };
+        }
+      } catch {
+        // OncoKB not available
+      }
     }
   }
   
   return Object.keys(result).length > 0 ? result : null;
 }
 
-async function fetchAlphaGenomeSection(variant: VariantResult): Promise<AlphaGenomeSection | null> {
-  try {
-    if (!process.env.ALPHAGENOME_API_KEY) {
-      throw new Error('ALPHAGENOME_API_KEY environment variable is not set. AlphaGenome requires an API key. Set it in your environment to enable AlphaGenome variant scoring.');
-    }
-
-    const grpcConn = connectionManager.getConnection('alphagenome');
-    
-    const result: AlphaGenomeSection = {
-      scorers: ['GeneMaskLFCScorer', 'GeneMaskSplicingScorer', 'CenterMaskScorer'],
-    };
-    
-    const expressionScores = await grpcConn.request({
-      variant: variant.id,
-      scorer: 'GeneMaskLFCScorer',
-    }) as Record<string, number>;
-    
-    if (expressionScores) {
-      result.expression_lfc = expressionScores;
-      const entries = Object.entries(expressionScores);
-      if (entries.length > 0) {
-        result.top_gene = entries[0][0];
-      }
-    }
-    
-    const spliceScores = await grpcConn.request({
-      variant: variant.id,
-      scorer: 'GeneMaskSplicingScorer',
-    }) as Record<string, number>;
-    
-    if (spliceScores) {
-      result.splice_score = spliceScores;
-    }
-    
-    const chromScores = await grpcConn.request({
-      variant: variant.id,
-      scorer: 'CenterMaskScorer',
-    }) as Record<string, number>;
-    
-    if (chromScores) {
-      result.chromatin_score = chromScores;
-    }
-    
-    return result;
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    if (msg.includes('ALPHAGENOME_API_KEY')) {
-      const section: AlphaGenomeSection = { scorers: [] };
-      throw new Error(msg);
-    }
-    return null;
-  }
+function fetchAlphaGenomeSection(): { _error: string } {
+  // Honest stub: the previous transport was a fabricated JSON-over-HTTPS
+  // endpoint (404). The real AlphaGenome API is native gRPC, pending
+  // reimplementation. Mirrors the clingen stub pattern in gene.ts.
+  return { _error: 'AlphaGenome scoring is temporarily unavailable: native gRPC transport pending reimplementation' };
 }
 
 export async function fetchOncoKbAnnotation(gene: string, proteinChange: string): Promise<OncoKbAnnotation | null> {
@@ -586,9 +553,8 @@ export async function fetchOncoKbAnnotation(gene: string, proteinChange: string)
     const conn = connectionManager.getConnection('oncokb');
     
     const queryParams = new URLSearchParams({
-      byProteinChange: 'true',
-      alteration: proteinChange.replace(/p\./, ''),
-      gene: gene,
+      alteration: normalizeProteinChange(proteinChange),
+      hugoSymbol: gene,
     });
     
     const response = await conn.request(`/annotate/mutations/byProteinChange?${queryParams.toString()}`) as OncoKbResponse;
@@ -598,20 +564,20 @@ export async function fetchOncoKbAnnotation(gene: string, proteinChange: string)
     }
     
     const therapies: Array<{ name: string; level?: string; drugs?: string[] }> = [];
-    
-    if (response.associatedTreatments) {
-      for (const t of response.associatedTreatments) {
+
+    if (response.treatments) {
+      for (const t of response.treatments) {
         therapies.push({
           name: t.drugs?.map((d: { drugName: string }) => d.drugName).join(', ') || t.drugs?.[0]?.drugName || '',
           level: t.level,
         });
       }
     }
-    
+
     return {
       oncogenic: response.oncogenic,
       level: response.highestLevel,
-      effect: response.mutationEffect,
+      effect: response.mutationEffect?.knownEffect,
       therapies,
     };
   } catch (error) {
@@ -640,7 +606,8 @@ interface MyVariantSearchResponse {
     hgvs?: { p: string; c: string };
     clinical_significance?: string;
     clinvar?: { stars: number };
-    gnomad?: { af: number };
+    gnomad_exome?: { af?: { af?: number } };
+    gnomad_genome?: { af?: { af?: number } };
   }>;
 }
 
@@ -706,19 +673,27 @@ interface MyVariantGetResponse {
 
 interface CivicVariantResponse {
   data?: {
-    variants?: Array<{
-      id: number;
-      clinicalSignificance?: string;
-      evidenceScore?: number;
-    }>;
+    gene?: {
+      variants?: {
+        nodes?: Array<{
+          id: number;
+          name?: string;
+          clinicalSignificanceCounts?: Array<{ significance?: string; count?: number }>;
+          singleVariantMolecularProfile?: {
+            molecularProfileScore?: number;
+            evidenceItems?: { totalCount?: number };
+          };
+        }>;
+      };
+    };
   };
 }
 
 interface OncoKbResponse {
   oncogenic?: string;
   highestLevel?: string;
-  mutationEffect?: string;
-  associatedTreatments?: Array<{
+  mutationEffect?: { knownEffect?: string };
+  treatments?: Array<{
     drugs?: Array<{ drugName: string }>;
     level?: string;
   }>;
@@ -750,15 +725,35 @@ function extractAllClinvarConditions(rcv: any[]): string[] {
   return [...new Set(names)];
 }
 
+const AA3_TO_1: Record<string, string> = {
+  Ala: 'A', Arg: 'R', Asn: 'N', Asp: 'D', Cys: 'C', Gln: 'Q', Glu: 'E', Gly: 'G',
+  His: 'H', Ile: 'I', Leu: 'L', Lys: 'K', Met: 'M', Phe: 'F', Pro: 'P', Ser: 'S',
+  Thr: 'T', Trp: 'W', Tyr: 'Y', Val: 'V',
+};
+
+/**
+ * Normalize a protein change for matching/lookup: strip the "p." prefix,
+ * convert three-letter amino acid codes to one-letter ("p.Val600Glu" →
+ * "V600E"), trim and uppercase. Applied identically to both our input and
+ * CIViC/OncoKB-side names so comparisons are notation-independent.
+ */
+export function normalizeProteinChange(change: string): string {
+  return change
+    .trim()
+    .replace(/^p\./, '')
+    .replace(/[A-Z][a-z]{2}/g, m => AA3_TO_1[m] ?? m)
+    .toUpperCase();
+}
+
 export function transformMyVariantHit(hit: any): VariantSearchResult {
   const ann = asArray(hit.snpeff?.ann)[0];
   return {
     id: hit.dbsnp?.rsid || hit._id,
     gene: hit.dbsnp?.gene?.symbol || ann?.genename || (hit as any).dbnsfp?.gene?.genename,
-    hgvs_p: ann?.hgvs_p,
+    hgvs_p: ann?.hgvs_p ? normalizeProteinChange(ann.hgvs_p) : undefined,
     hgvs_c: ann?.hgvs_c,
     significance: extractClinvarSignificance(hit.clinvar) || (hit as any).dbnsfp?.clinvar?.clnsig,
     clinvar_stars: hit.clinvar?.stars,
-    gnomad_af: hit.gnomad?.af,
+    gnomad_af: hit.gnomad_exome?.af?.af ?? hit.gnomad_genome?.af?.af,
   };
 }

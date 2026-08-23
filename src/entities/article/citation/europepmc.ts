@@ -1,34 +1,29 @@
 import { connectionManager } from '../../../connections/manager.js';
 import type { ArticleId, CitationRecord, CitationCount } from './types.js';
 import { withTimeout, DEFAULT_PROVIDER_TIMEOUT_MS } from '../../../connections/fetch-utils.js';
-
-interface EuropePMCCitationHit {
-  pmid?: string;
-  pmcid?: string;
-  doi?: string;
-  title?: string;
-  authorString?: string;
-  journalTitle?: string;
-  pubYear?: string;
-}
+import { EuropePMCRecord, EuropePMCCitationEntry, transformCitationEntry } from '../europepmc-shared.js';
 
 interface EuropePMCCitationsResponse {
+  citationList?: {
+    citation?: EuropePMCCitationEntry[];
+  };
   citationsArray?: {
-    citation?: EuropePMCCitationHit[];
+    citation?: EuropePMCCitationEntry[];
   };
 }
 
 interface EuropePMCReferencesResponse {
+  referenceList?: {
+    reference?: EuropePMCCitationEntry[];
+  };
   referencesArray?: {
-    reference?: EuropePMCCitationHit[];
+    reference?: EuropePMCCitationEntry[];
   };
 }
 
 interface EuropePMCSearchResponse {
   resultList?: {
-    result?: Array<{
-      citedByCount?: number;
-    }>;
+    result?: EuropePMCRecord[];
   };
 }
 
@@ -44,25 +39,12 @@ async function resolveToPMID(id: ArticleId): Promise<string | null> {
       conn.request(`/search?query=${encodeURIComponent(query)}&resulttype=lite&format=json&pageSize=1`),
       DEFAULT_PROVIDER_TIMEOUT_MS,
       { onTimeout: 'null' }
-    ) as { resultList?: { result?: Array<{ pmid?: string }> } } | null;
+    ) as EuropePMCSearchResponse | null;
 
     return response?.resultList?.result?.[0]?.pmid || null;
   } catch {
     return null;
   }
-}
-
-function transformHit(hit: EuropePMCCitationHit): CitationRecord {
-  return {
-    pmid: hit.pmid,
-    pmcid: hit.pmcid,
-    doi: hit.doi,
-    title: hit.title,
-    authors: hit.authorString ? hit.authorString.split(', ') : undefined,
-    journal: hit.journalTitle,
-    year: hit.pubYear ? parseInt(hit.pubYear, 10) : undefined,
-    source: 'europepmc',
-  };
 }
 
 export async function getForwardCitations(id: ArticleId, limit: number): Promise<CitationRecord[]> {
@@ -83,9 +65,9 @@ export async function getForwardCitations(id: ArticleId, limit: number): Promise
     );
 
     if (!response) return [];
-    return (response.citationsArray?.citation || [])
-      .filter((hit: EuropePMCCitationHit) => hit.pmid || hit.pmcid || hit.doi)
-      .map(transformHit)
+    return (response.citationList?.citation ?? response.citationsArray?.citation ?? [])
+      .filter((hit: EuropePMCCitationEntry) => hit.title || hit.id)
+      .map(transformCitationEntry)
       .slice(0, limit);
   } catch (error) {
     console.error('[europepmc/getForwardCitations] Error:', error);
@@ -97,7 +79,7 @@ export async function getBackwardReferences(id: ArticleId, limit: number, articl
   const pmid = await resolveToPMID(id);
   if (!pmid) return [];
 
-  const idPath = `PMID/${pmid}`;
+  const idPath = `MED/${pmid}`;
 
   // Request buffer to account for items without IDs and year filtering
   const requestPageSize = Math.max(limit * 3, 10);
@@ -111,9 +93,9 @@ export async function getBackwardReferences(id: ArticleId, limit: number, articl
     );
 
     if (!response) return [];
-    let records = (response.referencesArray?.reference || [])
-      .filter((hit: EuropePMCCitationHit) => hit.pmid || hit.pmcid || hit.doi)
-      .map(transformHit);
+    let records = (response.referenceList?.reference ?? response.referencesArray?.reference ?? [])
+      .filter((hit: EuropePMCCitationEntry) => hit.title || hit.id)
+      .map(transformCitationEntry);
 
     // Filter backward references by publication year: only include items
     // published in the same year or earlier than the source article
@@ -133,7 +115,9 @@ export async function getCitationCount(id: ArticleId): Promise<CitationCount | n
   const pmid = await resolveToPMID(id);
   if (!pmid) return null;
 
-  const query = `PMID:${pmid}`;
+  // `PMID:` full-text matches records that merely mention the PMID; EXT_ID is
+  // the fielded record-ID query
+  const query = `SRC:MED AND EXT_ID:${pmid}`;
 
   try {
     const conn = connectionManager.getConnection('europepmc');

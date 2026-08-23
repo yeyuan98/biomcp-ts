@@ -21,7 +21,7 @@ const ALL_PROVIDERS: CitationProvider[] = [
   { sourceId: 'opencitations', ...opencitationsProvider },
 ];
 
-const FAST_PROVIDER_IDS = ['europepmc', 'semantic_scholar', 'crossref'] as const;
+const FAST_PROVIDER_IDS = ['europepmc', 'semantic_scholar', 'crossref', 'opencitations'] as const;
 
 /**
  * Computes a completeness score for a citation record based on available fields

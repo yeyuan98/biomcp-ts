@@ -97,18 +97,6 @@ describe('geneSearch with options', () => {
     global.fetch = originalFetch;
   });
 
-  test('geneSearch() includes gene_type filter in query params', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ hits: [] }),
-    }) as any;
-
-    await geneSearch('TP53', { gene_type: 'protein-coding' });
-
-    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
-    expect(callUrl).toContain('type=protein-coding');
-  });
-
   test('geneSearch() includes chromosome filter in query params', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
@@ -1458,6 +1446,90 @@ describe('geneGet with disgenet section', () => {
     expect(result.sections).toBeDefined();
     const disgenet = result.sections!.disgenet as any;
     expect(disgenet._error).toContain('DISGENET_API_KEY');
+  });
+});
+
+// ============================================================
+// geneGet with disgenet section (keyed)
+// ============================================================
+describe('geneGet with disgenet section (keyed)', () => {
+  let originalFetch: typeof global.fetch;
+  let originalEnv: string | undefined;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    originalFetch = global.fetch;
+    originalEnv = process.env.DISGENET_API_KEY;
+    process.env.DISGENET_API_KEY = 'test-disgenet-key';
+    connectionManager.closeAll();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    if (originalEnv !== undefined) {
+      process.env.DISGENET_API_KEY = originalEnv;
+    } else {
+      delete process.env.DISGENET_API_KEY;
+    }
+  });
+
+  test('geneGet() disgenet queries gda/summary with gene_symbol and raw Authorization key', async () => {
+    let callIndex = 0;
+    global.fetch = jest.fn().mockImplementation(() => {
+      callIndex++;
+      if (callIndex === 1) {
+        // mygene lookup
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            hits: [{
+              symbol: 'BRCA1',
+              name: 'BRCA1 DNA repair',
+              summary: 'DNA repair.',
+            }],
+          }),
+          headers: new Headers({ 'content-type': 'application/json' }),
+        });
+      }
+      // DisGeNET gda/summary response
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          payload: [
+            {
+              symbolOfGene: 'BRCA1',
+              geneNcbiID: 672,
+              diseaseName: 'Breast carcinoma',
+              diseaseUMLSCUI: 'C0006142',
+              score: 0.9,
+              numPMIDs: 120,
+            },
+          ],
+          warnings: [],
+          pageNum: 0,
+          pageSize: 10,
+          pageCount: 1,
+          totalEntries: 1,
+        }),
+        headers: new Headers({ 'content-type': 'application/json' }),
+      });
+    }) as any;
+
+    const result = await geneGet('BRCA1', ['disgenet']);
+
+    const calls = (global.fetch as any).mock.calls;
+    expect(calls.length).toBe(2);
+    const url = new URL(calls[1][0] as string);
+    expect(url.origin + url.pathname).toBe('https://api.disgenet.com/api/v1/gda/summary');
+    expect(url.searchParams.get('gene_symbol')).toBe('BRCA1');
+    expect(url.searchParams.get('page_number')).toBe('0');
+    // Raw (unprefixed) API key in Authorization header.
+    expect((calls[1][1].headers as Headers).get('Authorization')).toBe('test-disgenet-key');
+
+    const disgenet = result.sections!.disgenet as any;
+    expect(disgenet.associations).toEqual([
+      { disease_name: 'Breast carcinoma', score: 0.9, pmids: 120, source: 'disgenet' },
+    ]);
   });
 });
 

@@ -1,41 +1,20 @@
 import { connectionManager } from '../../../connections/manager.js';
 import type { Article, ParsedDateRange } from '../types.js';
-
-export interface EuropePMCResult {
-  pubmedId?: string;
-  pmcId?: string;
-  doi?: string;
-  title?: string;
-  authorString?: string;
-  journalTitle?: string;
-  firstPublicationDate?: string;
-  citedByCount?: number;
-  isOpenAccess?: string;
-}
+import { EuropePMCRecord, splitAuthors } from '../europepmc-shared.js';
 
 interface EuropePMCResponse {
   resultList?: {
-    result?: Array<{
-      pubmedId?: string;
-      pmcId?: string;
-      doi?: string;
-      title?: string;
-      authorString?: string;
-      journalTitle?: string;
-      firstPublicationDate?: string;
-      citedByCount?: number;
-      isOpenAccess?: string;
-    }>;
+    result?: EuropePMCRecord[];
   };
 }
 
-export function transformEuropePMC(a: EuropePMCResult): Article {
+export function transformEuropePMC(a: EuropePMCRecord): Article {
   return {
-    pmid: a.pubmedId,
-    pmcid: a.pmcId,
+    pmid: a.pmid,
+    pmcid: a.pmcid,
     doi: a.doi,
     title: a.title,
-    authors: a.authorString?.split(', '),
+    authors: splitAuthors(a.authorString),
     journal: a.journalTitle,
     publication_date: a.firstPublicationDate,
     cited_by: a.citedByCount,

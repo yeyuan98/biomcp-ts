@@ -77,6 +77,33 @@ describe('RestConnection', () => {
     delete process.env.TEST_API_KEY;
   });
 
+  test('request() appends handling.envQueryParams when the env var is set, omits them otherwise', async () => {
+    process.env.NCBI_EMAIL = 'researcher@example.org';
+    const optionsWithEnvParams: ConnectionOptions = {
+      ...baseOptions,
+      handling: {
+        envQueryParams: [{ envVar: 'NCBI_EMAIL', params: { tool: 'biomcp-ts', email: '$NCBI_EMAIL' } }],
+      },
+    };
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({}),
+    }) as any;
+
+    const conn = new RestConnection(optionsWithEnvParams);
+    await conn.request('/esearch.fcgi');
+    let callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(callUrl).toContain('tool=biomcp-ts');
+    expect(callUrl).toContain('email=researcher%40example.org');
+
+    delete process.env.NCBI_EMAIL;
+    await conn.request('/esearch.fcgi');
+    callUrl = (global.fetch as any).mock.calls[1][0] as string;
+    expect(callUrl).not.toContain('tool=');
+    expect(callUrl).not.toContain('email=');
+  });
+
   test('request() includes custom headers from handling.headers', async () => {
     const optionsWithHeaders: ConnectionOptions = {
       ...baseOptions,

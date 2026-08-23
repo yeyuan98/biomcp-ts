@@ -90,7 +90,7 @@ Do NOT use compound free-text like "BRAF V600E" — use separate gene and hgvsp 
       description: 'Get detailed variant information with optional sections. Core data (id, gene, rsid, significance) is always returned at the top level. Use sections to request additional data.',
       inputSchema: {
         id: z.string().describe('Variant ID (rsid, HGVS, or ClinVar ID)'),
-        sections: z.array(z.enum(VARIANT_GET_SECTIONS)).optional().describe('Sections to include: core, frequency, predictions, clinical, alphagenome_scores'),
+        sections: z.array(z.enum(VARIANT_GET_SECTIONS)).optional().describe('Sections to include: core, frequency, predictions, clinical, alphagenome_scores (currently unavailable — returns an error stub pending AlphaGenome gRPC reimplementation)'),
         limit: z.number().int().min(1).max(100).default(20),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }

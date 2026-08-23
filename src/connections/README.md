@@ -1,6 +1,6 @@
 # connections
 
-API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a source registry, connection lifecycle management, and rate limiting for 36 bioinformatics data sources.
+API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a source registry, connection lifecycle management, and rate limiting for 34 bioinformatics data sources.
 
 ## Architecture
 
@@ -15,14 +15,13 @@ API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a sou
 Core types and the `IConnection` interface.
 
 ```ts
-type ProtocolType = 'rest' | 'graphql' | 'grpc';
+type ProtocolType = 'rest' | 'graphql';
 
 type AuthDeliveryMethod =
   | { type: 'header'; name: string }
   | { type: 'bearer' }
   | { type: 'authorization'; prefix?: string }
-  | { type: 'query-param'; name: string }
-  | { type: 'grpc-metadata'; name: string };
+  | { type: 'query-param'; name: string };
 
 interface AuthConfig {
   envVar: string;
@@ -135,26 +134,7 @@ class GraphQLConnection implements IConnection<string, unknown> {
 }
 ```
 
-Issues `POST` requests with `{ query, variables? }` JSON body.
-
-### `grpc.ts`
-
-```ts
-class GrpcConnection implements IConnection<GrpcRequest, unknown> {
-  constructor(options: ConnectionOptions);
-  request(req: GrpcRequest): Promise<unknown>;
-  batch(requests: GrpcRequest[]): Promise<unknown[]>;
-  healthCheck(): Promise<boolean>;
-  close(): void;
-}
-
-interface GrpcRequest {
-  variant: string;
-  scorer?: string;
-}
-```
-
-Proxies gRPC calls through Google's HTTP/JSON gateway at `https://{host}/v1/scoreVariant:scoreVariant`. Defaults `scorer` to `'GeneMaskLFCScorer'`.
+ Issues `POST` requests with `{ query, variables? }` JSON body.
 
 ### `rate-limiter.ts`
 
@@ -196,14 +176,14 @@ function withTimeout<T>(
 > EPO OPS (OAuth2 client-credentials) and USPTO PPUBS (session-token
 > handshake) live in `src/entities/patent/` as dedicated clients.
 
-### REST (31 sources)
+### REST (30 sources)
 
 | Category | Source IDs |
 |---|---|
 | Genomics | `mygene`, `myvariant`, `gtex`, `string` |
 | Proteins & Pathways | `uniprot`, `reactome`, `reactome_analysis` |
 | Drugs & Pharmacology | `mychem`, `openfda` |
-| Diseases | `mydisease`, `monarch`, `seer` |
+| Diseases | `mydisease`, `monarch` |
 | Literature | `pubmed`, `pubtator`, `europepmc`, `semantic_scholar`, `litsense`, `ncbi_idconv`, `pmc_oa`, `crossref`, `opencitations` |
 | Clinical Trials | `clinicaltrials` |
 | Ontologies & Analysis | `ols4` |
@@ -216,10 +196,6 @@ function withTimeout<T>(
 ### GraphQL (4 sources)
 
 `gnomad`, `civic`, `dgidb`, `opentargets`
-
-### gRPC (1 source)
-
-`alphagenome`
 
 ## Rate Limiting
 

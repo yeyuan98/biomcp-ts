@@ -4,7 +4,6 @@ import { fetchWithTimeout } from '../connections/fetch-utils.js';
 const SECTION_TIMEOUT_MS = 8000;
 
 export interface DrugSearchOptions {
-  drug_type?: string;
   source?: string;
   limit?: number;
   offset?: number;
@@ -41,7 +40,7 @@ export async function drugSearch(
   query: string,
   options: DrugSearchOptions = {}
 ): Promise<DrugSearchResult[]> {
-  const { drug_type, source, limit = 10, offset = 0 } = options;
+  const { source, limit = 10, offset = 0 } = options;
 
   const conn = connectionManager.getConnection('mychem');
 
@@ -51,10 +50,6 @@ export async function drugSearch(
     size: String(limit),
     from: String(offset),
   });
-
-  if (drug_type) {
-    queryParams.set('type', drug_type);
-  }
 
   const response = await conn.request(`/query?${queryParams.toString()}`) as MyChemSearchResponse;
 
@@ -281,7 +276,7 @@ async function resolveDrugChemblId(drugName: string): Promise<string | null> {
         hits { id name }
       }
     }`;
-    const raw = await conn.request(query, { name: drugName }) as any;
+    const raw = await conn.request(query, { name: drugName }, { rootField: 'search' }) as any;
     const data = JSON.parse(JSON.stringify(raw));
     return data?.data?.search?.hits?.[0]?.id || null;
   } catch {
@@ -305,7 +300,7 @@ async function fetchTargets(chemblId: string | null): Promise<Array<{ gene_symbo
       }
     }`;
 
-    const raw = await conn.request(query, { chemblId }) as any;
+    const raw = await conn.request(query, { chemblId }, { rootField: 'drug' }) as any;
     const data = JSON.parse(JSON.stringify(raw));
     const rows = data?.data?.drug?.mechanismsOfAction?.rows || [];
 
@@ -346,7 +341,7 @@ async function fetchIndications(chemblId: string | null): Promise<Array<{ diseas
       }
     }`;
 
-    const raw = await conn.request(query, { chemblId }) as any;
+    const raw = await conn.request(query, { chemblId }, { rootField: 'drug' }) as any;
     const data = JSON.parse(JSON.stringify(raw));
     const rows = data?.data?.drug?.indications?.rows || [];
 

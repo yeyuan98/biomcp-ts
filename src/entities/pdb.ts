@@ -102,7 +102,9 @@ export async function pdbSearch(
     return_type: 'entry',
     request_options: {
       paginate: { start: offset, rows: limit },
-      results_verbosity: 'compact',
+      // 'verbose' returns result_set entries as {identifier, score, …}
+      // objects; 'compact' returns bare identifier strings with no score.
+      results_verbosity: 'verbose',
     },
   };
 
