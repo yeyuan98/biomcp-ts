@@ -8,6 +8,14 @@ API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a sou
 - **Lazy initialization** — `ConnectionManager.getConnection(sourceId)` creates the connection on first access and caches it in a `Map`.
 - **Module singleton** — `connectionManager` is the pre-instantiated `ConnectionManager` exported from `manager.ts`.
 
+### Proxy-aware fetch (`proxy.ts`)
+
+Node's built-in fetch (undici) ignores `HTTP(S)_PROXY` env — verified live in proxied environments where direct TCP to some hosts (patents.google.com, web.archive.org) times out while the proxy carries them. `proxy.ts` installs an undici `EnvHttpProxyAgent` as the **global dispatcher**, making every `fetch` call honor `HTTP_PROXY`/`HTTPS_PROXY` (and lowercase forms) plus `NO_PROXY`/`no_proxy`. It self-initializes exactly once at module scope and is imported for its side effect by `manager.ts`, so the server, tests, and CLI paths all get proxy-aware fetch before first use (the env is read at agent construction time).
+
+- No-op without proxy env (verified from undici source: the agent aliases a plain `Agent` — behavior identical to direct fetch).
+- `ALL_PROXY` / socks-only proxies are out of scope (http CONNECT only); Node ≥ 22.15 offers the zero-dependency `NODE_USE_ENV_PROXY=1` alternative.
+- Exports `proxyStatus { configured, detail }`; dispatcher-setup failures are surfaced on stderr and fetch stays direct.
+
 ## File Reference
 
 ### `base.ts`

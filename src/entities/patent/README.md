@@ -107,28 +107,25 @@ batch. Co-citation mining closes that gap:
 few grants, no common refs, unquoted-query precision tip, source
 unavailable) and never break the main search.
 
-## Proxy-aware fetch (`connections/proxy.ts`)
+## Proxy-aware fetch
 
-Node's built-in fetch ignores `HTTP(S)_PROXY` env (verified live: direct
-TCP to patents.google.com / web.archive.org times out in proxied
-environments while the proxy carries them). A module-scope
-`setGlobalDispatcher(new EnvHttpProxyAgent())` (undici, in `dependencies`,
-`--external:undici` in the build) routes ALL fetch through the proxy when
-env is present and is a no-op otherwise (verified from undici source: no
-proxy env → plain Agent alias). `NO_PROXY` is honored; socks-only
-`ALL_PROXY` is not supported (http CONNECT only); Node ≥ 22.15 offers the
-zero-dependency `NODE_USE_ENV_PROXY=1` alternative. Engines floor is
-Node ≥ 20.18.1 (undici 8 requirement).
+All outbound fetch is proxy-aware via `connections/proxy.ts` (undici
+`EnvHttpProxyAgent` global dispatcher; `HTTP(S)_PROXY`/`NO_PROXY` honored).
+Details and limitations are documented in `src/connections/README.md`.
 
-Related resilience: the Google Patents search breaker now also trips on
-network errors (`fetch failed`/`ETIMEDOUT`/… — previously it retried and
-appended a fresh `_error` on every search forever); OPS auto-mode selection
-has 2-strike/15-min backoff (auth-class failures trip immediately; explicit
-`source: 'ops'` always attempts); when no worldwide backend remains, one
-`_note` explains the US-only coverage instead of silently dropping it.
+## Resilience
+
+The Google Patents search breaker also trips on network errors
+(`fetch failed`/`ETIMEDOUT`/… — previously it retried and appended a fresh
+`_error` on every search forever); OPS auto-mode selection has 2-strike/15-min
+backoff (auth-class failures trip immediately; explicit `source: 'ops'`
+always attempts); when no worldwide backend remains, one `_note` explains the
+US-only coverage instead of silently dropping it.
 
 `patentGet` sections run per-section priority chains with auth-aware silent
-skip and fall-through (24s per source step; claims get 30s):
+skip and fall-through. Each **source step** is raced against a timeout of
+`SECTION_TIMEOUT_MS` × 3 = 24 s (8 s base; claims chains:
+`CLAIMS_SECTION_TIMEOUT_MS` × 2 = 30 s):
 
 | Section | Chain |
 |---|---|
@@ -156,8 +153,10 @@ source code. Kept here so future maintainers don't re-verify from scratch.
   `/search/biblio` returns full biblio per record. CQL operators verified:
   `ti= "phrase"`, `ab=`, `pa=`, `in=`, `pn=`, `cpc=C12N15/11`, `pd=YYYYMMDD`,
   `ct={pn}` (forward citations). `pd within "a,b"` 500s server-side — avoid.
-- **Pagination caps**: default 1-25, max 100/page, 2000 reachable,
-  total-result-count capped at 10000.
+- **Pagination caps**: default 1-25, max 100/page. Deep paging capped at 2000
+  reachable results (client-enforced `offset + limit ≤ 2000`, documented in
+  `total_hits_basis`); the reported `@total-result-count` passes through to
+  `total_hits` as-is and may exceed the reachable window.
 - **Detail**: `/rest-services/published-data/publication/epodoc/{PN}/biblio|abstract|claims`.
   Kind codes must be **stripped or dotted** — bare kind (`US11027025B2`)
   404s; `US11027025` and `US11027025.B2` work.
@@ -169,10 +168,13 @@ source code. Kept here so future maintainers don't re-verify from scratch.
 - **Backward refs**: biblio `references-cited.citation[].patcit.document-id[]`.
 - **JSON**: universal via `Accept: application/json`, BadgerFish convention.
 - **Throttling**: **403 + `X-Rejection-Reason`** (`RegisteredQuotaPerWeek`,
-  `IndividualQuotaPerHour`), NOT 429. Quota headers
-  `X-IndividualQuotaPerHour-Used` / `X-RegisteredQuotaPerWeek-Used`; free tier
-  4 GB/week. No `Retry-After` documented. `OpsClient` retries once on 403
-  quota rejections.
+  `IndividualQuotaPerHour`), occasionally HTTP 429. `OpsClient.get()`
+  branches on the reason: transient rate limits (reason matching `RateLimit`,
+  or plain 429) are retried once after a backoff; quota-class rejections are
+  NOT retried — the failure feeds the auto-mode backoff and the request throws
+  immediately ("retry will not help until the quota window resets"). Quota
+  headers `X-IndividualQuotaPerHour-Used` / `X-RegisteredQuotaPerWeek-Used`;
+  free tier 4 GB/week. No `Retry-After` documented.
 
 ### USPTO ODP (`https://api.uspto.gov`)
 
@@ -234,4 +236,6 @@ source code. Kept here so future maintainers don't re-verify from scratch.
   block lasting 24h+. A circuit breaker (30 min) guards both search and
   detail; detail falls back to Wayback (`archive.org/wayback/available` →
   `web.archive.org/web/{ts}id_/...`, gzip magic-byte sniff) when coverage
-  exists.
+  exists. Snapshot gating: `available: false` or a 4xx/5xx capture `status`
+  skips the snapshot before playback (status-page captures can never serve
+  playable original bytes).

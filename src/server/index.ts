@@ -10,10 +10,11 @@ import { registerTrialTools } from './tools/trial.js';
 import { registerUtilityTools } from './tools/utility.js';
 import { registerPdbTools } from './tools/pdb.js';
 import { registerPatentTools } from './tools/patent.js';
+import { VERSION } from '../version.js';
 
 const server = new McpServer({
   name: 'biomcp',
-  version: '1.0.0',
+  version: VERSION,
 });
 
 registerGeneTools(server);

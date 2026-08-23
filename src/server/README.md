@@ -8,7 +8,8 @@ MCP protocol layer for biomcp-ts. Bootstraps a `McpServer` over `StdioServerTran
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
-const server = new McpServer({ name: 'biomcp', version: '1.0.0' });
+const server = new McpServer({ name: 'biomcp', version: VERSION });
+// VERSION is imported from src/version.ts and mirrors package.json
 // register tool modules...
 const transport = new StdioServerTransport();
 await server.connect(transport);
@@ -33,7 +34,7 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
-| `gene_search` | `query: string`, `gene_type?: "protein-coding" \| "ncRNA" \| "pseudo"`, `chromosome?: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for genes by symbol, name, or keyword | readOnly, openWorld |
+| `gene_search` | `query: string`, `chromosome?: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for genes by symbol, name, or keyword | readOnly, openWorld |
 | `gene_get` | `symbol: string`, `sections?: ("pathways" \| "ontology" \| "diseases" \| "protein" \| "go" \| "interactions" \| "clinical_evidence" \| "expression" \| "protein_atlas" \| "druggability" \| "dosage_sensitivity" \| "constraint" \| "disease_associations" \| "funding" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed gene information by symbol | readOnly, openWorld |
 | `gene_diseases` | `symbol: string`, `limit?: number (1-50, default 10)` | Get diseases associated with a gene. Requires `DISGENET_API_KEY`; falls back to OpenTargets | readOnly, openWorld |
 | `gene_drugs` | `symbol: string` | Find drugs targeting a gene | readOnly |
@@ -46,7 +47,7 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
 | `variant_search` | `query?: string`, `gene?: string`, `significance?: "benign" \| "likely_benign" \| "pathogenic" \| "likely_pathogenic" \| "uncertain"`, `max_frequency?: number`, `min_cadd?: number`, `consequence?: string`, `rsid?: string`, `hgvsp?: string`, `hgvsc?: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for variants by rsid, HGVS, gene+protein change | readOnly, openWorld |
-| `variant_get` | `id: string`, `sections?: ("core" \| "frequency" \| "predictions" \| "clinical" \| "alphagenome_scores" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed variant information with optional sections | readOnly, openWorld |
+| `variant_get` | `id: string`, `sections?: ("core" \| "frequency" \| "predictions" \| "clinical" \| "alphagenome_scores" \| "all")[]` (`alphagenome_scores` currently returns an error stub pending gRPC reimplementation), `limit?: number (1-100, default 20)` | Get detailed variant information with optional sections | readOnly, openWorld |
 | `variant_oncokb` | `gene: string`, `protein_change: string` | Get OncoKB annotations. Requires `ONCOKB_TOKEN` | readOnly, openWorld |
 | `variant_trials` | `variant: string` | Find clinical trials for a variant | readOnly |
 
@@ -54,7 +55,7 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
-| `drug_search` | `query: string`, `drug_type?: string`, `source?: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for drugs by name, mechanism, or keyword | readOnly, openWorld |
+| `drug_search` | `query: string`, `source?: string (mychem, chembl, openfda)`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for drugs by name, mechanism, or keyword | readOnly, openWorld |
 | `drug_get` | `name: string`, `sections?: ("core" \| "us_regulatory" \| "eu_regulatory" \| "who_regulatory" \| "safety" \| "targets" \| "indications" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed drug information by name | readOnly, openWorld |
 | `drug_trials` | `drug: string` | Find clinical trials for a drug | readOnly |
 
@@ -62,8 +63,8 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
-| `disease_search` | `query: string`, `disease_type?: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for diseases by name, phenotype, or keyword | readOnly, openWorld |
-| `disease_get` | `disease_id: string`, `sections?: ("core" \| "gene_associations" \| "phenotypes" \| "pathways" \| "survival" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed disease information by ID | readOnly, openWorld |
+| `disease_search` | `query: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for diseases by name, phenotype, or keyword | readOnly, openWorld |
+| `disease_get` | `disease_id: string`, `sections?: ("core" \| "gene_associations" \| "phenotypes" \| "pathways" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed disease information by ID | readOnly, openWorld |
 | `disease_drugs` | `disease_id: string`, `limit?: number (1-50, default 20)` | Get drugs for a disease via OpenTargets | readOnly, openWorld |
 | `disease_trials` | `disease_id: string`, `limit?: number (1-50, default 20)` | Get clinical trials for a disease | readOnly, openWorld |
 
@@ -72,13 +73,13 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
 | `article_search` | `query: string`, `source?: "pubmed" \| "europepmc" \| "semantic_scholar" \| "pubtator" \| "litsense"`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)`, `dateRange?: string` (YYYY-MM-DD/YYYY-MM-DD, open-ended allowed) | Federated literature search with deduplication and optional date filtering (pubmed, europepmc, semantic_scholar). Note: europepmc truncates date ranges to year-level granularity | readOnly, openWorld |
-| `article_get` | `id: string` (PMID, PMCID, or DOI), `sections?: ("core" \| "oa" \| "annotations" \| "graph" \| "citation" \| "all")[]`, `limit?: number (1-100, default 20)`, `citation_mode?: "fast" \| "full"` (default "fast"), `citation_direction?: "forward" \| "backward" \| "both"` (default "both") | Get detailed article information by identifier. Citation section uses fast mode (Europe PMC, Semantic Scholar, Crossref; ~4s) or full mode (adds PubMed, OpenCitations; ~15-30s). Results cached 10min. DOIs are resolved via NCBI IDConv with PubMed esearch fallback | readOnly, openWorld |
+| `article_get` | `id: string` (PMID, PMCID, or DOI), `sections?: ("core" \| "oa" \| "annotations" \| "graph" \| "citation" \| "all")[]`, `limit?: number (1-100, default 20)`, `citation_mode?: "fast" \| "full"` (default "fast"), `citation_direction?: "forward" \| "backward" \| "both"` (default "both") | Get detailed article information by identifier. Citation: fast mode (~4s, 4 providers — Europe PMC, Semantic Scholar, OpenCitations, Crossref counts/references — with automatic PubMed fallback) or full mode (~15-30s, all 5 providers incl. PubMed). Forward citation lists come from Europe PMC, Semantic Scholar, and OpenCitations; Crossref provides counts and backward references only. Results cached 10min. DOIs are resolved via NCBI IDConv with PubMed esearch fallback | readOnly, openWorld |
 
 ### Trial Tools (`tools/trial.ts`) — 2 tools
 
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
-| `trial_search` | `query: string`, `status?: string`, `phase?: string`, `intervention_type?: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search clinical trials by condition, intervention, or keyword | readOnly, openWorld |
+| `trial_search` | `query: string`, `status?: string`, `phase?: string`, `intervention_type?: string`, `limit?: number (1-50, default 10)`, `page_token?: string` (cursor from previous response) | Search clinical trials by condition, intervention, or keyword | readOnly, openWorld |
 | `trial_get` | `nct_id: string`, `sections?: ("core" \| "eligibility" \| "locations" \| "outcomes" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed trial information by NCT ID | readOnly, openWorld |
 
 ### Utility Tools (`tools/utility.ts`) — 2 tools
@@ -94,7 +95,7 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 |------|-------------|-------------|-------------|
 | `pdb` | `query?: string`, `pdb_id?: string`, `sections?: ("polymer_entities" \| "ligands" \| "assembly" \| "experiment" \| "citation" \| "all")[]`, `download?: boolean` (default false), `format?: "cif" \| "pdb"` (default "cif"), `limit?: number` (1-50, default 10), `offset?: number` (default 0) | Access RCSB PDB: search structures (query), get metadata (pdb_id), download files (pdb_id + download) | openWorld |
 
-Param-based dispatch: `query` → search mode, `pdb_id` → get mode, `pdb_id` + `download=true` → download mode. Downloads save to OS temp dir and return file path + size. Default format is mmCIF (universally available); legacy PDB format may 404 for some entries.
+Param-based dispatch: `query` → search mode, `pdb_id` → get mode, `pdb_id` + `download=true` → download mode. Downloads save to OS temp dir and return file path + size. Default format is mmCIF (universally available); legacy PDB format may 404 for some entries. This is the only tool with `readOnlyHint: false` (it writes downloaded structure files).
 
 ### Patent Tools (`tools/patent.ts`) — 2 tools
 

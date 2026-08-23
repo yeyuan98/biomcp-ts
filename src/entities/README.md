@@ -8,13 +8,14 @@ The business logic layer for biomcp-ts. Each entity module (gene, variant, drug,
 
 ## Section Fetching Strategy
 
-All entity `get` functions (except article and patent) use the same pattern:
+All entity `get` functions use the same pattern (patent is the exception — per-section priority chains, see `patent/README.md`):
 
-- Sections are dispatched via `Promise.allSettled` with an **8-second timeout** per section (`fetchWithTimeout`, `SECTION_TIMEOUT_MS = 8000`)
+- Sections are dispatched via `Promise.allSettled` with an **8-second timeout** per section (`fetchWithTimeout`, `SECTION_TIMEOUT_MS = 8000`) and a 30s overall abort guard
 - Fulfilled sections populate `result.sections[<name>]`
 - Failed sections (timeout, network error, auth missing) populate `result.sections[<name>] = { error: "..." }`
 - Section fetchers return `{ _error: "..." }` as a single-element array or object when the upstream source itself fails (e.g., `{ _error: "Pathway lookup failed (source: reactome): ..." }`)
-- The article entity does **not** use `Promise.allSettled` for sections; it fetches sequentially
+
+Option/result types are exported from each entity module (directory modules keep them in `types.ts`); this README documents function signatures and section tables only.
 
 ---
 
@@ -30,23 +31,14 @@ geneGet(symbol: string, sections?: string[]): Promise<GeneResult>
 transformMyGeneResponse(data: MyGeneGetResponse['hits'][0]): GeneResult
 ```
 
-### Exported Types
-
-| Type | Fields |
-|------|--------|
-| `GeneSearchOptions` | `gene_type?: 'protein-coding' \| 'ncRNA' \| 'pseudo'`, `chromosome?: string`, `limit?: number`, `offset?: number` |
-| `GeneSearchResult` | `symbol`, `name`, `entrez_id?`, `genomic_coordinates?: { chromosome, start, end }`, `uniprot_id?`, `omim_id?` |
-| `GeneGetOptions` | `sections?: string[]` |
-| `GeneResult` | `symbol`, `name`, `summary?`, `chromosome?`, `position?`, `sections?: Record<string, unknown>` |
-
 ### Sections
 
 | Section | Upstream API | Auth | Notes |
 |---------|-------------|------|-------|
-| `pathways` | Reactome | None | Searches by gene symbol, filters `types=Pathway`, returns up to 20 |
+| `pathways` | Reactome | None | Searches by gene symbol, filters `types=Pathway`, returns up to 10 (cross-entity `geneToPathways` uses 20) |
 | `protein` | UniProt | None | Queries `gene:<symbol> AND organism_id:9606` |
-| `ontology` | MyGene.info | None | Fetches GO terms from MyGene `go` field (BP/MF/CC), deduplicates, up to 20 |
-| `go` | MyGene.info | None | Same upstream as `ontology` but returns up to 50 terms with `aspect` field |
+| `ontology` | MyGene.info | None | GO terms from MyGene `go` field (BP/MF/CC), deduplicated, up to 20 |
+| `go` | MyGene.info | None | Same upstream as `ontology` but up to 50 terms with `aspect` field |
 | `interactions` | STRING-db | None | Interaction partners via `/json/interaction_partners`, up to 20 |
 | `civic` | CIViC (GraphQL) | None | Clinical variants for gene |
 | `expression` | GTEx | None | Resolves Ensembl ID via MyGene, then tries multiple Ensembl version suffixes (`.13`, `.12`, `.14`...) against GTEx v8 median expression |
@@ -54,11 +46,13 @@ transformMyGeneResponse(data: MyGeneGetResponse['hits'][0]): GeneResult
 | `druggability` | DGIdb (GraphQL) + OpenTargets (GraphQL) | None | DGIdb drug interactions + OpenTargets tractability |
 | `clingen` | — | — | **Stub**: always returns `{ _error: "...not available via public API..." }` |
 | `constraint` | gnomAD (GraphQL) | None | LOEUF, missense bad LOEUF, synonymous OE scores (GRCh38) |
-| `disgenet` | DisGeNET | `DISGENET_API_KEY` | Gene-disease associations, up to 20 |
+| `disgenet` | DisGeNET | `DISGENET_API_KEY` | Gene-disease associations via shared `entities/disgenet.ts` (`/gda/summary`, raw `Authorization` header, bounded to 2 pages / ~20 rows) |
 | `diseases` | OpenTargets (GraphQL) | None | Associated diseases via `target.associatedDiseases`, up to 20 |
 | `funding` | NIH Reporter | None | NIH grants mentioning gene, up to 20 |
 
 Use `sections: ['all']` to fetch all sections, or `sections: ['core']` (default) for just the base record.
+
+**Tool-name aliases:** MCP tool section names map onto entity keys in `SECTION_ALIASES` (gene.ts) and `GENE_STORAGE_KEYS` (server/tools/gene.ts): `clinical_evidence`↔`civic`, `protein_atlas`↔`hpa`, `dosage_sensitivity`↔`clingen`, `disease_associations`↔`disgenet`.
 
 ---
 
@@ -77,20 +71,6 @@ getVariantGetSections(): readonly string[]
 transformMyVariantHit(hit: any): VariantSearchResult
 ```
 
-### Exported Types
-
-| Type | Fields |
-|------|--------|
-| `VariantSearchOptions` | `query?: string`, `gene?: string`, `hgvsp?: string`, `significance?: 'benign' \| 'likely_benign' \| 'pathogenic' \| 'likely_pathogenic' \| 'uncertain'`, `max_frequency?: number`, `limit?: number`, `offset?: number` |
-| `VariantSearchResult` | `id`, `gene?`, `hgvs_p?`, `hgvs_c?`, `significance?`, `clinvar_stars?`, `gnomad_af?` |
-| `VariantGetOptions` | `sections?: string[]` |
-| `VariantResult` | `id`, `gene?`, `hgvs_p?`, `hgvs_c?`, `rsid?`, `cosmic_id?`, `significance?`, `conditions?`, `sections?: Record<string, unknown>` |
-| `FrequencySection` | `gnomad_af?`, `gnomad_exome_af?`, `gnomad_genome_af?`, `exac_af?`, `popul_max?`, `population_breakdown?: Record<string, number>` |
-| `PredictionsSection` | `cadd_score?`, `cadd_phred?`, `sift_score?`, `sift_pred?`, `polyphen_score?`, `polyphen_pred?`, `revel_score?`, `vest_score?`, `conservation?: { phylop?, phastcons?, gerp? }`, `other?: { alphamissense?, clinpred?, metarnn?, bayesdel? }` |
-| `ClinicalSection` | `clinvar?: { id?, significance?, stars?, conditions?, review_status?, submitters? }`, `cancer?: { oncogenic?, effect?, therapies? }`, `civic?: { id?, clinical_significance?, evidence_score? }` |
-| `AlphaGenomeSection` | `expression_lfc?`, `splice_score?`, `chromatin_score?`, `top_gene?`, `scorers?` |
-| `OncoKbAnnotation` | `oncogenic?`, `level?`, `effect?`, `therapies?: Array<{ name, level?, drugs? }>` |
-
 ### Query Rewriting
 
 `rewriteVariantQuery` transforms raw queries before sending to MyVariant:
@@ -104,10 +84,10 @@ transformMyVariantHit(hit: any): VariantSearchResult
 | Section | Upstream API | Auth | Notes |
 |---------|-------------|------|-------|
 | `core` | MyVariant.info | None | Returns the base variant fields |
-| `frequency` | MyVariant.info (gnomAD fields) | None | Extracts exome/genome AF and population breakdown from `gnomad_exome` / `gnomad_genome` |
-| `predictions` | MyVariant.info (dbNSFP/CADD fields) | None | Aggregates CADD, SIFT, PolyPhen, REVEL, VEST, conservation, AlphaMissense, ClinPred, MetaRNN, BayesDel |
-| `clinical` | MyVariant.info (ClinVar) + CIViC (GraphQL) + OncoKB | `ONCOKB_TOKEN` for OncoKB | ClinVar + CIViC variant annotations + OncoKB oncogenic/therapy data |
-| `alphagenome` | AlphaGenome (gRPC) | `ALPHAGENOME_API_KEY` | Expression LFC, splice scores, chromatin scores via GeneMaskLFCScorer, GeneMaskSplicingScorer, CenterMaskScorer |
+| `frequency` | MyVariant.info (gnomAD fields) | None | Exome/genome AF and population breakdown from `gnomad_exome` / `gnomad_genome` |
+| `predictions` | MyVariant.info (dbNSFP/CADD fields) | None | CADD, SIFT, PolyPhen, REVEL, VEST, conservation, AlphaMissense, ClinPred, MetaRNN, BayesDel |
+| `clinical` | MyVariant.info (ClinVar) + CIViC (GraphQL) + OncoKB | `ONCOKB_TOKEN` for OncoKB | ClinVar + CIViC + OncoKB oncogenic/therapy data. CIViC queries `gene(entrezSymbol)` + `variants(name:)`; the `name` arg is a server-side substring pre-filter, the exact match happens client-side with both sides normalized identically (`normalizeProteinChange`) |
+| `alphagenome` | — | — | **Stub**: returns `{ _error: "AlphaGenome scoring is temporarily unavailable: native gRPC transport pending reimplementation" }` — no transport exists |
 
 ### Available Filters (`getVariantSearchFilters()`)
 
@@ -128,18 +108,12 @@ transformMyVariantHit(hit: any): VariantSearchResult
 ```ts
 drugSearch(query: string, options?: DrugSearchOptions): Promise<DrugSearchResult[]>
 drugGet(name: string, sections?: string[]): Promise<DrugResult>
+resolveBestMatch(name: string, hits: Array<Record<string, unknown>>): BestMatchResult | null
 transformMyChemHit(hit: Record<string, unknown>): DrugSearchResult
 transformMyChemResponse(data: Record<string, unknown>): DrugResult
 ```
 
-### Exported Types
-
-| Type | Fields |
-|------|--------|
-| `DrugSearchOptions` | `drug_type?: string`, `source?: string`, `limit?: number`, `offset?: number` |
-| `DrugSearchResult` | `name`, `chembl_id?`, `inchi_key?`, `synonyms?`, `molecular_formula?`, `molecular_weight?`, `chebi_id?`, `unii?` |
-| `DrugGetOptions` | `sections?: string[]` |
-| `DrugResult` | `name`, `chembl_id?`, `aliases?`, `molecular_formula?`, `molecular_weight?`, `smiles?`, `inchi?`, `inchi_key?`, `sections?: Record<string, unknown>` |
+`drugGet` resolves free-text names to a ChEMBL ID by scoring MyChem candidates (3 = exact ChEMBL name match, 2 = exact synonym/display name, 1 = contains).
 
 ### Sections
 
@@ -167,15 +141,6 @@ transformMyDiseaseHit(hit: Record<string, unknown>): DiseaseSearchResult
 transformMyDiseaseResponse(data: Record<string, unknown>): DiseaseResult
 ```
 
-### Exported Types
-
-| Type | Fields |
-|------|--------|
-| `DiseaseSearchOptions` | `disease_type?: string`, `limit?: number`, `offset?: number` |
-| `DiseaseSearchResult` | `name`, `disease_id`, `mondo_id?`, `doid?` |
-| `DiseaseGetOptions` | `sections?: string[]` |
-| `DiseaseResult` | `name`, `disease_id`, `description?`, `ontology?`, `sections?: Record<string, unknown>` |
-
 ### Special Behaviors
 
 - **Fallback lookup**: `diseaseGet` first attempts a direct `/disease/<id>` endpoint; if that fails, falls back to a `/query` search
@@ -185,10 +150,9 @@ transformMyDiseaseResponse(data: Record<string, unknown>): DiseaseResult
 
 | Section | Upstream API | Auth | Notes |
 |---------|-------------|------|-------|
-| `gene_associations` | DisGeNET | `DISGENET_API_KEY` | Gene-disease associations, up to 20 |
+| `gene_associations` | DisGeNET | `DISGENET_API_KEY` | Gene-disease associations via shared `entities/disgenet.ts` (`/gda/summary` with normalized disease codes, e.g. `MONDO_0007254`) |
 | `phenotypes` | Monarch Initiative | None | HPO phenotype annotations filtered to `HP:` prefixed terms, up to 20 |
 | `pathways` | Reactome | None | Pathway search by disease ID, up to 20 |
-| `survival` | SEER | None | Median overall and progression-free survival |
 
 ---
 
@@ -198,33 +162,34 @@ transformMyDiseaseResponse(data: Record<string, unknown>): DiseaseResult
 
 ### Architecture
 
-The article entity is organized as a directory module at `src/entities/article/`:
-
 ```
 article/
 ├── index.ts              # Re-exports all public API
 ├── types.ts              # Article, ArticleSearchOptions, ArticleResult, ArticleGetOptions
+├── europepmc-shared.ts   # Shared EuropePMC helpers
+├── semantic-scholar-queue.ts  # Global single-flight queue for ALL Semantic Scholar traffic
 ├── search/               # Search backends (5 sources)
-│   ├── index.ts          # articleSearch() orchestrator + federatedSearch
+│   ├── index.ts          # articleSearch() orchestrator + federatedSearch (20s per-backend throw timeout)
 │   ├── dedup.ts          # deduplicateAndRank()
 │   ├── pubmed.ts         # searchPubMed(), formatPubMedDate()
-│   ├── europepmc.ts      # searchEuropePMC(), transformEuropePMC()
+│   ├── europepmc.ts      # searchEuropePMC(), transformEuropePMC() (cursorMark deep pagination)
 │   ├── semantic-scholar.ts # searchSemanticScholar(), transformSemanticScholar()
 │   ├── pubtator.ts       # searchPubTator(), transformPubTator()
 │   └── litsense.ts       # searchLitSense(), transformLitSense()
 ├── detail/               # Article get + sections
-│   ├── index.ts          # articleGet() orchestrator
+│   ├── index.ts          # articleGet() orchestrator (sections run via Promise.allSettled)
 │   ├── id-resolution.ts  # parseArticleId(), resolveToPmid(), resolveDoiToPmid()
 │   ├── open-access.ts    # fetchOpenAccess(), parseOaXml()
 │   └── annotations.ts    # fetchAnnotations(), fetchCitationGraph()
-├── citation/             # Citation providers (5 sources)
+├── citation/             # Citation providers
 │   ├── index.ts          # getCitations() orchestrator (federated)
 │   ├── types.ts          # ArticleId, CitationRecord, CitationCount, FederatedCitationResult
-│   ├── pubmed.ts         # PubMed elink-based provider
+│   ├── cache.ts          # 10-minute federated result cache
+│   ├── pubmed.ts         # PubMed elink-based provider (+ EFetch enrichment)
 │   ├── europepmc.ts      # EuropePMC citations/references API
 │   ├── semantic-scholar.ts # Semantic Scholar graph API
-│   ├── crossref.ts       # Crossref DOI-based provider
-│   └── opencitations.ts  # OpenCitations DOI-based provider (with 5s timeout)
+│   ├── crossref.ts       # Crossref count + backward references provider
+│   └── opencitations.ts  # OpenCitations v2 DOI-based provider
 └── transform/
     └── pubmed.ts         # parsePubMedXml()
 ```
@@ -234,7 +199,7 @@ article/
 ```ts
 articleSearch(query: string, options?: ArticleSearchOptions): Promise<Article[]>
 articleGet(identifier: string, sections?: string[]): Promise<ArticleResult>
-getCitations(id: ArticleId, options?: { direction?, source?, limit? }): Promise<FederatedCitationResult>
+getCitations(id: ArticleId, options?: { direction?: 'forward' | 'backward' | 'both'; source?; limit?; full?; articleYear? }): Promise<FederatedCitationResult>
 deduplicateAndRank(articles: Article[], limit: number): Article[]
 transformEuropePMC(a: EuropePMCResult): Article
 transformSemanticScholar(a: SemanticScholarPaper): Article
@@ -242,62 +207,48 @@ transformPubTator(a: PubTatorResult): Article
 transformLitSense(a: LitSenseResult): Article
 ```
 
-### Exported Types
-
-| Type | Fields |
-|------|--------|
-| `ArticleSearchOptions` | `source?: 'pubmed' \| 'europepmc' \| 'semantic_scholar' \| 'pubtator' \| 'litsense'`, `limit?`, `offset?`, `cursorMark?`, `dateRange?` |
-| `Article` | `pmid?`, `pmcid?`, `doi?`, `title?`, `abstract?`, `authors?`, `journal?`, `publication_date?`, `cited_by?`, `is_open_access?`, `source?`, `score?`, `mesh_headings?`, `publication_types?`, `keywords?`, `chemicals?` |
-| `ArticleGetOptions` | `sections?: string[]` |
-| `ArticleResult` | Extends `Article` with `sections?: Record<string, unknown>` |
-| `ArticleId` | `pmid?`, `pmcid?`, `doi?` |
-| `CitationRecord` | `pmid?`, `pmcid?`, `doi?`, `title?`, `authors?`, `journal?`, `year?`, `source` |
-| `CitationCount` | `total`, `by_year?`, `source` |
-| `SourceCitationResult` | `source_id`, `citation_count?`, `forward_citations`, `backward_references`, `error?` |
-| `FederatedCitationResult` | `article_id`, `citation_counts`, `forward_citations`, `backward_references`, `source_results` |
+(`getCitations` is exported from `article/citation/index.ts`, not the article barrel.)
 
 ### Federated Search
 
-When no `source` is specified, `articleSearch` queries all 5 backends concurrently via `Promise.allSettled`:
+When no `source` is specified, `articleSearch` queries all 5 backends concurrently via `Promise.allSettled`, each wrapped in a 20-second throw-mode `withTimeout` so a hung backend is recorded as an error result. With `dateRange` set, only the 3 backends that support date filtering run (PubMed, Europe PMC, Semantic Scholar).
 
 | Backend | Connection | Notes |
 |---------|-----------|-------|
 | PubMed | `pubmed` | Two-step: `esearch` → `efetch` XML → `parsePubMedXml` |
-| Europe PMC | `europepmc` | Supports `cursorMark` for deep pagination |
-| Semantic Scholar | `semantic_scholar` | REST API with `externalIds` mapping |
-| PubTator | `pubtator` | BioNER-annotated search |
-| LitSense | `litsense` | Sentence-level search (NCBI) |
+| Europe PMC | `europepmc` | Supports `cursorMark` for deep pagination, `dateRange` as year range |
+| Semantic Scholar | `semantic_scholar` | REST API with `externalIds` mapping; all S2 traffic (search + citations) is serialized through the single-flight `semantic-scholar-queue` to avoid unauthenticated 429s |
+| PubTator | `pubtator` | BioNER-annotated search; server-side pagination via `page`/`size` (size clamped 10–100, page derived from offset) |
+| LitSense | `litsense` | Sentence-level search (NCBI) via `limit=` param |
 
 Results are deduplicated by PMID/PMCID/DOI and ranked by citation count via `deduplicateAndRank`.
 
 ### Federated Citation
 
-When `citation` section is requested, `getCitations` queries citation providers concurrently via `Promise.allSettled`. By default, **fast mode** queries 3 providers; **full mode** (set `full: true`) queries all 5. Each provider has a 10-second timeout (`DEFAULT_PROVIDER_TIMEOUT_MS`). Within each provider, forward/backward/count requests run in parallel for 66% time reduction.
+When the `citation` section is requested, `getCitations` queries citation providers concurrently via `Promise.allSettled`. Within each provider, forward/backward/count requests run in parallel. Timeouts are unified in `connections/fetch-utils.ts` (`withTimeout`, `DEFAULT_PROVIDER_TIMEOUT_MS = 10000`, `'null'` mode for citation providers) — see `connections/README.md` for the full timeout layering.
 
-| Provider | Connection | Forward Citations | Backward References | Citation Count | Fast Mode | Notes |
-|----------|-----------|:-:|:-:|:-:|:-:|-------|
-| Europe PMC | `europepmc` | Yes (`/{PMID,DOI,PMC}/{id}/citations`) | Yes (`/{PMID,DOI,PMC}/{id}/references`) | Yes (`citedByCount`) | ✓ | Fastest (~0.23s); PMID/DOI/PMCID support |
-| Semantic Scholar | `semantic_scholar` | Yes (`/citations`) | Yes (`/references`) | Yes (`citationCount`) | ✓ | Moderate (~1.1s); supports PMID/DOI/PMCID; retries on 429 (3 attempts, exponential backoff) |
-| Crossref | `crossref` | Yes (`/works?filter=references:{doi}`) | Yes (`reference` array) | Yes (`is-referenced-by-count`) | ✓ | Moderate (~1.25s); DOI-based; work response cached within query |
-| PubMed | `pubmed` | Yes (elink `pubmed_pubmed_citedin`) | Yes (elink `pubmed_pubmed_refs`) | Yes (derived from elink, cached) | — | Slow (~7.67s per request); PMID-centric; EFetch enrichment |
-| OpenCitations | `opencitations` | Yes (`/v2/citations/`) | Yes (`/references/`) | Yes (`/citation-count/`) | — | Slow (~1.75s); DOI-based; lowest data quality |
+**Fast mode** (default) queries 4 providers (`FAST_PROVIDER_IDS`); **full mode** (`full: true`) adds PubMed. Fast mode falls back to PubMed when a PMID is available and the fast providers returned counts but no items (or backward items but no forward ones).
 
-**Performance**: Fast mode completes in ~4-5s; full mode takes ~15-30s (dominated by PubMed). Results are cached for 10 minutes by article ID. Use `clearCitationCache()` to clear.
+| Provider | Fast Mode | Forward Citations | Backward References | Citation Count | Notes |
+|----------|:-:|---|---|---|---|
+| Europe PMC | ✓ | `/MED/{pmid}/citations` (`citationList.citation`) | `/MED/{pmid}/references` | `citedByCount` from search | Resolves DOI/PMCID → PMID first |
+| Semantic Scholar | ✓ | `/graph/v1/paper/{id}/citations` | `/graph/v1/paper/{id}/references` | `citationCount` | Serialized through the S2 single-flight queue; 429s degrade to partial results (no retry) |
+| Crossref | ✓ | — (upstream removed the `references:` filter) | `reference` array from `/works/{doi}` | `is-referenced-by-count` | DOI-based; work response cached within query |
+| OpenCitations | ✓ | `/citations/doi:{doi}` | `/references/doi:{doi}` | `/citation-count/doi:{doi}` | v2 API (`api.opencitations.net/index/v2`), `doi:`-prefixed paths, redirects refused |
+| PubMed | full only | elink `pubmed_pubmed_citedin` + EFetch enrichment | elink `pubmed_pubmed_refs` | derived from elink | PMID-centric |
 
-**Caching**: Federated results cached 10min; per-query caches (Crossref work, PubMed elink) use 30s TTL.
+**Caching**: federated results cached 10 minutes (citation/cache.ts); per-query caches use short TTLs (Crossref work 60s, PubMed elink 30s). Use `clearCitationCache()` to clear.
 
-**Rate Limiting**: Semantic Scholar automatically retries on 429 with exponential backoff. Other providers handle 429 gracefully (partial results).
+Citation records are deduplicated by PMID (primary), then DOI, then PMCID; for duplicates the record with the most populated fields is kept (field-completeness scoring). `articleYear` filters backward references to same-year-or-earlier.
 
-Citation records are deduplicated by DOI (primary), then PMID, then PMCID. For duplicates, the record with the most populated fields is kept (field-completeness scoring).
-
-### Sections (sequential, not Promise.allSettled)
+### Sections
 
 | Section | Upstream API | Auth | Notes |
 |---------|-------------|------|-------|
-| `open_access` | NCBI ID Converter + PMC OA | None | Resolves PMCID → parses OA XML for PDF URL |
+| `open_access` (alias `oa`) | NCBI ID Converter + PMC OA | None | Resolves PMCID → parses OA XML for PDF URL |
 | `annotations` | PubTator (BioC JSON) | None | NER annotations (genes, diseases, variants, etc.) with offset positions |
-| `citation_graph` | PubMed E-utilities (`elink`) | None | Forward citations (`pubmed_pubmed_citedin`) and references (`pubmed_pubmed_refs`) as PMID lists. **Deprecated** — use `citation` instead |
-| `citation` | 5 citation providers (federated) | `S2_API_KEY` optional | Rich citation data with metadata, counts from multiple sources, deduplicated |
+| `citation_graph` (alias `graph`) | PubMed E-utilities (`elink`) | None | Forward citations and references as PMID lists. **Deprecated** — use `citation` |
+| `citation` | citation providers (federated) | `S2_API_KEY` optional | Rich citation data with metadata, counts from multiple sources, deduplicated |
 
 ### Special Behaviors
 
@@ -314,20 +265,13 @@ Citation records are deduplicated by DOI (primary), then PMID, then PMCID. For d
 ### Exported Functions
 
 ```ts
-trialSearch(query: string, options?: TrialSearchOptions): Promise<TrialSearchResult[]>
+trialSearch(query: string, options?: TrialSearchOptions): Promise<TrialSearchResponse>
 trialGet(nctId: string, sections?: string[]): Promise<TrialResult>
 transformTrialSearchResult(trial: ClinicalTrialsSearchStudy): TrialSearchResult
 transformTrialResponse(data: ClinicalTrialsDetailStudy): TrialResult
 ```
 
-### Exported Types
-
-| Type | Fields |
-|------|--------|
-| `TrialSearchOptions` | `status?: string`, `phase?: string`, `intervention_type?: string`, `searchType?: 'condition' \| 'intervention'`, `limit?`, `offset?` |
-| `TrialSearchResult` | `nct_id`, `title?`, `status?`, `phase?`, `conditions?`, `interventions?`, `sponsor?` |
-| `TrialGetOptions` | `sections?: string[]` |
-| `TrialResult` | `nct_id`, `title?`, `short_title?`, `status?`, `phase?`, `conditions?`, `interventions?`, `sponsor?`, `collaborator?`, `contacts?`, `sections?: Record<string, unknown>` |
+`TrialSearchResponse` is `{ studies: TrialSearchResult[]; nextPageToken?: string }` — pass `nextPageToken` back as `pageToken` for cursor-based pagination (replaces the old `offset` param).
 
 ### Search Behavior
 
@@ -361,16 +305,6 @@ validatePdbId(pdbId: string): void
 formatFileSize(bytes: number): string
 ```
 
-### Exported Types
-
-| Type | Fields |
-|------|--------|
-| `PdbSearchOptions` | `limit?: number`, `offset?: number` |
-| `PdbSearchResult` | `pdb_id`, `score?`, `summary?: PdbEntrySummary` |
-| `PdbEntrySummary` | `pdb_id`, `title`, `experimental_method?`, `resolution?`, `molecular_weight?`, `polymer_count?`, `polymer_composition?`, `deposition_date?`, `release_date?`, `organism?`, `doi?`, `pmid?`, `authors?`, `space_group?`, `unit_cell?`, `container_ids?` |
-| `PdbResult` | `pdb_id`, `summary: PdbEntrySummary`, `sections?: Record<string, unknown>` |
-| `PdbDownloadResult` | `file_path`, `file_size_bytes`, `file_size_human`, `format`, `pdb_id`, `_warn?` |
-
 ### Search Behavior
 
 - Uses `post()` on the `pdb_search` connection (RCSB Search API v2, POST to `/query`)
@@ -388,58 +322,36 @@ formatFileSize(bytes: number): string
 | `experiment` | Extracted from core `exptl`, `refine`, `em_3d_reconstruction` | None | No additional network request |
 | `citation` | Extracted from core `rcsb_primary_citation` | None | No additional network request |
 
-### Download Behavior
+### Download & Validation
 
-- Fetches from `https://files.rcsb.org/download/{id}.{ext}`
-- Saves to OS temp directory (`mkdtempSync`) with timestamped filename
-- Default format is `cif` (mmCIF, universally available for all experimental entries)
-- Legacy `pdb` format may 404 for some entries; returns clear error suggesting retry with `cif`
+- Fetches from `https://files.rcsb.org/download/{id}.{ext}`; saves to OS temp directory (`mkdtempSync`) with timestamped filename
+- Default format is `cif` (mmCIF, universally available); legacy `pdb` format may 404 for some entries and returns a clear error suggesting retry with `cif`
 - Files >1 MB include `_warn` field advising the agent to use grep/read specific line ranges
-
-### Validation
-
-- `validatePdbId` rejects IDs not matching `/^[A-Za-z0-9]{4}$/`
-- AlphaFold/CSM IDs (starting with `AF_` or `MA_`) are rejected with a message pointing to AlphaFold DB
+- `validatePdbId` rejects IDs not matching `/^[A-Za-z0-9]{4}$/`; AlphaFold/CSM IDs (`AF_`/`MA_` prefix) are rejected with a pointer to AlphaFold DB
 
 ---
 
 ## Patent (`patent/`)
 
-**Primary sources:** EPO OPS (worldwide, `EPO_OPS_CONSUMER_KEY`/`EPO_OPS_CONSUMER_SECRET`), USPTO ODP (`USPTO_API_KEY`), USPTO PPUBS (keyless), Google Patents (keyless, best-effort)
-
-Directory module at `src/entities/patent/` (mirrors `article/`). See `src/entities/patent/README.md` for the full architecture, the verified API contract appendix, and the source degradation ladder.
-
-### Exported Functions
+Directory module at `src/entities/patent/`. See `src/entities/patent/README.md` for the full architecture, source ladder, seminal prior-art discovery, verified API contract appendix, and degradation behavior.
 
 ```ts
 patentSearch(query: string, options?: PatentSearchOptions): Promise<PatentSearchResponse>
 patentGet(publicationNumber: string, sections?: string[]): Promise<PatentResult>
-dedupPatents(patents: PatentSearchResult[], limit?: number): PatentSearchResult[]
-normalizePublicationNumber(input: string): string
 ```
-
-(Per-backend transforms live in `src/entities/patent/search/*.ts` submodule exports.)
-
-### Search Behavior
-
-Without `source`, backends are auto-selected: worldwide = EPO OPS when credentials exist (else Google Patents, circuit-breaker gated); US = PPUBS always (keyless, full-text, relevance-ranked via `sort_by: 'relevance' | 'recency'`, default relevance). USPTO ODP is opt-in via `source` — bibliographic only, but metadata-rich. With OPS configured, Google Patents is opt-in only — it hard-IP-blocks automated clients (verified). Results are deduplicated by publication number (kind-code-insensitive) and re-ordered by `relevance_score` when any backend supplied scores. A failed backend appends a `{ _error }` element rather than failing the search; a hard ppubs failure falls back to uspto_odp once (budget-guarded, tagged `{ _note }`); clean 0-hit searches append a `{ _hint }`. Markers never count toward `limit`/`total_hits`, and `total_hits_basis` documents each backend's counting semantics.
-
-PPUBS queries combine free text with parenthesized field filters (`(pfizer).as.`, `(C12N15/11).cpc.` — full CPC symbols only); ODP uses Lucene with plain terms AND-joined and explicit boolean syntax passed through verbatim (`applicationMetaData.patentNumber:"..."`, `.filingDate:[a TO b]`); OPS uses CQL (`ti=`, `pa=`, `cpc=`, `ct=`).
-
-Foundational prior-art discovery runs by default after every search with results (`seminal: false` opts out): co-citation mining over the backward references of the top granted ppubs hits surfaces seminal documents whose vocabulary predates the query concept (e.g. the Szostak mRNA-display family US6261804B1 / PCT WO98/31700 for "mRNA display"), resolved to US family members with title+assignee via OPS creds or Google Patents keylessly, returned as `seminal_prior_art` with `co_cited_by`/`cited_by`/`mined_count` and deadline-bounded degradation notes. See `src/entities/patent/README.md`.
 
 ### Sections (per-section priority chains, auth-aware)
 
-| Section | Upstream chain | Auth | Notes |
-|---------|---------------|------|-------|
-| `core` (default) | OPS biblio → GP/Wayback → PPUBS (US) | OPS: `EPO_OPS_CONSUMER_KEY/SECRET` | Bibliographic record |
-| `abstract` | OPS abstract → GP/Wayback → PPUBS (US) | same | |
-| `claims` | PPUBS `claimsHtml` (US) → OPS claims (EP/WO/EU/CA) → GP/Wayback | OPS creds optional | OPS has **no US fulltext**; capped ~100 KB with `_warn` |
-| `citations` | OPS backward + `ct=` forward → GP/Wayback → PPUBS `usRef*`/`foreignRef*` | OPS creds optional | |
-| `family` | OPS INPADOC family → GP/Wayback `docdbFamily` → PPUBS (US) | OPS creds optional | |
-| `classifications` | OPS IPC+CPC → GP/Wayback → ODP/PPUBS (US) | `USPTO_API_KEY` for ODP step | |
+| Section | Chain |
+|---------|-------|
+| `core` (default) | OPS biblio → GP/Wayback → PPUBS (US) |
+| `abstract` | OPS abstract → GP/Wayback → PPUBS (US) |
+| `claims` | PPUBS `claimsHtml` (US) → OPS claims (EP/WO/EU/CA — no US fulltext) → GP/Wayback; capped ~100 KB with `_warn` |
+| `citations` | OPS backward + `ct=` forward → GP/Wayback → PPUBS `usRef*`/`foreignRef*` |
+| `family` | OPS INPADOC family → GP/Wayback `docdbFamily` → PPUBS (US) |
+| `classifications` | OPS IPC+CPC → GP/Wayback → ODP/PPUBS (US) |
 
-Google Patents detail falls back to Wayback Machine snapshots (availability probe + original-bytes `id_` fetch with gzip sniffing) when live access is blocked.
+Google Patents detail falls back to Wayback Machine snapshots when live access is blocked (IP-block proven; see patent README).
 
 ---
 
@@ -476,7 +388,7 @@ diseaseToTrials(diseaseQuery: string): Promise<Array<{ nct_id: string; title?: s
 | `drugToTrials` | ClinicalTrials.gov (via `trialSearch`, `searchType: 'intervention'`) | None |
 | `drugToAdverseEvents` | OpenFDA (`/drug/event.json`) | None |
 | `diseaseToDrugs` | MyDisease (ID resolution) + OpenTargets (GraphQL) | None |
-| `diseaseToGenes` | DisGeNET (`/api/v1/disease/{diseaseId}`) | `DISGENET_API_KEY` |
+| `diseaseToGenes` | DisGeNET via shared `entities/disgenet.ts` (`/gda/summary`) | `DISGENET_API_KEY` |
 | `diseaseToTrials` | ClinicalTrials.gov (via `trialSearch`) | None |
 
 #### `diseaseToDrugs` ID Resolution
@@ -502,8 +414,8 @@ geneEnrichment(geneSymbols: string[]): Promise<PathwayEnrichmentResult[]>
 ```
 
 - Requires **at least 3** gene symbols
-- Posts newline-delimited symbols to `https://reactome.org/AnalysisService/identifiers/projection` (direct `fetch`, 15s timeout)
-- Returns up to 30 pathways with `p_value`, `genes_overlap`, `genes_total`
+- Posts newline-delimited symbols (plain-text body, not JSON) to Reactome AnalysisService `/identifiers/projection` via the `reactome_analysis` connection (registry-supplied timeout/retry/rate-limit)
+- Returns up to 30 pathways with `p_value`, `genes_overlap`, `genes_total`; timeouts degrade to an `_error` row instead of throwing
 
 **Exported type:** `PathwayEnrichmentResult { pathway_id, name, p_value?, genes_overlap?, genes_total?, source }`
 
@@ -536,4 +448,4 @@ BatchGetInput { entity: string; id: string; sections?: string[] }
 BatchGetResult { entity: string; id: string; success: boolean; data?: unknown; error?: string }
 ```
 
-All outbound fetch is proxy-aware (`connections/proxy.ts`): HTTP(S)_PROXY/NO_PROXY env honored via undici EnvHttpProxyAgent; no-op without proxy env.
+All outbound fetch is proxy-aware — see `src/connections/README.md` (Proxy-aware fetch).
