@@ -4,6 +4,7 @@ import {
   AuthConfig, 
   ProtocolType 
 } from './base.js';
+import { VERSION } from '../version.js';
 import { TokenBucketRateLimiter, RateLimiterFactory } from './rate-limiter.js';
 import { withRetry } from './retry.js';
 import { HttpConnectionError } from './errors.js';
@@ -131,7 +132,7 @@ export class GraphQLConnection implements IConnection<string, unknown> {
   private buildHeaders(): Headers {
     const headers = new Headers();
     headers.set('Content-Type', 'application/json');
-    headers.set('User-Agent', 'biomcp-ts/0.2.3');
+    headers.set('User-Agent', `biomcp-ts/${VERSION}`);
     
     if (!this.auth || !process.env[this.auth.envVar]) {
       return headers;

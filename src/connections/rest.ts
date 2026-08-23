@@ -4,6 +4,7 @@ import {
   ConnectionHandling,
   ProtocolType
 } from './base.js';
+import { VERSION } from '../version.js';
 import { TokenBucketRateLimiter, RateLimiterFactory } from './rate-limiter.js';
 import { withRetry } from './retry.js';
 import { HttpConnectionError } from './errors.js';
@@ -212,7 +213,7 @@ export class RestConnection implements IConnection<string, unknown> {
 
     // Some APIs (e.g. OpenTargets) reject Node's implicit `user-agent: node`
     // at their edge; send an identifying UA unless the source overrides it.
-    headers.set('User-Agent', 'biomcp-ts/0.2.3');
+    headers.set('User-Agent', `biomcp-ts/${VERSION}`);
 
     const acceptMap: Record<string, string> = {
       json: 'application/json',
