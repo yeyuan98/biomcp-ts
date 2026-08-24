@@ -5,6 +5,7 @@ import { fetchWithTimeout } from '../connections/fetch-utils.js';
 import { withRetry, isRetryableError } from '../connections/retry.js';
 import { transformMyGeneHit } from '../transform/gene.js';
 import { fetchDisgenetGdaSummary } from './disgenet.js';
+import { gtexMedianExpression } from './gtex.js';
 
 const SECTION_TIMEOUT_MS = 8000;
 
@@ -189,7 +190,7 @@ export async function geneGet(
             case 'go': return { section: 'go', data: await withRetry(() => fetchGo(lookupSymbol, combinedSignal), retryOpts) };
             case 'interactions': return { section: 'interactions', data: await withRetry(() => fetchInteractions(lookupSymbol, combinedSignal), retryOpts) };
             case 'civic': return { section: 'civic', data: await withRetry(() => fetchCivic(lookupSymbol, combinedSignal), retryOpts) };
-            case 'expression': return { section: 'expression', data: await withRetry(() => fetchExpression(lookupSymbol, combinedSignal), retryOpts) };
+            case 'expression': return { section: 'expression', data: await withRetry(() => fetchExpression(lookupSymbol), retryOpts) };
             case 'hpa': return { section: 'hpa', data: await withRetry(() => fetchHpa(lookupSymbol, combinedSignal), retryOpts) };
             case 'druggability': return { section: 'druggability', data: await withRetry(() => fetchDruggability(lookupSymbol, combinedSignal), retryOpts) };
             case 'clingen': return { section: 'clingen', data: await withRetry(() => fetchClingen(lookupSymbol, combinedSignal), retryOpts) };
@@ -403,52 +404,13 @@ async function fetchCivic(geneSymbol: string, signal?: AbortSignal): Promise<{ v
   }
 }
 
-async function fetchExpression(geneSymbol: string, signal?: AbortSignal): Promise<{ tissues?: Array<{ tissue: string; tpm: number }> }> {
+async function fetchExpression(geneSymbol: string): Promise<{ tissues?: Array<{ tissue: string; tpm: number }> }> {
   try {
-    const mygeneConn = connectionManager.getConnection('mygene');
-    const geneResponse = await mygeneConn.request(
-      `/query?q=symbol:${encodeURIComponent(geneSymbol)}&species=human&fields=ensembl.gene&size=1`,
-      undefined,
-      signal ? { signal } : undefined
-    ) as any;
-    const ensemblId = geneResponse?.hits?.[0]?.ensembl?.gene;
-    if (!ensemblId) return { _error: `Could not resolve Ensembl ID for '${geneSymbol}'` } as any;
-
-    const conn = connectionManager.getConnection('gtex');
-
-    let response: any = null;
-    const baseId = ensemblId.replace(/\.\d+$/, '');
-
-    const versions = ['', '.13', '.12', '.14', '.15', '.16', '.11', '.10', '.09', '.08'];
-    const probeSignals = signal ? [AbortSignal.timeout(6000), signal] : [AbortSignal.timeout(6000)];
-    const probeSignal = probeSignals.length === 1 ? probeSignals[0] : AbortSignal.any(probeSignals);
-    const probes = versions.map(version => {
-      const gencodeId = baseId + version;
-      return conn.request(
-        `/api/v2/expression/medianGeneExpression?gencodeId=${encodeURIComponent(gencodeId)}&datasetId=gtex_v8`,
-        undefined,
-        { signal: probeSignal }
-      ).then((attempt: any) => {
-        if (attempt?.data?.length > 0) return attempt;
-        throw new Error('No data');
-      });
-    });
-
-    try {
-      response = await Promise.any(probes);
-    } catch {
-      // All probes failed — fall through to error handling below
+    const expression = await gtexMedianExpression(geneSymbol, { limit: 20 });
+    if (expression.tissues.length === 0) {
+      return { _error: `No GTEx expression data found for '${geneSymbol}' (${expression.gencode_id}). The gene may not be in the GTEx dataset.` } as any;
     }
-    
-    if (!response || !response.data?.length) {
-      return { _error: `No GTEx expression data found for '${geneSymbol}' (${baseId}). The gene may not be in the GTEx dataset.` } as any;
-    }
-
-    const tissues = response.data.slice(0, 20).map((r: any) => ({
-      tissue: r.tissueSiteDetailId,
-      tpm: r.median,
-    }));
-    return { tissues };
+    return { tissues: expression.tissues.map(t => ({ tissue: t.tissue, tpm: t.median_tpm })) };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error('[fetchExpression] Error:', error);
@@ -788,13 +750,6 @@ interface CivicResponse {
       };
     } | null;
   };
-}
-
-interface GTExResponse {
-  data?: Array<{
-    tissue: string;
-    tpm: number;
-  }>;
 }
 
 interface HPAResponse extends Array<{
