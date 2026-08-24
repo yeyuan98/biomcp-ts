@@ -6,8 +6,19 @@ Optional read-only SQL access to your own databases through three MCP tools (`db
 
 | Backend | Driver | Notes |
 |---------|--------|-------|
-| **MySQL** | [`mysql2`](https://www.npmjs.com/package/mysql2) | Optional peer dependency — run `npm install mysql2`; the server prints an actionable install hint if it is missing |
+| **MySQL** | [`mysql2`](https://www.npmjs.com/package/mysql2) | Optional peer dependency — npm does **not** auto-install it; see [installation modes](#installation-modes). The server prints an actionable install hint if it is missing |
 | **SQLite** (local file) | built-in [`node:sqlite`](https://nodejs.org/api/sqlite.html) | No extra dependency; requires Node >= 22.13. The file is opened strictly read-only |
+
+## Installation modes
+
+There is one package; the backend you get depends on what is installed next to it:
+
+| Mode | Setup | Works from |
+|------|-------|-----------|
+| Core only / SQLite | nothing extra — `npx biomcp` anywhere (Node >= 22.13) | any directory |
+| MySQL | local tree containing both packages: `npm install biomcp mysql2`, then run `npx biomcp` from that directory | that directory |
+
+Why the difference: `mysql2` is a peer dependency, and Node resolves peers relative to the running script's install tree. A bare `npx biomcp` executes from the npx cache, which cannot see a separately installed `mysql2` — global installs do not help either. If the driver is missing when `DB_TYPE=mysql` is set, startup still succeeds and the first db tool call returns an actionable error: *"Install it to enable MySQL tools: npm install mysql2"*.
 
 ## Enabling
 
@@ -37,6 +48,8 @@ DB_TYPE=sqlite DB_SQLITE_PATH=/data/bio.db
   }
 }
 ```
+
+The db tools are registered at server startup, so **restart your MCP client** after adding or changing these variables — see [AGENT-INSTALL.md → Verify](AGENT-INSTALL.md#4-verify) for per-client restart specifics.
 
 ## Tools
 

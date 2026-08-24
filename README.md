@@ -106,7 +106,7 @@ Capabilities that ship with the package but stay inactive until enabled. Each li
 
 | Feature | Enable | Guide |
 |---------|--------|-------|
-| **Database access** — read-only SQL tools (`db_query`, `db_list_tables`, `db_describe_table`) for MySQL and local-file SQLite | Set `DB_TYPE` (+ connection env vars) | [docs/DATABASE.md](docs/DATABASE.md) |
+| **Database access** — read-only SQL tools (`db_query`, `db_list_tables`, `db_describe_table`) for MySQL and local-file SQLite | Set `DB_TYPE` (+ connection env vars); MySQL also needs `npm install biomcp mysql2` in a local tree | [docs/DATABASE.md](docs/DATABASE.md) |
 
 ## Documentation
 
