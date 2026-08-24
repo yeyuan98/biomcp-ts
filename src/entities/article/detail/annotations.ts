@@ -77,7 +77,7 @@ export async function fetchAnnotations(pmid: string): Promise<Array<{ type: stri
 
 export async function fetchCitationGraph(pmid: string): Promise<{ citations?: string[]; references?: string[] }> {
   try {
-    const conn = connectionManager.getConnection('pubmed');
+    const conn = connectionManager.getConnection('eutils');
 
     const [citedInResponse, refsResponse] = await Promise.all([
       conn.request(

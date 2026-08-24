@@ -16,7 +16,7 @@ interface CitationOptions {
 
 async function fetchPubMedArticle(pmid: string): Promise<Article> {
   try {
-    const conn = connectionManager.getConnection('pubmed');
+    const conn = connectionManager.getConnection('eutils');
 
     const xmlString = await conn.request(
       `/efetch.fcgi?db=pubmed&id=${pmid}&rettype=abstract`

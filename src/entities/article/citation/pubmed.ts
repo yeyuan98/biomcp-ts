@@ -21,7 +21,7 @@ function extractLinks(response: PubMedLinkResponse, linkName: string): string[] 
 const citedInCache = new Map<string, { promise: Promise<string[]>; cleanup: ReturnType<typeof setTimeout> }>();
 
 async function fetchCitedInLinks(pmid: string): Promise<string[]> {
-  const conn = connectionManager.getConnection('pubmed');
+  const conn = connectionManager.getConnection('eutils');
   const response = await withTimeout(
     conn.request(`/elink.fcgi?dbfrom=pubmed&linkname=pubmed_pubmed_citedin&id=${pmid}&retmode=json`) as Promise<PubMedLinkResponse>,
     DEFAULT_PROVIDER_TIMEOUT_MS,
@@ -53,7 +53,7 @@ async function enrichPmids(pmids: string[]): Promise<Map<string, CitationRecord>
   if (pmids.length === 0) return recordMap;
 
   try {
-    const conn = connectionManager.getConnection('pubmed');
+    const conn = connectionManager.getConnection('eutils');
     const xmlString = await withTimeout(
       conn.request(`/efetch.fcgi?db=pubmed&id=${pmids.join(',')}&rettype=abstract`) as Promise<string>,
       DEFAULT_PROVIDER_TIMEOUT_MS,
@@ -111,7 +111,7 @@ export async function getBackwardReferences(id: ArticleId, limit: number, articl
   const fetchLimit = articleYear !== undefined ? Math.max(limit * 3, 10) : limit;
 
   try {
-    const conn = connectionManager.getConnection('pubmed');
+    const conn = connectionManager.getConnection('eutils');
 
     const response = await withTimeout(
       conn.request(`/elink.fcgi?dbfrom=pubmed&linkname=pubmed_pubmed_refs&id=${id.pmid}&retmode=json`) as Promise<PubMedLinkResponse>,
