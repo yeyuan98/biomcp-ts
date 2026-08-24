@@ -49,7 +49,7 @@ Queries may be plain terms, an accession, or NCBI field syntax ("TP53[Gene Name]
     {
       description: `Fetch a GenBank/RefSeq nucleotide record as text (GenBank flat file or FASTA).
 
-Whole-record fetches are capped at 2,000,000 bp — larger records require a seq_start/seq_stop region (1-based, inclusive, up to 10 Mb span; set strand=2 for a reverse-strand slice where seq_start > seq_stop). Output guard: sequence_text is truncated to its first 200,000 characters when oversized — request a narrower region for the full text.`,
+Whole-record fetches are capped at 2,000,000 bp — larger records require a seq_start/seq_stop region (1-based, inclusive, up to 10 Mb span; set strand=2 for a reverse-strand slice where seq_start > seq_stop — the region field echoes the request as given, while NCBI's text shows complement(min..max)). Output guard: sequence_text is truncated to its first 200,000 characters when oversized — request a narrower region for the full text.`,
       inputSchema: {
         accession: z.string().describe('GenBank/RefSeq accession, versioned or bare — NC_000023.11, NG_017013.2, KJ668569.2'),
         format: z.enum(['genbank', 'fasta']).default('genbank').describe('Record format: genbank flat file (default) or fasta'),

@@ -98,8 +98,11 @@ describe('InputValidation.geoAccession', () => {
     expect(InputValidation.geoAccession.safeParse('GPL11154').success).toBe(true);
   });
 
-  it('rejects GDS and malformed accessions', () => {
-    expect(InputValidation.geoAccession.safeParse('GDS1234').success).toBe(false);
+  it('admits GDS accessions so the entity layer can return curated-DataSet guidance', () => {
+    expect(InputValidation.geoAccession.safeParse('GDS1234').success).toBe(true);
+  });
+
+  it('rejects malformed accessions', () => {
     expect(InputValidation.geoAccession.safeParse('GSE').success).toBe(false);
   });
 });
@@ -202,7 +205,7 @@ describe('isValidEntityInput', () => {
   });
 
   it('returns false for invalid geo/sra/genbank inputs', () => {
-    expect(isValidEntityInput('geo', 'GDS1234')).toBe(false);
+    expect(isValidEntityInput('geo', 'not-an-accession')).toBe(false);
     expect(isValidEntityInput('sra', 'ERP123456')).toBe(false);
     expect(isValidEntityInput('genbank', '###')).toBe(false);
   });

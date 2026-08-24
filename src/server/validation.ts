@@ -32,7 +32,7 @@ export const InputValidation = {
   articleId: z.string().regex(/^(?:\d+|PMC\d+|10\.\d{4,}\/\S+)$/i, 'Article ID must be a PMID (numeric), PMCID (PMC...), or DOI (10.x/...)'),
   nctId: z.string().regex(/^NCT\d{8}$/, 'NCT ID must be in format NCT########'),
   patentId: z.string().regex(/^[A-Za-z]{2}\s?(?:RE|PP|H)?\s?\d{5,}\s?(?:[A-Za-z]\d{0,2})?$/, 'Patent ID must be a publication number like US11027025B2, EP3904939, US20260240819A1'),
-  geoAccession: z.string().regex(/^(GSE|GSM|GPL)\d+$/, 'GEO accession must be a series (GSE...), sample (GSM...), or platform (GPL...) like GSE183947'),
+  geoAccession: z.string().regex(/^(GSE|GSM|GPL|GDS)\d+$/, 'GEO accession must be a series (GSE...), sample (GSM...), platform (GPL...), or curated dataset (GDS...) like GSE183947'),
   sraAccession: z.string().regex(/^SR[PXRS]\d+$/, 'NCBI SRA accession must be SRP/SRX/SRR/SRS followed by digits, like SRR14432476'),
   genbankAccession: z.string().regex(/^[A-Z]{1,6}_?\d+(\.\d+)?$/i, 'GenBank/RefSeq accession like NC_000023.11, NG_017013.2, or KJ668569.2'),
   limit: z.number().int().min(1).max(100),
