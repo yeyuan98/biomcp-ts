@@ -19,6 +19,8 @@ BioMCP is a standard MCP **stdio** server — any MCP-compatible client can run 
 npx biomcp          # runs the latest published server; nothing else needed
 ```
 
+`npx biomcp` from any directory covers the **core tools and the SQLite backend** (zero extra dependencies). The **MySQL backend additionally needs the optional driver `mysql2`**, and npm peer dependencies resolve only from a local install tree — see step 3 if you want it.
+
 **From source** (only if you need unreleased changes):
 
 ```bash
@@ -29,10 +31,11 @@ npm install && npm run build     # produces dist/bundle.js
 
 In the snippets below, replace the `command`/`args` pair accordingly:
 
-| Path | command | args |
-|------|---------|------|
-| Published | `npx` | `["biomcp"]` |
-| From source | `node` | `["/absolute/path/to/biomcp-ts/dist/bundle.js"]` |
+| Path | command | args | Backends available |
+|------|---------|------|--------------------|
+| Published (`npx`) | `npx` | `["biomcp"]` | Core + SQLite |
+| Published + MySQL | `npx` | `["biomcp"]` (from the local tree created in step 3) | Core + SQLite + MySQL |
+| From source | `node` | `["/absolute/path/to/biomcp-ts/dist/bundle.js"]` | Core + SQLite (+ MySQL if `mysql2` is installed in that checkout) |
 
 ## 2. Configure your client
 
@@ -127,7 +130,15 @@ Work through this checklist with the user before filling in `env` blocks:
 1. **Does the user hit rate limits or need premium data?** Add the matching optional keys — see [ENV-VARS.md](ENV-VARS.md#api-keys-and-identifiers) for every key and what it unlocks:
    - Higher limits: `NCBI_API_KEY`, `S2_API_KEY`, `OPENFDA_API_KEY`, `CROSSREF_EMAIL` (+`NCBI_EMAIL`)
    - Feature-gated tools/sources: `ONCOKB_TOKEN` (`variant_oncokb`), `DISGENET_API_KEY`, `EPO_OPS_CONSUMER_KEY`+`SECRET` (worldwide patents), `USPTO_API_KEY`
-2. **Does the user want SQL database access?** Set `DB_TYPE=mysql` or `DB_TYPE=sqlite` plus connection variables — full guide in [DATABASE.md](DATABASE.md). Without `DB_TYPE` the db tools simply don't appear.
+2. **Does the user want SQL database access?** Two parts — full guide in [DATABASE.md](DATABASE.md):
+   - **If MySQL:** the optional driver must be installed next to biomcp. Create a local install tree (peer dependencies are not auto-installed and cannot be seen from a bare `npx biomcp`):
+     ```bash
+     mkdir biomcp-mysql && cd biomcp-mysql
+     npm install biomcp mysql2
+     # run `npx biomcp` from this directory; point the client's command/args here
+     ```
+   - **If SQLite:** nothing to install (built-in `node:sqlite`); plain `npx biomcp` works.
+   - Either way, set `DB_TYPE=mysql|sqlite` plus connection variables ([ENV-VARS.md](ENV-VARS.md#database-access-optional-feature)). Without `DB_TYPE` the db tools simply don't appear.
 3. **Behind a corporate proxy?** Set `HTTPS_PROXY`/`HTTP_PROXY` (+ optional `NO_PROXY`) — see [ENV-VARS.md → Proxy](ENV-VARS.md#proxy).
 
 Place chosen variables into the client entry's env block:
@@ -139,7 +150,14 @@ Place chosen variables into the client entry's env block:
 
 ## 4. Verify
 
-1. Restart/reload the client.
+> **A restart is required to load (or reload) the biomcp tools.** MCP servers are launched when the client starts, so config edits made while a client is running do not take effect until it restarts. After any change to the server entry — adding biomcp, changing env vars, enabling the database feature — restart:
+>
+> - **Claude Desktop**: quit fully and relaunch the app
+> - **Claude Code**: start a new session (`claude mcp list` reads fresh state; `/mcp` inside an existing session shows only what was loaded at startup)
+> - **Codex CLI / IDE extension**: exit and relaunch `codex`
+> - **OpenCode**: restart the TUI or open a new session
+
+1. Restart the client per the table above.
 2. Claude Code: `/mcp` or `claude mcp list` · OpenCode: `opencode mcp list` · Codex: `/mcp` inside a session.
 3. Smoke-test from the terminal (server should start and wait silently on stdio):
 
@@ -149,4 +167,4 @@ Place chosen variables into the client entry's env block:
 
 4. In the client, ask for something like *"search genes for BRAF"* — `gene_search` should return results.
 
-If the server starts but tool calls fail with missing-variable hints, revisit step 3.
+If tools still don't appear after a full restart, re-check step 2's listing command for parse warnings; if tool calls fail with missing-variable hints, revisit step 3.

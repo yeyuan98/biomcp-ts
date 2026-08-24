@@ -24,6 +24,8 @@ Optional. Without them the affected tools still work using keyless fallbacks or 
 
 Activates the `db_query` / `db_list_tables` / `db_describe_table` tools when `DB_TYPE` is set. Full guide: [DATABASE.md](DATABASE.md).
 
+> The MySQL backend additionally requires the optional peer driver `mysql2` installed next to biomcp (a plain `npx biomcp` cannot see it) — see [DATABASE.md → Installation modes](DATABASE.md#installation-modes).
+
 | Variable | Required | Purpose |
 |----------|----------|---------|
 | `DB_TYPE` | yes (`mysql` or `sqlite`) | Selects the backend and activates the db tools |
