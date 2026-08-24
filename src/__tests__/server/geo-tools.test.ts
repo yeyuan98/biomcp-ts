@@ -200,4 +200,13 @@ describe('geo tools', () => {
     );
     expect(fetchUrls()).toHaveLength(0);
   });
+
+  it('geo_get surfaces curated-DataSet guidance for GDS accessions (isError, no fetch)', async () => {
+    mockFetchRoutes(defaultRoutes());
+
+    await expect(harness.callTool('geo_get', { accession: 'GDS1234' })).rejects.toThrow(
+      /GDS accessions \(e\.g\. GDS1234\) refer to curated GEO DataSet records.*Use the underlying series accession \(GSE\.\.\.\) or sample accession \(GSM\.\.\.\) instead/s
+    );
+    expect(fetchUrls()).toHaveLength(0);
+  });
 });

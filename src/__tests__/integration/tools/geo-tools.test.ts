@@ -69,12 +69,12 @@ describe('geo tools (integration)', () => {
     expect(Array.isArray(result.characteristics)).toBe(true);
   }, 120000);
 
-  it('geo_get rejects GDS accessions', async () => {
-    // The tool schema only admits GSE/GSM/GPL, so GDS fails input validation
-    // (curated DataSets are not served by the SOFT endpoint).
+  it('geo_get returns curated-DataSet guidance for GDS accessions', async () => {
+    // GDS passes schema validation; the entity guard fires before any fetch
+    // and points users at the underlying GSE/GSM records.
     await expect(
       harness.callTool('geo_get', { accession: 'GDS1234' })
-    ).rejects.toThrow(/accession/i);
+    ).rejects.toThrow(/curated GEO DataSet records.*series accession \(GSE\.\.\.\) or sample accession \(GSM\.\.\.\)/s);
   }, 30000);
 
   it('geo_get rejects malformed accessions', async () => {

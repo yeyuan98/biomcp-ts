@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `genbank_get` accepts INSDC WGS accessions with 4–6 letter prefixes (e.g. `BGGH01000031.1`), unblocking chaining from `genbank_search` results.
 - SOFT parser continuation lines join with a space when both fragments are alphanumeric (wrapped values no longer fuse words).
 - Stale versioned Ensembl IDs (e.g. `ENSG…17` under GENCODE v39) get a hint to retry with the bare ENSG form, which always resolves to the current version.
+- `geo_get` admits GDS accessions at the schema layer and returns curated-DataSet guidance (pointing at the underlying GSE/GSM) as `isError` content instead of an opaque input-validation rejection.
 
 ## [0.3.2] - 2026-08-24
 
