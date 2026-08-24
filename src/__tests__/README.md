@@ -106,3 +106,19 @@ Integration tests use `InMemoryTransport` from the MCP SDK to connect a real `Cl
 **Keyed skips:** OPS/ODP patent describes and the OncoKB variant test (above). Everything else runs keyless against live APIs.
 
 **CI strategy:** Integration tests should run as a separate workflow (nightly or on-demand), not as PR gate.
+
+## Database Tests
+
+- **Unit** (`src/__tests__/db/`): validator rules, env config loader, SQLite backend against temp-file databases (via built-in `node:sqlite`), MySQL translator mappings, and MCP-level tool behavior over in-memory transport. No external services needed.
+- **Integration** (`src/__tests__/integration/tools/db-tools.test.ts`): runs against a live MySQL server and **skips automatically** unless these variables are set:
+
+```bash
+BIOMCP_DB_IT_HOST=127.0.0.1 \
+BIOMCP_DB_IT_PORT=3306 \
+BIOMCP_DB_IT_USER=root \
+BIOMCP_DB_IT_PASSWORD=secret \
+BIOMCP_DB_IT_DATABASE=bio \
+npm run test:integration
+```
+
+A throwaway server works well: `docker run --rm -d -p 3306:3306 -e MYSQL_ROOT_PASSWORD=secret -e MYSQL_DATABASE=bio mysql:8.4`

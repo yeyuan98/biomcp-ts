@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Database access variant** — optional read-only SQL tools (`db_query`, `db_list_tables`, `db_describe_table`) ported from the bioresearcher plugin's db toolkit, shipped in the same package but registered only when `DB_TYPE` is set:
+  - `mysql` backend on `mysql2` (optional peer dependency; actionable install hint when absent). Port includes fixes found during validation against MySQL 8.4/9.3: eager `SELECT 1` ping at connect (credentials/host errors now fail fast instead of surfacing at first query), human-readable field type names instead of raw protocol codes, and pool reset on connection-level failures.
+  - `sqlite` backend for local database files via the built-in `node:sqlite` module (zero extra dependencies, Node >= 22.13), opened with `PRAGMA query_only = ON` as defense-in-depth behind the query validator.
+  - Read-only SQL validator hardened: keyword scan now strips string literals (no more false positives like `WHERE name = 'DELETE me'`), read-only CTEs (`WITH ... SELECT`) are allowed, and `INTO OUTFILE/DUMPFILE` is explicitly blocked.
+  - Configuration via environment variables (`DB_TYPE`, `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_DATABASE`, `DB_SQLITE_PATH`, `DB_CONNECTION_TIMEOUT_MS`) replacing the legacy `env.jsonc` loader; programmatic API exposed through the new `biomcp/db` subpath export.
+
+### Changed
+
+- **Breaking**: minimum Node.js version raised from 20.18 to **22.13** (required by the built-in SQLite module used by the database variant; `better-sqlite3@13` requires Node >= 22 as well).
+- `@types/node` bumped to ^22 accordingly.
+
 ## [0.3.1] - 2026-08-24
 
 ### Fixed

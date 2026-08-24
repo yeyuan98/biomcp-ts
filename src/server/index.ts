@@ -10,6 +10,7 @@ import { registerTrialTools } from './tools/trial.js';
 import { registerUtilityTools } from './tools/utility.js';
 import { registerPdbTools } from './tools/pdb.js';
 import { registerPatentTools } from './tools/patent.js';
+import { registerDbToolsIfConfigured, shutdownDbBackend } from './tools/db.js';
 import { VERSION } from '../version.js';
 
 const server = new McpServer({
@@ -26,10 +27,17 @@ registerTrialTools(server);
 registerUtilityTools(server);
 registerPdbTools(server);
 registerPatentTools(server);
+const dbEnabled = registerDbToolsIfConfigured(server);
+if (dbEnabled) {
+  console.error(`[biomcp] database tools enabled via DB_TYPE=${process.env.DB_TYPE}`);
+}
 
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  process.on('exit', () => {
+    void shutdownDbBackend();
+  });
 }
 
 main().catch(error => {

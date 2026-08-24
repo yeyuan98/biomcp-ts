@@ -12,15 +12,18 @@
     "url": "git+https://github.com/yeyuan98/biomcp-ts.git"
   },
   "exports": {
-    ".": "./dist/bundle.js"
+    ".": "./dist/bundle.js",
+    "./db": "./dist/db.js",
+    "./package.json": "./package.json"
   },
   "files": [
     "dist/bundle.js",
+    "dist/db.js",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc && esbuild dist/server/index.js --bundle --platform=node --format=esm --minify --external:undici --outfile=dist/bundle.js",
+    "build": "tsc && esbuild dist/server/index.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --outfile=dist/bundle.js && esbuild dist/db/index.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --outfile=dist/db.js",
     "build:bundle": "npm run build",
     "prepack": "npm run build",
     "start": "node dist/bundle.js",
@@ -35,19 +38,28 @@
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/jest": "^30.0.0",
-    "@types/node": "^20.11.0",
+    "@types/node": "^22.13.0",
     "esbuild": "^0.28.0",
     "fast-xml-parser": "^5.7.1",
     "jest": "^30.3.0",
+    "mysql2": "^3.24.1",
     "ts-jest": "^29.4.9",
     "tsx": "^4.7.0",
     "typescript": "^5.3.0",
     "zod": "^3.25.0"
   },
   "engines": {
-    "node": ">=20.18.1"
+    "node": ">=22.13.0"
   },
   "license": "MIT",
+  "peerDependencies": {
+    "mysql2": "^3.18.0"
+  },
+  "peerDependenciesMeta": {
+    "mysql2": {
+      "optional": true
+    }
+  },
   "dependencies": {
     "undici": "^8.10.0"
   }
