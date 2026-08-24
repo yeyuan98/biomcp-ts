@@ -181,7 +181,7 @@ describe('sra tools', () => {
     mockEutils(['8877661']);
 
     await expect(harness.callTool('sra_get', { accession: 'ABC123' })).rejects.toThrow(
-      /Expected NCBI SRA accession SRP\/SRX\/SRR\/SRS\/SRZ like SRR14432476/
+      /Expected NCBI SRA accession SRP\/SRX\/SRR\/SRS like SRR14432476/
     );
     expect(fetchUrls()).toHaveLength(0);
   });

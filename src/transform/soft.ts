@@ -28,11 +28,15 @@ export function parseSoftRecord(text: string): SoftRecord {
 
   for (const rawLine of text.split(/\r\n|\r|\n/)) {
     // Continuation: SOFT wraps long values with leading whitespace on the
-    // continuation line — append to the previous value line directly.
+    // continuation line — append to the previous value, inserting a space
+    // when both fragments are alphanumeric so words never fuse.
     if (/^[ \t]+\S/.test(rawLine) && currentKey !== null) {
       const values = fields.get(currentKey);
       if (values && values.length > 0) {
-        values[values.length - 1] += rawLine.trim();
+        const last = values[values.length - 1];
+        const fragment = rawLine.trim();
+        values[values.length - 1] =
+          last && /\w$/.test(last) && /^\w/.test(fragment) ? `${last} ${fragment}` : last + fragment;
       }
       continue;
     }

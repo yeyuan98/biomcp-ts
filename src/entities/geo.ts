@@ -130,7 +130,7 @@ interface GdsSummaryEntry {
   suppfile?: string;
   n_samples?: number;
   samples?: Array<{ accession?: string; title?: string }>;
-  pubmedids?: number[];
+  pubmedids?: Array<number | string>;
   bioproject?: string;
   extrelations?: Array<{ relationtype?: string; targetobject?: string }>;
 }
@@ -151,7 +151,7 @@ interface GdsEnrichment {
   pdat?: string;
   taxon?: string;
   bioproject?: string;
-  pubmedIds?: number[];
+  pubmedIds?: Array<number | string>;
   sraTokens?: string[];
 }
 
@@ -231,7 +231,7 @@ export async function geoSearch(query: string, options: GeoSearchOptions = {}): 
       // n_samples preferred over samples.length — esummary gds embeds the
       // full (potentially 10k+) samples array for mega-series.
       n_samples: entry.n_samples ?? entry.samples?.length,
-      pubmed_ids: entry.pubmedids,
+      pubmed_ids: (entry.pubmedids ?? []).map(Number).filter(Number.isInteger),
       bioproject: entry.bioproject,
       sra_project: sraProject,
       supplementary_file_format: entry.suppfile,
@@ -371,13 +371,38 @@ function pickDownloadableFile(files: string[]): string | undefined {
   return files.find(f => /\.(gz|csv|txt)$/i.test(f)) ?? files[0];
 }
 
+const DOWNLOAD_TIMEOUT_MS = 60_000;
+const DOWNLOAD_HOST_ALLOWLIST = /^(www\.)?(ftp\.)?ncbi\.nlm\.nih\.gov$|^(www\.)?ncbi\.nlm\.nih\.gov$|\.ncbi\.nlm\.nih\.gov$/i;
+
+/** Supplementary URLs are submitter-controlled text — only NCBI hosts are
+ *  fetched, with a bounded timeout and a sanitized local filename. */
+function assertDownloadableUrl(httpsUrl: string): void {
+  let host: string;
+  try {
+    host = new URL(httpsUrl).hostname;
+  } catch {
+    throw new Error(`Invalid supplementary file URL: ${httpsUrl}`);
+  }
+  if (!DOWNLOAD_HOST_ALLOWLIST.test(host)) {
+    throw new Error(
+      `Refusing to download supplementary file from non-NCBI host '${host}' — only *.ncbi.nlm.nih.gov URLs are allowed`
+    );
+  }
+}
+
+function sanitizeFilename(name: string): string {
+  const cleaned = name.replace(/[^A-Za-z0-9._-]/g, '_');
+  return cleaned.replace(/^[._]+/, '_') || 'geo_supplementary_file';
+}
+
 async function downloadSupplementaryFile(
   url: string,
   maxBytes: number
 ): Promise<GeoDownloadedFile> {
   // GEO FTP URLs are served verbatim over HTTPS.
   const httpsUrl = url.replace(/^ftp:\/\//i, 'https://');
-  const response = await fetch(httpsUrl);
+  assertDownloadableUrl(httpsUrl);
+  const response = await fetch(httpsUrl, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
   if (!response.ok) {
     throw new Error(`Failed to download ${httpsUrl}: HTTP ${response.status} ${response.statusText}`);
   }
@@ -396,7 +421,7 @@ async function downloadSupplementaryFile(
     );
   }
 
-  const filename = httpsUrl.split('/').pop() ?? 'geo_supplementary_file';
+  const filename = sanitizeFilename(httpsUrl.split('/').pop() ?? 'geo_supplementary_file');
   const tmpDir = mkdtempSync(join(tmpdir(), 'geo_'));
   const path = join(tmpDir, filename);
   writeFileSync(path, buffer);
@@ -443,11 +468,17 @@ async function buildSeriesDetail(accession: string, record: SoftRecord): Promise
   const samplePreview = enrichment?.samplePreview
     ?? softSampleIds.slice(0, GEO_SAMPLES_PREVIEW).map(id => ({ accession: id, title: undefined }));
 
+  // NB: SOFT emits numeric strings, esummary returns strings — normalize to
+  // numbers so the Set dedupes across both sources.
   const pubmedIds = [
-    ...new Set([
-      ...getSoftValues(record, 'Series_pubmed_id').map(Number).filter(Number.isInteger),
-      ...(enrichment?.pubmedIds ?? []),
-    ]),
+    ...new Set(
+      [
+        ...getSoftValues(record, 'Series_pubmed_id'),
+        ...(enrichment?.pubmedIds ?? []).map(String),
+      ]
+        .map(Number)
+        .filter(Number.isInteger)
+    ),
   ];
 
   const organisms = [
@@ -484,8 +515,11 @@ async function buildSeriesDetail(accession: string, record: SoftRecord): Promise
     pubmed_ids: pubmedIds,
     bioproject: extractBioproject(relations) ?? enrichment?.bioproject,
     sra: [...new Set([...extractSraTokens(relations), ...(enrichment?.sraTokens ?? [])])],
-    super_series: collectSeriesRelations(relations, /SuperSeries of (GSE\d+)/gi),
-    sub_series: collectSeriesRelations(relations, /SubSeries of (GSE\d+)/gi),
+    // NB: live SOFT emits "SuperSeries of: GSExxx" on the SUPER-series record,
+    // listing its sub-series (verified GSE344572/GSE344405), while
+    // "SubSeries of: GSEyyy" on a sub-series points up to its super-series.
+    sub_series: collectSeriesRelations(relations, /SuperSeries of:?\s*(GSE\d+)/gi),
+    super_series: collectSeriesRelations(relations, /SubSeries of:?\s*(GSE\d+)/gi),
     relations_raw: relations,
   };
 }
@@ -519,7 +553,7 @@ function buildPlatformDetail(accession: string, record: SoftRecord): GeoPlatform
     title: getSoftValue(record, 'Platform_title') ?? '',
     status: getSoftValue(record, 'Platform_status'),
     technology: getSoftValue(record, 'Platform_technology'),
-    organisms: [...new Set(getSoftValues(record, 'Platform_organism_ch1'))],
+    organisms: [...new Set([...getSoftValues(record, 'Platform_organism'), ...getSoftValues(record, 'Platform_organism_ch1')])],
     supplementary_files: filterSupplementaryFiles(getSoftValues(record, 'Platform_supplementary_file')),
     relations_raw: relations,
     sra: extractSraTokens(relations),

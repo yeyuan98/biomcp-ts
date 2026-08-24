@@ -65,9 +65,9 @@ const MEDIAN_TP53_UNSORTED = {
 
 const EQTL_TP53_UNSORTED = {
   data: [
-    { variantId: 'chr17_7676153_C_T_b38', geneSymbol: 'TP53', gencodeId: 'ENSG00000141510.18', tissueSiteDetailId: 'Thyroid', pValue: 2.1e-8, nes: 0.35, slope: 0.12 },
-    { variantId: 'chr17_7676409_C_T_b38', geneSymbol: 'TP53', gencodeId: 'ENSG00000141510.18', tissueSiteDetailId: 'Thyroid', pValue: 1.2e-12, nes: -0.28, slope: -0.09 },
-    { variantId: 'chr17_7676582_A_G_b38', geneSymbol: 'TP53', gencodeId: 'ENSG00000141510.18', tissueSiteDetailId: 'Thyroid', pValue: 4.5e-6, nes: 0.11, slope: 0.05 },
+    { variantId: 'chr17_7676153_C_T_b38', geneSymbol: 'TP53', gencodeId: 'ENSG00000141510.18', tissueSiteDetailId: 'Thyroid', pValue: 2.1e-8, nes: 0.35 },
+    { variantId: 'chr17_7676409_C_T_b38', geneSymbol: 'TP53', gencodeId: 'ENSG00000141510.18', tissueSiteDetailId: 'Thyroid', pValue: 1.2e-12, nes: -0.28 },
+    { variantId: 'chr17_7676582_A_G_b38', geneSymbol: 'TP53', gencodeId: 'ENSG00000141510.18', tissueSiteDetailId: 'Thyroid', pValue: 4.5e-6, nes: 0.11 },
   ],
 };
 
@@ -406,7 +406,7 @@ describe('gtexEqtl', () => {
 
     expect(result.associations.map(a => a.p_value)).toEqual([1.2e-12, 2.1e-8]);
     expect(result.associations[0].variant_id).toBe('chr17_7676409_C_T_b38');
-    expect(result.associations[0]).toMatchObject({ nes: -0.28, slope: -0.09 });
+    expect(result.associations[0]).toMatchObject({ nes: -0.28 });
   });
 
   test('HTTP 422 from the API surfaces as a readable Error', async () => {

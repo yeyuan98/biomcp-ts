@@ -131,7 +131,7 @@ Param-based dispatch: `query` → search mode, `pdb_id` → get mode, `pdb_id` +
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
 | `gtex_expression` | `gene: string` (HGNC symbol `TP53` or Ensembl ID `ENSG00000141510`, versioned or bare), `tissue?: string` (tissueSiteDetailId, e.g. Brain_Cortex, Whole_Blood), `limit?: number (1-54, default 20)` | Get median gene expression across GTEx tissues (Analysis v10, 54 tissue sites, TPM, sorted highest first). Genes resolve to a versioned gencodeId first (symbol or bare ENSG do not work directly on expression endpoints). Dataset pinned to `gtex_v10` with metadata-derived latest-release fallback | readOnly, openWorld |
-| `gtex_eqtl` | `gene: string` (HGNC symbol or Ensembl ID), `tissue: string` (required tissueSiteDetailId, e.g. Whole_Blood), `limit?: number (1-100, default 20)` | Get significant cis-eQTL associations (GTEx v10 `singleTissueEqtl`): variant_id, p_value, nes, slope, sorted by ascending p-value. Empty `associations` is legitimate (no significant eQTLs). Invalid tissue IDs are rejected against the dataset tissue list | readOnly, openWorld |
+| `gtex_eqtl` | `gene: string` (HGNC symbol or Ensembl ID), `tissue: string` (required tissueSiteDetailId, e.g. Whole_Blood), `limit?: number (1-100, default 20)` | Get significant cis-eQTL associations (GTEx v10 `singleTissueEqtl`): variant_id, p_value, nes, sorted by ascending p-value. Empty `associations` is legitimate (no significant eQTLs). Invalid tissue IDs are rejected against the dataset tissue list | readOnly, openWorld |
 
 ### Database Tools (`tools/db.ts`) — 3 tools (optional)
 

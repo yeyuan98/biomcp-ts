@@ -74,6 +74,20 @@ const ESUMMARY_DOCS: Record<string, Record<string, unknown>> = {
     createdate: '2021/01/01',
     updatedate: '2021/01/01',
   },
+  BGGH01000031: {
+    uid: '999000222',
+    caption: 'BGGH01000031',
+    title: 'Lactobacillus acidophilus WGS contig',
+    slen: 45123,
+    taxid: 1579,
+    organism: 'Lactobacillus acidophilus',
+    biomol: 'genomic',
+    topology: 'linear',
+    sourcedb: 'insd',
+    accessionversion: 'BGGH01000031.1',
+    createdate: '2020/01/01',
+    updatedate: '2020/01/01',
+  },
 };
 
 // Batch esummary docs for search — uids order deliberately differs from the
@@ -191,6 +205,17 @@ describe('genbankGet', () => {
 
     await expect(genbankGet('not-an-accession')).rejects.toThrow(/Invalid GenBank accession 'not-an-accession'/);
     expect(callUrls()).toHaveLength(0);
+  });
+
+  test('accepts WGS-style 4-letter-prefix accessions (BGGH01000031.1)', async () => {
+    const { genbankGet } = await loadGenbank();
+    mockFetchRoutes(defaultRoutes());
+
+    const record = await genbankGet('BGGH01000031.1');
+
+    expect(record.accession).toBe('BGGH01000031.1');
+    const efetch = callUrls().find(u => u.includes('efetch.fcgi'));
+    expect(efetch).toContain('id=BGGH01000031.1');
   });
 
   test('esummary error envelope surfaces as Error via parseEutilsJson', async () => {

@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - GEO series SOFT records now also read `Series_sample_organism` / `Series_platform_organism` keys (series SOFT emits them without the `_ch1` suffix used by sample records), so `geo_get` organisms no longer depend solely on best-effort esummary enrichment.
+- GEO super/sub-series relations now parse the live SOFT format (`SuperSeries of: GSExxx` with colon) with corrected semantics: `sub_series` lists the record's sub-series (from `SuperSeries of:` lines on a super-series) and `super_series` points up to the parent (from `SubSeries of:` lines); previously both fields were always empty.
+- GEO platform details read `Platform_organism` (GPL SOFT emits it without `_ch1`), fixing always-empty `organisms` for platform records.
+- `geo_get` `pubmed_ids` are normalized to numbers across sources (SOFT emits numeric strings, esummary emits strings), removing duplicate mixed-type entries.
+- Supplementary-file download hardening: URLs are restricted to NCBI hosts (`*.ncbi.nlm.nih.gov`), the fetch has a 60 s timeout, and the local filename is sanitized.
+- `gtex_eqtl` no longer advertises a `slope` field — the live `singleTissueEqtl` endpoint returns NES but no slope (the contract now matches the API).
+- `genbank_get` accepts INSDC WGS accessions with 4–6 letter prefixes (e.g. `BGGH01000031.1`), unblocking chaining from `genbank_search` results.
+- SOFT parser continuation lines join with a space when both fragments are alphanumeric (wrapped values no longer fuse words).
+- Stale versioned Ensembl IDs (e.g. `ENSG…17` under GENCODE v39) get a hint to retry with the bare ENSG form, which always resolves to the current version.
 
 ## [0.3.2] - 2026-08-24
 

@@ -105,8 +105,8 @@ describe('InputValidation.geoAccession', () => {
 });
 
 describe('InputValidation.sraAccession', () => {
-  it('accepts SRP/SRX/SRR/SRS/SRZ accessions', () => {
-    for (const prefix of ['SRP', 'SRX', 'SRR', 'SRS', 'SRZ']) {
+  it('accepts SRP/SRX/SRR/SRS accessions', () => {
+    for (const prefix of ['SRP', 'SRX', 'SRR', 'SRS']) {
       expect(InputValidation.sraAccession.safeParse(`${prefix}14432476`).success).toBe(true);
     }
   });
