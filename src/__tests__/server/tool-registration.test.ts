@@ -58,6 +58,29 @@ jest.mock('../../entities/patent.js', () => ({
   PatentResult: undefined,
 }));
 
+jest.mock('../../entities/geo.js', () => ({
+  geoSearch: jest.fn(),
+  geoGet: jest.fn(),
+  geoToSraAccessions: jest.fn(),
+}));
+
+jest.mock('../../entities/sra/index.js', () => ({
+  sraSearch: jest.fn(),
+  sraGet: jest.fn(),
+}));
+
+jest.mock('../../entities/genbank.js', () => ({
+  genbankSearch: jest.fn(),
+  genbankGet: jest.fn(),
+  genbankToGeneIds: jest.fn(),
+}));
+
+jest.mock('../../entities/gtex.js', () => ({
+  gtexMedianExpression: jest.fn(),
+  gtexEqtl: jest.fn(),
+  getGtexTissues: jest.fn(),
+}));
+
 jest.mock('../../entities/cross-entity.js', () => ({
   geneToDrugs: jest.fn(),
   geneToTrials: jest.fn(),
@@ -107,6 +130,10 @@ import { registerArticleTools } from '../../server/tools/article.js';
 import { registerUtilityTools } from '../../server/tools/utility.js';
 import { registerPdbTools } from '../../server/tools/pdb.js';
 import { registerPatentTools } from '../../server/tools/patent.js';
+import { registerGeoTools } from '../../server/tools/geo.js';
+import { registerSraTools } from '../../server/tools/sra.js';
+import { registerGenbankTools } from '../../server/tools/genbank.js';
+import { registerGtexTools } from '../../server/tools/gtex.js';
 
 beforeEach(() => {
   mockRegisterTool.mockClear();
@@ -153,7 +180,27 @@ describe('Tool registration', () => {
     expect(mockRegisterTool).toHaveBeenCalledTimes(1);
   });
 
-  it('total registerTool calls across all registrations = 27', () => {
+  it('registerGeoTools calls registerTool 2 times', () => {
+    registerGeoTools(mockServer);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(2);
+  });
+
+  it('registerSraTools calls registerTool 2 times', () => {
+    registerSraTools(mockServer);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(2);
+  });
+
+  it('registerGenbankTools calls registerTool 3 times', () => {
+    registerGenbankTools(mockServer);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(3);
+  });
+
+  it('registerGtexTools calls registerTool 2 times', () => {
+    registerGtexTools(mockServer);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(2);
+  });
+
+  it('total registerTool calls across all registrations = 36', () => {
     registerGeneTools(mockServer);
     registerDrugTools(mockServer);
     registerVariantTools(mockServer);
@@ -163,7 +210,11 @@ describe('Tool registration', () => {
     registerUtilityTools(mockServer);
     registerPdbTools(mockServer);
     registerPatentTools(mockServer);
-    expect(mockRegisterTool).toHaveBeenCalledTimes(27);
+    registerGeoTools(mockServer);
+    registerSraTools(mockServer);
+    registerGenbankTools(mockServer);
+    registerGtexTools(mockServer);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(36);
   });
 
   it('no duplicate tool names across all registrations', () => {
@@ -176,6 +227,10 @@ describe('Tool registration', () => {
     registerUtilityTools(mockServer);
     registerPdbTools(mockServer);
     registerPatentTools(mockServer);
+    registerGeoTools(mockServer);
+    registerSraTools(mockServer);
+    registerGenbankTools(mockServer);
+    registerGtexTools(mockServer);
 
     const names = mockRegisterTool.mock.calls.map((call: any[]) => call[0]);
     const uniqueNames = new Set(names);
@@ -192,6 +247,10 @@ describe('Tool registration', () => {
     registerUtilityTools(mockServer);
     registerPdbTools(mockServer);
     registerPatentTools(mockServer);
+    registerGeoTools(mockServer);
+    registerSraTools(mockServer);
+    registerGenbankTools(mockServer);
+    registerGtexTools(mockServer);
 
     const names = mockRegisterTool.mock.calls.map((call: any[]) => call[0]);
     const expected = [
@@ -204,6 +263,10 @@ describe('Tool registration', () => {
       'discover', 'batch_get',
       'pdb',
       'patent_search', 'patent_get',
+      'geo_search', 'geo_get',
+      'sra_search', 'sra_get',
+      'genbank_search', 'genbank_get', 'genbank_genes',
+      'gtex_expression', 'gtex_eqtl',
     ];
     expect(names.sort()).toEqual(expected.sort());
   });

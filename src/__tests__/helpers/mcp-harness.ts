@@ -10,6 +10,10 @@ import { registerTrialTools } from '../../server/tools/trial.js';
 import { registerUtilityTools } from '../../server/tools/utility.js';
 import { registerPdbTools } from '../../server/tools/pdb.js';
 import { registerPatentTools } from '../../server/tools/patent.js';
+import { registerGeoTools } from '../../server/tools/geo.js';
+import { registerSraTools } from '../../server/tools/sra.js';
+import { registerGenbankTools } from '../../server/tools/genbank.js';
+import { registerGtexTools } from '../../server/tools/gtex.js';
 import { connectionManager } from '../../connections/manager.js';
 
 export type McpTestHarness = {
@@ -30,6 +34,10 @@ export async function createMcpTestHarness(): Promise<McpTestHarness> {
   registerUtilityTools(server);
   registerPdbTools(server);
   registerPatentTools(server);
+  registerGeoTools(server);
+  registerSraTools(server);
+  registerGenbankTools(server);
+  registerGtexTools(server);
 
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'test-client', version: '1.0.0' });

@@ -10,6 +10,10 @@ import { registerTrialTools } from './tools/trial.js';
 import { registerUtilityTools } from './tools/utility.js';
 import { registerPdbTools } from './tools/pdb.js';
 import { registerPatentTools } from './tools/patent.js';
+import { registerGeoTools } from './tools/geo.js';
+import { registerSraTools } from './tools/sra.js';
+import { registerGenbankTools } from './tools/genbank.js';
+import { registerGtexTools } from './tools/gtex.js';
 import { registerDbToolsIfConfigured, shutdownDbBackend } from './tools/db.js';
 import { VERSION } from '../version.js';
 
@@ -27,6 +31,10 @@ registerTrialTools(server);
 registerUtilityTools(server);
 registerPdbTools(server);
 registerPatentTools(server);
+registerGeoTools(server);
+registerSraTools(server);
+registerGenbankTools(server);
+registerGtexTools(server);
 const dbEnabled = registerDbToolsIfConfigured(server);
 if (dbEnabled) {
   console.error(`[biomcp] database tools enabled via DB_TYPE=${process.env.DB_TYPE}`);
