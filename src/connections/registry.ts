@@ -2,7 +2,7 @@ import { ConnectionOptions } from './base.js';
 
 export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   // ==========================================
-  // GENOMICS - REST (4 sources)
+  // GENOMICS - REST (5 sources)
   // ==========================================
   mygene: {
     sourceId: 'mygene',

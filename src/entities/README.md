@@ -1,6 +1,6 @@
 # Entities Layer
 
-The business logic layer for biomcp-ts. Each entity module (gene, variant, drug, disease, article, trial, pdb, patent) implements a consistent **search / get / sections** pattern:
+The business logic layer for biomcp-ts. Each entity module (gene, variant, drug, disease, article, trial, pdb, patent, geo, sra, genbank, gtex) implements a consistent **search / get / sections** pattern:
 
 1. **`search`** — queries a primary data source with filters, returns lightweight result arrays
 2. **`get`** — fetches a single entity by identifier, optionally enriching with parallel section fetches
@@ -41,7 +41,7 @@ transformMyGeneResponse(data: MyGeneGetResponse['hits'][0]): GeneResult
 | `go` | MyGene.info | None | Same upstream as `ontology` but up to 50 terms with `aspect` field |
 | `interactions` | STRING-db | None | Interaction partners via `/json/interaction_partners`, up to 20 |
 | `civic` | CIViC (GraphQL) | None | Clinical variants for gene |
-| `expression` | GTEx | None | Resolves Ensembl ID via MyGene, then tries multiple Ensembl version suffixes (`.13`, `.12`, `.14`...) against GTEx v8 median expression |
+| `expression` | GTEx | None | Delegates to `entities/gtex.ts` `gtexMedianExpression` (GTEx Analysis v10, versioned gencodeId resolution, top-20 tissues by median TPM) |
 | `hpa` | Human Protein Atlas | None | Subcellular location from `/search` |
 | `druggability` | DGIdb (GraphQL) + OpenTargets (GraphQL) | None | DGIdb drug interactions + OpenTargets tractability |
 | `clingen` | — | — | **Stub**: always returns `{ _error: "...not available via public API..." }` |
@@ -158,7 +158,7 @@ transformMyDiseaseResponse(data: Record<string, unknown>): DiseaseResult
 
 ## Article (`article/`)
 
-**Primary source:** PubMed (`pubmed` connection) for get; federated across 5 sources for search
+**Primary source:** PubMed (via the shared `eutils` connection) for get; federated across 5 sources for search
 
 ### Architecture
 
@@ -215,7 +215,7 @@ When no `source` is specified, `articleSearch` queries all 5 backends concurrent
 
 | Backend | Connection | Notes |
 |---------|-----------|-------|
-| PubMed | `pubmed` | Two-step: `esearch` → `efetch` XML → `parsePubMedXml` |
+| PubMed | `eutils` | Two-step: `esearch` → `efetch` XML → `parsePubMedXml` |
 | Europe PMC | `europepmc` | Supports `cursorMark` for deep pagination, `dateRange` as year range |
 | Semantic Scholar | `semantic_scholar` | REST API with `externalIds` mapping; all S2 traffic (search + citations) is serialized through the single-flight `semantic-scholar-queue` to avoid unauthenticated 429s |
 | PubTator | `pubtator` | BioNER-annotated search; server-side pagination via `page`/`size` (size clamped 10–100, page derived from offset) |
@@ -352,6 +352,120 @@ patentGet(publicationNumber: string, sections?: string[]): Promise<PatentResult>
 | `classifications` | OPS IPC+CPC → GP/Wayback → ODP/PPUBS (US) |
 
 Google Patents detail falls back to Wayback Machine snapshots when live access is blocked (IP-block proven; see patent README).
+
+---
+
+## GEO (`geo.ts`)
+
+**Primary sources:** NCBI E-utilities db=gds (`eutils` connection), GEO SOFT viewer (`geo_soft` connection)
+
+### Exported Functions
+
+```ts
+geoSearch(query: string, options?: GeoSearchOptions): Promise<GeoSearchResult[]>
+geoGet(accession: string, options?: GeoGetOptions): Promise<GeoDetail>
+geoToSraAccessions(accession: string): Promise<string[]>
+```
+
+`GeoSearchOptions` filters by `entryType` (`gse`/`gsm`/`gpl`/`gds`, appended as `[ETYP]`), `organism` (`[ORGN]`), `limit` (≤50), `offset`. `GeoGetOptions` controls optional supplementary-file download (`download`, `maxBytes` ≥ 1 MB, default 50 MB).
+
+### Behavior
+
+- `geoGet` validates the accession (GSE/GSM/GPL only — GDS curated DataSets are rejected with a pointer to the underlying series/sample), fetches the SOFT record (`acc.cgi?targ=self&form=text&view=full`), parses it via `transform/soft.ts`, and enriches series details with best-effort esummary gds metadata (sample preview ≤20, n_samples, PubMed IDs, BioProject, SRA tokens). Enrichment failure degrades to SOFT-only output
+- SOFT relations power the cross-links: `sra` (SRP/SRX/SRR tokens from `SRA:` relations), `bioproject`, `super_series`/`sub_series`, `series` (from a sample back to its GSE)
+- The SOFT endpoint may serve HTML block pages to datacenter IPs — detected and surfaced as an explicit error
+- `geoToSraAccessions` (SOFT relations → esummary extrelations → elink fallback) is not exposed as a tool
+
+### Source / Auth
+
+| Source | Connection | Auth | Notes |
+|--------|-----------|------|-------|
+| E-utilities gds | `eutils` | `NCBI_API_KEY` optional | esearch + esummary; shared 3 req/s NCBI budget |
+| GEO SOFT viewer | `geo_soft` | None | Plain-text SOFT records; 300 ms rate interval; HTML block-page sniffing |
+
+---
+
+## SRA (`sra/`)
+
+**Primary source:** NCBI E-utilities db=sra (`eutils` connection)
+
+### Exported Functions
+
+```ts
+sraSearch(query: string, options?: { limit?: number; offset?: number }): Promise<SraSearchResultItem[]>
+sraGet(accession: string): Promise<SraDetail>
+```
+
+Directory module: `index.ts` (E-utilities orchestration) + `transform/experiment-package.ts` (fast-xml-parser for SRA experiment-package XML → `SraRecord`).
+
+### Behavior
+
+- `sraSearch` runs esearch db=sra, then efetches experiment-package XML in batches of 10; items carry `experiment_accession`, `study_accession`, `sample_accession`, `organism`, `library_strategy`, `run_count`, `first_run_accession`, `bioproject`
+- `sraGet` dispatches on the accession prefix: SRR → run detail (instrument, `total_spots`/`total_bases`/`size_bytes`), SRP → study detail (experiment list, capped at 50), SRS → sample detail (matching experiments), otherwise SRX experiment detail (library strategy/source/selection/layout, platform, runs)
+- ENA (ERP/ERR) and DDBJ (DRP/DRR) accessions are rejected at the tool layer with an ENA pointer — NCBI SRA does not index them
+- efetch responses are multi-MB; batch size 10 (far below the 200-id eutils cap) keeps responses bounded
+
+### Source / Auth
+
+| Source | Connection | Auth | Notes |
+|--------|-----------|------|-------|
+| E-utilities sra | `eutils` | `NCBI_API_KEY` optional | esearch + efetch XML; shared 3 req/s NCBI budget |
+
+---
+
+## GenBank (`genbank.ts`)
+
+**Primary source:** NCBI E-utilities db=nuccore (`eutils` connection)
+
+### Exported Functions
+
+```ts
+genbankSearch(query: string, options?: GenbankSearchOptions): Promise<GenbankSearchResult[]>
+genbankGet(accession: string, options?: GenbankGetOptions): Promise<GenbankRecord>
+genbankToGeneIds(accession: string): Promise<number[]>
+```
+
+### Behavior
+
+- `genbankGet` fetches esummary metadata first (length, organism, sourcedb), then validates region constraints: whole records capped at 2,000,000 bp (larger requires `seq_start`/`seq_stop`), region span ≤ 10 Mb, coordinates ≤ record length, `seq_start > seq_stop` only with `strand: 2`; rettype switches to `gbwithparts` for records > 20 Mb
+- `sequence_text` is the raw efetch text (GenBank flat file or FASTA); a hard `maxResponseBytes` cap (default 30 MB) errors on oversized responses instead of truncating
+- `genbankToGeneIds` runs elink nuccore→gene (≤100 links) — entrezgene IDs for MyGene-backed tools
+- `NCBI_API_KEY` optional (higher rate limits)
+
+### Source / Auth
+
+| Source | Connection | Auth | Notes |
+|--------|-----------|------|-------|
+| E-utilities nuccore | `eutils` | `NCBI_API_KEY` optional | esearch + esummary + efetch + elink; shared 3 req/s NCBI budget |
+
+---
+
+## GTEx (`gtex.ts`)
+
+**Primary source:** GTEx Portal API v2 (`gtex` connection, https://gtexportal.org)
+
+### Exported Functions
+
+```ts
+gtexMedianExpression(geneIdentifier: string, options?: { tissueSiteDetailId?: string; limit?: number }): Promise<GTExMedianExpressionResult>
+gtexEqtl(geneIdentifier: string, tissueSiteDetailId: string, options?: { limit?: number }): Promise<GTExEqtlResult>
+resolveGencodeId(geneIdentifier: string): Promise<GencodeIdResolution>
+getGtexTissues(): Promise<GTExTissueInfo[]>
+getGtexDatasets(): Promise<GTExDatasetInfo[]>
+```
+
+### Behavior
+
+- Dataset selection: latest `gtex_vN` release derived from `/api/v2/metadata/dataset` with a pinned `gtex_v10` fallback when metadata is unavailable (non-GTEx datasets like kids_first_harmonization are excluded)
+- Gene resolution: HGNC symbols and Ensembl IDs (bare or versioned) resolve to a versioned `gencodeId` via `/api/v2/reference/geneSearch` — symbol queries are prefix-fuzzy (TP53 also returns TP53BP2...), so an exact `geneSymbolUpper` match is required (up to 2 pages). Unversioned ENSG yields empty data with HTTP 200 from expression endpoints, hence the mandatory resolver. Results memoized per identifier
+- `gtexMedianExpression` returns tissues sorted by median TPM descending (54 tissue sites, limit-clipped); `tissueSiteDetailId` filters to a single tissue
+- `gtexEqtl` validates the tissue against the dataset tissue list, then returns associations sorted by ascending p-value; empty `data` with HTTP 200 is legitimate (no significant eQTLs) and yields `associations: []`
+
+### Source / Auth
+
+| Source | Connection | Auth | Notes |
+|--------|-----------|------|-------|
+| GTEx Portal API v2 | `gtex` | None | Keyless; 100 ms rate interval |
 
 ---
 

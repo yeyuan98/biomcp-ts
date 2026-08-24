@@ -1,16 +1,17 @@
 # BioMCP
 
-A high-performance MCP server that gives LLMs access to 27 biomedical tools federated across 50+ upstream APIs — genes, variants, drugs, diseases, literature, clinical trials, and structural biology in a single integration.
+A high-performance MCP server that gives LLMs access to 36 biomedical tools federated across 50+ upstream APIs — genes, variants, drugs, diseases, literature, clinical trials, structural biology, and functional genomics in a single integration.
 
 ## Highlights
 
-- **27 tools** across 9 domains — search, retrieve, and cross-reference biomedical entities (+3 optional database tools)
-- **50+ upstream sources** — MyGene, MyVariant, MyChem, MyDisease, ClinVar, gnomAD, UniProt, Reactome, OpenTargets, CIViC, OncoKB, DisGeNET, GTEx, STRING, DGIdb, ClinicalTrials.gov, PubMed, EuropePMC, Semantic Scholar, PubTator, LitSense, Monarch Initiative, OpenFDA, NIH Reporter, and more
+- **36 tools** across 13 domains — search, retrieve, and cross-reference biomedical entities (+3 optional database tools)
+- **50+ upstream sources** — MyGene, MyVariant, MyChem, MyDisease, ClinVar, gnomAD, UniProt, Reactome, OpenTargets, CIViC, OncoKB, DisGeNET, GTEx, STRING, DGIdb, ClinicalTrials.gov, PubMed, EuropePMC, Semantic Scholar, PubTator, LitSense, Monarch Initiative, OpenFDA, NIH Reporter, NCBI GEO, SRA, GenBank, and more
+- **Functional genomics & sequences** — GEO series/sample search with SOFT detail parsing, SRA experiment/run metadata, GenBank/RefSeq records with region slices, and GTEx v10 median expression + cis-eQTLs
 - **Section-based fetching** — `entityGet(id, sections)` fans out to multiple sources with per-section timeouts and graceful degradation (failed sections return `{ _error }` instead of crashing)
 - **Federated article search** — queries 5 literature backends simultaneously with PMID/PMCID/DOI deduplication
 - **Patent access** — worldwide patent search and detail via keyed EPO OPS / USPTO ODP; keyless USPTO Public Search and Google Patents (+Wayback archive) fallbacks
 - **Zero-config startup** — works out of the box; optional API keys unlock higher rate limits and premium data
-- **~690 unit tests** (mocked) + **100 integration tests** (live APIs via in-process MCP client, gated skips)
+- **~825 unit tests** (mocked) + **120 integration tests** (live APIs via in-process MCP client, gated skips)
 
 ## Install
 
@@ -95,6 +96,35 @@ Full tool schemas (params, enums, defaults) live in [src/server/README.md](src/s
 |------|-------------|
 | `patent_search` | Search patents worldwide (US, EP, WO, JP, 100+ authorities) with assignee/inventor/CPC/status/date filters and relevance ranking (`sort_by`). Quote exact multi-word concepts (e.g. "mRNA display"). Foundational prior art is auto-discovered via co-citation mining (`seminal_prior_art`; disable with `seminal: false`). Default backends: USPTO Public Search full-text (US, keyless, relevance-ranked) + EPO OPS (worldwide, keyed); uspto_odp (US bibliographic metadata) and google_patents (best-effort) available via `source` |
 | `patent_get` | Get patent details by publication number with sections: abstract, claims (US fulltext via USPTO Public Search; EP/WO via EPO OPS), citations (forward + backward), family, classifications |
+
+### GEO (2)
+
+| Tool | Description |
+|------|-------------|
+| `geo_search` | Search NCBI GEO for functional genomics studies (expression microarrays, RNA-seq, single-cell series) by entry type (GSE/GSM/GPL/GDS) and organism; results carry cross-links (sra_project, bioproject, pubmed_ids) for chaining |
+| `geo_get` | Get the full SOFT record for a GEO series/sample/platform: summary, organisms, sample preview (≤20), supplementary file URLs, and cross-references; optionally download the first supplementary file |
+
+### SRA (2)
+
+| Tool | Description |
+|------|-------------|
+| `sra_search` | Search NCBI's Sequence Read Archive for sequencing experiments and runs by free text, accession, or field syntax; returns experiment/study/sample accessions with library strategy and run counts |
+| `sra_get` | Get full details for an SRA accession: SRR run (instrument, spots, bases, size), SRX experiment (library design), SRP study (experiment list), or SRS sample; ENA/DDBJ accessions rejected with an ENA pointer |
+
+### GenBank (3)
+
+| Tool | Description |
+|------|-------------|
+| `genbank_search` | Search NCBI nucleotide records (GenBank/RefSeq/INSDC) by plain terms, accession, or field syntax; results include accession.version, definition, length, organism, topology |
+| `genbank_get` | Fetch a GenBank/RefSeq record as GenBank flat file or FASTA; whole records capped at 2 Mb — larger records require a `seq_start`/`seq_stop` region (up to 10 Mb, reverse-strand via `strand=2`) |
+| `genbank_genes` | Map a GenBank/RefSeq accession to its NCBI Gene IDs (elink nuccore→gene) for bridging into gene tools |
+
+### GTEx (2)
+
+| Tool | Description |
+|------|-------------|
+| `gtex_expression` | Get median gene expression across GTEx tissues (Analysis v10, 54 tissue sites, TPM, highest first); accepts HGNC symbol or Ensembl gene ID, with optional single-tissue filter |
+| `gtex_eqtl` | Get significant cis-eQTL associations for a gene in a specific GTEx tissue (v10): variant_id, p_value, NES, slope, sorted by ascending p-value |
 
 ### Citation Module
 

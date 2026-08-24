@@ -8,7 +8,7 @@ Optional. Without them the affected tools still work using keyless fallbacks or 
 
 | Variable | Used by | Effect |
 |----------|---------|--------|
-| `NCBI_API_KEY` | PubMed, PMC OA, NCBI ID conversion, PubTator | Higher NCBI E-utilities rate limits (from 3 to 10 req/s) |
+| `NCBI_API_KEY` | PubMed, GEO, SRA, GenBank, PMC OA, NCBI ID conversion, PubTator | Higher NCBI E-utilities rate limits (from 3 to 10 req/s) |
 | `NCBI_EMAIL` | PubMed, PubTator | Polite-contact `tool`/`email` parameters on NCBI E-utilities requests |
 | `S2_API_KEY` | Semantic Scholar | Higher rate limits on Semantic Scholar article search/citations |
 | `OPENFDA_API_KEY` | OpenFDA | Higher rate limits for drug regulatory data |
