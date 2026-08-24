@@ -9,7 +9,7 @@ const GBWITHPARTS_THRESHOLD_BP = 20_000_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 30_000_000;
 const MAX_GENE_LINKS = 100;
 
-const ACCESSION_RE = /^[A-Z]{1,2}_?\d+(\.\d+)?$/i;
+const ACCESSION_RE = /^[A-Z]{1,6}_?\d+(\.\d+)?$/i;
 
 export interface GenbankSearchResult {
   accession: string;

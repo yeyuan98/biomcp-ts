@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { sraSearch, sraGet } from '../../entities/sra/index.js';
 
-const SRA_ACCESSION_REGEX = /^SR[PXRSZ]\d+$/;
+const SRA_ACCESSION_REGEX = /^SR[PXRS]\d+$/;
 const ENA_DDBJ_ACCESSION_REGEX = /^(ER|DR)[PXRS]\d+$/;
 
 export function registerSraTools(server: McpServer): void {
@@ -36,7 +36,7 @@ The query may be free text, an accession (SRP study, SRX experiment, SRR run, SR
 
 Chain from geo_get (sra field) or sra_search (experiment_accession / first_run_accession). European (ERP/ERR) and DDBJ (DRP/DRR) accessions are NOT indexed in NCBI SRA — use ENA (https://www.ebi.ac.uk/ena) for those.`,
       inputSchema: {
-        accession: z.string().describe('NCBI SRA accession: SRP (study), SRX (experiment), SRR (run), SRS (sample), or SRZ (analysis), e.g. SRR14432476'),
+        accession: z.string().describe('NCBI SRA accession: SRP (study), SRX (experiment), SRR (run), or SRS (sample), e.g. SRR14432476'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
@@ -50,7 +50,7 @@ Chain from geo_get (sra field) or sra_search (experiment_accession / first_run_a
         }
         if (!SRA_ACCESSION_REGEX.test(normalized)) {
           throw new Error(
-            `Expected NCBI SRA accession SRP/SRX/SRR/SRS/SRZ like SRR14432476 — got "${accession}"`
+            `Expected NCBI SRA accession SRP/SRX/SRR/SRS like SRR14432476 — got "${accession}"`
           );
         }
         const detail = await sraGet(normalized);

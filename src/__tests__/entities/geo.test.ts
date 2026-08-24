@@ -25,8 +25,8 @@ const GSE_SOFT_FULL = [
   '!Series_supplementary_file = ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE183nnn/GSE183947/suppl/GSE183947_fpkm.csv.gz',
   '!Series_relation = BioProject: https://www.ncbi.nlm.nih.gov/bioproject/PRJNA762469',
   '!Series_relation = SRA: https://www.ncbi.nlm.nih.gov/sra?term=SRP336638',
-  '!Series_relation = SuperSeries of GSE12345',
-  '!Series_relation = SubSeries of GSE99999',
+  '!Series_relation = SuperSeries of: GSE12345',
+  '!Series_relation = SubSeries of: GSE99999',
   '',
 ].join('\r\n');
 
@@ -53,6 +53,26 @@ const GSM_SOFT_FULL = [
   '!Sample_supplementary_file = ftp://ftp.ncbi.nlm.nih.gov/geo/samples/GSM5574nnn/GSM5574685/suppl/GSM5574685_tumor.counts.csv.gz',
   '',
 ].join('\n');
+
+const GPL_SOFT_FULL = [
+  '^PLATFORM = GPL11154',
+  '!Platform_title = Illumina HiSeq 2500 (Homo sapiens)',
+  '!Platform_geo_accession = GPL11154',
+  '!Platform_status = Public on Mar 25 2011',
+  '!Platform_organism = Homo sapiens',
+  '!Platform_technology = high-throughput sequencing',
+  '',
+].join('\n');
+
+const GSE_SOFT_ODDNAME_SUPP = GSE_SOFT_FULL.replace(
+  /^!Series_supplementary_file = .*\r?\n/m,
+  '!Series_supplementary_file = ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE183nnn/GSE183947/suppl/GSE183947_fpkm(fi)le.csv.gz\r\n'
+);
+
+const GSE_SOFT_FOREIGN_SUPP = GSE_SOFT_FULL.replace(
+  /^!Series_supplementary_file = .*\r?\n/m,
+  '!Series_supplementary_file = ftp://evil.example.com/geo/GSE183947.csv.gz\r\n'
+);
 
 // 25 embedded samples — geoGet must preview only the first 20 while keeping
 // the true total from n_samples.
@@ -167,6 +187,8 @@ interface EutilsOverrides {
   esummary?: RouteHandler;
   elink?: RouteHandler;
   extrelations?: Array<Record<string, unknown>>;
+  gseSoft?: string;
+  pubmedidsAsStrings?: boolean;
 }
 
 function defaultRoutes(overrides: EutilsOverrides = {}): Record<string, RouteHandler> {
@@ -187,6 +209,15 @@ function defaultRoutes(overrides: EutilsOverrides = {}): Record<string, RouteHan
           entries[key] = () => ({ ...base(), extrelations: overrides.extrelations });
         }
       }
+      if (overrides.pubmedidsAsStrings) {
+        for (const key of Object.keys(entries)) {
+          const base = entries[key];
+          entries[key] = () => {
+            const entry = base();
+            return { ...entry, pubmedids: (entry as { pubmedids?: unknown }).pubmedids?.map(String) };
+          };
+        }
+      }
       const ids = (url.searchParams.get('id') ?? '').split(',');
       const result: Record<string, unknown> = { uids: [...ids].reverse() };
       for (const id of ids) {
@@ -205,7 +236,9 @@ function defaultRoutes(overrides: EutilsOverrides = {}): Record<string, RouteHan
     [GEO_ACC]: (url) => {
       const acc = (url.searchParams.get('acc') ?? '').toUpperCase();
       if (acc === 'GSM5574685') return okText(GSM_SOFT_FULL);
+      if (acc === 'GPL11154') return okText(GPL_SOFT_FULL);
       if (acc === 'GSE999001') return okText(GSE_SOFT_NO_SRA);
+      if (overrides.gseSoft) return okText(overrides.gseSoft);
       return okText(GSE_SOFT_FULL);
     },
   };
@@ -386,8 +419,10 @@ describe('geoGet series detail', () => {
     expect(detail.pubmed_ids).toEqual([35046993]);
     expect(detail.bioproject).toBe('PRJNA762469');
     expect(detail.sra).toEqual(['SRP336638']);
-    expect(detail.super_series).toEqual(['GSE12345']);
-    expect(detail.sub_series).toEqual(['GSE99999']);
+    // Live semantics: 'SuperSeries of: X' lists this record's sub-series;
+    // 'SubSeries of: Y' points up to its super-series (verified GSE344572/405).
+    expect(detail.sub_series).toEqual(['GSE12345']);
+    expect(detail.super_series).toEqual(['GSE99999']);
     expect(detail.relations_raw).toHaveLength(4);
     expect(detail).not.toHaveProperty('download');
   });
@@ -407,6 +442,18 @@ describe('geoGet series detail', () => {
     ]);
     expect(detail.n_samples).toBe(2);
     expect(detail.publication_date).toBe('2021-09-15');
+  });
+
+  test('pubmed_ids dedupes across SOFT (numbers) and esummary (live strings)', async () => {
+    const { geoGet } = await loadGeo();
+    mockFetchRoutes(defaultRoutes({ pubmedidsAsStrings: true }));
+
+    const detail = await geoGet('GSE183947');
+
+    if (detail.entry_type !== 'series') throw new Error('expected series detail');
+    // Same PMID arrives twice (SOFT numeric + esummary '35046993') — must emit once, as a number.
+    expect(detail.pubmed_ids).toEqual([35046993]);
+    expect(detail.pubmed_ids.every(id => typeof id === 'number')).toBe(true);
   });
 
   test('HTML block page from geo_soft is detected and reported', async () => {
@@ -526,6 +573,59 @@ describe('geoGet supplementary download', () => {
     await expect(geoGet('GSE183947', { download: true })).rejects.toThrow(
       'No supplementary file available for GSE183947'
     );
+  });
+
+  test('refuses to download supplementary files from non-NCBI hosts', async () => {
+    const { geoGet } = await loadGeo();
+    mockFetchRoutes({
+      ...defaultRoutes({ gseSoft: GSE_SOFT_FOREIGN_SUPP }),
+      'https://evil.example.com/': () => { throw new Error('must not be fetched'); },
+    });
+
+    await expect(geoGet('GSE183947', { download: true })).rejects.toThrow(
+      /non-NCBI host 'evil\.example\.com'/
+    );
+  });
+
+  test('sanitizes the local filename for unusual URL segments', async () => {
+    const { geoGet } = await loadGeo();
+    const payload = Buffer.from('gz bytes');
+    mockFetchRoutes({
+      ...defaultRoutes({ gseSoft: GSE_SOFT_ODDNAME_SUPP }),
+      'https://ftp.ncbi.nlm.nih.gov/': () => okBinary(payload),
+    });
+
+    const detail = await geoGet('GSE183947', { download: true });
+
+    if (detail.entry_type !== 'series') throw new Error('expected series detail');
+    expect(detail.download!.filename).toBe('GSE183947_fpkm_fi_le.csv.gz');
+    expect(existsSync(detail.download!.path)).toBe(true);
+  });
+});
+
+describe('geoGet platform detail', () => {
+  let originalFetch: typeof global.fetch;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    originalFetch = global.fetch;
+    connectionManager.closeAll();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  test('maps Platform_organism (live SOFT emits no _ch1 suffix on GPL records)', async () => {
+    const { geoGet } = await loadGeo();
+    mockFetchRoutes(defaultRoutes());
+
+    const detail = await geoGet('GPL11154');
+
+    if (detail.entry_type !== 'platform') throw new Error('expected platform detail');
+    expect(detail.title).toContain('Illumina HiSeq 2500');
+    expect(detail.organisms).toEqual(['Homo sapiens']);
+    expect(detail.technology).toBe('high-throughput sequencing');
   });
 });
 

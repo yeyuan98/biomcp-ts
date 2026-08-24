@@ -43,7 +43,6 @@ export interface GTExEqtlAssociation {
   variant_id: string;
   p_value: number;
   nes: number;
-  slope: number;
 }
 
 export interface GTExEqtlResult {
@@ -96,7 +95,6 @@ interface SingleTissueEqtlResponse {
     variantId: string;
     pValue: number;
     nes: number;
-    slope: number;
   }>;
 }
 
@@ -117,8 +115,19 @@ interface ActiveDataset {
 
 let datasetsMemo: Promise<GTExDatasetInfo[]> | null = null;
 let activeDatasetMemo: Promise<ActiveDataset> | null = null;
+let activeDatasetMemoAt = 0;
+const ACTIVE_DATASET_TTL_MS = 10 * 60 * 1000;
 let tissuesMemo: Promise<GTExTissueInfo[]> | null = null;
+const GENCODE_MEMO_MAX = 500;
 const gencodeIdMemo = new Map<string, Promise<GencodeIdResolution>>();
+
+function rememberGencodeId(key: string, promise: Promise<GencodeIdResolution>): void {
+  if (gencodeIdMemo.size >= GENCODE_MEMO_MAX) {
+    const oldest = gencodeIdMemo.keys().next().value;
+    if (oldest !== undefined) gencodeIdMemo.delete(oldest);
+  }
+  gencodeIdMemo.set(key, promise);
+}
 
 export function getGtexDatasets(): Promise<GTExDatasetInfo[]> {
   if (!datasetsMemo) {
@@ -151,7 +160,8 @@ async function fetchDatasets(): Promise<GTExDatasetInfo[]> {
 /** Latest gtex_vN release derived from metadata; NB: kids_first_harmonization
  *  and other non-GTEx datasets must stay excluded from the comparison. */
 async function getActiveDataset(): Promise<ActiveDataset> {
-  if (!activeDatasetMemo) {
+  if (!activeDatasetMemo || Date.now() - activeDatasetMemoAt > ACTIVE_DATASET_TTL_MS) {
+    activeDatasetMemoAt = Date.now();
     activeDatasetMemo = (async () => {
       try {
         const datasets = await getGtexDatasets();
@@ -181,13 +191,18 @@ function datasetVersion(datasetId: string): number {
  *  endpoints, so callers must always use the versioned ID returned here. */
 export function resolveGencodeId(geneIdentifier: string): Promise<GencodeIdResolution> {
   const key = geneIdentifier.trim().toUpperCase();
-  if (!gencodeIdMemo.has(key)) {
-    gencodeIdMemo.set(key, resolveGencodeIdUncached(geneIdentifier.trim()).catch(error => {
-      gencodeIdMemo.delete(key);
-      throw error;
-    }));
+  const cached = gencodeIdMemo.get(key);
+  if (cached) {
+    gencodeIdMemo.delete(key);
+    gencodeIdMemo.set(key, cached);
+    return cached;
   }
-  return gencodeIdMemo.get(key)!;
+  const promise = resolveGencodeIdUncached(geneIdentifier.trim()).catch(error => {
+    gencodeIdMemo.delete(key);
+    throw error;
+  });
+  rememberGencodeId(key, promise);
+  return promise;
 }
 
 async function resolveGencodeIdUncached(identifier: string): Promise<GencodeIdResolution> {
@@ -199,7 +214,12 @@ async function resolveGencodeIdUncached(identifier: string): Promise<GencodeIdRe
     const response = await conn.request(`/api/v2/reference/geneSearch?${query.toString()}`) as GeneSearchResponse;
     const hit = (Array.isArray(response.data) ? response.data : [])[0];
     if (!hit?.gencodeId) {
-      throw notFoundInDataset(identifier, datasetId);
+      // NB: versioned ENSGs go stale between GENCODE releases; the bare form
+      // always resolves to the current version (verified live).
+      const hint = identifier.includes('.')
+        ? ` — try the unversioned form ${identifier.split('.')[0]}`
+        : '';
+      throw new Error(notFoundInDataset(identifier, datasetId).message + hint);
     }
     return toResolution(hit);
   }
@@ -293,7 +313,6 @@ export async function gtexEqtl(
       variant_id: r.variantId,
       p_value: r.pValue,
       nes: r.nes,
-      slope: r.slope,
     }));
   const limit = Math.min(Math.max(options.limit ?? DEFAULT_EQTL_LIMIT, 1), MAX_EQTL_LIMIT);
 

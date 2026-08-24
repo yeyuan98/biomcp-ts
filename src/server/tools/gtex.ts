@@ -29,7 +29,7 @@ Accepts an HGNC symbol (TP53) or Ensembl gene ID (ENSG00000141510, versioned or 
   server.registerTool(
     'gtex_eqtl',
     {
-      description: `Get significant cis-eQTL associations for a gene in a specific GTEx tissue (GTEx Analysis v10): variant_id, p_value, NES, and slope, sorted by ascending p-value.
+      description: `Get significant cis-eQTL associations for a gene in a specific GTEx tissue (GTEx Analysis v10): variant_id, p_value, and NES (effect direction/size), sorted by ascending p-value.
 
 tissue is a required GTEx tissueSiteDetailId (e.g. Whole_Blood, Brain_Cortex).`,
       inputSchema: {

@@ -18,7 +18,7 @@ const GSE_SOFT = [
   '!Series_supplementary_file = ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE183nnn/GSE183947/suppl/GSE183947_fpkm.csv.gz',
   '!Series_relation = BioProject: https://www.ncbi.nlm.nih.gov/bioproject/PRJNA762469',
   '!Series_relation = SRA: https://www.ncbi.nlm.nih.gov/sra?term=SRP336638',
-  '!Series_relation = SuperSeries of GSE12345',
+  '!Series_relation = SuperSeries of: GSE12345',
   '!Series_summary =',
   '',
 ].join('\n');
@@ -64,7 +64,7 @@ describe('parseSoftRecord', () => {
       '!Series_title = after a continued value',
     ].join('\n');
     const record = parseSoftRecord(text);
-    expect(getSoftValue(record, 'Series_summary')).toBe('a very long summary value thatwraps onto a second line');
+    expect(getSoftValue(record, 'Series_summary')).toBe('a very long summary value that wraps onto a second line');
     expect(getSoftValue(record, 'Series_title')).toBe('after a continued value');
   });
 
