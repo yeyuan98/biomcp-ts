@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **DepMap ETL script** (`scripts/external-databases/depmap/`) — builds a query-ready SQLite database (~5 GB, ~3 min) from the latest DepMap Public release (26Q1): CRISPR gene effect/dependency, expression TPM, copy number, somatic mutations (24 curated columns), model/gene metadata, and essentiality controls in a long-format schema (`WITHOUT ROWID` + gene-direction indexes; index-served queries < 10 ms). Two-step flow per DepMap's CAPTCHA-gated distribution: one-time manual staging of the 9 pinned files from the portal, then `make depmap-build RAW_DIR=...` md5-verifies every file against DepMap's official `no-captcha` manifest before ingesting. Release selection parses `DepMap Public <YY>Q<Q>` names (dates drift in the manifest); pinned schema baselines fail loudly on format drift; default profiles (`IsDefaultEntryForModel=Yes`) are kept, non-defaults skipped and counted. Scripts under `scripts/` are self-contained (not part of the npm package; no `src/` imports), orchestrated exclusively via Makefile targets (`depmap-list`, `depmap-build`), and type-checked by `make typecheck` through the new `tsconfig.scripts.json`. 21 unit tests (RFC4180 parser incl. chunk-boundary escaped quotes, manifest parsing/release selection, dataset map, md5 staging verification, full ingest on fixtures) plus an env-gated live-manifest integration test (`BIOMCP_DEPMAP_IT=1`).
+
 ## [0.4.0] - 2026-08-24
 
 ### Added

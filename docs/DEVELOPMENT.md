@@ -13,7 +13,7 @@ npm install
 make              # Show available targets
 make install      # Install dependencies
 make build        # Compile and bundle into dist/bundle.js (+ dist/db.js)
-make typecheck    # Type-check without emitting
+make typecheck    # Type-check src/ + scripts/ without emitting
 make clean        # Remove build artifacts
 ```
 
@@ -71,4 +71,5 @@ Version lives in `package.json`; notable changes go to [CHANGELOG.md](../CHANGEL
 | `src/connections/` | HTTP layer: source registry, REST/GraphQL clients, rate limiting, retries, circuit breakers, proxy-aware fetch |
 | `src/db/` | Optional SQL variant (see [DATABASE.md](DATABASE.md)) |
 | `src/transform/` | Upstream payload → normalized schema mappers |
+| `scripts/` | Self-contained ETL scripts for API-less external databases (not part of the npm package); orchestrated via Makefile targets, e.g. `make depmap-build` — see [scripts/external-databases/](../scripts/external-databases/README.md) |
 | `docs/` | Feature guides (`DATABASE.md`, `ENV-VARS.md`, `AGENT-INSTALL.md`) |

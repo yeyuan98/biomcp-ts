@@ -78,6 +78,33 @@ List tables/views with engine, row count (approximate for MySQL via `information
 
 Get column schema: name, type, nullability, key type (`PRI`/`UNI`/`MUL`), default value, and comments.
 
+## Prebuilt external databases
+
+Some data sources (e.g. DepMap) have no usable programmatic API, so their data is acquired
+and organized ahead of time by standalone scripts in
+[`scripts/external-databases/`](../scripts/external-databases/README.md) — orchestrated
+through Makefile targets, never at MCP-tool call time.
+
+### DepMap (Cancer Dependency Map)
+
+```bash
+make depmap-list RAW_DIR=/path/to/staged/files   # what to stage + verification status
+make depmap-build RAW_DIR=/path/to/staged/files   # md5-verify + build the SQLite DB
+```
+
+Staging is a one-time manual step (browser download from the DepMap portal — its CAPTCHA
+blocks programmatic access); the script verifies every file's md5 against DepMap's official
+manifest. The build takes ~3 minutes and produces a ~5 GB database (CRISPR gene
+effect/dependency, expression, copy number, mutations, model/gene metadata) — see the
+[script README](../scripts/external-databases/depmap/README.md) for the schema, semantics,
+and licensing notes. Then point the db tools at it:
+
+```bash
+DB_TYPE=sqlite DB_SQLITE_PATH=scripts/external-databases/depmap/dist/depmap-26Q1.db npx .
+```
+
+The script's live-manifest integration test is skipped unless `BIOMCP_DEPMAP_IT=1` is set.
+
 ## Programmatic Use
 
 The feature is exported from the `biomcp/db` subpath:
