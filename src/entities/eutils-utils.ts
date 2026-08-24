@@ -49,6 +49,17 @@ export function parseEutilsJson<T extends EutilsEnvelope>(raw: string, context: 
   return parsed;
 }
 
+/**
+ * Canonical guard for E-utilities JSON calls made through RestConnection,
+ * which already JSON-parses application/json bodies and returns strings
+ * for everything else. Accepts either shape, re-stringifying objects so
+ * the shared envelope check (plus non-JSON/HTML-block detection) always
+ * runs.
+ */
+export function parseEutilsResponse<T extends EutilsEnvelope>(response: unknown, context: string): T {
+  return parseEutilsJson<T>(typeof response === 'string' ? response : JSON.stringify(response), context);
+}
+
 function assertEutilsPayload(parsed: EutilsEnvelope, context: string): void {
   const error =
     parsed.error ?? parsed.esearchresult?.error ?? parsed.result?.error;
