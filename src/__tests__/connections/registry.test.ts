@@ -2,7 +2,7 @@ import { SOURCE_REGISTRY, getSourceConfig, getSourcesByProtocol, getSourcesRequi
 
 describe('SOURCE_REGISTRY', () => {
   it('has expected keys', () => {
-    const expectedKeys = ['mygene', 'myvariant', 'mychem', 'pubmed', 'clinicaltrials', 'opentargets'];
+    const expectedKeys = ['mygene', 'myvariant', 'mychem', 'eutils', 'geo_soft', 'gtex', 'clinicaltrials', 'opentargets'];
     for (const key of expectedKeys) {
       expect(SOURCE_REGISTRY).toHaveProperty(key);
     }

@@ -67,7 +67,7 @@ export async function resolveToPmid(id: string, type: 'doi' | 'pmcid'): Promise<
 
 export async function resolveDoiToPmid(doi: string): Promise<ResolvedPmid> {
   try {
-    const conn = connectionManager.getConnection('pubmed');
+    const conn = connectionManager.getConnection('eutils');
 
     const searchResponse = await conn.request(
       `/esearch.fcgi?db=pubmed&term=${encodeURIComponent(doi)}[doi]&retmode=json&retmax=1`

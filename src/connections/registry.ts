@@ -32,6 +32,17 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
   },
+  // GEO SOFT viewer (acc.cgi): serves plain-text SOFT records for GEO
+  // accessions (GSE/GSM/GPL). Separate from E-utilities (different host,
+  // separate rate budget); may return HTML block pages to datacenter IPs,
+  // which callers must sniff for.
+  geo_soft: {
+    sourceId: 'geo_soft',
+    baseUrl: 'https://www.ncbi.nlm.nih.gov/geo/query',
+    protocol: 'rest',
+    handling: { timeoutMs: 15000 },
+    rateLimit: { intervalMs: 300 },
+  },
 
   // ==========================================
   // PROTEINS & PATHWAYS - REST (3 sources)
@@ -102,8 +113,14 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   // ==========================================
   // LITERATURE - REST (9 sources)
   // ==========================================
-  pubmed: {
-    sourceId: 'pubmed',
+  // Shared NCBI E-utilities connection: serves PubMed (article_*), GEO
+  // (db=gds), SRA (db=sra), GenBank (db=nuccore) and BioSample lookups.
+  // Single entry on purpose: ConnectionManager caches one rate limiter per
+  // sourceId, and NCBI enforces a shared 3 req/s budget per IP across ALL
+  // E-utilities databases — a duplicate entry would double the effective
+  // rate and risk an IP ban.
+  eutils: {
+    sourceId: 'eutils',
     baseUrl: 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils',
     protocol: 'rest',
     handling: {

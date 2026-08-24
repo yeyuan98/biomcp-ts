@@ -23,8 +23,8 @@ export async function searchPubMed(query: string, limit: number, offset: number,
       searchUrl += `&maxdate=${dateRange.to ? formatPubMedDate(dateRange.to) : '3000/12/31'}`;
     }
 
-    // Retry policy lives on the registry 'pubmed' source config.
-    const conn = connectionManager.getConnection('pubmed');
+    // Retry policy lives on the registry 'eutils' source config.
+    const conn = connectionManager.getConnection('eutils');
     const searchResponse = await conn.request(searchUrl) as PubMedSearchResponse;
 
     if (!searchResponse.esearchresult?.idlist?.length) return [];
