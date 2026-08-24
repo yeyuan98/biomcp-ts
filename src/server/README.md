@@ -104,7 +104,17 @@ Param-based dispatch: `query` → search mode, `pdb_id` → get mode, `pdb_id` +
 | `patent_search` | `query: string` (quote exact multi-word concepts, e.g. "mRNA display"), `assignee?: string`, `inventor?: string`, `cpc?: string` (full symbol e.g. "C12N15/11"), `status?: "granted" \| "application"`, `date_range?: string` (YYYY-MM-DD/YYYY-MM-DD, open-ended allowed), `limit?: number (1-50, default 10)`, `offset?: number (default 0)`, `source?: "ops" \| "uspto_odp" \| "ppubs" \| "google_patents"`, `sort_by?: "relevance" \| "recency"` (default relevance; ppubs only), `seminal?: boolean` (default true: co-citation discovery of foundational prior art in `seminal_prior_art`; ~5-20s, set false for fastest lookups) | Search patents worldwide. Backends: ppubs (US full-text conceptual search, keyless, relevance-ranked — default US backend), ops (EPO OPS worldwide bibliographic, keyed), uspto_odp (US application metadata, bibliographic, keyed), google_patents (best-effort). Auto mode = worldwide + ppubs; hard ppubs failure falls back to uspto_odp once (tagged `_note`); 0-hit searches get a `_hint` | readOnly, openWorld |
 | `patent_get` | `patent_id: string` (e.g. "US11027025B2", "EP3904939B1"), `sections?: ("core" \| "abstract" \| "claims" \| "citations" \| "family" \| "classifications" \| "all")[]`, `limit?: number (1-100, default 20)` | Get patent details with per-section source fallback chains. Claims: US fulltext via PPUBS, EP/WO via OPS. Citations include forward (`ct=`) and backward references | readOnly, openWorld |
 
-**Total: 27 tools** across 9 registration modules.
+### Database Tools (`tools/db.ts`) — 3 tools (optional)
+
+Registered only when `DB_TYPE` is set — see [docs/DATABASE.md](../../docs/DATABASE.md).
+
+| Tool | Input Schema | Description | Annotations |
+|------|-------------|-------------|-------------|
+| `db_query` | `sql: string`, `params?: Record<string, unknown>` | Execute a read-only SELECT query with named parameters (`:name`). Allow-list: SELECT/SHOW/DESCRIBE/EXPLAIN/WITH; blocks writes, multi-statement SQL, `INTO OUTFILE/DUMPFILE` | readOnly |
+| `db_list_tables` | — | List tables/views with engine, row count, creation time, comments | readOnly |
+| `db_describe_table` | `table_name: string` | Column schema: name, type, nullability, key type, default value | readOnly |
+
+**Total: 27 core tools** across 10 registration modules (+3 optional database tools).
 
 ## Error Handling (`errors.ts`)
 
