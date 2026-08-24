@@ -18,6 +18,21 @@ npm run test:all         # All tests combined
 npm run test:coverage    # Unit tests with coverage
 ```
 
+> **Always run tests via the npm scripts or `make` targets.** This is a native-ESM
+> project (`"type": "module"` + ts-jest ESM), so jest must be launched with
+> `node --experimental-vm-modules`. The npm scripts do this for you. A bare
+> `npx jest …` invocation will *appear* to work but silently degrades: ESM mocks
+> registered via `jest.unstable_mockModule` stop applying (tests then assert against
+> real modules — e.g. the proxy suite hits live undici) and any module using
+> `import.meta.url` fails with "Cannot use 'import.meta' outside a module".
+>
+> If you must invoke jest directly, use:
+>
+> ```bash
+> node --experimental-vm-modules node_modules/.bin/jest [args…]
+> ```
+
+
 ## Directory Structure
 
 ```
