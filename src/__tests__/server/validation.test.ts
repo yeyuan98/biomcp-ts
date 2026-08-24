@@ -91,6 +91,48 @@ describe('InputValidation.limit', () => {
   });
 });
 
+describe('InputValidation.geoAccession', () => {
+  it('accepts GSE/GSM/GPL accessions', () => {
+    expect(InputValidation.geoAccession.safeParse('GSE183947').success).toBe(true);
+    expect(InputValidation.geoAccession.safeParse('GSM5574685').success).toBe(true);
+    expect(InputValidation.geoAccession.safeParse('GPL11154').success).toBe(true);
+  });
+
+  it('rejects GDS and malformed accessions', () => {
+    expect(InputValidation.geoAccession.safeParse('GDS1234').success).toBe(false);
+    expect(InputValidation.geoAccession.safeParse('GSE').success).toBe(false);
+  });
+});
+
+describe('InputValidation.sraAccession', () => {
+  it('accepts SRP/SRX/SRR/SRS/SRZ accessions', () => {
+    for (const prefix of ['SRP', 'SRX', 'SRR', 'SRS', 'SRZ']) {
+      expect(InputValidation.sraAccession.safeParse(`${prefix}14432476`).success).toBe(true);
+    }
+  });
+
+  it('rejects European/DDBJ accessions and malformed input', () => {
+    expect(InputValidation.sraAccession.safeParse('ERP123456').success).toBe(false);
+    expect(InputValidation.sraAccession.safeParse('ERR123456').success).toBe(false);
+    expect(InputValidation.sraAccession.safeParse('DRP123456').success).toBe(false);
+    expect(InputValidation.sraAccession.safeParse('SRR').success).toBe(false);
+  });
+});
+
+describe('InputValidation.genbankAccession', () => {
+  it('accepts versioned and bare RefSeq/GenBank accessions', () => {
+    expect(InputValidation.genbankAccession.safeParse('NC_000023.11').success).toBe(true);
+    expect(InputValidation.genbankAccession.safeParse('NG_017013.2').success).toBe(true);
+    expect(InputValidation.genbankAccession.safeParse('KJ668569.2').success).toBe(true);
+    expect(InputValidation.genbankAccession.safeParse('U12345').success).toBe(true);
+  });
+
+  it('rejects malformed accessions', () => {
+    expect(InputValidation.genbankAccession.safeParse('not an accession').success).toBe(false);
+    expect(InputValidation.genbankAccession.safeParse('NC_').success).toBe(false);
+  });
+});
+
 describe('formatValidationErrors', () => {
   it('formats single error as multiline string', () => {
     const result = formatValidationErrors([{ path: 'name', message: 'Required' }]);
@@ -152,6 +194,18 @@ describe('isValidEntityInput', () => {
     expect(isValidEntityInput('patent', 'crispr')).toBe(false);
     expect(isValidEntityInput('patent', '12345')).toBe(false);
   });
+
+  it('returns true for valid geo/sra/genbank inputs', () => {
+    expect(isValidEntityInput('geo', 'GSE183947')).toBe(true);
+    expect(isValidEntityInput('sra', 'SRR14432476')).toBe(true);
+    expect(isValidEntityInput('genbank', 'NC_000023.11')).toBe(true);
+  });
+
+  it('returns false for invalid geo/sra/genbank inputs', () => {
+    expect(isValidEntityInput('geo', 'GDS1234')).toBe(false);
+    expect(isValidEntityInput('sra', 'ERP123456')).toBe(false);
+    expect(isValidEntityInput('genbank', '###')).toBe(false);
+  });
 });
 
 describe('getEntitySuggestions', () => {
@@ -184,6 +238,12 @@ describe('getEntitySuggestions', () => {
 
   it('returns suggestion for patent mentioning patent_search', () => {
     expect(getEntitySuggestions('patent')).toContain('patent_search');
+  });
+
+  it('returns suggestions for geo, sra, and genbank', () => {
+    expect(getEntitySuggestions('geo')).toContain('geo_search');
+    expect(getEntitySuggestions('sra')).toContain('sra_search');
+    expect(getEntitySuggestions('genbank')).toContain('genbank_search');
   });
 
   it('returns fallback for unknown entity', () => {
