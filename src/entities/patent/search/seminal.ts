@@ -12,13 +12,16 @@ const RESOLVE_TOP_N = 3;
 const RESOLUTION_MIN_REMAINING_MS = 3_000;
 
 /**
- * Overall budget for the whole seminal phase (mining + resolution),
- * independent of (and under) the tool-level timeout — a mining blowup must
- * degrade to a note, never destroy the main search results. Mining alone
- * paces ~10s (1 req/s limiter over 9 calls); OPS/GP resolution needs ~3-6s
- * more, so 20s leaves margin under the 30s tool timeout.
+ * Overall cap for the whole seminal phase (mining + resolution). The
+ * effective budget is caller-supplied: auto mode passes the tool-budget
+ * remainder (elapsed-aware, see search/index.ts), other callers get this
+ * default. Independent of (and under) the tool-level timeout — a mining
+ * blowup must degrade to a note, never destroy the main search results.
+ * Mining alone paces ~11-13s (1 req/s limiter over 1 pool + 10 doc
+ * calls, plus any 429 retry waits); OPS/GP resolution needs ~3-6s more,
+ * so 30s leaves margin under the 60s tool timeout.
  */
-export const SEMINAL_DEADLINE_MS = 20_000;
+export const SEMINAL_MAX_BUDGET_MS = 30_000;
 
 const KEYLESS_RESOLUTION_NOTE =
   'PCT publication; national-phase equivalents (e.g. US grants) could not be resolved automatically. ' +
@@ -265,7 +268,10 @@ interface Candidate {
 
 function timeoutReject(ms: number): Promise<never> {
   return new Promise((_, reject) => {
-    const timer = setTimeout(() => reject(new Error('seminal mining deadline exceeded')), Math.max(ms, 0));
+    const timer = setTimeout(
+      () => reject(new Error(`seminal mining deadline exceeded after ${Math.round(Math.max(ms, 0) / 1000)}s of the mining budget`)),
+      Math.max(ms, 0),
+    );
     // Don't hold the event loop after the raced promise wins (script/CLI use).
     (timer as { unref?: () => void }).unref?.();
   });
@@ -329,8 +335,9 @@ function assigneeOf(record: PpubsPoolRecord): string {
 export async function mineSeminalPriorArt(
   query: string,
   visibleResults: PatentSearchResult[],
+  budgetMs: number = SEMINAL_MAX_BUDGET_MS,
 ): Promise<SeminalOutcome> {
-  const deadline = Date.now() + SEMINAL_DEADLINE_MS;
+  const deadline = Date.now() + budgetMs;
   const timeLeft = () => deadline - Date.now();
 
   const visibleKeys = new Set(
@@ -359,18 +366,32 @@ export async function mineSeminalPriorArt(
     return { entries: [], mined: grants.length, note: 'too few granted documents in the top results to mine reliably' };
   }
 
-  const settledDocs = await Promise.race([
-    Promise.allSettled(grants.map(g => ppubsClient.getDocument(g.guid!, g.type!))),
+  // Degrade-to-partial docs phase: each document records into `docs` the
+  // moment it settles, so a deadline hit keeps whatever already settled
+  // instead of discarding everything (the previous all-or-nothing race
+  // threw away already-fetched references on timeout).
+  const docs: Array<{ status: number; body: string } | null> = grants.map(() => null);
+  await Promise.race([
+    Promise.all(grants.map(async (g, i) => {
+      try {
+        const resp = await ppubsClient.getDocument(g.guid!, g.type!);
+        docs[i] = { status: resp.status, body: resp.body };
+      } catch {
+        docs[i] = null; // same semantics as a rejected allSettled entry
+      }
+    })),
     timeoutReject(timeLeft()),
-  ]);
+  ]).catch(() => {
+    // deadline: fall through with the partial snapshot
+  });
 
   const counts = new Map<string, Candidate>();
   let mined = 0;
-  settledDocs.forEach((res, i) => {
-    if (res.status !== 'fulfilled' || res.value.status !== 200) return;
+  docs.forEach((docResp, i) => {
+    if (!docResp || docResp.status !== 200) return;
     let doc: PpubsDocRecord;
     try {
-      doc = JSON.parse(res.value.body);
+      doc = JSON.parse(docResp.body);
     } catch {
       return;
     }

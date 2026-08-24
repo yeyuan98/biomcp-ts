@@ -3,24 +3,34 @@ import { HttpConnectionError } from '../../../connections/errors.js';
 import type { PatentSearchOptions, PatentSearchResult } from '../types.js';
 import { kindToStatus } from './dedup.js';
 
+/** HTTP 503/429 blocks: Google hard-IP-blocks for 24h+ — stay open long. */
 const BREAKER_OPEN_MS = 30 * 60 * 1000;
+/**
+ * Network-class trips (proxy blips, DNS, connect timeouts): recover in
+ * seconds-to-minutes. A 30-min window here once degraded auto mode to
+ * US-only for half an hour off a single transient "fetch failed" with no
+ * recovery path (resetGooglePatentsBreaker has no production caller;
+ * expiry is the only half-open).
+ */
+const NETWORK_BREAKER_OPEN_MS = 2 * 60 * 1000;
 
 interface BreakerState {
   openedAt: number;
+  openMs: number;
 }
 
 let breaker: BreakerState | null = null;
 
 export function isGooglePatentsBlocked(): boolean {
-  return breaker !== null && Date.now() - breaker.openedAt < BREAKER_OPEN_MS;
+  return breaker !== null && Date.now() - breaker.openedAt < breaker.openMs;
 }
 
 export function resetGooglePatentsBreaker(): void {
   breaker = null;
 }
 
-function tripBreaker(): void {
-  breaker = { openedAt: Date.now() };
+function tripBreaker(openMs: number): void {
+  breaker = { openedAt: Date.now(), openMs };
 }
 
 /**
@@ -40,7 +50,7 @@ export function isNetworkError(err: unknown): boolean {
 export function breakerRemainingMinutes(): number {
   if (!isGooglePatentsBlocked()) return 0;
   const elapsed = Date.now() - breaker!.openedAt;
-  return Math.max(1, Math.ceil((BREAKER_OPEN_MS - elapsed) / 60_000));
+  return Math.max(1, Math.ceil((breaker!.openMs - elapsed) / 60_000));
 }
 
 function stripHtml(s: string | undefined): string | undefined {
@@ -135,11 +145,10 @@ export async function searchGooglePatents(
   try {
     raw = await conn.request(path);
   } catch (err) {
-    if (
-      (err instanceof HttpConnectionError && (err.status === 503 || err.status === 429)) ||
-      isNetworkError(err)
-    ) {
-      tripBreaker();
+    if (isNetworkError(err)) {
+      tripBreaker(NETWORK_BREAKER_OPEN_MS);
+    } else if (err instanceof HttpConnectionError && (err.status === 503 || err.status === 429)) {
+      tripBreaker(BREAKER_OPEN_MS);
     }
     throw err;
   }

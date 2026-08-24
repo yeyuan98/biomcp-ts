@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-24
+
+### Fixed
+
+- `patent_search` seminal prior-art mining: a fixed 20 s mining deadline (sized for the old 30 s tool timeout) collided with shared ppubs rate-limiter contention and every failure collapsed into a misleading constant "mining source unavailable" note — while forced-source mining succeeded. Mining now runs on an adaptive budget (60 s tool budget minus elapsed search time, capped at 30 s, skipped with an explicit "time budget exhausted" note when under 8 s remain), failure notes carry the real cause (deadline with budget, PPUBS HTTP status, malformed payload), and the reference-fetch phase keeps already-fetched documents on deadline instead of discarding them.
+- Google Patents search circuit breaker: network-class failures (`fetch failed`/`ETIMEDOUT`/…) now open the breaker for 2 min instead of 30 min; HTTP 503/429 blocks keep the 30-min window (`breakerRemainingMinutes` reports the per-trip duration).
+
+### Changed
+
+- `SEARCH_TIMEOUT_MS` is derived from the entity-exported `PATENT_SEARCH_TOOL_BUDGET_MS` (60 s); patent entity README and `patent_search` description updated to match current behavior.
+
 ## [0.3.0] - 2026-08-24
 
 ### Breaking

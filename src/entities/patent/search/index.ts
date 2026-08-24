@@ -1,5 +1,5 @@
 import type { PatentSearchOptions, PatentSearchResponse, PatentSearchResult, PatentSource } from '../types.js';
-import { hasOpsCredentials, isOpsBackedOff, opsBackoffReason, recordOpsFailure, recordOpsSuccess, resetOpsBackoff } from '../ops-client.js';
+import { hasOpsCredentials, isOpsBackedOff, opsBackoffReason, recordOpsFailure, recordOpsSuccess } from '../ops-client.js';
 import { hasOdpKey } from './odp.js';
 import { isGooglePatentsBlocked } from './google-patents.js';
 import { dedupPatents } from './dedup.js';
@@ -8,6 +8,27 @@ export const PATENT_SEARCH_SOURCES: readonly PatentSource[] = ['ops', 'uspto_odp
 
 /** Skip the ppubs→odp fallback when the tool timeout budget is nearly spent. */
 const FALLBACK_BUDGET_MS = 12_000;
+
+/**
+ * Tool-level timeout budget for patent_search. Exported so server/tools
+ * derives SEARCH_TIMEOUT_MS from it (no upward import) and the seminal
+ * mining phase can adapt to elapsed time instead of assuming a fixed
+ * budget — the fixed 20s deadline predated the 30s → 60s tool-timeout
+ * bump and misreported rate-limiter pacing as "mining source
+ * unavailable" (verified: batch auto-mode calls queue behind the shared
+ * 1 req/s ppubs bucket; forced-source calls start mining with it full).
+ */
+export const PATENT_SEARCH_TOOL_BUDGET_MS = 60_000;
+
+/** Reserved under the tool budget for response serialization/transport. */
+const MINING_SAFETY_MARGIN_MS = 5_000;
+/**
+ * Below this remaining budget mining is skipped outright: the phase
+ * needs ~11 paced ppubs calls (1 pool + 10 docs at 1 req/s), so a
+ * shorter budget cannot finish and would risk the tool timeout
+ * destroying the whole response — main results included.
+ */
+const MINING_MIN_BUDGET_MS = 8_000;
 
 const EMPTY_HINT =
   'No patents matched. Try quoting an exact concept phrase (e.g. "mRNA display"), broadening terms, ' +
@@ -205,6 +226,9 @@ export async function patentSearch(
   // Foundational prior-art discovery via co-citation mining. Default-on
   // (opt out with seminal: false); runs only when real results exist and
   // degrades to a note on any failure — it must never break the search.
+  // The budget adapts to elapsed time: elapsed is measured after the
+  // fallback loop so a slow main search (or the shared ppubs rate limiter
+  // draining under batch concurrency) shrinks — or skips — mining.
   const response: PatentSearchResponse = { patents, total_hits };
   if (total_hits_basis && Object.keys(total_hits_basis).length > 0) {
     response.total_hits_basis = total_hits_basis;
@@ -215,14 +239,22 @@ export async function patentSearch(
     );
     if (hasRealResults) {
       let seminal_note: string | undefined;
-      try {
-        const { mineSeminalPriorArt } = await import('./seminal.js');
-        const outcome = await mineSeminalPriorArt(query, patents);
-        response.seminal_prior_art = outcome.entries;
-        response.mined_count = outcome.mined;
-        seminal_note = outcome.note;
-      } catch {
-        seminal_note = 'seminal prior-art discovery skipped (mining source unavailable)';
+      const elapsed = Date.now() - startedAt;
+      const remaining = PATENT_SEARCH_TOOL_BUDGET_MS - elapsed - MINING_SAFETY_MARGIN_MS;
+      if (remaining < MINING_MIN_BUDGET_MS) {
+        seminal_note = `seminal prior-art discovery skipped (time budget exhausted after a slow search; ${Math.round(elapsed / 1000)}s already spent)`;
+      } else {
+        try {
+          const { mineSeminalPriorArt, SEMINAL_MAX_BUDGET_MS } = await import('./seminal.js');
+          const outcome = await mineSeminalPriorArt(query, patents, Math.min(remaining, SEMINAL_MAX_BUDGET_MS));
+          response.seminal_prior_art = outcome.entries;
+          response.mined_count = outcome.mined;
+          seminal_note = outcome.note;
+        } catch (err) {
+          // Never break the search — but do report the real cause (deadline,
+          // PPUBS 5xx, malformed payload) instead of a constant string.
+          seminal_note = `seminal prior-art discovery skipped (${err instanceof Error ? err.message : String(err)})`;
+        }
       }
       if (!/"[^"]+"/.test(query) && query.trim().split(/\s+/).length > 1) {
         seminal_note = [

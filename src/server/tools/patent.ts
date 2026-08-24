@@ -1,9 +1,11 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { patentSearch, patentGet, PATENT_GET_SECTIONS } from '../../entities/patent/index.js';
+import { patentSearch, patentGet, PATENT_GET_SECTIONS, PATENT_SEARCH_TOOL_BUDGET_MS } from '../../entities/patent/index.js';
 import { applyLimit, withToolTimeout } from './utils.js';
 
-const SEARCH_TIMEOUT_MS = 60000;
+// Derived from the entity-exported budget so the seminal mining phase can
+// size itself against the real tool timeout (see search/index.ts).
+const SEARCH_TIMEOUT_MS = PATENT_SEARCH_TOOL_BUDGET_MS;
 const GET_TIMEOUT_MS = 120000;
 
 const PATENT_ALL_SECTIONS = ['abstract', 'claims', 'citations', 'family', 'classifications'];
@@ -44,7 +46,7 @@ export function registerPatentTools(server: McpServer): void {
           .optional()
           .describe('Result ranking: "relevance" (default, conceptual match ranking) or "recency" (newest first). Currently affects the ppubs backend only'),
         seminal: z.boolean().optional()
-          .describe('Discover foundational prior art via co-citation analysis of the top results (default: true; adds ~5-15s; set false for the fastest bibliographic lookups)'),
+          .describe('Discover foundational prior art via co-citation analysis of the top results (default: true; adds ~5-30s; set false for the fastest bibliographic lookups)'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },

@@ -95,7 +95,8 @@ batch. Co-citation mining closes that gap:
 4. **Cross-assignee threshold**: cited by ≥ 3 sampled docs AND ≥ 2 distinct
    assignees (single-family block-citation blobs never qualify); ranked by
    assignee breadth then count; capped at 5 `seminal_prior_art` entries.
-5. WO→US resolution, deadline-bounded (~20 s total phase budget): EPO OPS
+5. WO→US resolution, deadline-bounded (adaptive budget: the 60 s tool
+   budget minus elapsed search time, capped at ~30 s): EPO OPS
    INPADOC family (earliest granted US member + title + assignee via
    biblio) → Google Patents detail keylessly (PCT-kind variants A1/A2/
    kindless, with **page-identity validation** — Google sometimes redirects
@@ -103,9 +104,12 @@ batch. Co-citation mining closes that gap:
    exit IPs; a mismatched page is rejected) → WO display form + actionable
    note (inventor-search fallback, patent_get pointer).
 
-`seminal: false` opts out. Failures degrade to `seminal_note` hints (too
-few grants, no common refs, unquoted-query precision tip, source
-unavailable) and never break the main search.
+`seminal: false` opts out. Failures degrade to `seminal_note` hints
+carrying the real cause (deadline exceeded with the budget, PPUBS mining
+HTTP status, malformed payload, too few grants, no common refs,
+unquoted-query precision tip, budget-exhausted skip) and never break the
+main search. The docs phase is degrade-to-partial: references already
+fetched when the deadline hits are counted rather than discarded.
 
 ## Proxy-aware fetch
 
@@ -115,12 +119,16 @@ Details and limitations are documented in `src/connections/README.md`.
 
 ## Resilience
 
-The Google Patents search breaker also trips on network errors
-(`fetch failed`/`ETIMEDOUT`/… — previously it retried and appended a fresh
-`_error` on every search forever); OPS auto-mode selection has 2-strike/15-min
-backoff (auth-class failures trip immediately; explicit `source: 'ops'`
-always attempts); when no worldwide backend remains, one `_note` explains the
-US-only coverage instead of silently dropping it.
+The Google Patents search breaker trips with class-specific windows:
+HTTP 503/429 blocks open it for 30 min (blocks last 24h+); network-class
+errors (`fetch failed`/`ETIMEDOUT`/…) open it for only 2 min. Earlier
+regressions this replaces: network errors retried forever appending a
+fresh `_error` per search, then a single transient blip excluded Google
+Patents from auto mode for half an hour with no recovery path. OPS
+auto-mode selection has 2-strike/15-min backoff (auth-class failures
+trip immediately; explicit `source: 'ops'` always attempts); when no
+worldwide backend remains, one `_note` explains the US-only coverage
+instead of silently dropping it.
 
 `patentGet` sections run per-section priority chains with auth-aware silent
 skip and fall-through. Each **source step** is raced against a timeout of
@@ -233,8 +241,10 @@ source code. Kept here so future maintainers don't re-verify from scratch.
   Layout varies by jurisdiction (EP lacks ref rows; JP lacks forwardRefs) —
   parser treats every field as optional.
 - **IP-blocking is proven**: light probing earned a 503 "automated queries"
-  block lasting 24h+. A circuit breaker (30 min) guards both search and
-  detail; detail falls back to Wayback (`archive.org/wayback/available` →
+  block lasting 24h+. The search circuit breaker (30 min on HTTP blocks,
+  2 min on network-class trips) guards `searchGooglePatents` only — detail
+  fetches keep their own independent 30-min block state; detail falls back
+  to Wayback (`archive.org/wayback/available` →
   `web.archive.org/web/{ts}id_/...`, gzip magic-byte sniff) when coverage
   exists. Snapshot gating: `available: false` or a 4xx/5xx capture `status`
   skips the snapshot before playback (status-page captures can never serve

@@ -405,6 +405,122 @@ describe('seminal prior-art mining', () => {
     expect(response.seminal_note).toContain('too few granted documents yielded reference data');
   });
 
+  // Mining-failure/adaptive-budget mocks: GP leg fails softly, the main
+  // ppubs search returns real results, and the pool/docs legs delegate to
+  // caller-supplied handlers (non-200 bodies, malformed payloads, hangs).
+  function ppubsSeminalPhaseMock(opts: {
+    pool: () => unknown;
+    docs?: Record<string, () => unknown>;
+    mainPatents?: unknown[];
+    searchCalls?: { count: number };
+    onMainSearch?: () => void;
+  }) {
+    return jest.fn().mockImplementation((url: any, init?: any) => {
+      const u = String(url);
+      if (u.includes('patents.google.com')) {
+        return Promise.reject(new Error('no network'));
+      }
+      if (u.includes('/api/users/me/session')) {
+        return jsonResp({ userCase: { caseId: 1 } }, { 'x-access-token': 'tok-1', 'content-type': 'application/json' });
+      }
+      if (u.includes('/api/searches/searchWithBeFamily')) {
+        const body = JSON.parse(init.body);
+        if (opts.searchCalls) opts.searchCalls.count++;
+        if (body.pageCount >= 100) return opts.pool();
+        opts.onMainSearch?.();
+        return jsonResp({ patents: opts.mainPatents ?? [POOL_GRANTS[0]], numberOfFamilies: 100 });
+      }
+      if (u.includes('/api/patents/highlight/')) {
+        for (const guid of Object.keys(opts.docs ?? {})) {
+          if (u.includes(guid)) return opts.docs![guid]();
+        }
+      }
+      return Promise.reject(new Error(`unexpected ${u}`));
+    });
+  }
+
+  test('mining failure note surfaces the real cause (PPUBS pool HTTP 500)', async () => {
+    global.fetch = ppubsSeminalPhaseMock({
+      pool: () => ({ ok: false, status: 500, headers: new Headers({}), text: () => Promise.resolve('upstream exploded') }),
+      mainPatents: [POOL_GRANTS[0], POOL_APPS[0]],
+    }) as any;
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await advanceUntilSettled(patentSearch('"mRNA display"', { limit: 5 }));
+    // main page intact; the note carries the underlying status, not a constant string
+    expect(response.patents.filter(p => !p._error)).toHaveLength(2);
+    expect(response.seminal_note).toContain('skipped');
+    expect(response.seminal_note).toContain('PPUBS mining-pool search failed: HTTP 500');
+  });
+
+  test('mining failure note surfaces malformed pool payloads', async () => {
+    global.fetch = ppubsSeminalPhaseMock({
+      pool: () => ({ ok: true, status: 200, headers: new Headers({ 'content-type': 'application/json' }), text: () => Promise.resolve('<html>bad gateway</html>') }),
+    }) as any;
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
+    expect(response.seminal_note).toContain('skipped');
+    expect(response.seminal_note).toContain('PPUBS mining-pool search returned malformed JSON');
+  });
+
+  test('mining deadline note names the budget (default cap 30s)', async () => {
+    global.fetch = ppubsSeminalPhaseMock({
+      pool: () => new Promise(() => {}), // hangs; mock ignores the abort signal
+    }) as any;
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
+    expect(response.patents.filter(p => !p._error)).toHaveLength(1);
+    expect(response.seminal_note).toContain('skipped');
+    expect(response.seminal_note).toContain('deadline exceeded after 30s');
+    expect(response.seminal_note).not.toContain('mining source unavailable');
+  });
+
+  test('mining budget adapts to elapsed search time (35s elapsed → 20s budget)', async () => {
+    // A frozen Date.now spy would deadlock the token-bucket refill (it needs
+    // an advancing clock), so the slow search is simulated with a system-time
+    // jump inside the main-search mock — fake-time advancement continues.
+    global.fetch = ppubsSeminalPhaseMock({
+      pool: () => new Promise(() => {}),
+      onMainSearch: () => { jest.setSystemTime(new Date(Date.now() + 35_000)); },
+    }) as any;
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
+    expect(response.seminal_note).toContain('deadline exceeded after 20s');
+  });
+
+  test('mining is skipped outright when the remaining budget is under the floor', async () => {
+    const searchCalls = { count: 0 };
+    global.fetch = ppubsSeminalPhaseMock({
+      pool: () => { throw new Error('pool search must not run when the budget is exhausted'); },
+      searchCalls,
+      onMainSearch: () => { jest.setSystemTime(new Date(Date.now() + 50_000)); }, // 5s remaining < 8s floor
+    }) as any;
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
+    expect(searchCalls.count).toBe(1); // main search only — no pool call burned
+    expect(response.patents.filter(p => !p._error)).toHaveLength(1);
+    expect(response.seminal_prior_art).toBeUndefined();
+    expect(response.mined_count).toBeUndefined();
+    expect(response.seminal_note).toContain('time budget exhausted');
+  });
+
+  test('docs phase degrades to partial on deadline instead of discarding fetched refs', async () => {
+    global.fetch = ppubsSeminalPhaseMock({
+      pool: () => jsonResp({ patents: POOL_GRANTS, numberOfFamilies: 100 }),
+      docs: {
+        'US-9347058-B2': () => jsonResp(DOC_REFS['US-9347058-B2']),
+        'US-11060085-B2': () => jsonResp(DOC_REFS['US-11060085-B2']),
+        'US-11913137-B2': () => new Promise(() => {}), // hangs past the deadline
+      },
+    }) as any;
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
+    // two settled docs count; no throw → no 'skipped' note
+    expect(response.mined_count).toBe(2);
+    expect(response.seminal_prior_art).toEqual([]);
+    expect(response.seminal_note).toContain('too few granted documents yielded reference data');
+    expect(response.seminal_note ?? '').not.toContain('skipped');
+  });
+
   test('non-200 getDocument bodies do not inflate the mined denominator', async () => {
     global.fetch = jest.fn().mockImplementation((url: any) => {
       const u = String(url);
@@ -900,6 +1016,49 @@ describe('patent search federation', () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
     gp.resetGooglePatentsBreaker();
     connectionManager.closeAll();
+  });
+
+  test('breaker: network-class trip reopens after ~2 min (not 30)', async () => {
+    const gp = await import('../../entities/patent/search/google-patents.js');
+    gp.resetGooglePatentsBreaker();
+    const { connectionManager } = await import('../../connections/manager.js');
+    connectionManager.closeAll();
+    global.fetch = jest.fn().mockRejectedValue(Object.assign(new Error('fetch failed'), { cause: { code: 'ETIMEDOUT' } })) as any;
+
+    await expect(gp.searchGooglePatents('crispr', {})).rejects.toThrow(/fetch failed/);
+    expect(gp.isGooglePatentsBlocked()).toBe(true);
+    expect(gp.breakerRemainingMinutes()).toBe(2); // short network window
+
+    jest.advanceTimersByTime(60_000);
+    expect(gp.isGooglePatentsBlocked()).toBe(true); // still open at t+1min
+    jest.advanceTimersByTime(61_000); // past t+2min: expiry is the half-open
+    expect(gp.isGooglePatentsBlocked()).toBe(false);
+    connectionManager.closeAll();
+    gp.resetGooglePatentsBreaker();
+  });
+
+  test('breaker: HTTP 503 trip keeps the long 30-min window', async () => {
+    const gp = await import('../../entities/patent/search/google-patents.js');
+    gp.resetGooglePatentsBreaker();
+    const { connectionManager } = await import('../../connections/manager.js');
+    connectionManager.closeAll();
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      statusText: 'Service Unavailable',
+      headers: new Headers(),
+      text: () => Promise.resolve('Sorry... automated queries'),
+    }) as any;
+
+    await expect(gp.searchGooglePatents('crispr', {})).rejects.toBeInstanceOf(HttpConnectionError);
+    expect(gp.breakerRemainingMinutes()).toBe(30);
+
+    jest.advanceTimersByTime(3 * 60_000); // beyond the network window…
+    expect(gp.isGooglePatentsBlocked()).toBe(true); // …but 503 blocks persist
+    jest.advanceTimersByTime(28 * 60_000); // 31 min total
+    expect(gp.isGooglePatentsBlocked()).toBe(false);
+    connectionManager.closeAll();
+    gp.resetGooglePatentsBreaker();
   });
 
   test('google patents search quotes multi-word phrases (OR-junk guard)', async () => {

@@ -17,6 +17,7 @@ export type {
 export {
   patentSearch,
   PATENT_SEARCH_SOURCES,
+  PATENT_SEARCH_TOOL_BUDGET_MS,
   selectSearchBackends,
   dedupPatents,
   normalizePublicationNumber,
