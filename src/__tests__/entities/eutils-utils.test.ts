@@ -3,6 +3,7 @@ import {
   chunkUids,
   joinUidParam,
   parseEutilsJson,
+  parseEutilsResponse,
 } from '../../entities/eutils-utils.js';
 
 describe('parseEutilsJson', () => {
@@ -38,6 +39,32 @@ describe('parseEutilsJson', () => {
 
   it('includes body prefix when text starts with Error:', () => {
     expect(() => parseEutilsJson('Error: Failed to understand Id', 'efetch')).toThrow(/Failed to understand Id/);
+  });
+});
+
+describe('parseEutilsResponse', () => {
+  it('accepts pre-parsed objects from RestConnection', () => {
+    const parsed = parseEutilsResponse<{ esearchresult: { idlist: string[] } }>(
+      { esearchresult: { idlist: ['1'] } },
+      'SRA search'
+    );
+    expect(parsed.esearchresult.idlist).toEqual(['1']);
+  });
+
+  it('accepts raw strings', () => {
+    const parsed = parseEutilsResponse<{ result: { uids: string[] } }>(
+      '{"result":{"uids":["9"]}}',
+      'esummary'
+    );
+    expect(parsed.result.uids).toEqual(['9']);
+  });
+
+  it('surfaces error envelopes from object responses', () => {
+    expect(() => parseEutilsResponse({ error: 'Invalid uid' }, 'BioSample')).toThrow(/Invalid uid/);
+  });
+
+  it('rejects non-JSON string responses', () => {
+    expect(() => parseEutilsResponse('<html>blocked</html>', 'GEO')).toThrow(/non-JSON response/);
   });
 });
 
