@@ -1677,3 +1677,116 @@ describe('transformMyGeneResponse edge cases', () => {
     expect(result.summary).toBeUndefined();
   });
 });
+
+// ============================================================
+// geneGet with expression section (GTEx v10)
+// ============================================================
+describe('geneGet with expression section', () => {
+  let originalFetch: typeof global.fetch;
+
+  const GTEx_DATASETS = [
+    { datasetId: 'gtex_v8', displayName: 'GTEx Analysis v8', gencodeVersion: 'v26', genomeBuild: 'GRCh38/hg38' },
+    { datasetId: 'kids_first_harmonization', displayName: "Kid's First", gencodeVersion: 'v26', genomeBuild: 'GRCh38/hg38' },
+    { datasetId: 'gtex_v10', displayName: 'GTEx Analysis v10', gencodeVersion: 'v39', genomeBuild: 'GRCh38/hg38' },
+  ];
+  const GTEx_GENE_SEARCH = {
+    data: [
+      { gencodeId: 'ENSG00000143514.17', geneSymbol: 'TP53BP2', geneSymbolUpper: 'TP53BP2' },
+      { gencodeId: 'ENSG00000115129.14', geneSymbol: 'TP53I3', geneSymbolUpper: 'TP53I3' },
+      { gencodeId: 'ENSG00000141510.18', geneSymbol: 'TP53', geneSymbolUpper: 'TP53', entrezGeneId: 7157 },
+    ],
+    paging_info: { numberOfPages: 1, page: 0, maxItemsPerPage: 250, totalNumberOfItems: 3 },
+  };
+  const GTEx_MEDIAN = {
+    data: [
+      { median: 22.65, tissueSiteDetailId: 'Adipose_Subcutaneous', ontologyId: 'UBERON:0002190', unit: 'TPM' },
+      { median: 12.03, tissueSiteDetailId: 'Whole_Blood', ontologyId: 'UBERON:0000178', unit: 'TPM' },
+      { median: 5.12, tissueSiteDetailId: 'Muscle_Skeletal', ontologyId: 'UBERON:0002378', unit: 'TPM' },
+    ],
+  };
+
+  function okJson(body: unknown) {
+    return {
+      ok: true,
+      json: () => Promise.resolve(body),
+      headers: new Headers({ 'content-type': 'application/json' }),
+    };
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    originalFetch = global.fetch;
+    connectionManager.closeAll();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  test('geneGet() expression section returns GTEx tissues as {tissue, tpm}', async () => {
+    global.fetch = jest.fn().mockImplementation((rawUrl: string) => {
+      if (rawUrl.includes('mygene.info')) {
+        return Promise.resolve(okJson({
+          hits: [{ symbol: 'TP53', name: 'Tumor protein p53', summary: 'Tumor suppressor.' }],
+        }));
+      }
+      if (rawUrl.includes('metadata/dataset')) return Promise.resolve(okJson(GTEx_DATASETS));
+      if (rawUrl.includes('geneSearch')) return Promise.resolve(okJson(GTEx_GENE_SEARCH));
+      if (rawUrl.includes('medianGeneExpression')) return Promise.resolve(okJson(GTEx_MEDIAN));
+      return Promise.resolve(okJson({}));
+    }) as any;
+
+    const result = await geneGet('TP53', ['expression']);
+
+    expect(result.sections).toBeDefined();
+    const expression = result.sections!.expression as { tissues: Array<{ tissue: string; tpm: number }> };
+    expect(expression.tissues[0]).toEqual({ tissue: 'Adipose_Subcutaneous', tpm: 22.65 });
+    expect(expression.tissues.map(t => t.tissue)).toEqual(['Adipose_Subcutaneous', 'Whole_Blood', 'Muscle_Skeletal']);
+
+    const urls = (global.fetch as any).mock.calls.map((c: any[]) => c[0] as string);
+    const medianUrl = urls.find(u => u.includes('medianGeneExpression'));
+    expect(medianUrl).toContain('gencodeId=ENSG00000141510.18');
+    expect(medianUrl).toContain('datasetId=gtex_v10');
+  });
+
+  test('geneGet() expression section surfaces _error when gene is not in GTEx', async () => {
+    global.fetch = jest.fn().mockImplementation((rawUrl: string) => {
+      if (rawUrl.includes('mygene.info')) {
+        return Promise.resolve(okJson({
+          hits: [{ symbol: 'NOGTEX1', name: 'Not in GTEx', summary: 'A gene.' }],
+        }));
+      }
+      if (rawUrl.includes('metadata/dataset')) return Promise.resolve(okJson(GTEx_DATASETS));
+      if (rawUrl.includes('geneSearch')) {
+        return Promise.resolve(okJson({ data: [], paging_info: { numberOfPages: 0 } }));
+      }
+      return Promise.resolve(okJson({}));
+    }) as any;
+
+    const result = await geneGet('NOGTEX1', ['expression']);
+
+    const expression = result.sections!.expression as { _error: string };
+    expect(expression._error).toContain('Expression lookup failed');
+    expect(expression._error).toContain("Gene 'NOGTEX1' not found in GTEx v10");
+  });
+
+  test('geneGet() expression section surfaces _error for empty median data', async () => {
+    global.fetch = jest.fn().mockImplementation((rawUrl: string) => {
+      if (rawUrl.includes('mygene.info')) {
+        return Promise.resolve(okJson({
+          hits: [{ symbol: 'TP53', name: 'Tumor protein p53', summary: 'Tumor suppressor.' }],
+        }));
+      }
+      if (rawUrl.includes('metadata/dataset')) return Promise.resolve(okJson(GTEx_DATASETS));
+      if (rawUrl.includes('geneSearch')) return Promise.resolve(okJson(GTEx_GENE_SEARCH));
+      if (rawUrl.includes('medianGeneExpression')) return Promise.resolve(okJson({ data: [] }));
+      return Promise.resolve(okJson({}));
+    }) as any;
+
+    const result = await geneGet('TP53', ['expression']);
+
+    const expression = result.sections!.expression as { _error: string };
+    expect(expression._error).toContain('No GTEx expression data found');
+    expect(expression._error).toContain('ENSG00000141510.18');
+  });
+});
