@@ -2,64 +2,23 @@
 
 A high-performance MCP server that gives LLMs access to 27 biomedical tools federated across 50+ upstream APIs — genes, variants, drugs, diseases, literature, clinical trials, and structural biology in a single integration.
 
-Adapted from the [BioMCP Rust](https://github.com/genomoncology/biomcp) with agent-first development approach and enhancements. Kudos to the original authors.
-
 ## Highlights
 
-- **27 tools** across 9 domains — search, retrieve, and cross-reference biomedical entities
+- **27 tools** across 9 domains — search, retrieve, and cross-reference biomedical entities (+3 optional database tools)
 - **50+ upstream sources** — MyGene, MyVariant, MyChem, MyDisease, ClinVar, gnomAD, UniProt, Reactome, OpenTargets, CIViC, OncoKB, DisGeNET, GTEx, STRING, DGIdb, ClinicalTrials.gov, PubMed, EuropePMC, Semantic Scholar, PubTator, LitSense, Monarch Initiative, OpenFDA, NIH Reporter, and more
 - **Section-based fetching** — `entityGet(id, sections)` fans out to multiple sources with per-section timeouts and graceful degradation (failed sections return `{ _error }` instead of crashing)
 - **Federated article search** — queries 5 literature backends simultaneously with PMID/PMCID/DOI deduplication
 - **Patent access** — worldwide patent search and detail via keyed EPO OPS / USPTO ODP; keyless USPTO Public Search and Google Patents (+Wayback archive) fallbacks
 - **Zero-config startup** — works out of the box; optional API keys unlock higher rate limits and premium data
-- **629 unit tests** (mocked) + **97 integration tests** (live APIs via in-process MCP client, 5 keyed skips)
+- **~690 unit tests** (mocked) + **100 integration tests** (live APIs via in-process MCP client, gated skips)
 
-## Quick Start
-
-### Install and build
+## Install
 
 ```bash
-git clone <repo-url> && cd biomcp-ts
-make install build
+npx biomcp        # zero-config stdio MCP server; Node >= 22.13
 ```
 
-### Configure with Claude Desktop
-
-Add to your Claude Desktop `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "biomcp": {
-      "command": "npx",
-      "args": ["biomcp"]
-    }
-  }
-}
-```
-
-Or from a local checkout:
-
-```json
-{
-  "mcpServers": {
-    "biomcp": {
-      "command": "node",
-      "args": ["/path/to/biomcp-ts/dist/bundle.js"]
-    }
-  }
-}
-```
-
-### Direct stdio
-
-```bash
-npm start
-```
-
-### Any MCP-compatible client
-
-BioMCP speaks standard MCP over **stdio**. Point any MCP client at the `biomcp` binary or `node dist/bundle.js`.
+**Setup is guided in [docs/AGENT-INSTALL.md](docs/AGENT-INSTALL.md)** — copy-paste config snippets for Claude Desktop, Claude Code, Codex, and OpenCode, plus an agent-friendly checklist for API keys and optional features.
 
 ## Available Tools
 
@@ -149,40 +108,18 @@ Capabilities that ship with the package but stay inactive until enabled. Each li
 |---------|--------|-------|
 | **Database access** — read-only SQL tools (`db_query`, `db_list_tables`, `db_describe_table`) for MySQL and local-file SQLite | Set `DB_TYPE` (+ connection env vars) | [docs/DATABASE.md](docs/DATABASE.md) |
 
-## Development
+## Documentation
 
-```bash
-make              # Show available targets
-make install      # Install dependencies
-make build        # Compile and bundle into dist/bundle.js
-make typecheck    # Type-check without emitting
-make test         # Run unit tests (fast, mocked)
-make test-integration  # Run integration tests (live APIs, ~60s)
-make test-all     # Run all tests
-make clean        # Remove build artifacts
-```
-
-After `make build`, `npx .` runs the bundled MCP server locally — the recommended workflow for development testing.
-
-## Environment Variables
-
-BioMCP works without any configuration. Optional keys unlock higher rate limits and extra sources; two are required for specific features (noted below). Proxy variables apply to every tool via proxy-aware global fetch.
-
-| Variable | Required | Purpose |
-|----------|----------|---------|
-| `NCBI_API_KEY` | no | Higher PubMed / NCBI E-utilities rate limits |
-| `NCBI_EMAIL` | no | Polite-contact `tool`/`email` params on NCBI E-utilities requests |
-| `S2_API_KEY` | no | Semantic Scholar rate limits |
-| `OPENFDA_API_KEY` | no | OpenFDA rate limits |
-| `ONCOKB_TOKEN` | for `variant_oncokb` | OncoKB cancer variant annotations |
-| `DISGENET_API_KEY` | for DisGeNET associations | DisGeNET disease-gene associations |
-| `CROSSREF_EMAIL` | no | Crossref polite pool |
-| `EPO_OPS_CONSUMER_KEY` / `EPO_OPS_CONSUMER_SECRET` | no | EPO OPS worldwide patent search + detail |
-| `USPTO_API_KEY` | no | USPTO Open Data Portal application search |
-| `DB_TYPE` + [database variables](docs/DATABASE.md#enabling) | for `db_*` tools | MySQL or local-file SQLite read-only access (see [Optional Features](#optional-features)) |
-| `HTTPS_PROXY` / `HTTP_PROXY` (+ lowercase) | no | Route all upstream requests through a proxy |
-| `NO_PROXY` | no | Comma-separated proxy exclusions (honored by undici) |
+| Doc | Contents |
+|-----|----------|
+| [docs/AGENT-INSTALL.md](docs/AGENT-INSTALL.md) | Guided installation & client configuration (Claude Desktop, Claude Code, Codex, OpenCode) |
+| [docs/ENV-VARS.md](docs/ENV-VARS.md) | Single source of truth for every environment variable |
+| [docs/DATABASE.md](docs/DATABASE.md) | Database access feature guide |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Build, test, publish workflow |
+| [src/server/README.md](src/server/README.md) | Full tool schemas (params, enums, defaults) |
 
 ## License
 
-[MIT](LICENSE)
+Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE) for attributions.
+
+BioMCP-TS is adapted from the upstream [BioMCP Rust](https://github.com/genomoncology/biomcp) project (MIT) with an agent-first development approach and enhancements — kudos to the original authors.

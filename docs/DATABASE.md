@@ -11,16 +11,15 @@ Optional read-only SQL access to your own databases through three MCP tools (`db
 
 ## Enabling
 
-Set `DB_TYPE` plus the connection variables for your backend in the MCP client configuration:
+Set `DB_TYPE` plus the connection variables for your backend. The complete, canonical list lives in [ENV-VARS.md → Database access](ENV-VARS.md#database-access-optional-feature); the essentials:
 
-| Variable | Required | Purpose |
-|----------|----------|---------|
-| `DB_TYPE` | yes (`mysql` or `sqlite`) | Selects the backend and activates the db tools |
-| `DB_HOST` / `DB_PORT` | MySQL | Defaults: `localhost` / `3306` |
-| `DB_USER` (or `DB_USERNAME`) / `DB_PASSWORD` | MySQL | Credentials |
-| `DB_DATABASE` | MySQL | Database name |
-| `DB_SQLITE_PATH` | SQLite | Path to an existing `.db`/`.sqlite` file (opened read-only) |
-| `DB_CONNECTION_TIMEOUT_MS` | no | Connect timeout, default `10000` |
+```bash
+# MySQL
+DB_TYPE=mysql DB_HOST=localhost DB_PORT=3306 DB_USER=bio_user DB_PASSWORD=… DB_DATABASE=bio
+
+# SQLite (local file)
+DB_TYPE=sqlite DB_SQLITE_PATH=/data/bio.db
+```
 
 ### Example (Claude Desktop)
 

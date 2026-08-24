@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-08-24
+
 ### Added
 
 - **Database access variant** — optional read-only SQL tools (`db_query`, `db_list_tables`, `db_describe_table`) ported from the bioresearcher plugin's db toolkit, shipped in the same package but registered only when `DB_TYPE` is set:
@@ -19,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Breaking**: minimum Node.js version raised from 20.18 to **22.13** (required by the built-in SQLite module used by the database variant; `better-sqlite3@13` requires Node >= 22 as well).
 - `@types/node` bumped to ^22 accordingly.
+
+### Documentation
+
+- Root README restructured: Quick Start/Development/Environment Variables sections replaced by links; new `docs/` guides — AGENT-INSTALL.md (guided client setup for Claude Desktop, Claude Code, Codex, OpenCode), ENV-VARS.md (single source of truth for all environment variables), DATABASE.md, DEVELOPMENT.md.
+- Relicensed from MIT to **Apache-2.0** with NOTICE carrying project copyright (Ye Yuan) and upstream BioMCP Rust attribution.
 
 ## [0.3.1] - 2026-08-24
 
