@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-24
+
 ### Added
 
 - **Functional genomics & sequence tools** — 9 new MCP tools (27 → 36 total) across four NCBI/GTEx domains:

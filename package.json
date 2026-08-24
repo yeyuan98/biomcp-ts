@@ -1,6 +1,6 @@
 {
   "name": "biomcp",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "BioMCP - Biomedical MCP Server in TypeScript",
   "type": "module",
   "main": "dist/bundle.js",
