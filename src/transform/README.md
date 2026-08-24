@@ -33,3 +33,19 @@ Filters out falsy and empty-string values from an alias list. Returns `[]` for `
 Maps a raw RCSB Data API entry response to a `PdbEntrySummary`. Extracts `pdb_id`, `title`, `experimental_method` (deduplicated), `resolution`, `molecular_weight`, `polymer_count`, `polymer_composition`, `deposition_date`, `release_date`, `organism`, `doi`, `pmid`, `authors`, `space_group`, `unit_cell`, and `container_ids`. All optional fields default to `undefined` when absent.
 
 Input shape (partial): `{ struct?, exptl?, refine?, rcsb_entry_info?, rcsb_accession_info?, rcsb_entry_container_identifiers?, rcsb_primary_citation?, audit_author?, rcsb_entity_source_organism?, symmetry?, cell? }` — see `pdb.ts` for the full typed shape.
+
+## soft.ts
+
+Parser for NCBI GEO SOFT records (`acc.cgi?form=text&targ=self`).
+
+### `parseSoftRecord(text: string): SoftRecord`
+
+Parses a single-entity SOFT record into a `SoftRecord { entity_type, accession, fields: Map<string, string[]>, getSingle(key) }`. Repeated `!Key = value` lines accumulate in the fields map (exact key match); continuation lines (leading whitespace) append to the previous value; `^`/`^^`/`^!` sub-entity lines are skipped (`targ=self` yields one record per fetch).
+
+### `getSoftValue(record: SoftRecord, key: string): string | undefined`
+
+First value for a key, or `undefined` when absent.
+
+### `getSoftValues(record: SoftRecord, key: string): string[]`
+
+All values for a repeated key (empty array when absent).

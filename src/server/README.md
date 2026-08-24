@@ -15,7 +15,7 @@ const transport = new StdioServerTransport();
 await server.connect(transport);
 ```
 
-Entry point: `src/server/index.ts`. Calls nine registration functions in order: `registerGeneTools`, `registerVariantTools`, `registerDrugTools`, `registerDiseaseTools`, `registerArticleTools`, `registerTrialTools`, `registerUtilityTools`, `registerPdbTools`, `registerPatentTools`.
+Entry point: `src/server/index.ts`. Calls thirteen registration functions in order: `registerGeneTools`, `registerVariantTools`, `registerDrugTools`, `registerDiseaseTools`, `registerArticleTools`, `registerTrialTools`, `registerUtilityTools`, `registerPdbTools`, `registerPatentTools`, `registerGeoTools`, `registerSraTools`, `registerGenbankTools`, `registerGtexTools`.
 
 ## Tool Handler Pattern
 
@@ -95,7 +95,7 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 |------|-------------|-------------|-------------|
 | `pdb` | `query?: string`, `pdb_id?: string`, `sections?: ("polymer_entities" \| "ligands" \| "assembly" \| "experiment" \| "citation" \| "all")[]`, `download?: boolean` (default false), `format?: "cif" \| "pdb"` (default "cif"), `limit?: number` (1-50, default 10), `offset?: number` (default 0) | Access RCSB PDB: search structures (query), get metadata (pdb_id), download files (pdb_id + download) | openWorld |
 
-Param-based dispatch: `query` → search mode, `pdb_id` → get mode, `pdb_id` + `download=true` → download mode. Downloads save to OS temp dir and return file path + size. Default format is mmCIF (universally available); legacy PDB format may 404 for some entries. This is the only tool with `readOnlyHint: false` (it writes downloaded structure files).
+Param-based dispatch: `query` → search mode, `pdb_id` → get mode, `pdb_id` + `download=true` → download mode. Downloads save to OS temp dir and return file path + size. Default format is mmCIF (universally available); legacy PDB format may 404 for some entries. `pdb` and `geo_get` are the only tools with `readOnlyHint: false` (they can write downloaded files to disk).
 
 ### Patent Tools (`tools/patent.ts`) — 2 tools
 
@@ -103,6 +103,35 @@ Param-based dispatch: `query` → search mode, `pdb_id` → get mode, `pdb_id` +
 |------|-------------|-------------|-------------|
 | `patent_search` | `query: string` (quote exact multi-word concepts, e.g. "mRNA display"), `assignee?: string`, `inventor?: string`, `cpc?: string` (full symbol e.g. "C12N15/11"), `status?: "granted" \| "application"`, `date_range?: string` (YYYY-MM-DD/YYYY-MM-DD, open-ended allowed), `limit?: number (1-50, default 10)`, `offset?: number (default 0)`, `source?: "ops" \| "uspto_odp" \| "ppubs" \| "google_patents"`, `sort_by?: "relevance" \| "recency"` (default relevance; ppubs only), `seminal?: boolean` (default true: co-citation discovery of foundational prior art in `seminal_prior_art`; ~5-20s, set false for fastest lookups) | Search patents worldwide. Backends: ppubs (US full-text conceptual search, keyless, relevance-ranked — default US backend), ops (EPO OPS worldwide bibliographic, keyed), uspto_odp (US application metadata, bibliographic, keyed), google_patents (best-effort). Auto mode = worldwide + ppubs; hard ppubs failure falls back to uspto_odp once (tagged `_note`); 0-hit searches get a `_hint` | readOnly, openWorld |
 | `patent_get` | `patent_id: string` (e.g. "US11027025B2", "EP3904939B1"), `sections?: ("core" \| "abstract" \| "claims" \| "citations" \| "family" \| "classifications" \| "all")[]`, `limit?: number (1-100, default 20)` | Get patent details with per-section source fallback chains. Claims: US fulltext via PPUBS, EP/WO via OPS. Citations include forward (`ct=`) and backward references | readOnly, openWorld |
+
+### GEO Tools (`tools/geo.ts`) — 2 tools
+
+| Tool | Input Schema | Description | Annotations |
+|------|-------------|-------------|-------------|
+| `geo_search` | `query: string` (free text or `GSE183947[Accession]` field syntax), `entry_type?: "gse" \| "gsm" \| "gpl" \| "gds"` (default gse), `organism?: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search NCBI GEO via E-utilities db=gds (esearch + esummary). Each result carries cross-links: `sra_project` → `sra_get`, `bioproject`, `pubmed_ids` → `article_get`, `accession` → `geo_get`. `NCBI_API_KEY` optional (higher rate limits) | readOnly, openWorld |
+| `geo_get` | `accession: string` (regex `^(GSE\|GSM\|GPL)\d+$`, e.g. GSE183947, GSM5574685, GPL11154; GDS rejected — curated DataSets are not served by SOFT), `download?: boolean` (default false), `max_bytes?: number (min 1000000, default 52428800 = 50 MB)` | Get the full SOFT record from the GEO SOFT viewer (`acc.cgi?targ=self&form=text&view=full`): series detail includes summary, organisms, platform_ids, sample preview (≤20), supplementary file URLs, and cross-references (sra, pubmed_ids, bioproject, super/sub-series); enriched with esummary gds metadata (best-effort). `download=true` saves the first supplementary file (.gz/.csv/.txt) to a temp path and returns path/size/URL | openWorld |
+
+### SRA Tools (`tools/sra.ts`) — 2 tools
+
+| Tool | Input Schema | Description | Annotations |
+|------|-------------|-------------|-------------|
+| `sra_search` | `query: string` (free text, accession SRP/SRX/SRR/SRS, or `"RNA-SEQ AND Homo sapiens[Organism]"`), `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search NCBI SRA via E-utilities (esearch db=sra → efetch experiment-package XML, batches of 10). Items list experiment/study/sample accessions, organism, library strategy, run count, and `first_run_accession` for chaining into `sra_get`. `NCBI_API_KEY` optional | readOnly, openWorld |
+| `sra_get` | `accession: string` (SRP/SRX/SRR/SRS/SZ, e.g. SRR14432476; ENA `ER*`/DDBJ `DR*` accessions rejected with an ENA pointer — NCBI SRA does not index them) | Get full SRA entry details: SRR run (instrument, total_spots, total_bases, size_bytes), SRX experiment (library strategy/source/selection/layout, platform), SRP study (experiment list, ≤50), or SRS sample. Shares the NCBI E-utilities 3 req/s budget | readOnly, openWorld |
+
+### GenBank Tools (`tools/genbank.ts`) — 3 tools
+
+| Tool | Input Schema | Description | Annotations |
+|------|-------------|-------------|-------------|
+| `genbank_search` | `query: string` (plain terms, accession, or `"TP53[Gene Name] AND Homo sapiens[Organism]"`), `organism?: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search NCBI nucleotide (E-utilities db=nuccore, esearch + esummary). Results include accession.version, definition, length_bp, organism, taxon_id, topology, sourcedb. `NCBI_API_KEY` optional | readOnly, openWorld |
+| `genbank_get` | `accession: string` (versioned or bare, e.g. NC_000023.11, NG_017013.2, KJ668569.2), `format?: "genbank" \| "fasta"` (default genbank), `seq_start?: number (min 1)`, `seq_stop?: number (min 1)` (both required together; 1-based inclusive; required for records > 2 Mb; span ≤ 10 Mb), `strand?: 1 \| 2` (2 = reverse slice, allows seq_start > seq_stop), `max_response_bytes?: number (default 30000000)` | Fetch a nucleotide record (esummary metadata + efetch text). Whole-record fetches capped at 2,000,000 bp; oversized responses error instead of truncating. Output guard: `sequence_text` truncated to its first 200,000 characters with a truncation note | readOnly, openWorld |
+| `genbank_genes` | `accession: string` (GenBank/RefSeq, versioned or bare, e.g. NG_017013.2) | Map a nucleotide accession to NCBI Gene IDs (elink nuccore→gene, ≤100 links) — entrezgene IDs usable directly with MyGene-backed gene tools | readOnly, openWorld |
+
+### GTEx Tools (`tools/gtex.ts`) — 2 tools
+
+| Tool | Input Schema | Description | Annotations |
+|------|-------------|-------------|-------------|
+| `gtex_expression` | `gene: string` (HGNC symbol `TP53` or Ensembl ID `ENSG00000141510`, versioned or bare), `tissue?: string` (tissueSiteDetailId, e.g. Brain_Cortex, Whole_Blood), `limit?: number (1-54, default 20)` | Get median gene expression across GTEx tissues (Analysis v10, 54 tissue sites, TPM, sorted highest first). Genes resolve to a versioned gencodeId first (symbol or bare ENSG do not work directly on expression endpoints). Dataset pinned to `gtex_v10` with metadata-derived latest-release fallback | readOnly, openWorld |
+| `gtex_eqtl` | `gene: string` (HGNC symbol or Ensembl ID), `tissue: string` (required tissueSiteDetailId, e.g. Whole_Blood), `limit?: number (1-100, default 20)` | Get significant cis-eQTL associations (GTEx v10 `singleTissueEqtl`): variant_id, p_value, nes, slope, sorted by ascending p-value. Empty `associations` is legitimate (no significant eQTLs). Invalid tissue IDs are rejected against the dataset tissue list | readOnly, openWorld |
 
 ### Database Tools (`tools/db.ts`) — 3 tools (optional)
 
@@ -114,7 +143,7 @@ Registered only when `DB_TYPE` is set — see [docs/DATABASE.md](../../docs/DATA
 | `db_list_tables` | — | List tables/views with engine, row count, creation time, comments | readOnly |
 | `db_describe_table` | `table_name: string` | Column schema: name, type, nullability, key type, default value | readOnly |
 
-**Total: 27 core tools** across 10 registration modules (+3 optional database tools).
+**Total: 36 core tools** across 13 registration modules (+3 optional database tools).
 
 ## Error Handling (`errors.ts`)
 
@@ -231,4 +260,8 @@ src/server/
     utility.ts        2 utility tools (discover, batch_get)
     pdb.ts            1 PDB tool (search, get, download)
     patent.ts         2 patent tools (search, get)
+    geo.ts            2 GEO tools (search, get + optional download)
+    sra.ts            2 SRA tools (search, get)
+    genbank.ts        3 GenBank tools (search, get, genes)
+    gtex.ts           2 GTEx tools (expression, eqtl)
 ```

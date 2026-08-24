@@ -1,6 +1,6 @@
 # BioMCP TypeScript — Source Architecture
 
-ESM-only MCP server exposing 27 biomedical tools to LLMs. Federates queries across 50+ upstream APIs. Requires Node.js >= 20.18.1 (`engines` in package.json), targets ES2022. Single runtime dependency: `undici` (proxy-aware global fetch). `@modelcontextprotocol/sdk`, `zod`, and `fast-xml-parser` are devDependencies bundled into `dist/bundle.js` at build time.
+ESM-only MCP server exposing 36 biomedical tools to LLMs. Federates queries across 50+ upstream APIs. Requires Node.js >= 20.18.1 (`engines` in package.json), targets ES2022. Single runtime dependency: `undici` (proxy-aware global fetch). `@modelcontextprotocol/sdk`, `zod`, and `fast-xml-parser` are devDependencies bundled into `dist/bundle.js` at build time.
 
 ## Architecture
 
@@ -9,7 +9,7 @@ ESM-only MCP server exposing 27 biomedical tools to LLMs. Federates queries acro
 │  LLM  ──stdio──▶  server/index.ts  (McpServer bootstrap)   │
 │                          │                                   │
 │                   server/tools/*.ts                         │
-│                   (9 modules, 27 tools)                      │
+│                   (13 modules, 36 tools)                     │
 │                          │                                   │
 │              ┌───────────┼───────────┐                      │
 │              ▼           ▼           ▼                      │
@@ -28,7 +28,7 @@ ESM-only MCP server exposing 27 biomedical tools to LLMs. Federates queries acro
 │             │               │                                │
 │             └───────┬───────┘                                │
 │                     ▼                                        │
-│              registry.ts (34 sources, incl. patents)         │
+│              registry.ts (35 sources, incl. patents)         │
 │                     │                                        │
 │                     ▼                                        │
 │            transform/*.ts                                   │
@@ -43,10 +43,10 @@ Four layers, strict downward dependency. No upward references.
 
 ## Layer 1 — `server/` MCP Protocol Layer
 
-Entry point. Converts MCP tool calls into entity-layer invocations. All tools are read-only except `pdb` (it writes downloaded structure files to disk). For the complete tool registry, input schemas, error codes, and validation details, see [server/README.md](server/README.md).
+Entry point. Converts MCP tool calls into entity-layer invocations. All tools are read-only except `pdb` (writes downloaded structure files to disk) and `geo_get` with `download: true` (writes supplementary files to disk). For the complete tool registry, input schemas, error codes, and validation details, see [server/README.md](server/README.md).
 
-- `server/index.ts` — creates `McpServer` on `StdioServerTransport`, imports and calls all 9 `register*Tools(server)` functions.
-- `server/tools/` — 9 registration modules, one `register*Tools(server)` per domain; handlers try/catch and delegate to the entity layer; Zod input schemas.
+- `server/index.ts` — creates `McpServer` on `StdioServerTransport`, imports and calls all 13 `register*Tools(server)` functions.
+- `server/tools/` — 13 registration modules, one `register*Tools(server)` per domain; handlers try/catch and delegate to the entity layer; Zod input schemas.
 - `server/errors.ts` — `BioMCPError` typing, `formatError` classification, `withErrorHandling`, `{ _error }` section helpers.
 - `server/validation.ts` — Zod schemas for entity identifiers plus `validateInput` / `isValidEntityInput` / `getEntitySuggestions`.
 
@@ -75,6 +75,10 @@ entityGet(id, sections?)      → { ...core, sections: Record<string, unknown> }
 | `trial.ts` | 3 (eligibility, locations, outcomes) | ClinicalTrials.gov |
 | `pdb.ts` | 5 (polymer_entities, ligands, assembly, experiment, citation) | RCSB PDB (Data API, Search API, File Download) |
 | `patent/` | 6 (core, abstract, claims, citations, family, classifications) | EPO OPS, USPTO ODP, USPTO PPUBS, Google Patents (+ Wayback fallback) |
+| `geo.ts` | — (flat detail) | NCBI E-utilities (db=gds), GEO SOFT viewer |
+| `sra/` | — (flat detail per entry type) | NCBI E-utilities (db=sra, experiment-package XML) |
+| `genbank.ts` | — (flat record) | NCBI E-utilities (db=nuccore, esummary/efetch/elink) |
+| `gtex.ts` | — (flat result) | GTEx Portal API v2 (gtex_v10, pinned with metadata-derived fallback) |
 
 ### `entities/cross-entity.ts`
 
@@ -116,7 +120,7 @@ Hides upstream API protocol differences behind a uniform interface.
 - `AuthConfig`: env var name, delivery method (header, bearer, query-param), conditional rate limits
 
 ### `connections/registry.ts`
-`SOURCE_REGISTRY`: `Record<string, ConnectionOptions>` with 34 data source configurations. Organized by domain (genomics, proteins/pathways, drugs, diseases, literature, clinical trials, patents). Each entry specifies URL, protocol (rest/graphql), auth config, and rate limit (including conditional keyed vs. fallback rates).
+`SOURCE_REGISTRY`: `Record<string, ConnectionOptions>` with 35 data source configurations. Organized by domain (genomics, proteins/pathways, drugs, diseases, literature, clinical trials, patents). Each entry specifies URL, protocol (rest/graphql), auth config, and rate limit (including conditional keyed vs. fallback rates).
 
 ### `connections/manager.ts`
 `ConnectionManager` — module-level singleton exported as `connectionManager`. Lazy factory: `getConnection(sourceId)` creates the connection on first access, caches in a `Map`. `createConnection()` dispatches on `protocol` to instantiate `RestConnection` or `GraphQLConnection`.
@@ -141,7 +145,7 @@ Both implement `IConnection` and integrate `TokenBucketRateLimiter` on every `re
 
 ## Layer 4 — `transform/` Data Transformation Layer
 
-Normalizes upstream responses into domain types. Pure functions, no side effects. Currently `transform/gene.ts` (MyGene hit/detail → `GeneSearchResult` / `GeneResult`, alias normalization) and `transform/pdb.ts` (RCSB response normalization).
+Normalizes upstream responses into domain types. Pure functions, no side effects. Currently `transform/gene.ts` (MyGene hit/detail → `GeneSearchResult` / `GeneResult`, alias normalization), `transform/pdb.ts` (RCSB response normalization), and `transform/soft.ts` (GEO SOFT text records → `SoftRecord` field maps).
 
 ## Data Flow
 
@@ -189,7 +193,7 @@ make install        # Install dependencies
 make build          # Compile and bundle into dist/bundle.js
 make typecheck      # tsc --noEmit
 make test           # Unit tests (fast, mocked, parallel)
-make test-integration # Integration tests (live APIs, serial, ~60s)
+make test-integration # Integration tests (live APIs, serial, ~4-5 min)
 make test-all        # All tests combined
 make clean          # Remove build artifacts
 ```

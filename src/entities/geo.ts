@@ -454,8 +454,12 @@ async function buildSeriesDetail(accession: string, record: SoftRecord): Promise
     ...new Set(
       [
         enrichment?.taxon,
+        // Series SOFT emits 'Series_sample_organism'/'Series_platform_organism'
+        // (no _ch1 suffix, unlike sample records).
         ...getSoftValues(record, 'Series_organism_ch1'),
         ...getSoftValues(record, 'Series_sample_organism_ch1'),
+        ...getSoftValues(record, 'Series_sample_organism'),
+        ...getSoftValues(record, 'Series_platform_organism'),
       ].filter((o): o is string => !!o)
     ),
   ];

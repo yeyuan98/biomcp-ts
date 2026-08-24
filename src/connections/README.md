@@ -1,6 +1,6 @@
 # connections
 
-API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a source registry, connection lifecycle management, and rate limiting for 34 bioinformatics data sources.
+API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a source registry, connection lifecycle management, and rate limiting for 35 bioinformatics data sources.
 
 ## Architecture
 
@@ -184,15 +184,15 @@ function withTimeout<T>(
 > EPO OPS (OAuth2 client-credentials) and USPTO PPUBS (session-token
 > handshake) live in `src/entities/patent/` as dedicated clients.
 
-### REST (30 sources)
+### REST (31 sources)
 
 | Category | Source IDs |
 |---|---|
-| Genomics | `mygene`, `myvariant`, `gtex`, `string` |
+| Genomics | `mygene`, `myvariant`, `gtex`, `string`, `geo_soft` |
 | Proteins & Pathways | `uniprot`, `reactome`, `reactome_analysis` |
 | Drugs & Pharmacology | `mychem`, `openfda` |
 | Diseases | `mydisease`, `monarch` |
-| Literature | `pubmed`, `pubtator`, `europepmc`, `semantic_scholar`, `litsense`, `ncbi_idconv`, `pmc_oa`, `crossref`, `opencitations` |
+| Literature | `eutils`, `pubtator`, `europepmc`, `semantic_scholar`, `litsense`, `ncbi_idconv`, `pmc_oa`, `crossref`, `opencitations` |
 | Clinical Trials | `clinicaltrials` |
 | Ontologies & Analysis | `ols4` |
 | Funding & Research | `nih_reporter` |
@@ -200,6 +200,8 @@ function withTimeout<T>(
 | Oncology | `oncokb` |
 | Structural Biology | `pdb_data`, `pdb_search`, `pdb_files` |
 | Required Auth Keys | `disgenet` |
+
+> `eutils` is the shared NCBI E-utilities connection (formerly registered as `pubmed`): one entry serves PubMed (article_*), GEO (db=gds), SRA (db=sra), and GenBank (db=nuccore) — NCBI enforces a shared per-IP budget across all E-utilities databases, so a single rate limiter is deliberate. `geo_soft` (GEO SOFT viewer, a different NCBI host) keeps its own separate rate budget.
 
 ### GraphQL (4 sources)
 
@@ -214,7 +216,7 @@ function withTimeout<T>(
 - Key present + `keyedRateLimitMs` set → uses `keyedRateLimitMs`
 - No key → uses `fallbackRateLimitMs` (falls back to `intervalMs` if unset)
 
-Sources with conditional rate limits: `pubmed`, `pubtator`, `semantic_scholar`.
+Sources with conditional rate limits: `eutils`, `pubtator`, `semantic_scholar`.
 
 ## Error Enrichment
 

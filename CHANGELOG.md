@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Functional genomics & sequence tools** — 9 new MCP tools (27 → 36 total) across four NCBI/GTEx domains:
+  - GEO (`geo_search`, `geo_get`): E-utilities db=gds search with entry-type/organism filters and cross-links (sra_project, bioproject, pubmed_ids); SOFT record detail for GSE/GSM/GPL via the new `geo_soft` connection, including sample preview (≤20), supplementary file URLs, and optional supplementary-file download (`download`, `max_bytes`). New `transform/soft.ts` parser for SOFT text records.
+  - SRA (`sra_search`, `sra_get`): esearch db=sra + experiment-package XML parsing (batches of 10); run/experiment/study/sample detail dispatch on accession prefix; ENA/DDBJ accessions rejected with an ENA pointer.
+  - GenBank (`genbank_search`, `genbank_get`, `genbank_genes`): nuccore esearch/esummary/efetch with region slicing (`seq_start`/`seq_stop` up to 10 Mb, reverse-strand via `strand=2`), 2 Mb whole-record cap, 30 MB response guard, and elink nuccore→gene mapping to entrezgene IDs.
+  - GTEx (`gtex_expression`, `gtex_eqtl`): dedicated `entities/gtex.ts` on GTEx Analysis v10 (54 tissues, TPM; single-tissue cis-eQTLs sorted by p-value) with a gencodeId resolver (HGNC symbol or bare/versioned ENSG; exact `geneSymbolUpper` matching against prefix-fuzzy geneSearch).
+- Integration test suites for all four new domains (`geo-tools`, `sra-tools`, `genbank-tools`, `gtex-tools`; 20 live tests against stable fixtures — GSE183947/GSM5574685, SRP356657/SRX13898298/SRR14432476, NG_017013.2/NC_000001.11, TP53/SORT1).
+
+### Changed
+
+- **GTEx expression is now gtex_v10-backed**: `gene_get`'s `expression` section delegates to the new resolver instead of probing Ensembl version suffixes against GTEx v8 — numeric TPMs shift slightly vs v8 (e.g. TP53 adipose subcutaneous median ~22.46 → ~22.65).
+- The NCBI E-utilities connection source id is renamed `pubmed` → `eutils` (internal only — one rate limiter now deliberately serves PubMed, GEO, SRA, and GenBank since NCBI enforces a shared per-IP budget across all E-utilities databases); the keyless `geo_soft` connection (www.ncbi.nlm.nih.gov/geo/query) is new with its own rate budget.
+
+### Fixed
+
+- GEO series SOFT records now also read `Series_sample_organism` / `Series_platform_organism` keys (series SOFT emits them without the `_ch1` suffix used by sample records), so `geo_get` organisms no longer depend solely on best-effort esummary enrichment.
+
 ## [0.3.2] - 2026-08-24
 
 ### Added
