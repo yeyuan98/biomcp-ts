@@ -1,17 +1,17 @@
 # BioMCP
 
-A high-performance MCP server that gives LLMs access to 36 biomedical tools federated across 50+ upstream APIs — genes, variants, drugs, diseases, literature, clinical trials, structural biology, and functional genomics in a single integration.
+A high-performance MCP server that gives LLMs access to 40 biomedical tools federated across 50+ upstream APIs — genes, variants, drugs, diseases, literature, clinical trials, structural biology, and functional genomics in a single integration.
 
 ## Highlights
 
-- **36 tools** across 13 domains — search, retrieve, and cross-reference biomedical entities (+3 optional database tools)
-- **50+ upstream sources** — MyGene, MyVariant, MyChem, MyDisease, ClinVar, gnomAD, UniProt, Reactome, OpenTargets, CIViC, OncoKB, DisGeNET, GTEx, STRING, DGIdb, ClinicalTrials.gov, PubMed, EuropePMC, Semantic Scholar, PubTator, LitSense, Monarch Initiative, OpenFDA, NIH Reporter, NCBI GEO, SRA, GenBank, and more
+- **40 tools** across 14 domains — search, retrieve, and cross-reference biomedical entities (+3 optional database tools)
+- **50+ upstream sources** — MyGene, MyVariant, MyChem, MyDisease, ClinVar, gnomAD, UniProt, Reactome, OpenTargets, CIViC, OncoKB, DisGeNET, GTEx, STRING, DGIdb, ClinicalTrials.gov, PubMed, EuropePMC, Semantic Scholar, PubTator, LitSense, Monarch Initiative, OpenFDA, NIH Reporter, NCBI GEO, SRA, GenBank, Ensembl, and more
 - **Functional genomics & sequences** — GEO series/sample search with SOFT detail parsing, SRA experiment/run metadata, GenBank/RefSeq records with region slices, and GTEx v10 median expression + cis-eQTLs
 - **Section-based fetching** — `entityGet(id, sections)` fans out to multiple sources with per-section timeouts and graceful degradation (failed sections return `{ _error }` instead of crashing)
 - **Federated article search** — queries 5 literature backends simultaneously with PMID/PMCID/DOI deduplication
 - **Patent access** — worldwide patent search and detail via keyed EPO OPS / USPTO ODP; keyless USPTO Public Search and Google Patents (+Wayback archive) fallbacks
 - **Zero-config startup** — works out of the box; optional API keys unlock higher rate limits and premium data
-- **~885 unit tests** (mocked) + **123 integration tests** (live APIs via in-process MCP client, gated skips)
+- **~906 unit tests** (mocked) + **130 integration tests** (live APIs via in-process MCP client, gated skips)
 
 ## Install
 
@@ -125,6 +125,15 @@ Full tool schemas (params, enums, defaults) live in [src/server/README.md](src/s
 |------|-------------|
 | `gtex_expression` | Get median gene expression across GTEx tissues (Analysis v10, 54 tissue sites, TPM, highest first); accepts HGNC symbol or Ensembl gene ID, with optional single-tissue filter |
 | `gtex_eqtl` | Get significant cis-eQTL associations for a gene in a specific GTEx tissue (v10): variant_id, p_value, NES, slope, sorted by ascending p-value |
+
+### Ensembl (4)
+
+| Tool | Description |
+|------|-------------|
+| `ensembl_lookup` | Resolve a gene in Ensembl terms for any of ~356 species: stable ID (+version), symbol, coordinates on the current assembly, canonical transcript; `expand=true` adds transcripts with protein IDs and external references |
+| `ensembl_homology` | Find orthologues/paralogues across species via Ensembl Compara — target stable IDs, taxonomy level, percent identity, sorted by identity; filter with `target_species`/`target_taxon` |
+| `ensembl_consequence` | Compute variant consequences on demand via Ensembl VEP for NOVEL variants and non-human species: most severe consequence, per-transcript effects (SIFT/PolyPhen), co-located ClinVar/COSMIC/gnomAD data. Known human variants get deeper pre-computed scores via `variant_get` |
+| `ensembl_region` | Query genes/transcripts/known variants in a genomic interval (`chr:start-end`) on the current assembly — locus triage |
 
 ### Citation Module
 

@@ -15,7 +15,7 @@ const transport = new StdioServerTransport();
 await server.connect(transport);
 ```
 
-Entry point: `src/server/index.ts`. Calls thirteen registration functions in order: `registerGeneTools`, `registerVariantTools`, `registerDrugTools`, `registerDiseaseTools`, `registerArticleTools`, `registerTrialTools`, `registerUtilityTools`, `registerPdbTools`, `registerPatentTools`, `registerGeoTools`, `registerSraTools`, `registerGenbankTools`, `registerGtexTools`.
+Entry point: `src/server/index.ts`. Calls fourteen registration functions in order: `registerGeneTools`, `registerVariantTools`, `registerDrugTools`, `registerDiseaseTools`, `registerArticleTools`, `registerTrialTools`, `registerUtilityTools`, `registerPdbTools`, `registerPatentTools`, `registerGeoTools`, `registerSraTools`, `registerGenbankTools`, `registerGtexTools`, `registerEnsemblTools`.
 
 ## Tool Handler Pattern
 
@@ -135,6 +135,15 @@ Param-based dispatch: `query` → search mode, `pdb_id` → get mode, `pdb_id` +
 | `gtex_expression` | `gene: string` (HGNC symbol `TP53` or Ensembl ID `ENSG00000141510`, versioned or bare), `tissue?: string` (tissueSiteDetailId, e.g. Brain_Cortex, Whole_Blood), `limit?: number (1-54, default 20)` | Get median gene expression across GTEx tissues (Analysis v10, 54 tissue sites, TPM, sorted highest first). Genes resolve to a versioned gencodeId first (symbol or bare ENSG do not work directly on expression endpoints). Dataset pinned to `gtex_v10` with metadata-derived latest-release fallback | readOnly, openWorld |
 | `gtex_eqtl` | `gene: string` (HGNC symbol or Ensembl ID), `tissue: string` (required tissueSiteDetailId, e.g. Whole_Blood), `limit?: number (1-100, default 20)` | Get significant cis-eQTL associations (GTEx v10 `singleTissueEqtl`): variant_id, p_value, nes, sorted by ascending p-value. Empty `associations` is legitimate (no significant eQTLs). Invalid tissue IDs are rejected against the dataset tissue list | readOnly, openWorld |
 
+### Ensembl Tools (`tools/ensembl.ts`) — 4 tools
+
+| Tool | Input Schema | Description | Annotations |
+|------|-------------|-------------|-------------|
+| `ensembl_lookup` | `gene_or_id: string` (HGNC symbol `BRAF` or Ensembl gene ID `ENSG00000157764`, versioned or bare), `species?: string` (default "human"; scientific names or aliases like `mouse`), `expand?: boolean` (default false) | Resolve a gene in Ensembl terms for any of ~356 species: stable ID (+version), symbol, biotype, coordinates on the current assembly (GRCh38 human, GRCm39 mouse), canonical transcript; `expand=true` adds all transcripts with translation/protein IDs and external references. The identifier/structure authority — for rich human annotation use `gene_get` instead | readOnly, openWorld |
+| `ensembl_homology` | `gene: string` (symbol or ENSG), `species?: string` (default human), `type?: "orthologues" \| "paralogues"` (default orthologues), `target_species?: string`, `target_taxon?: number`, `limit?: number (1-100, default 20)` | Find orthologues/paralogues across species via Ensembl Compara: target stable IDs, species, taxonomy level, percent identity — sorted by identity. Symbols resolve to stable IDs first (the `/homology/symbol` route proved flaky upstream). The cross-species gene mapping source in biomcp | readOnly, openWorld |
+| `ensembl_consequence` | `variant: string` (HGVS c./p./g. like `NM_004333:c.1799T>A`, or rsID `rs113488060`), `species?: string` (default human), `limit?: number (1-50, default 10)` | Compute variant consequences on demand via Ensembl VEP — works for NOVEL variants absent from databases and non-human species. Returns most_severe_consequence, top-N per-transcript effects (impact, codons/amino acids, SIFT/PolyPhen where available) and co-located ClinVar/COSMIC/gnomAD data. For known human variants `variant_get` adds deep pre-computed scores (CADD, REVEL, …) | readOnly, openWorld |
+| `ensembl_region` | `region: string` (`chr:start-end`, e.g. `7:140450000-140480000`; span ≤ 10 Mb), `features?: ("gene" \| "transcript" \| "variation")[]` (default ["gene","variation"]), `species?: string` (default human), `limit?: number (1-500, default 50)` | Query what lives in a genomic interval on the current assembly: genes/transcripts (stable IDs, symbols, biotypes) and known variants (rsIDs, alleles, consequences, clinical significance) — locus-triage queries. Results capped at limit with truncated marker; sequence text belongs in `genbank_get` | readOnly, openWorld |
+
 ### Database Tools (`tools/db.ts`) — 3 tools (optional)
 
 Registered only when `DB_TYPE` is set — see [docs/DATABASE.md](../../docs/DATABASE.md).
@@ -145,7 +154,7 @@ Registered only when `DB_TYPE` is set — see [docs/DATABASE.md](../../docs/DATA
 | `db_list_tables` | — | List tables/views with engine, row count, creation time, comments | readOnly |
 | `db_describe_table` | `table_name: string` | Column schema: name, type, nullability, key type, default value | readOnly |
 
-**Total: 36 core tools** across 13 registration modules (+3 optional database tools).
+**Total: 40 core tools** across 14 registration modules (+3 optional database tools).
 
 ## Error Handling (`errors.ts`)
 
@@ -266,4 +275,5 @@ src/server/
     sra.ts            2 SRA tools (search, get)
     genbank.ts        3 GenBank tools (search, get, genes)
     gtex.ts           2 GTEx tools (expression, eqtl)
-```
+    ensembl.ts        4 Ensembl tools (lookup, homology, consequence, region)
+  ```
