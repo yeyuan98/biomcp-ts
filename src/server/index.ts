@@ -14,6 +14,7 @@ import { registerGeoTools } from './tools/geo.js';
 import { registerSraTools } from './tools/sra.js';
 import { registerGenbankTools } from './tools/genbank.js';
 import { registerGtexTools } from './tools/gtex.js';
+import { registerEnsemblTools } from './tools/ensembl.js';
 import { registerDbToolsIfConfigured, shutdownDbBackend } from './tools/db.js';
 import { VERSION } from '../version.js';
 
@@ -35,6 +36,7 @@ registerGeoTools(server);
 registerSraTools(server);
 registerGenbankTools(server);
 registerGtexTools(server);
+registerEnsemblTools(server);
 const dbEnabled = registerDbToolsIfConfigured(server);
 if (dbEnabled) {
   console.error(`[biomcp] database tools enabled via DB_TYPE=${process.env.DB_TYPE}`);
