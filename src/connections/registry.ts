@@ -2,7 +2,7 @@ import { ConnectionOptions } from './base.js';
 
 export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   // ==========================================
-  // GENOMICS - REST (5 sources)
+  // GENOMICS - REST (6 sources)
   // ==========================================
   mygene: {
     sourceId: 'mygene',
@@ -24,6 +24,20 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     protocol: 'rest',
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
+  },
+  // Ensembl REST (https://rest.ensembl.org): gene stable-ID lookup, Compara
+  // homology, on-demand VEP consequences, region overlap. Keyless; verified
+  // budget is 55,000 req/hour per IP — intervalMs 100 keeps a capacity-1
+  // bucket well under it. Transient 500/503s are common upstream, hence the
+  // retry entry. See src/entities/ensembl.ts for endpoints deliberately
+  // excluded after repeated probe failures (/xrefs/*, /phenotype/*).
+  ensembl: {
+    sourceId: 'ensembl',
+    baseUrl: 'https://rest.ensembl.org',
+    protocol: 'rest',
+    handling: { timeoutMs: 15000 },
+    rateLimit: { intervalMs: 100 },
+    retry: { attempts: 3, backoffMs: 200 },
   },
   string: {
     sourceId: 'string',
