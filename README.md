@@ -155,6 +155,7 @@ Capabilities that ship with the package but stay inactive until enabled. Each li
 | [docs/ENV-VARS.md](docs/ENV-VARS.md) | Single source of truth for every environment variable |
 | [docs/DATABASE.md](docs/DATABASE.md) | Database access feature guide |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Build, test, publish workflow |
+| [docs/development/CI.md](docs/development/CI.md) | CI pipeline, Dependabot automation, auto-merge safety model |
 | [src/server/README.md](src/server/README.md) | Full tool schemas (params, enums, defaults) |
 
 ## License
