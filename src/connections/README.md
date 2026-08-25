@@ -1,6 +1,6 @@
 # connections
 
-API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a source registry, connection lifecycle management, and rate limiting for 35 bioinformatics data sources.
+API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a source registry, connection lifecycle management, and rate limiting for 36 bioinformatics data sources.
 
 ## Architecture
 
@@ -184,11 +184,11 @@ function withTimeout<T>(
 > EPO OPS (OAuth2 client-credentials) and USPTO PPUBS (session-token
 > handshake) live in `src/entities/patent/` as dedicated clients.
 
-### REST (31 sources)
+### REST (32 sources)
 
 | Category | Source IDs |
 |---|---|
-| Genomics | `mygene`, `myvariant`, `gtex`, `string`, `geo_soft` |
+| Genomics | `mygene`, `myvariant`, `gtex`, `string`, `geo_soft`, `ensembl` |
 | Proteins & Pathways | `uniprot`, `reactome`, `reactome_analysis` |
 | Drugs & Pharmacology | `mychem`, `openfda` |
 | Diseases | `mydisease`, `monarch` |
