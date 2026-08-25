@@ -60,6 +60,48 @@ describe('getDbConfigFromEnv', () => {
       const cfg = getDbConfigFromEnv();
       expect(cfg?.type).toBe('sqlite');
       expect(cfg?.database).toBe('/tmp/bio.db');
+      expect(cfg?.attach).toBeUndefined();
+    });
+  });
+
+  it('parses DB_SQLITE_PATH as a comma-separated list (first = main, rest = attach)', () => {
+    withEnv({ DB_TYPE: 'sqlite', DB_SQLITE_PATH: '/data/main.db, /data/depmap-26Q1.db,/data/scratch.sqlite' }, () => {
+      const cfg = getDbConfigFromEnv();
+      expect(cfg?.database).toBe('/data/main.db');
+      expect(cfg?.attach).toEqual(['/data/depmap-26Q1.db', '/data/scratch.sqlite']);
+    });
+  });
+
+  it('drops empty entries but errors when nothing remains', () => {
+    withEnv({ DB_TYPE: 'sqlite', DB_SQLITE_PATH: '/data/a.db,,' }, () => {
+      expect(getDbConfigFromEnv()?.database).toBe('/data/a.db');
+    });
+    withEnv({ DB_TYPE: 'sqlite', DB_SQLITE_PATH: ' , ,' }, () => {
+      expect(() => getDbConfigFromEnv()).toThrow(/DB_SQLITE_PATH/);
+    });
+  });
+
+  it('rejects more than 11 database entries, naming every offender', () => {
+    const paths = Array.from({ length: 12 }, (_, i) => `/data/db${i}.db`).join(',');
+    withEnv({ DB_TYPE: 'sqlite', DB_SQLITE_PATH: paths }, () => {
+      expect(() => getDbConfigFromEnv()).toThrow(/Too many SQLite databases[\s\S]*db11\.db/);
+    });
+  });
+
+  it('accepts exactly 11 entries (1 main + 10 attached)', () => {
+    const paths = Array.from({ length: 11 }, (_, i) => `/data/db${i}.db`).join(',');
+    withEnv({ DB_TYPE: 'sqlite', DB_SQLITE_PATH: paths }, () => {
+      const cfg = getDbConfigFromEnv();
+      expect(cfg?.database).toBe('/data/db0.db');
+      expect(cfg?.attach).toHaveLength(10);
+    });
+  });
+
+  it('applies the same list parsing to the DB_DATABASE fallback', () => {
+    withEnv({ DB_TYPE: 'sqlite', DB_DATABASE: '/data/a.db,/data/b.db' }, () => {
+      const cfg = getDbConfigFromEnv();
+      expect(cfg?.database).toBe('/data/a.db');
+      expect(cfg?.attach).toEqual(['/data/b.db']);
     });
   });
 

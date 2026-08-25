@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
 
 export type SqliteDatabase = DatabaseSync;
@@ -25,7 +26,9 @@ export function loadSqliteModule(): typeof import('node:sqlite') {
 
 export function openReadOnlyDatabase(file: string): SqliteDatabase {
   const { DatabaseSync } = loadSqliteModule();
-  const db = new DatabaseSync(file);
+  // mode=ro URI: the file is opened read-only at the VFS level, and a missing
+  // file fails instead of being created.
+  const db = new DatabaseSync(`${pathToFileURL(file).href}?mode=ro`);
   db.exec('PRAGMA query_only = ON');
   return db;
 }

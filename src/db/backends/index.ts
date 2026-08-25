@@ -51,10 +51,18 @@ export async function initializeBackend(config: IConnectionConfig): Promise<IDat
     await defaultBackend.disconnect();
   }
 
-  defaultBackend = createBackend(config);
-  await defaultBackend.connect();
+  const backend = createBackend(config);
+  try {
+    await backend.connect();
+  } catch (error) {
+    // Never leave a half-initialized backend as the process-wide default —
+    // a failed config must not poison subsequent tool calls.
+    await backend.disconnect().catch(() => undefined);
+    throw error;
+  }
+  defaultBackend = backend;
 
-  return defaultBackend;
+  return backend;
 }
 
 export async function closeBackend(): Promise<void> {

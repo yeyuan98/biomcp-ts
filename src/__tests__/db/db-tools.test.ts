@@ -123,3 +123,69 @@ describe('db tools end-to-end over MCP (sqlite)', () => {
     await h.cleanup();
   });
 });
+
+describe('db tools multi-database over MCP (sqlite ATTACH)', () => {
+  let dir: string;
+  let mainFile: string;
+  let extraFile: string;
+  let harness: Awaited<ReturnType<typeof createDbHarness>>;
+
+  beforeAll(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'biomcp-mcp-multidb-'));
+    mainFile = join(dir, 'main.db');
+    extraFile = join(dir, 'depmap-26Q1.db');
+    const { loadSqliteModule } = await import('../../db/backends/sqlite/connection.js');
+    const { DatabaseSync } = await loadSqliteModule();
+    const main = new DatabaseSync(mainFile);
+    main.exec("CREATE TABLE genes (id INTEGER PRIMARY KEY, symbol TEXT NOT NULL); INSERT INTO genes (symbol) VALUES ('BRAF')");
+    main.close();
+    const extra = new DatabaseSync(extraFile);
+    extra.exec(`
+      CREATE TABLE gene_effect (model_id TEXT, gene_symbol TEXT, value REAL);
+      INSERT INTO gene_effect VALUES ('ACH-000222', 'BRAF', -4.46);
+    `);
+    extra.close();
+    harness = await createDbHarness({
+      DB_TYPE: 'sqlite',
+      DB_SQLITE_PATH: `${mainFile},${extraFile}`,
+    });
+  }, 20000);
+
+  afterAll(async () => {
+    await harness.cleanup();
+    await closeBackend();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('db_list_tables exposes databases array with derived aliases (main first)', async () => {
+    const r = await harness.callTool('db_list_tables');
+    expect(r.json().databases.map((d: { name: string }) => d.name)).toEqual(['main', 'depmap_26q1']);
+    expect(r.json().databases[1].file).toBe(extraFile);
+    const collections = r.json().collections;
+    expect(collections.find((c: { name: string; database?: string }) => c.name === 'genes')?.database).toBe('main');
+    expect(collections.find((c: { name: string; database?: string }) => c.name === 'gene_effect')?.database).toBe('depmap_26q1');
+  });
+
+  it('db_query joins across databases with alias-qualified names', async () => {
+    const r = await harness.callTool('db_query', {
+      sql: "SELECT g.symbol, e.model_id, e.value FROM depmap_26q1.gene_effect e JOIN main.genes g ON g.symbol = e.gene_symbol",
+    });
+    expect(r.isError).toBe(false);
+    expect(r.json().data.rows).toEqual([{ symbol: 'BRAF', model_id: 'ACH-000222', value: -4.46 }]);
+  });
+
+  it('db_describe_table accepts alias-qualified names and hints on miss', async () => {
+    const ok = await harness.callTool('db_describe_table', { table_name: 'depmap_26q1.gene_effect' });
+    expect(ok.json().columnCount).toBe(3);
+
+    const missing = await harness.callTool('db_describe_table', { table_name: 'gene_effectz' });
+    expect(missing.json().error.code).toBe('COLLECTION_NOT_FOUND');
+    expect(missing.json().error.hints.some((h: string) => /alias\.table/.test(h))).toBe(true);
+  });
+
+  it('db_query error hints mention alias qualification for missing tables', async () => {
+    const r = await harness.callTool('db_query', { sql: 'SELECT * FROM gene_effectz' });
+    expect(r.json().success).toBe(false);
+    expect(r.json().error.hints.some((h: string) => /alias\.table/.test(h))).toBe(true);
+  });
+});

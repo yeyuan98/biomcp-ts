@@ -83,6 +83,10 @@ describe('stripStringLiterals', () => {
 describe('validateCollectionName', () => {
   it('accepts plain identifiers', () => {
     expect(validateCollectionName('genes_2', 'mysql').valid).toBe(true);
+    expect(validateCollectionName('depmap_26q1.gene_effect', 'sqlite').valid).toBe(true);
+    expect(validateCollectionName('a.b.c', 'sqlite').valid).toBe(false);
+    expect(validateCollectionName('depmap_26q1.', 'sqlite').valid).toBe(false);
+    expect(validateCollectionName('.genes', 'sqlite').valid).toBe(false);
   });
 
   it('rejects empty and invalid names', () => {

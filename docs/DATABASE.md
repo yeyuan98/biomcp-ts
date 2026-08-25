@@ -30,6 +30,9 @@ DB_TYPE=mysql DB_HOST=localhost DB_PORT=3306 DB_USER=bio_user DB_PASSWORD=… DB
 
 # SQLite (local file)
 DB_TYPE=sqlite DB_SQLITE_PATH=/data/bio.db
+
+# SQLite (multiple files: first = main, rest attached read-only)
+DB_TYPE=sqlite DB_SQLITE_PATH=/data/bio.db,/data/depmap-26Q1.db
 ```
 
 ### Example (Claude Desktop)
@@ -50,6 +53,28 @@ DB_TYPE=sqlite DB_SQLITE_PATH=/data/bio.db
 ```
 
 The db tools are registered at server startup, so **restart your MCP client** after adding or changing these variables — see [AGENT-INSTALL.md → Verify](AGENT-INSTALL.md#4-verify) for per-client restart specifics.
+
+## Multiple SQLite databases
+
+`DB_SQLITE_PATH` accepts a **comma-separated list of database files** (paths containing commas are not supported). The first file is the **main** database; every additional file is ATTACHed read-only under an alias derived from its filename (`depmap-26Q1.db` → `depmap_26q1`; sanitized to `[a-z0-9_]`, lowercased, suffixed on collisions). Up to 10 extra files (SQLite's own limit).
+
+What this enables through the same three tools:
+
+- **Discovery**: `db_list_tables` returns a `databases` array (name, file, table count — `main` first) and every collection carries its owning `database`.
+- **Qualified access**: reference tables as `alias.table` in `db_query` and `db_describe_table`. Unqualified names resolve against main first, then attached databases in order — qualify to disambiguate when the same table name exists in more than one file.
+- **Cross-database JOINs** in a single query:
+
+```sql
+SELECT m.CellLineName, e.value
+FROM depmap_26q1.gene_effect e JOIN depmap_26q1.models m ON m.model_id = e.model_id
+WHERE e.gene_symbol = 'KRAS' ORDER BY e.value ASC LIMIT 10
+```
+
+Notes:
+
+- Both the main file and every attached file are opened strictly read-only (`mode=ro` URIs plus `PRAGMA query_only = ON`); a missing file fails startup of the first tool call with an error naming the entry.
+- Row counts are exact in `db_list_tables` except for databases larger than 256 MB, where they are omitted (a `notes` entry says so) — use `SELECT COUNT(*)` instead.
+- A WAL-mode database in a read-only *directory* cannot be attached (SQLite needs to create its `-shm` file there); place it on writable storage or convert it (`PRAGMA journal_mode=DELETE`).
 
 ## Tools
 
@@ -72,11 +97,11 @@ Results are structured JSON: rows, column field info, execution time, and backen
 
 ### `db_list_tables`
 
-List tables/views with engine, row count (approximate for MySQL via `information_schema`, exact for SQLite tables), creation time, and comments.
+List tables/views across every configured database: a `databases` array (SQLite multi-file setups list `main` plus attached aliases with file paths and table counts) and per-table engine, row count (approximate for MySQL via `information_schema`, exact for SQLite tables except >256 MB databases, where omitted), owning database, creation time, and comments.
 
 ### `db_describe_table`
 
-Get column schema: name, type, nullability, key type (`PRI`/`UNI`/`MUL`), default value, and comments.
+Get column schema: name, type, nullability, key type (`PRI`/`UNI`/`MUL`), default value, and comments. Accepts `table` (resolved against main first) or `alias.table` for attached databases.
 
 ## Prebuilt external databases
 
@@ -103,6 +128,9 @@ and licensing notes. Then point the db tools at it:
 DB_TYPE=sqlite DB_SQLITE_PATH=scripts/external-databases/depmap/dist/depmap-26Q1.db npx .
 ```
 
+Or combine it with your own main database in a comma list (see [Multiple SQLite databases](#multiple-sqlite-databases)):
+`DB_SQLITE_PATH=/data/bio.db,scripts/external-databases/depmap/dist/depmap-26Q1.db` — then query `depmap_26q1.gene_effect` and JOIN across both.
+
 The script's live-manifest integration test is skipped unless `BIOMCP_DEPMAP_IT=1` is set.
 
 ## Programmatic Use
@@ -117,7 +145,17 @@ const server = new McpServer({ name: 'my-server', version: '1.0.0' });
 registerDbTools(server);
 ```
 
-The subpath also exposes backend classes (`MysqlBackend`, `SqliteBackend`), `createBackend`/`initializeBackend`, and the `validateReadOnlyQuery` validator for custom integrations.
+The subpath also exposes backend classes (`MysqlBackend`, `SqliteBackend`), `createBackend`/`initializeBackend`, and the `validateReadOnlyQuery` validator for custom integrations. For multiple SQLite databases, pass extra files via the typed `attach` field:
+
+```ts
+await initializeBackend({
+  type: 'sqlite',
+  host: 'localhost',
+  port: 0,
+  database: '/data/bio.db',          // main
+  attach: ['/data/depmap-26Q1.db'],  // read-only, alias 'depmap_26q1'
+});
+```
 
 ## Security Model
 
@@ -127,4 +165,4 @@ The subpath also exposes backend classes (`MysqlBackend`, `SqliteBackend`), `cre
 
 ## Testing
 
-See [src/__tests__/README.md](../src/__tests__/README.md#database-tests). Unit tests cover the validator, env loader, SQLite backend (temp-file databases), translators, and MCP-level tool behavior; an integration suite runs against a live MySQL server when `BIOMCP_DB_IT_*` variables are set.
+See [src/__tests__/README.md](../src/__tests__/README.md#database-tests). Unit tests cover the validator, env loader, SQLite backend (temp-file databases, including multi-database ATTACH), translators, and MCP-level tool behavior; integration suites run against a live MySQL server or local SQLite files when the respective `BIOMCP_DB_IT_*` variables are set.

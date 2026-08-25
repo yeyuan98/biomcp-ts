@@ -32,7 +32,7 @@ Activates the `db_query` / `db_list_tables` / `db_describe_table` tools when `DB
 | `DB_HOST` / `DB_PORT` | MySQL | Defaults: `localhost` / `3306` |
 | `DB_USER` (or `DB_USERNAME`) / `DB_PASSWORD` | MySQL | Credentials |
 | `DB_DATABASE` | MySQL | Database name |
-| `DB_SQLITE_PATH` | SQLite | Path to an existing `.db`/`.sqlite` file (opened read-only) |
+| `DB_SQLITE_PATH` | SQLite | Comma-separated list of existing `.db`/`.sqlite` files (all opened read-only): the first is the **main** database, the rest are attached under filename-derived aliases — enables `alias.table` names and cross-database JOINs; see [DATABASE.md → Multiple SQLite databases](DATABASE.md#multiple-sqlite-databases) |
 | `DB_CONNECTION_TIMEOUT_MS` | no | Connect timeout, default `10000` |
 
 ## Proxy
@@ -47,11 +47,12 @@ Honored by every upstream request via proxy-aware global fetch (undici).
 
 ## Test-only
 
-Never read by the shipped server — used only by the optional live-MySQL integration suite:
+Never read by the shipped server — used only by the optional live-database integration suites:
 
 | Variable | Purpose |
 |----------|---------|
 | `BIOMCP_DB_IT_HOST` / `BIOMCP_DB_IT_PORT` | MySQL server under test (suite skips unless both are set) |
 | `BIOMCP_DB_IT_USER` / `BIOMCP_DB_IT_PASSWORD` / `BIOMCP_DB_IT_DATABASE` | Credentials (defaults: `root` / empty / `bio`) |
+| `BIOMCP_DB_IT_SQLITE_PATH` | SQLite file(s) under test, same comma-list syntax as `DB_SQLITE_PATH` (suite skips unless set) |
 
 See [src/__tests__/README.md](../src/__tests__/README.md#database-tests).

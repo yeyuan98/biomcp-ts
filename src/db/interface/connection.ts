@@ -5,6 +5,9 @@ export interface IConnectionConfig {
   host: string;
   port: number;
   database: string;
+  /** SQLite only: additional database files to ATTACH read-only after `database`
+   * (the main file). Attached databases are addressable as `alias.table`. */
+  attach?: string[];
   username?: string;
   password?: string;
   connectionTimeout?: number;

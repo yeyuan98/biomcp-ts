@@ -13,6 +13,20 @@ import type {
 } from '../interface/index.js';
 import { getErrorHints } from './validator.js';
 
+/** node:sqlite reports every failure as code ERR_SQLITE_ERROR with the real
+ * SQLite result code in the numeric `errcode` property. Map the codes this
+ * toolkit has dedicated hints/behavior for so they actually trigger. */
+function normalizeErrorCode(err: Error): string | undefined {
+  const code = (err as Error & { code?: string }).code;
+  if (code === 'ERR_SQLITE_ERROR') {
+    const errcode = (err as Error & { errcode?: number }).errcode;
+    if (errcode === 14) return 'SQLITE_CANTOPEN';
+    if (errcode === 26) return 'SQLITE_NOTADB';
+    if (errcode === 8) return 'SQLITE_READONLY';
+  }
+  return code;
+}
+
 export abstract class BaseBackend implements IDatabaseBackend {
   abstract readonly type: string;
   abstract readonly config: IConnectionConfig;
@@ -56,7 +70,7 @@ export abstract class BaseBackend implements IDatabaseBackend {
     additionalHints?: string[]
   ): IQueryResult {
     const err = error instanceof Error ? error : new Error(String(error));
-    const errorCode = (err as Error & { code?: string }).code;
+    const errorCode = normalizeErrorCode(err);
     const baseHints = getErrorHints(errorCode);
     const hints = additionalHints ? [...baseHints, ...additionalHints] : [...baseHints];
 

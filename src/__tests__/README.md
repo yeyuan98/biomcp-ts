@@ -124,16 +124,22 @@ Integration tests use `InMemoryTransport` from the MCP SDK to connect a real `Cl
 
 ## Database Tests
 
-- **Unit** (`src/__tests__/db/`): validator rules, env config loader, SQLite backend against temp-file databases (via built-in `node:sqlite`), MySQL translator mappings, and MCP-level tool behavior over in-memory transport. No external services needed.
-- **Integration** (`src/__tests__/integration/tools/db-tools.test.ts`): runs against a live MySQL server and **skips automatically** unless these variables are set:
+- **Unit** (`src/__tests__/db/`): validator rules, env config loader (including the `DB_SQLITE_PATH` comma-list), SQLite backend against temp-file databases (via built-in `node:sqlite`) — single- and multi-database ATTACH setups, MySQL translator mappings, and MCP-level tool behavior over in-memory transport. No external services needed.
+- **Integration** (`src/__tests__/integration/tools/db-tools.test.ts`): two independently gated suites:
+  - **MySQL** — runs against a live server and skips automatically unless these variables are set:
 
-```bash
-BIOMCP_DB_IT_HOST=127.0.0.1 \
-BIOMCP_DB_IT_PORT=3306 \
-BIOMCP_DB_IT_USER=root \
-BIOMCP_DB_IT_PASSWORD=secret \
-BIOMCP_DB_IT_DATABASE=bio \
-npm run test:integration
-```
+    ```bash
+    BIOMCP_DB_IT_HOST=127.0.0.1 \
+    BIOMCP_DB_IT_PORT=3306 \
+    BIOMCP_DB_IT_USER=root \
+    BIOMCP_DB_IT_PASSWORD=secret \
+    BIOMCP_DB_IT_DATABASE=bio \
+    npm run test:integration
+    ```
 
-A throwaway server works well: `docker run --rm -d -p 3306:3306 -e MYSQL_ROOT_PASSWORD=secret -e MYSQL_DATABASE=bio mysql:8.4`
+    A throwaway server works well: `docker run --rm -d -p 3306:3306 -e MYSQL_ROOT_PASSWORD=secret -e MYSQL_DATABASE=bio mysql:8.4`
+  - **SQLite** — runs against local files (same comma-list syntax as `DB_SQLITE_PATH`) and skips unless set:
+
+    ```bash
+    BIOMCP_DB_IT_SQLITE_PATH=/data/bio.db,/data/depmap-26Q1.db npm run test:integration
+    ```

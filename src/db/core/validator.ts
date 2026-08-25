@@ -97,7 +97,9 @@ export function validateReadOnlyQuery(sql: string, backendType: string): Validat
 }
 
 export function validateCollectionName(name: string, backendType: string): ValidationResult {
-  const TABLE_NAME_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+  // One optional qualifier segment is allowed so SQLite multi-database setups
+  // can address attached tables as `alias.table`.
+  const TABLE_NAME_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?$/;
 
   if (!name || !name.trim()) {
     return {
@@ -181,8 +183,8 @@ export const ERROR_HINTS = {
     'Ensure all identifiers are properly quoted if needed',
   ],
   SQLITE_FILE: [
-    'Verify DB_SQLITE_PATH points to an existing database file',
-    'Check that the file is a valid SQLite database',
+    'Verify DB_SQLITE_PATH lists existing database file(s)',
+    'Check that each file is a valid SQLite database',
     'This toolkit opens databases in read-only mode',
   ],
   GENERIC: [
@@ -207,6 +209,7 @@ const ERROR_HINT_MAP: Record<string, readonly string[]> = {
   ERR_MODULE_NOT_FOUND: ERROR_HINTS.MISSING_DEPENDENCY,
   SQLITE_CANTOPEN: ERROR_HINTS.SQLITE_FILE,
   SQLITE_NOTADB: ERROR_HINTS.SQLITE_FILE,
+  SQLITE_READONLY: ERROR_HINTS.SQLITE_FILE,
 };
 
 export function getErrorHints(errorCode: string | undefined): readonly string[] {
