@@ -473,7 +473,7 @@ getGtexDatasets(): Promise<GTExDatasetInfo[]>
 
 **Primary source:** Ensembl REST (https://rest.ensembl.org, `ensembl` connection — keyless, 55,000 req/hour per IP verified via `x-ratelimit-*` headers; 100 ms serial pacing + retry for transient 500/503s)
 
-> **Excluded endpoints:** `/xrefs/*` and `/phenotype/*` hung/503'd consistently during 2026-08 probing and are deliberately not used (documented in the module header comment); external references come from `/lookup?expand=1` instead. `/homology/symbol` also proved flaky — symbols resolve to stable IDs via `/lookup` first, then only `/homology/id` is hit.
+> **Excluded endpoints:** `/xrefs/*` and `/phenotype/*` hung/503'd consistently during 2026-08 probing and are deliberately not used (documented in the module header comment) — cross-reference data is therefore NOT available from this module (`/lookup?expand=1` does not carry xref fields). `/homology/symbol` also proved flaky — symbols resolve to stable IDs via `/lookup` first, then only `/homology/id` is hit. Versioned ENSG inputs are scrubbed to bare IDs before routing (`/lookup/id` rejects versioned forms).
 
 ### Exported Functions
 
@@ -491,7 +491,7 @@ isEnsemblGeneId(input: string): boolean
 - `ensemblLookup`: `/lookup/symbol/{species}/{symbol}` or `/lookup/id/{ensg}` (auto-routed on ID prefix; transcript/protein IDs rejected with guidance). `expand=1` adds transcripts with translation/protein IDs, exon counts, canonical flags
 - `ensemblHomology`: Compara orthologues/paralogues with percent identity, sorted desc (nulls last), limit-clipped with `truncated` marker; semicolon-matrix params (`type=…;target_species=…`) verified live
 - `ensemblConsequence`: VEP compute-on-demand — HGVS c./p./g. via GET `/vep/{species}/hgvs/{url-encoded}`; rsIDs via POST `/vep/{species}/id` (the GET rsID form does not exist upstream). Both forms return an **array** of results (unwrapped to the first entry). Effects sorted by impact severity (HIGH > MODERATE > LOW > MODIFIER), limit-clipped; colocated ClinVar/COSMIC/gnomAD data capped at 5 entries
-- `ensemblRegion`: `/overlap/region/{species}/{chr}:{start}-{end}` with REPEATED `feature=` params (comma lists are rejected upstream); region format validated, span ≤ 10 Mb; results capped at `limit` with `total`/`truncated`
+- `ensemblRegion`: `/overlap/region/{species}/{chr}:{start}-{end}` with REPEATED `feature=` params (comma lists are rejected upstream); region format validated, span ≤ 5 Mb (upstream-enforced); results capped at `limit` with `total`/`truncated`
 - Species passes through verbatim (aliases like `mouse` accepted upstream); invalid species surface as upstream 400s
 
 ### Source / Auth
