@@ -10,13 +10,17 @@ function isRetryable(error: unknown): boolean {
       msg.includes('rate limit') ||
       msg.includes('fetch failed') ||
       msg.includes('econnreset') ||
-      msg.includes('etimedout')
+      msg.includes('etimedout') ||
+      msg.includes('timeout') ||
+      // Ensembl throttles/overloads with transient 5xx instead of 429s.
+      /http 50[0234]/.test(msg) ||
+      msg.includes('service unavailable')
     );
   }
   return false;
 }
 
-const NETWORK_ROW_RE = /fetch failed|timeout|timed out|econnreset|etimedout/i;
+const NETWORK_ROW_RE = /fetch failed|timeout|timed out|econnreset|etimedout|http 50[0234]|service unavailable/i;
 
 function hasTransientErrorRow(result: unknown): boolean {
   if (!Array.isArray(result)) return false;
