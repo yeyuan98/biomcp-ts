@@ -81,6 +81,13 @@ jest.mock('../../entities/gtex.js', () => ({
   getGtexTissues: jest.fn(),
 }));
 
+jest.mock('../../entities/ensembl.js', () => ({
+  ensemblLookup: jest.fn(),
+  ensemblHomology: jest.fn(),
+  ensemblConsequence: jest.fn(),
+  ensemblRegion: jest.fn(),
+}));
+
 jest.mock('../../entities/cross-entity.js', () => ({
   geneToDrugs: jest.fn(),
   geneToTrials: jest.fn(),
@@ -134,6 +141,7 @@ import { registerGeoTools } from '../../server/tools/geo.js';
 import { registerSraTools } from '../../server/tools/sra.js';
 import { registerGenbankTools } from '../../server/tools/genbank.js';
 import { registerGtexTools } from '../../server/tools/gtex.js';
+import { registerEnsemblTools } from '../../server/tools/ensembl.js';
 
 beforeEach(() => {
   mockRegisterTool.mockClear();
@@ -200,7 +208,12 @@ describe('Tool registration', () => {
     expect(mockRegisterTool).toHaveBeenCalledTimes(2);
   });
 
-  it('total registerTool calls across all registrations = 36', () => {
+  it('registerEnsemblTools calls registerTool 4 times', () => {
+    registerEnsemblTools(mockServer);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(4);
+  });
+
+  it('total registerTool calls across all registrations = 40', () => {
     registerGeneTools(mockServer);
     registerDrugTools(mockServer);
     registerVariantTools(mockServer);
@@ -214,7 +227,8 @@ describe('Tool registration', () => {
     registerSraTools(mockServer);
     registerGenbankTools(mockServer);
     registerGtexTools(mockServer);
-    expect(mockRegisterTool).toHaveBeenCalledTimes(36);
+    registerEnsemblTools(mockServer);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(40);
   });
 
   it('no duplicate tool names across all registrations', () => {
@@ -231,6 +245,7 @@ describe('Tool registration', () => {
     registerSraTools(mockServer);
     registerGenbankTools(mockServer);
     registerGtexTools(mockServer);
+    registerEnsemblTools(mockServer);
 
     const names = mockRegisterTool.mock.calls.map((call: any[]) => call[0]);
     const uniqueNames = new Set(names);
@@ -251,6 +266,7 @@ describe('Tool registration', () => {
     registerSraTools(mockServer);
     registerGenbankTools(mockServer);
     registerGtexTools(mockServer);
+    registerEnsemblTools(mockServer);
 
     const names = mockRegisterTool.mock.calls.map((call: any[]) => call[0]);
     const expected = [
@@ -267,6 +283,7 @@ describe('Tool registration', () => {
       'sra_search', 'sra_get',
       'genbank_search', 'genbank_get', 'genbank_genes',
       'gtex_expression', 'gtex_eqtl',
+      'ensembl_lookup', 'ensembl_homology', 'ensembl_consequence', 'ensembl_region',
     ];
     expect(names.sort()).toEqual(expected.sort());
   });

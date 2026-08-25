@@ -14,6 +14,7 @@ import { registerGeoTools } from '../../server/tools/geo.js';
 import { registerSraTools } from '../../server/tools/sra.js';
 import { registerGenbankTools } from '../../server/tools/genbank.js';
 import { registerGtexTools } from '../../server/tools/gtex.js';
+import { registerEnsemblTools } from '../../server/tools/ensembl.js';
 import { connectionManager } from '../../connections/manager.js';
 
 export type McpTestHarness = {
@@ -38,6 +39,7 @@ export async function createMcpTestHarness(): Promise<McpTestHarness> {
   registerSraTools(server);
   registerGenbankTools(server);
   registerGtexTools(server);
+  registerEnsemblTools(server);
 
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'test-client', version: '1.0.0' });
