@@ -1,0 +1,56 @@
+# CI gate pipeline for biomcp-ts
+#
+# Runs on every pull_request and on pushes to main. The job id (`ci`) doubles as
+# the status-check name — the branch ruleset requires exactly this check before
+# merging, which is also what makes dependabot auto-merge safe (see
+# docs/development/CI.md).
+#
+# Note: full `npm audit` (not --omit=dev) is intentional. This repo bundles
+# runtime code from devDependencies into dist/bundle.js (e.g. fast-xml-parser),
+# so "dev-only" advisories can be production vulnerabilities.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install (lockfile-exact)
+        run: npm ci --no-fund
+
+      - name: Typecheck (src + scripts)
+        run: make typecheck
+
+      - name: Unit tests (mocked; integration excluded by npm test)
+        run: npm test
+
+      - name: Build bundles
+        run: npm run build
+
+      - name: Dependency audit (full — see header note)
+        run: npm audit --audit-level=low
+
+      - name: MCP stdio handshake smoke (NDJSON framing)
+        run: |
+          req='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci-smoke","version":"0"}}}'
+          out=$({ echo "$req"; sleep 2; } | timeout 15 node dist/bundle.js)
+          echo "$out" | grep -q '"serverInfo"'

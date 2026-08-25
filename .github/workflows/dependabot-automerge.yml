@@ -1,0 +1,65 @@
+# Guarded auto-merge for Dependabot PRs
+#
+# Safety model (see docs/development/CI.md): the REAL guarantee is the ci
+# workflow completing successfully on the PR; the guards below are cheap
+# heuristics that keep automerge confined to lockfile-only dependency bumps.
+#
+# Why workflow_run instead of pull_request: a pull_request-triggered job is
+# itself a pending check on the PR — watching checks from inside it deadlocks
+# (and gh's check rollup needs scopes we deliberately don't grant). Triggering
+# on ci's completion instead means this job only runs AFTER ci is green, never
+# races check creation, and does not appear as a PR check itself.
+#
+# Requires the repo setting Settings -> General -> Pull Requests -> Allow
+# auto-merge. Note: merges performed with GITHUB_TOKEN do not trigger further
+# workflow runs (the push-to-main ci run will not fire for automerges; the
+# PR-side ci run already gated the change).
+
+name: dependabot-automerge
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: dependabot-automerge-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  automerge:
+    # Only PR-triggered ci runs that succeeded, authored by dependabot[bot].
+    if: >
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Guard — lockfile-only changes + dependencies label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          set -euo pipefail
+          files=$(gh api "repos/$REPO/pulls/$NUMBER/files" --paginate --jq '.[].filename')
+          bad=$(grep -vx 'package-lock.json' <<<"$files" || true)
+          if [ -n "$bad" ]; then
+            echo "Not automerging: non-lockfile changes:" >&2; echo "$bad" >&2
+            exit 1
+          fi
+          gh api "repos/$REPO/pulls/$NUMBER" --jq '.labels[].name' | grep -qx 'dependencies'
+
+      - name: Request merge pinned to the verified head commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          gh pr merge "$NUMBER" --merge --auto --match-head-commit "$HEAD_SHA"

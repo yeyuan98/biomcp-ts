@@ -42,6 +42,9 @@ make test-coverage     # Unit tests with coverage report
 > A bare `npx jest …` silently skips ESM mocking and breaks `import.meta`.
 > Details: [src/__tests__/README.md](../src/__tests__/README.md#running-tests).
 
+CI runs these gates (plus build, dependency audit, and a stdio smoke test) on
+every PR — see [development/CI.md](development/CI.md).
+
 The database integration suite needs a live MySQL server and is skipped unless configured:
 
 ```bash

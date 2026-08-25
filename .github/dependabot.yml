@@ -1,0 +1,37 @@
+# Dependabot configuration for biomcp-ts
+#
+# Security updates run on public repos even without this file; this config shapes
+# their PRs (labels, commit prefixes, grouping) and adds scheduled version updates.
+# NOTE: versioning-strategy lockfile-only also applies to security updates — any
+# fix that would require a package.json range change produces NO PR at all, so the
+# Security tab must still be monitored (see docs/development/CI.md).
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Shanghai
+    versioning-strategy: lockfile-only
+    open-pull-requests-limit: 8
+    labels:
+      - dependencies
+      - javascript
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+    groups:
+      # Minor+patch version updates arrive as one grouped PR (majors stay individual).
+      minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
+      # All security updates arrive as one grouped PR regardless of SemVer level.
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"

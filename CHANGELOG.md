@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-08-25
+
+### Added
+
+- **CI gate pipeline** (`.github/workflows/ci.yml`) — runs on every PR and push to `main`: `npm ci`, typecheck (`src/` + `scripts/`), the 908 mocked unit tests, bundle build, **full** `npm audit` (runtime deps are bundled from devDependencies, so `--omit=dev` is a false-negative gate here), and a stdio MCP `initialize` handshake smoke test (NDJSON framing).
+- **Guarded Dependabot auto-merge** (`.github/workflows/dependabot-automerge.yml`) — triggers on `ci` workflow completion (`workflow_run`), only for `pull_request`-triggered successful runs authored by `dependabot[bot]`; guards changed files to exactly `package-lock.json` plus the `dependencies` label, then requests a merge commit via auto-merge pinned to the verified head commit (`--match-head-commit`). Safety rests on the green `ci` run, not diff shape; if `ci` fails the workflow never runs (fail-closed).
+- **Dependabot config** (`.github/dependabot.yml`) — weekly (Mon 09:00 Asia/Shanghai) lockfile-only version updates grouped into one minor+patch PR (majors stay individual), and all security updates grouped into one PR; conventional `chore(deps)`/`chore(deps-dev)` prefixes; `dependencies`+`javascript` labels. Fixes outside `package.json` ranges produce no PR — the Security tab remains the backstop.
+- **CI documentation** (`docs/development/CI.md`) — the pipeline's wheels and cogs, the auto-merge safety model, repo-specific gotchas, local verification steps for every gate, and operations/rollback guidance. Cross-linked from the README docs table and `docs/DEVELOPMENT.md`.
+
+### Changed
+
+- **Dependency security sweep — full `npm audit` is now 0 vulnerabilities.** Merged eight Dependabot security-update PRs as lockfile-only merge commits (PRs #4–#7: fast-uri 3.1.6, @hono/node-server 1.19.17, hono 4.13.4, ip-address 10.5.0 + express-rate-limit 8.6.2; PRs #10–#13: brace-expansion, qs 6.15.3, fast-xml-builder 1.3.1, esbuild 0.28.2 + tsx 4.23.12), then a mop-up `npm audit fix` for @babel/core, body-parser, and js-yaml. Two of the bumped packages ship inside `dist/bundle.js` (fast-uri via ajv, fast-xml-builder via fast-xml-parser) — gated on the full unit suite.
+- **Lockfile registry normalized** — all `resolved` URLs rewritten from `registry.npmmirror.com` to `registry.npmjs.org` (integrity hashes unchanged); CI installs are no longer hostage to a third-party CN mirror.
+
+## [0.4.2] - 2026-08-25
+
+### Changed
+
+- **Ensembl rsID precision caveat** — `ensembl_consequence` tool description and the three READMEs now document that rsID inputs resolve via dbSNP coordinates and can under-annotate consequences vs equivalent HGVS notation (evidence example in the entities README).
+- Removed a local `opencode.jsonc` test artifact; ignore pattern added.
+
 ## [0.4.1] - 2026-08-25
 
 ### Added
