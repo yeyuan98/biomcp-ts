@@ -1,0 +1,57 @@
+# Guarded auto-merge for Dependabot PRs
+#
+# Safety model (see docs/development/CI.md): the REAL guarantee is the ci
+# workflow running on the PR; the guards below are cheap heuristics that keep
+# automerge confined to lockfile-only dependency bumps. This workflow watches
+# ci checks to completion (--watch --fail-fast) before requesting the merge, so
+# it is safe even before the ruleset marks ci as a required status check.
+#
+# Requires the repo setting Settings -> General -> Pull Requests -> Allow
+# auto-merge to be enabled. Note: merges performed with GITHUB_TOKEN do not
+# trigger further workflow runs (the push-to-main ci run will not fire for
+# automerges; the PR-side ci run already gated the change).
+
+name: dependabot-automerge
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: dependabot-automerge-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  automerge:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Guard — lockfile-only changes + dependencies label
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          files=$(gh api "repos/$REPO/pulls/$NUMBER/files" --paginate --jq '.[].filename')
+          bad=$(grep -vx 'package-lock.json' <<<"$files" || true)
+          if [ -n "$bad" ]; then
+            echo "Not automerging: non-lockfile changes:" >&2; echo "$bad" >&2
+            exit 1
+          fi
+          gh api "repos/$REPO/pulls/$NUMBER" --jq '.labels[].name' | grep -qx 'dependencies'
+
+      - name: Wait for ci to pass, then request merge
+        if: steps.guard.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh pr checks "$NUMBER" --watch --fail-fast
+          gh pr merge "$NUMBER" --merge --auto
