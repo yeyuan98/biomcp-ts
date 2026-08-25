@@ -1,6 +1,6 @@
 # BioMCP TypeScript — Source Architecture
 
-ESM-only MCP server exposing 36 biomedical tools to LLMs. Federates queries across 50+ upstream APIs. Requires Node.js >= 20.18.1 (`engines` in package.json), targets ES2022. Single runtime dependency: `undici` (proxy-aware global fetch). `@modelcontextprotocol/sdk`, `zod`, and `fast-xml-parser` are devDependencies bundled into `dist/bundle.js` at build time.
+ESM-only MCP server exposing 40 biomedical tools to LLMs. Federates queries across 50+ upstream APIs. Requires Node.js >= 20.18.1 (`engines` in package.json), targets ES2022. Single runtime dependency: `undici` (proxy-aware global fetch). `@modelcontextprotocol/sdk`, `zod`, and `fast-xml-parser` are devDependencies bundled into `dist/bundle.js` at build time.
 
 ## Architecture
 
@@ -9,7 +9,7 @@ ESM-only MCP server exposing 36 biomedical tools to LLMs. Federates queries acro
 │  LLM  ──stdio──▶  server/index.ts  (McpServer bootstrap)   │
 │                          │                                   │
 │                   server/tools/*.ts                         │
-│                   (13 modules, 36 tools)                     │
+│                   (14 modules, 40 tools)                     │
 │                          │                                   │
 │              ┌───────────┼───────────┐                      │
 │              ▼           ▼           ▼                      │
@@ -28,7 +28,7 @@ ESM-only MCP server exposing 36 biomedical tools to LLMs. Federates queries acro
 │             │               │                                │
 │             └───────┬───────┘                                │
 │                     ▼                                        │
-│              registry.ts (35 sources, incl. patents)         │
+│              registry.ts (36 sources, incl. patents)         │
 │                     │                                        │
 │                     ▼                                        │
 │            transform/*.ts                                   │
@@ -45,8 +45,8 @@ Four layers, strict downward dependency. No upward references.
 
 Entry point. Converts MCP tool calls into entity-layer invocations. All tools are read-only except `pdb` (writes downloaded structure files to disk) and `geo_get` with `download: true` (writes supplementary files to disk). For the complete tool registry, input schemas, error codes, and validation details, see [server/README.md](server/README.md).
 
-- `server/index.ts` — creates `McpServer` on `StdioServerTransport`, imports and calls all 13 `register*Tools(server)` functions.
-- `server/tools/` — 13 registration modules, one `register*Tools(server)` per domain; handlers try/catch and delegate to the entity layer; Zod input schemas.
+- `server/index.ts` — creates `McpServer` on `StdioServerTransport`, imports and calls all 14 `register*Tools(server)` functions.
+- `server/tools/` — 14 registration modules, one `register*Tools(server)` per domain; handlers try/catch and delegate to the entity layer; Zod input schemas.
 - `server/errors.ts` — `BioMCPError` typing, `formatError` classification, `withErrorHandling`, `{ _error }` section helpers.
 - `server/validation.ts` — Zod schemas for entity identifiers plus `validateInput` / `isValidEntityInput` / `getEntitySuggestions`.
 
@@ -79,6 +79,7 @@ entityGet(id, sections?)      → { ...core, sections: Record<string, unknown> }
 | `sra/` | — (flat detail per entry type) | NCBI E-utilities (db=sra, experiment-package XML) |
 | `genbank.ts` | — (flat record) | NCBI E-utilities (db=nuccore, esummary/efetch/elink) |
 | `gtex.ts` | — (flat result) | GTEx Portal API v2 (gtex_v10, pinned with metadata-derived fallback) |
+| `ensembl.ts` | — (flat results) | Ensembl REST (lookup, Compara homology, on-demand VEP, region overlap) |
 
 ### `entities/cross-entity.ts`
 
@@ -120,7 +121,7 @@ Hides upstream API protocol differences behind a uniform interface.
 - `AuthConfig`: env var name, delivery method (header, bearer, query-param), conditional rate limits
 
 ### `connections/registry.ts`
-`SOURCE_REGISTRY`: `Record<string, ConnectionOptions>` with 35 data source configurations. Organized by domain (genomics, proteins/pathways, drugs, diseases, literature, clinical trials, patents). Each entry specifies URL, protocol (rest/graphql), auth config, and rate limit (including conditional keyed vs. fallback rates).
+`SOURCE_REGISTRY`: `Record<string, ConnectionOptions>` with 36 data source configurations. Organized by domain (genomics, proteins/pathways, drugs, diseases, literature, clinical trials, patents). Each entry specifies URL, protocol (rest/graphql), auth config, and rate limit (including conditional keyed vs. fallback rates).
 
 ### `connections/manager.ts`
 `ConnectionManager` — module-level singleton exported as `connectionManager`. Lazy factory: `getConnection(sourceId)` creates the connection on first access, caches in a `Map`. `createConnection()` dispatches on `protocol` to instantiate `RestConnection` or `GraphQLConnection`.

@@ -3,8 +3,9 @@ import { RestConnection } from '../connections/rest.js';
 
 // EXCLUDED ENDPOINTS — constant failures during 2026-08 empirical probing
 // (plan §2.2); do not add these without re-validating upstream stability:
-//   - GET /xrefs/*      — hung >45s across 3 attempts, then 503; external
-//                         references are obtained via /lookup?expand=1 instead.
+//   - GET /xrefs/*      — hung >45s across 3 attempts, then 503; excluded,
+//                         so cross-reference data is NOT available from this
+//                         module (lookup expand=1 does not carry xref fields).
 //   - GET /phenotype/*  — hung >45s across 2 attempts; phenotype associations
 //                         are covered by the Monarch-backed disease tools.
 //   - feature=regulatory on /overlap — deprecated upstream, unreliable.
@@ -18,9 +19,15 @@ const DEFAULT_CONSEQUENCE_LIMIT = 10;
 const MAX_CONSEQUENCE_LIMIT = 50;
 const DEFAULT_REGION_LIMIT = 50;
 const REGION_ALLOWED_FEATURES = ['gene', 'transcript', 'variation'] as const;
-const REGION_MAX_SPAN_BP = 10_000_000;
+// NB: upstream rejects spans > 5,000,000 bp ("greater than the maximum
+// allowed length of 5000000") — verified live; keep the client cap in sync.
+const REGION_MAX_SPAN_BP = 5_000_000;
 
 const ENSEMBL_GENE_ID_RE = /^ENS[A-Z]{0,4}G\d+(\.\d+)?$/i;
+// NB: /lookup/id and /homology/id accept BARE stable IDs only — a versioned
+// ENSG….\d+ returns HTTP 400 upstream ("ID 'ENSG….16' not found"). Versions
+// are scrubbed before routing (mirrors gtex.ts's stale-version handling).
+const VERSIONED_GENE_ID_RE = /^ENS[A-Z]{0,4}G\d+\.\d+$/i;
 const RSID_RE = /^rs\d+$/i;
 const HGVS_MINIMAL_RE = /^[^:]+:[cgnprm]\.\S+/i;
 
@@ -214,6 +221,11 @@ export function isEnsemblGeneId(input: string): boolean {
   return ENSEMBL_GENE_ID_RE.test(input.trim());
 }
 
+/** Strip a `.version` suffix — upstream ID endpoints reject versioned forms. */
+function bareGeneId(input: string): string {
+  return VERSIONED_GENE_ID_RE.test(input.trim()) ? input.trim().split('.')[0] : input.trim();
+}
+
 function ensemblConn() {
   return connectionManager.getConnection('ensembl');
 }
@@ -269,10 +281,12 @@ export async function resolveEnsemblGene(
     );
   }
   if (isEnsemblGeneId(trimmed)) {
-    return mapGene(trimmed, species, await fetchGene(`/lookup/id/${encodeURIComponent(trimmed)}`), false);
+    const id = bareGeneId(trimmed);
+    return mapGene(trimmed, species, await fetchGene(`/lookup/id/${encodeURIComponent(id)}`), false);
   }
   const encoded = encodeURIComponent(trimmed);
-  return mapGene(trimmed, species, await fetchGene(`/lookup/symbol/${species}/${encoded}`), false);}
+  return mapGene(trimmed, species, await fetchGene(`/lookup/symbol/${encodeURIComponent(species)}/${encoded}`), false);
+}
 
 export async function ensemblLookup(
   geneOrId: string,
@@ -291,7 +305,7 @@ export async function ensemblLookup(
   }
 
   if (isEnsemblGeneId(trimmed)) {
-    return mapGene(trimmed, species, await fetchGene(`/lookup/id/${encodeURIComponent(trimmed)}${suffix}`), expand);
+    return mapGene(trimmed, species, await fetchGene(`/lookup/id/${encodeURIComponent(bareGeneId(trimmed))}${suffix}`), expand);
   }
   return mapGene(
     trimmed,
@@ -324,6 +338,8 @@ export async function ensemblHomology(
     const resolved = await resolveEnsemblGene(trimmed, species);
     if (!resolved.id) throw new Error(`Gene '${trimmed}' could not be resolved in Ensembl`);
     geneId = resolved.id;
+  } else {
+    geneId = bareGeneId(trimmed);
   }
 
   const params = [`type=${type}`];
@@ -412,11 +428,16 @@ function mapColocated(cv: Record<string, unknown>): EnsemblColocatedVariant {
   };
 }
 
-function mapVepResult(input: string, species: string, result: RawVepResult): EnsemblConsequenceResult {
+function mapVepResult(
+  input: string,
+  species: string,
+  result: RawVepResult,
+  limit: number = DEFAULT_CONSEQUENCE_LIMIT
+): EnsemblConsequenceResult {
   const all = (Array.isArray(result.transcript_consequences) ? result.transcript_consequences : [])
     .map(mapConsequence)
     .sort((a, b) => impactOf(b as unknown as Record<string, unknown>) - impactOf(a as unknown as Record<string, unknown>));
-  const limit = Math.max(DEFAULT_CONSEQUENCE_LIMIT, 1);
+  const capped = Math.max(limit, 1);
 
   return {
     input,
@@ -424,8 +445,8 @@ function mapVepResult(input: string, species: string, result: RawVepResult): Ens
     most_severe_consequence: optStr(result.most_severe_consequence),
     allele_string: optStr(result.allele_string),
     effects_total: all.length,
-    effects_returned: Math.min(all.length, limit),
-    consequences: all.slice(0, limit),
+    effects_returned: Math.min(all.length, capped),
+    consequences: all.slice(0, capped),
     colocated_variants: (Array.isArray(result.colocated_variants) ? result.colocated_variants : [])
       .slice(0, 5)
       .map(mapColocated),
@@ -460,13 +481,8 @@ export async function ensemblConsequence(
     );
   }
 
-  const mapped = mapVepResult(trimmed, species, result);
-  if (options.limit !== undefined) {
-    const limit = Math.min(Math.max(options.limit, 1), MAX_CONSEQUENCE_LIMIT);
-    mapped.consequences = mapped.consequences.slice(0, limit);
-    mapped.effects_returned = mapped.consequences.length;
-  }
-  return mapped;
+  const limit = Math.min(Math.max(options.limit ?? DEFAULT_CONSEQUENCE_LIMIT, 1), MAX_CONSEQUENCE_LIMIT);
+  return mapVepResult(trimmed, species, result, limit);
 }
 
 function mapRegionFeature(f: Record<string, unknown>): EnsemblRegionFeature {
@@ -521,7 +537,7 @@ export async function ensemblRegion(
   const end = Number(endStr);
   if (end < start) throw new Error(`Invalid region '${region}' — end must be >= start`);
   if (end - start + 1 > REGION_MAX_SPAN_BP) {
-    throw new Error(`Region span ${(end - start + 1).toLocaleString()} bp exceeds the ${REGION_MAX_SPAN_BP / 1_000_000} Mb limit — narrow it`);
+    throw new Error(`Region span ${(end - start + 1).toLocaleString()} bp exceeds the ${REGION_MAX_SPAN_BP / 1_000_000} Mb upstream limit — narrow it`);
   }
 
   // NB: Ensembl requires REPEATED feature params (comma lists are rejected).

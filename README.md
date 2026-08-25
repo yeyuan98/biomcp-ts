@@ -11,7 +11,7 @@ A high-performance MCP server that gives LLMs access to 40 biomedical tools fede
 - **Federated article search** — queries 5 literature backends simultaneously with PMID/PMCID/DOI deduplication
 - **Patent access** — worldwide patent search and detail via keyed EPO OPS / USPTO ODP; keyless USPTO Public Search and Google Patents (+Wayback archive) fallbacks
 - **Zero-config startup** — works out of the box; optional API keys unlock higher rate limits and premium data
-- **~906 unit tests** (mocked) + **130 integration tests** (live APIs via in-process MCP client, gated skips)
+- **~906 unit tests** (mocked) + **129 integration tests** (live APIs via in-process MCP client, gated skips)
 
 ## Install
 
@@ -130,7 +130,7 @@ Full tool schemas (params, enums, defaults) live in [src/server/README.md](src/s
 
 | Tool | Description |
 |------|-------------|
-| `ensembl_lookup` | Resolve a gene in Ensembl terms for any of ~356 species: stable ID (+version), symbol, coordinates on the current assembly, canonical transcript; `expand=true` adds transcripts with protein IDs and external references |
+| `ensembl_lookup` | Resolve a gene in Ensembl terms for any of ~356 species: stable ID (+version), symbol, coordinates on the current assembly, canonical transcript; `expand=true` adds transcripts with translation/protein IDs |
 | `ensembl_homology` | Find orthologues/paralogues across species via Ensembl Compara — target stable IDs, taxonomy level, percent identity, sorted by identity; filter with `target_species`/`target_taxon` |
 | `ensembl_consequence` | Compute variant consequences on demand via Ensembl VEP for NOVEL variants and non-human species: most severe consequence, per-transcript effects (SIFT/PolyPhen), co-located ClinVar/COSMIC/gnomAD data. Known human variants get deeper pre-computed scores via `variant_get` |
 | `ensembl_region` | Query genes/transcripts/known variants in a genomic interval (`chr:start-end`) on the current assembly — locus triage |

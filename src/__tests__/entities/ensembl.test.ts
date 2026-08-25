@@ -204,16 +204,18 @@ describe('ensembl entity', () => {
       expect(result.transcripts![1].is_canonical).toBe(false);
     });
 
-    it('routes ENSG inputs to /lookup/id', async () => {
+    it('routes ENSG inputs to /lookup/id and scrubs version suffixes', async () => {
       const { ensemblLookup } = await loadEnsembl();
       mockFetchRoutes({
         '/lookup/id': () => okJson(LOOKUP_BRAF),
       });
 
-      const result = await ensemblLookup('ENSG00000157764');
+      const result = await ensemblLookup('ENSG00000157764.16');
 
       expect(result.id).toBe('ENSG00000157764');
+      // Upstream rejects versioned IDs with HTTP 400 — only the bare form may be sent.
       expect(callUrls()[0]).toContain('/lookup/id/ENSG00000157764');
+      expect(callUrls()[0]).not.toContain('ENSG00000157764.');
     });
 
     it('rejects transcript/protein IDs with a helpful error', async () => {
@@ -238,6 +240,45 @@ describe('ensembl entity', () => {
 
       await expect(ensemblLookup('ENSG99999999999')).rejects.toThrow(/HTTP 400/);
     });
+
+    it('retries transient 503s via the registry retry config then succeeds', async () => {
+      const { ensemblLookup } = await loadEnsembl();
+      let calls = 0;
+      mockFetchRoutes({
+        '/lookup/id': () => {
+          calls += 1;
+          if (calls < 3) {
+            return {
+              ok: false,
+              status: 503,
+              statusText: 'Service Unavailable',
+              json: () => Promise.resolve({}),
+              headers: new Headers(),
+            };
+          }
+          return okJson(LOOKUP_BRAF);
+        },
+      });
+
+      const result = await ensemblLookup('ENSG00000157764');
+      expect(result.symbol).toBe('BRAF');
+      expect(calls).toBe(3);
+    }, 15000);
+
+    it('surfaces an error after exhausting retries on persistent 503s', async () => {
+      const { ensemblLookup } = await loadEnsembl();
+      mockFetchRoutes({
+        '/lookup/id': () => ({
+          ok: false,
+          status: 503,
+          statusText: 'Service Unavailable',
+          json: () => Promise.resolve({}),
+          headers: new Headers(),
+        }),
+      });
+
+      await expect(ensemblLookup('ENSG00000157764')).rejects.toThrow(/HTTP 503/);
+    }, 15000);
   });
 
   describe('resolveEnsemblGene', () => {
@@ -432,7 +473,7 @@ describe('ensembl entity', () => {
 
       await expect(ensemblRegion('7:140450000')).rejects.toThrow(/Invalid region/);
       await expect(ensemblRegion('7:20000000-1000000')).rejects.toThrow(/end must be >= start/);
-      await expect(ensemblRegion('7:1-20000000')).rejects.toThrow(/10 Mb limit/);
+      await expect(ensemblRegion('7:1-20000000')).rejects.toThrow(/5 Mb upstream limit/);
       await expect(ensemblRegion('7:1-1000', { features: ['regulatory' as never] })).rejects.toThrow(/Unsupported feature/);
     });
   });

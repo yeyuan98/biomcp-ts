@@ -11,14 +11,14 @@ export function registerEnsemblTools(server: McpServer): void {
   server.registerTool(
     'ensembl_lookup',
     {
-      description: `Resolve a gene in Ensembl terms for ANY Ensembl species (356 available): stable ID (ENSG…), symbol↔ID mapping, versioned identifier, canonical transcript, and coordinates on the current assembly (GRCh38 human, GRCm39 mouse, …). With expand=true, returns all transcripts (with translation/protein IDs) and external cross-references.
+      description: `Resolve a gene in Ensembl terms for ANY Ensembl species (356 available): stable ID (ENSG…), symbol↔ID mapping, versioned identifier, canonical transcript, and coordinates on the current assembly (GRCh38 human, GRCm39 mouse, …). With expand=true, returns all transcripts with translation/protein IDs.
 
-Accepts an HGNC symbol (BRAF) or Ensembl gene ID (ENSG00000157764, versioned or bare). Species accepts scientific names or aliases ('homo_sapiens'/'human', 'mus_musculus'/'mouse').
+Accepts an HGNC symbol (BRAF) or Ensembl gene ID (ENSG00000157764, versioned or bare — versions are resolved to the current record). Species accepts scientific names or aliases ('homo_sapiens'/'human', 'mus_musculus'/'mouse').
 For rich human gene annotation (summary, pathways, drugs, diseases) use gene_get instead — this tool is the identifier/structure authority.`,
       inputSchema: {
         gene_or_id: z.string().describe('HGNC symbol (BRAF) or Ensembl gene ID (ENSG00000157764, versioned or bare)'),
         species: z.string().default('human').describe("Species name or alias — 'human' (default), 'mouse', 'mus_musculus', 'rat', …"),
-        expand: z.boolean().default(false).describe('Include all transcripts with translation IDs and external references'),
+        expand: z.boolean().default(false).describe('Include all transcripts with translation/protein IDs'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
