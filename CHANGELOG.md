@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-25
+
 ### Added
 
 - **Multiple SQLite databases in the db tools** — `DB_SQLITE_PATH` now accepts a comma-separated list of database files (first = main, rest ATTACHed read-only under filename-derived aliases), enabling `alias.table` names and cross-database JOINs through the existing `db_query`/`db_list_tables`/`db_describe_table` tools: `db_list_tables` returns a `databases` array (name, file, table count, main first) plus each collection's owning database; validation accepts one qualifier segment (`alias.table`); attaches use `mode=ro` URIs via `pathToFileURL` (a missing or URI-hostile filename fails cleanly instead of silently creating a database); row counts are omitted for databases >256 MB with an explanatory note; "no such table" errors hint at alias qualification when multiple databases are configured; node:sqlite numeric `errcode`s are mapped so the `SQLITE_CANTOPEN`/`SQLITE_NOTADB` hints and reconnect path actually trigger. Programmatic surface: typed `attach?: string[]` on `IConnectionConfig`, optional `listDatabases()` on backends.

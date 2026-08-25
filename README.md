@@ -11,7 +11,7 @@ A high-performance MCP server that gives LLMs access to 36 biomedical tools fede
 - **Federated article search** — queries 5 literature backends simultaneously with PMID/PMCID/DOI deduplication
 - **Patent access** — worldwide patent search and detail via keyed EPO OPS / USPTO ODP; keyless USPTO Public Search and Google Patents (+Wayback archive) fallbacks
 - **Zero-config startup** — works out of the box; optional API keys unlock higher rate limits and premium data
-- **~825 unit tests** (mocked) + **120 integration tests** (live APIs via in-process MCP client, gated skips)
+- **~885 unit tests** (mocked) + **123 integration tests** (live APIs via in-process MCP client, gated skips)
 
 ## Install
 
