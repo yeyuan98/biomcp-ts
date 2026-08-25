@@ -57,19 +57,34 @@ Security tab is the backstop and still needs occasional human eyes.
 
 ## Auto-merge safety model
 
-The guarantee is **`ci` passing on the PR**, not the shape of the diff. A
-lockfile-only bump can still change shipped behavior (the `fast-uri` 3.1.6 bump
-rewrote URI parsing code bundled into `dist/bundle.js`; the test suite caught
-its semantics). The workflow's guards — actor `dependabot[bot]`, files exactly
-`{package-lock.json}`, `dependencies` label, `gh pr checks --watch --fail-fast`
-— just keep automation confined to the boring cases.
+The guarantee is **`ci` completing successfully on the PR**, not the shape of
+the diff. A lockfile-only bump can still change shipped behavior (the
+`fast-uri` 3.1.6 bump rewrote URI parsing code bundled into `dist/bundle.js`;
+the test suite caught its semantics). The workflow's guards — ci run
+PR-triggered and green, actor `dependabot[bot]`, files exactly
+`{package-lock.json}`, `dependencies` label, merge pinned to the exact head
+commit that passed ci (`--match-head-commit`) — just keep automation confined
+to the boring cases.
+
+The workflow triggers on **ci's completion** (`workflow_run`), not on the pull
+request. This is deliberate: a `pull_request`-triggered job is itself a pending
+check on the PR, so watching checks from inside it would deadlock; firing after
+ci finishes avoids that, avoids racing check creation, and keeps this workflow
+from appearing as a PR check at all. If ci fails, this workflow never runs —
+fail-closed.
 
 Known limits, by design:
 
 - Merges via `GITHUB_TOKEN` do not trigger further workflow runs, so the
-  push-to-`main` `ci` run skips automerges (the PR-side run already gated them).
+  push-to-`main` `ci` run skips automerges (the PR-side run already gated
+  them).
 - Auto-merge requires the repo setting *Settings → General → Pull Requests →
-  Allow auto-merge*.
+  Allow auto-merge*; without it the merge step fails visibly (red ✗) after a
+  green guard — that is the symptom, not a security issue.
+- If `Allow auto-merge` is on but the `ci` check is not yet a *required* status
+  check in the ruleset, `gh pr merge --auto` can merge immediately once
+  requested. ci already passed at that point (that is the trigger), so the
+  residual window is only additional, not-yet-configured branch protections.
 
 ## Verifying changes locally
 
@@ -92,9 +107,15 @@ equivalences: guard passes iff `gh api repos/<repo>/pulls/<n>/files` lists only
 
 ## Operations & rollback
 
-- **A Dependabot PR was not auto-merged** — check the guard (files/label), the
-  `ci` run on it, and the repo's Allow auto-merge setting; merge manually if
-  `ci` is green.
+- **A Dependabot PR was not auto-merged** — check, in order: did `ci` run on
+  it at all (automerge only fires after a successful PR-triggered `ci` run)?
+  Did the guard fail (non-lockfile files, missing `dependencies` label — check
+  the automerge job log)? Is *Allow auto-merge* enabled in repo settings? If
+  `ci` is green and the guards pass, merge manually.
+- **Red ✗ on the automerge job of every Dependabot PR** — most likely the
+  repo's *Allow auto-merge* setting is off (see above), or the PR carries
+  non-lockfile changes (e.g. a manifest edit — those are exactly the ones that
+  should stay manual).
 - **Ruleset blocks your direct push to `main`** — that is the intended end
   state (PR + required `ci`). Emergency escape hatch: an owner can bypass, or
   temporarily disable the ruleset.
