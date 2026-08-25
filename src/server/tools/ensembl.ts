@@ -64,7 +64,7 @@ Use it for conservation questions ('is this gene conserved?', 'what is the mouse
     {
       description: `Predict the functional consequence of a variant on demand via Ensembl VEP — works even for NOVEL variants absent from every database, and for non-human species.
 
-Input forms: HGVS c./p./g. notation ("NM_004333:c.1799T>A", "ENST00000288602:c.1799T>A") or a dbSNP rsID ("rs113488060").
+Input forms: HGVS c./p./g. notation ("NM_004333:c.1799T>A", "ENST00000288602:c.1799T>A") or a dbSNP rsID ("rs113488060"). Prefer HGVS over rsIDs when both are available — rsIDs are resolved through dbSNP's coordinate mapping, which can yield less specific consequences.
 Returns the most severe consequence plus per-transcript effects (impact, codon/amino-acid change, SIFT/PolyPhen where available) and co-located known variants (ClinVar/COSMIC IDs, gnomAD/1000G frequencies when present).
 For KNOWN human variants, variant_get additionally provides deep pre-computed scores (CADD, REVEL, AlphaMissense, ClinVar stars) — prefer it there.`,
       inputSchema: {

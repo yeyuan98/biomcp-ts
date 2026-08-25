@@ -1,3 +1,4 @@
 node_modules
 dist
 scripts/external-databases/*/raw/
+opencode.jsonc
