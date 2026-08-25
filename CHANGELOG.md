@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Dependabot auto-merge failed at the merge step** ("failed to run git: fatal: not a git repository") — the job never checks out the repository, so `gh pr merge` fell back to local git-repo discovery. The `GH_REPO` environment variable is now set job-wide, telling `gh` which repository to operate on without any git context. Guard step unaffected (its `gh api` calls already used explicit paths).
+
 ## [0.4.3] - 2026-08-25
 
 ### Added
