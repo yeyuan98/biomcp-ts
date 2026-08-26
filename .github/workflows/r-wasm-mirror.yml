@@ -1,0 +1,154 @@
+# Release pipeline for the R-analysis WASM mirror bundle.
+#
+# On version bump to main (a tag "v<version>" that does not exist yet), build
+# and publish the wasm package bundle as a GitHub release asset. End-user
+# servers download it from releases/latest at first use (src/ranalysis/mirror.ts).
+#
+# Rebuild policy (docs/development/CI.md):
+# - If src/ranalysis, scripts/ranalysis, or this workflow changed since the
+#   previous release tag (or no previous tag exists) -> fresh build, gated by
+#   golden numeric validation (scripts/ranalysis/validate-bundle.mjs).
+# - Otherwise -> copy-forward: re-upload the previous release's asset under its
+#   original name, keeping package versions pinned and the client contract
+#   ("releases/latest always has the asset") intact.
+#
+# Version-bump PRs must be human-merged: merges performed with GITHUB_TOKEN do
+# not fire push events (see docs/development/CI.md). workflow_dispatch inputs
+# provide a manual path (and are used by M0 acceptance testing).
+#
+# Note on tar.gz vs tar.zst: the client runs on Node >= 22.13, where zlib zstd
+# support is not guaranteed (it landed in 22.15); the bundle uses gzip so
+# extraction needs only the system tar.
+
+name: r-wasm-mirror
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Force a fresh mirror build even if nothing changed'
+        type: boolean
+        default: false
+      force_copy:
+        description: 'Force copy-forward from the previous release even if sources changed'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: r-wasm-release
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Resolve version, previous tag, and change set
+        id: gate
+        env:
+          FORCE_REBUILD: ${{ inputs.force_rebuild }}
+          FORCE_COPY: ${{ inputs.force_copy }}
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          git fetch --tags origin
+          if git rev-parse --verify --quiet "refs/tags/v${VERSION}" >/dev/null; then
+            echo "tag_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+          PREV="$(git tag -l 'v*' --sort=-v:refname | head -n 1 || true)"
+          echo "prev_tag=${PREV}" >> "$GITHUB_OUTPUT"
+          CHANGED="false"
+          if [ -z "${PREV}" ]; then
+            CHANGED="true"
+          elif git diff --name-only "${PREV}" HEAD -- src/ranalysis scripts/ranalysis .github/workflows/r-wasm-mirror.yml | grep -q .; then
+            CHANGED="true"
+          fi
+          echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
+          if [ "${FORCE_REBUILD}" = "true" ]; then
+            echo "mode=rebuild" >> "$GITHUB_OUTPUT"
+          elif [ "${FORCE_COPY}" = "true" ] && [ -n "${PREV}" ]; then
+            echo "mode=copy" >> "$GITHUB_OUTPUT"
+          else
+            if [ "${CHANGED}" = "true" ]; then echo "mode=rebuild" >> "$GITHUB_OUTPUT"
+            else echo "mode=copy" >> "$GITHUB_OUTPUT"; fi
+          fi
+
+      - name: Guard — release for this version already exists
+        if: steps.gate.outputs.tag_exists == 'true' && inputs.force_rebuild != true && inputs.force_copy != true
+        run: echo "Tag ${{ steps.gate.outputs.tag }} already exists; nothing to do."
+
+      - name: Install dependencies (lockfile-exact)
+        if: steps.gate.outputs.tag_exists != 'true' || inputs.force_rebuild == true || inputs.force_copy == true
+        run: npm ci --no-fund
+
+      - name: Build mirror bundle (closure + locfit + indexes + manifest)
+        if: steps.gate.outputs.mode == 'rebuild' && (steps.gate.outputs.tag_exists != 'true' || inputs.force_rebuild == true)
+        run: |
+          set -euo pipefail
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+          STAMP="$(date -u +%Y%m%d)"
+          echo "ASSET_NAME=r-wasm-mirror-${STAMP}-${SHORT_SHA}.tar.gz" >> "$GITHUB_ENV"
+          node scripts/ranalysis/fetch-mirror.mjs --out mirror-out --bundle "mirror-out/${STAMP}-${SHORT_SHA}.tar.gz"
+          mv "mirror-out/${STAMP}-${SHORT_SHA}.tar.gz" ./
+
+      - name: Validate bundle (golden numeric checks)
+        if: steps.gate.outputs.mode == 'rebuild' && (steps.gate.outputs.tag_exists != 'true' || inputs.force_rebuild == true)
+        run: node scripts/ranalysis/validate-bundle.mjs --dir mirror-out/repo
+
+      - name: Copy-forward previous asset
+        if: steps.gate.outputs.mode == 'copy' && (steps.gate.outputs.tag_exists != 'true' || inputs.force_copy == true)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREV_TAG: ${{ steps.gate.outputs.prev_tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PREV_TAG}" ]; then
+            echo "No previous release to copy from; failing loudly instead of shipping without an asset." >&2
+            exit 1
+          fi
+          mkdir -p copy-out
+          gh release download "${PREV_TAG}" --repo "$GITHUB_REPOSITORY" -p 'r-wasm-mirror-*.tar.gz' -D copy-out
+          ASSET_NAME="$(basename "$(find copy-out -name 'r-wasm-mirror-*.tar.gz' | head -n 1)")"
+          echo "ASSET_NAME=${ASSET_NAME}" >> "$GITHUB_ENV"
+          echo "Copying forward ${ASSET_NAME} from ${PREV_TAG}"
+
+      - name: Publish release asset
+        if: steps.gate.outputs.tag_exists != 'true' || inputs.force_rebuild == true || inputs.force_copy == true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.gate.outputs.tag }}
+          VERSION: ${{ steps.gate.outputs.version }}
+          MODE: ${{ steps.gate.outputs.mode }}
+        run: |
+          set -euo pipefail
+          ASSET_PATH="$(find . -maxdepth 2 -name "${ASSET_NAME}" | head -n 1)"
+          echo "Publishing ${ASSET_NAME} (${MODE}) to ${TAG}"
+          NOTES="R WASM mirror bundle (${MODE}).
+          Downloaded by biomcp at first use of the R analysis tools (ANALYSIS_R=1).
+          See NOTICE inside the archive for package licenses and sources."
+          if gh release view "${TAG}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "${TAG}" "${ASSET_PATH}" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "${TAG}" "${ASSET_PATH}" \
+              --title "biomcp ${VERSION}" \
+              --notes "${NOTES}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --latest
+          fi
