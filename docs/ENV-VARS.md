@@ -35,6 +35,21 @@ Activates the `db_query` / `db_list_tables` / `db_describe_table` tools when `DB
 | `DB_SQLITE_PATH` | SQLite | Comma-separated list of existing `.db`/`.sqlite` files (all opened read-only): the first is the **main** database, the rest are attached under filename-derived aliases — enables `alias.table` names and cross-database JOINs; see [DATABASE.md → Multiple SQLite databases](DATABASE.md#multiple-sqlite-databases) |
 | `DB_CONNECTION_TIMEOUT_MS` | no | Connect timeout, default `10000` |
 
+## R analysis (optional feature)
+
+Activates the `analysis_r_deseq2` / `analysis_r_edger` / `analysis_r_limma` / `analysis_r_session_info` tools (Bioconductor DE in sandboxed WebAssembly R). Full guide: [R-ANALYSIS.md](R-ANALYSIS.md).
+
+> Requires the optional peer dependency `webr` installed next to biomcp — see [R-ANALYSIS.md → Enabling](R-ANALYSIS.md#enabling).
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `ANALYSIS_R` | yes (`1`/`true`) | Activates the R analysis tools |
+| `ANALYSIS_R_MIRROR_URL` | no | Override the wasm package bundle source: an extracted bundle directory, a `.tar.gz` archive (path, `file://`, or http(s) URL), for offline/self-hosted use. Default: latest GitHub release asset, cached in `~/.cache/biomcp/` |
+| `ANALYSIS_R_TIMEOUT_MS` | no | Per-analysis timeout, default `600000` (10 min); exceeded analyses are interrupted |
+| `ANALYSIS_R_MEM_LIMIT_MB` | no | RSS watermark above which new analyses are refused, default `2048` |
+| `ANALYSIS_R_GITHUB_REPO` | no | `owner/repo` to fetch release assets from (default: this project's repository) |
+| `BIOMPC_CACHE_DIR` | no | Base directory for the mirror cache (default `~/.cache/biomcp`) |
+
 ## Proxy
 
 Honored by every upstream request via proxy-aware global fetch (undici).

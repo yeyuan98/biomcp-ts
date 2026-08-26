@@ -1,6 +1,6 @@
 {
   "name": "biomcp",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "description": "BioMCP - Biomedical MCP Server in TypeScript",
   "type": "module",
   "main": "dist/bundle.js",
@@ -24,7 +24,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc && esbuild dist/server/index.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --outfile=dist/bundle.js && esbuild dist/db/index.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --outfile=dist/db.js",
+    "build": "tsc && esbuild dist/server/index.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --external:webr --outfile=dist/bundle.js && esbuild dist/db/index.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --external:webr --outfile=dist/db.js",
     "build:bundle": "npm run build",
     "prepack": "npm run build",
     "start": "node dist/bundle.js",
@@ -47,6 +47,7 @@
     "ts-jest": "^29.4.9",
     "tsx": "^4.7.0",
     "typescript": "^5.3.0",
+    "webr": "^0.6.0",
     "zod": "^3.25.0"
   },
   "engines": {
@@ -54,10 +55,14 @@
   },
   "license": "Apache-2.0",
   "peerDependencies": {
-    "mysql2": "^3.18.0"
+    "mysql2": "^3.18.0",
+    "webr": ">=0.6.0 <0.7"
   },
   "peerDependenciesMeta": {
     "mysql2": {
+      "optional": true
+    },
+    "webr": {
       "optional": true
     }
   },
