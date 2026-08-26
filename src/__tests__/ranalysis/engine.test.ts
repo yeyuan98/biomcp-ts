@@ -11,12 +11,13 @@ const writeFileMock = jest.fn();
 
 const shelterMock = { captureR: captureRMock, purge: purgeMock };
 
+const analyzePathMock = jest.fn(async () => ({ exists: true }));
 const webRInstance = {
   init: initMock,
   close: closeMock,
   interrupt: interruptMock,
   evalR: evalRMock,
-  FS: { mkdir: mkdirMock, writeFile: writeFileMock },
+  FS: { mkdir: mkdirMock, writeFile: writeFileMock, analyzePath: analyzePathMock },
   Shelter: jest.fn(() => Promise.resolve(shelterMock)),
 };
 
@@ -62,7 +63,7 @@ describe('R analysis engine', () => {
     });
     initMock.mockResolvedValue(undefined);
     closeMock.mockResolvedValue(undefined);
-    mkdirMock.mockRejectedValue(Object.assign(new Error('EEXIST'), { code: 'EEXIST' }));
+    mkdirMock.mockResolvedValue(undefined);
     writeFileMock.mockResolvedValue(undefined);
   });
 
@@ -142,10 +143,21 @@ describe('R analysis engine', () => {
     expect(order).toEqual(['start', 'end', 'start', 'end']);
   });
 
-  it('writes inputs into the VFS under /input after readiness', async () => {
+  it('writes inputs inside the queued job before evaluation', async () => {
     const { rEngine } = await importEngine();
-    await rEngine.writeInput('counts.csv', 'gene,s1\ng1,1\n');
+    await rEngine.runScript('x', [{ name: 'counts.csv', content: 'gene,s1\ng1,1\n' }]);
+    expect(analyzePathMock).toHaveBeenCalledWith('/input');
     expect(writeFileMock).toHaveBeenCalledWith('/input/counts.csv', expect.any(Uint8Array));
+  });
+
+  it('queue keeps working after a rejected job', async () => {
+    const { rEngine } = await importEngine();
+    await rEngine.ensureReady();
+    captureRMock.mockRejectedValueOnce(new Error('Error in eval: boom'));
+    const rejection = rEngine.runScript('boom');
+    await expect(rejection).rejects.toThrow(/boom/);
+    const { payload } = await rEngine.runScript('ok');
+    expect(payload).toEqual({ summary: {}, columns: [], top: [], warnings: [] });
   });
 
   it('reports session info through the queue', async () => {

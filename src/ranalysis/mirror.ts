@@ -2,12 +2,14 @@ import { createHash } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { createReadStream, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { extname, join, resolve } from 'node:path';
+import { extname, join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 
 export const DEFAULT_GITHUB_REPO = 'yeyuan98/biomcp-ts';
 const ASSET_NAME_RE = /^r-wasm-mirror-.*\.tar\.gz$/;
 const CACHE_ROOT = join(homedir(), '.cache', 'biomcp');
+const DOWNLOAD_TIMEOUT_MS = 30_000;
+const ASSET_TIMEOUT_MS = 600_000;
 
 export interface MirrorManifest {
   files?: Array<{ name: string; sha256: string }>;
@@ -65,6 +67,18 @@ function writeState(state: MirrorState): void {
 
 function extractTarGz(tarPath: string, destDir: string): void {
   mkdirSync(destDir, { recursive: true });
+  const listing = spawnSync('tar', ['-tzf', tarPath], { encoding: 'utf8' });
+  if (listing.status !== 0) {
+    rmSync(destDir, { recursive: true, force: true });
+    throw new MirrorError(`Mirror bundle is not a valid tar.gz archive: ${listing.stderr.slice(0, 300)}`);
+  }
+  for (const member of (listing.stdout ?? '').split('\n')) {
+    if (member === '' || member === './' || member === '.') continue;
+    if (member.startsWith('/') || member.split('/').includes('..')) {
+      rmSync(destDir, { recursive: true, force: true });
+      throw new MirrorError(`Mirror bundle contains an unsafe member path: ${member}`);
+    }
+  }
   const r = spawnSync('tar', ['-xzf', tarPath, '-C', destDir], { encoding: 'buffer' });
   if (r.status !== 0) {
     rmSync(destDir, { recursive: true, force: true });
@@ -75,13 +89,14 @@ function extractTarGz(tarPath: string, destDir: string): void {
 async function fetchJson(url: string): Promise<any> {
   const res = await fetch(url, {
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'biomcp-ranalysis' },
+    signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
   });
   if (!res.ok) throw new MirrorError(`GitHub API request failed (${res.status}) for ${url}.`);
   return res.json();
 }
 
 async function downloadTo(url: string, destPath: string): Promise<void> {
-  const res = await fetch(url, { headers: { 'User-Agent': 'biomcp-ranalysis' } });
+  const res = await fetch(url, { headers: { 'User-Agent': 'biomcp-ranalysis' }, signal: AbortSignal.timeout(ASSET_TIMEOUT_MS) });
   if (!res.ok || !res.body) throw new MirrorError(`Mirror download failed (${res.status}) for ${url}.`);
   const buf = Buffer.from(await res.arrayBuffer());
   writeFileSync(destPath, buf);
@@ -93,8 +108,9 @@ function verifyManifest(dir: string): MirrorManifest {
   const manifest: MirrorManifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
   const files = manifest.files ?? [];
   for (const f of files) {
+    const rootDir = resolve(dir);
     const p = resolve(dir, f.name);
-    if (!p.startsWith(resolve(dir))) throw new MirrorError(`Manifest entry escapes bundle dir: ${f.name}`);
+    if (!(p === rootDir || p.startsWith(rootDir + sep))) throw new MirrorError(`Manifest entry escapes bundle dir: ${f.name}`);
     if (!existsSync(p)) throw new MirrorError(`Mirror bundle is missing file: ${f.name}`);
     const got = sha256File(p);
     if (got !== f.sha256) {
@@ -222,16 +238,24 @@ export class MirrorServer {
     if (this.server) return this.url();
     const root = resolve(dir);
     const server = createServer((req, res) => {
-      const url = decodeURIComponent((req.url ?? '').split('?')[0]);
-      const p = resolve(join(root, url.replace(/^\/+/, '')));
-      if (!p.startsWith(root) || !existsSync(p) || statSync(p).isDirectory()) {
+      let p: string;
+      try {
+        const url = decodeURIComponent((req.url ?? '').split('?')[0]);
+        p = resolve(join(root, url.replace(/^\/+/, '')));
+      } catch {
+        res.writeHead(400);
+        res.end('bad request');
+        return;
+      }
+      if (!(p === root || p.startsWith(root + sep)) || !existsSync(p) || statSync(p).isDirectory()) {
         res.writeHead(404);
         res.end('not found');
         return;
       }
+      const size = statSync(p).size;
       res.writeHead(200, {
         'content-type': MIME[extname(p)] ?? 'text/plain',
-        'content-length': statSync(p).size,
+        'content-length': size,
         'access-control-allow-origin': '*',
       });
       createReadStream(p).pipe(res);

@@ -58,7 +58,11 @@ options(repos = c(MIRROR = ${JSON.stringify(mirrorUrl)}))
 suppressWarnings(webr::install(c("DESeq2", "edgeR", "limma", "jsonlite"), repos = getOption("repos")))
 paste0("installed=", length(rownames(installed.packages())))
 `);
-check('packages install', true, (await out.result.toString()));
+{
+  const installReport = await out.result.toString();
+  const installed = Number(installReport.match(/installed=(\d+)/)?.[1] ?? 0);
+  check('analysis packages install', installed >= 60, installReport);
+}
 
 const res = await shelter.captureR(`
 suppressMessages({library(DESeq2); library(edgeR); library(limma); library(jsonlite)})
@@ -118,6 +122,12 @@ fpr <- function(padj, truth) {
 }
 
 r1 <- run("deseq2"); r2 <- run("edger"); r3 <- run("limma")
+
+ye <- DGEList(counts = counts, group = grp)
+ye <- calcNormFactors(ye)
+ye <- estimateDisp(ye)
+ete <- exactTest(ye, pair = c("ctl", "trt"))
+re <- list(padj = p.adjust(ete$table$PValue, "BH"), lfc = ete$table$logFC)
 cat("limma up:", sum(as.numeric(r3$lfc)[de_up] > 0), "down:", sum(as.numeric(r3$lfc)[de_down] < 0), "\n")
 cat("edger up:", sum(as.numeric(r2$lfc)[de_up] > 0), "down:", sum(as.numeric(r2$lfc)[de_down] < 0), "\n")
 top100 <- function(padj) order(padj, na.last = NA)[1:100]
@@ -131,10 +141,10 @@ rownames(counts0) <- rownames(counts)
 dds0 <- DESeq(DESeqDataSetFromMatrix(counts0, DataFrame(cd), ~ condition), quiet = TRUE)
 fpr0 <- fpr(results(dds0)$padj, truth)
 
-cat("DBGXXX limma_up=", sum(as.numeric(r3$lfc)[de_up] > 0), " limma_down=", sum(as.numeric(r3$lfc)[de_down] < 0), " lfc_head=", paste(round(head(as.numeric(r3$lfc)[de_up]), 2), collapse=","), "\\n")
 jsonlite::toJSON(list(
   deseq2 = list(sig = recover(r1$padj), dir = direction_ok(r1$lfc), fpr = fpr0),
   edger = list(sig = recover(r2$padj), dir = direction_ok(r2$lfc)),
+  edger_exact = list(sig = recover(re$padj), dir = direction_ok(re$lfc)),
   limma = list(sig = recover(r3$padj), dir = direction_ok(r3$lfc)),
   jaccard_deseq2_edger = j12,
   jaccard_deseq2_limma = j13,
@@ -152,6 +162,8 @@ check('edgeR recovers >= 60 DE genes', v.edger.sig >= 60, `sig=${v.edger.sig}`);
 check('limma recovers >= 60 DE genes', v.limma.sig >= 60, `sig=${v.limma.sig}`);
 check('DESeq2 directions correct', v.deseq2.dir === true);
 check('edgeR directions correct', v.edger.dir === true);
+check('edgeR exact recovers >= 60 DE genes', v.edger_exact.sig >= 60, `sig=${v.edger_exact.sig}`);
+check('edgeR exact directions correct', v.edger_exact.dir === true);
 check('limma directions correct', v.limma.dir === true);
 check('DESeq2/edgeR top-100 Jaccard > 0.5', v.jaccard_deseq2_edger > 0.5, `J=${v.jaccard_deseq2_edger}`);
 check('DESeq2/limma top-100 Jaccard > 0.5', v.jaccard_deseq2_limma > 0.5, `J=${v.jaccard_deseq2_limma}`);

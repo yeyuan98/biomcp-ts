@@ -40,7 +40,7 @@ build_output <- function(summary_list, full, top_n, include_full) {
 }
 `;
 
-function contrastSetup(req: CanonicalAnalysisRequest): string {
+function contrastSetup(req: CanonicalAnalysisRequest, opts: { nativeCoefNames?: boolean } = {}): string {
   const c = req.contrast
     ? `list(${JSON.stringify(req.contrast.variable)}, ${JSON.stringify(req.contrast.numerator)}, ${JSON.stringify(req.contrast.denominator)})`
     : 'NULL';
@@ -71,7 +71,7 @@ if (!is.null(contrast_spec)) {
     stop("contrast levels '", num_col, "' / '", den_col, "' not found among model matrix columns: ", paste(mm_cols, collapse = ", "))
   }
 } else if (!is.null(coef_request)) {
-  if (!(coef_request %in% mm_cols)) {
+  if (${opts.nativeCoefNames ? 'FALSE' : '!(coef_request %in% mm_cols)'}) {
     stop("coef '", coef_request, "' not found among model matrix columns: ", paste(mm_cols, collapse = ", "))
   }
   coef_name <- coef_request
@@ -101,16 +101,33 @@ export function deseq2Script(req: CanonicalAnalysisRequest, opts: Deseq2Options)
     : 'NULL';
   return (
     SHARED_PREFIX.replace('__DESIGN__', JSON.stringify('~' + req.design)) +
-    contrastSetup(req) +
+    contrastSetup(req, { nativeCoefNames: true }) +
     `
 main <- function() {
   suppressMessages(library(DESeq2))
   dds <- DESeqDataSetFromMatrix(countData = counts, colData = coldata_df, design = design_formula)
   dds <- DESeq(dds, quiet = TRUE, fitType = ${JSON.stringify(opts.fitType)})
+  rn <- resultsNames(dds)
   res <- if (!is.null(${contrast})) {
     results(dds, contrast = ${contrast}, alpha = ${opts.alpha})
   } else {
-    results(dds, alpha = ${opts.alpha})
+    use_name <- NULL
+    if (!is.null(coef_request)) {
+      if (coef_request %in% rn) {
+        use_name <- coef_request
+      } else {
+        for (n in rn) {
+          if (gsub("_", "", sub("_vs_.*$", "", n)) == coef_request) { use_name <- n; break }
+        }
+      }
+      if (is.null(use_name)) {
+        stop("coef '", coef_request, "' not found among DESeq2 results names: ", paste(rn, collapse = ", "))
+      }
+    } else {
+      use_name <- rn[length(rn)]
+    }
+    coef_name <<- use_name
+    results(dds, name = use_name, alpha = ${opts.alpha})
   }
   ${
     opts.shrink
@@ -253,7 +270,7 @@ main <- function() {
   y <- calcNormFactors(y)
   v <- voom(y, design = mm, plot = FALSE)
   fit <- lmFit(v, design = mm)
-  if (!is.null(contrast_vector)) fit <- contrasts.fit(fit, contrasts = contrast_vector)
+  if (!is.null(contrast_vector)) fit <- contrasts.fit(fit, contrasts = matrix(contrast_vector, ncol = 1, dimnames = list(mm_cols, coef_name)))
   fit <- eBayes(fit)
   if (!(coef_name %in% colnames(fit$coefficients))) {
     stop("coefficient '", coef_name, "' not found; available: ", paste(colnames(fit$coefficients), collapse = ", "))

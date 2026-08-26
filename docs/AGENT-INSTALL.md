@@ -139,7 +139,7 @@ Work through this checklist with the user before filling in `env` blocks:
      ```
    - **If SQLite:** nothing to install (built-in `node:sqlite`); plain `npx biomcp` works.
    - Either way, set `DB_TYPE=mysql|sqlite` plus connection variables ([ENV-VARS.md](ENV-VARS.md#database-access-optional-feature)). Without `DB_TYPE` the db tools simply don't appear.
-3. **Does the user want in-process R/Bioconductor analysis?** (`analysis_r_deseq2` / `analysis_r_edger` / `analysis_r_limma`) — full guide in [R-ANALYSIS.md](R-ANALYSIS.md):
+3. **Does the user want in-process R/Bioconductor analysis?** (`analysis_r_deseq2`, `analysis_r_edger`, `analysis_r_limma`, `analysis_r_session_info`) — full guide in [R-ANALYSIS.md](R-ANALYSIS.md):
    - The optional `webr` peer dependency must be installed next to biomcp (same local-install-tree pattern as MySQL):
      ```bash
      mkdir biomcp-r && cd biomcp-r

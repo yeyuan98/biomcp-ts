@@ -120,6 +120,60 @@ maybe('analysis_r_* tools (integration, live webR)', () => {
     expect(tsv.split('\n').length).toBeGreaterThan(1000);
   }, 300_000);
 
+  it('limma handles reversed contrasts (reference as numerator)', async () => {
+    const res = await callTool('analysis_r_limma', {
+      ...BASE_ARGS,
+      contrast: { variable: 'condition', numerator: 'control', denominator: 'treated' },
+      top_n: 5,
+    });
+    expect(res.isError).toBeUndefined();
+    const text = res.content[0].text;
+    expect(text).toContain('condition: control vs treated');
+    const firstLfc = Number(text.match(/\| ENSG\d+ \| [\d.]+ \| (-?[\d.]+) \|/)?.[1] ?? 0);
+    expect(firstLfc).toBeLessThan(-0.5);
+  }, 300_000);
+
+  it('edgeR exact test runs with correct directions', async () => {
+    const res = await callTool('analysis_r_edger', { ...BASE_ARGS, test: 'exact' });
+    expect(res.isError).toBeUndefined();
+    const text = res.content[0].text;
+    expect(text).toContain('| test | exact |');
+    const firstLfc = Number(text.match(/\| ENSG\d+ \| [\d.]+ \| (-?[\d.]+) \|/)?.[1] ?? 0);
+    expect(firstLfc).toBeGreaterThan(0.5);
+  }, 300_000);
+
+  it('format=json returns structured output', async () => {
+    const res = await callTool('analysis_r_deseq2', { ...BASE_ARGS, format: 'json', top_n: 3 });
+    expect(res.isError).toBeUndefined();
+    const parsed = JSON.parse(res.content[0].text);
+    expect(parsed.summary.framework).toBe('DESeq2');
+    expect(Array.isArray(parsed.top)).toBe(true);
+    expect(parsed.top.length).toBe(3);
+    expect(parsed.columns[0]).toBe('gene');
+  }, 300_000);
+
+  it('DESeq2 coef path tests the requested coefficient, not the last term', async () => {
+    const coefRes = await callTool('analysis_r_deseq2', {
+      ...BASE_ARGS,
+      contrast: undefined,
+      coef: 'conditiontreated',
+      top_n: 5,
+    });
+    expect(coefRes.isError).toBeUndefined();
+    const defaultRes = await callTool('analysis_r_deseq2', { ...BASE_ARGS, contrast: undefined, top_n: 5 });
+    const sig = (t: string) => Number(t.match(/n significant \| (\d+)/)?.[1] ?? -1);
+    expect(sig(coefRes.content[0].text)).toBe(sig(defaultRes.content[0].text));
+    const batchRes = await callTool('analysis_r_deseq2', {
+      ...BASE_ARGS,
+      contrast: undefined,
+      coef: 'batchb2',
+      top_n: 5,
+    });
+    expect(batchRes.isError).toBeUndefined();
+    expect(batchRes.content[0].text).toContain('coef batchb2');
+    expect(sig(batchRes.content[0].text)).toBeLessThan(sig(defaultRes.content[0].text));
+  }, 300_000);
+
   it('analysis_r_session_info reports versions', async () => {
     const res = await callTool('analysis_r_session_info', {});
     expect(res.isError).toBeUndefined();

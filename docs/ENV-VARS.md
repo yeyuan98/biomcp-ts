@@ -44,7 +44,7 @@ Activates the `analysis_r_deseq2` / `analysis_r_edger` / `analysis_r_limma` / `a
 | Variable | Required | Purpose |
 |----------|----------|---------|
 | `ANALYSIS_R` | yes (`1`/`true`) | Activates the R analysis tools |
-| `ANALYSIS_R_MIRROR_URL` | no | Override the wasm package bundle source: an extracted bundle directory, a `.tar.gz` archive (path, `file://`, or http(s) URL), for offline/self-hosted use. Default: latest GitHub release asset, cached in `~/.cache/biomcp/` |
+| `ANALYSIS_R_MIRROR_URL` | no | Override the wasm package bundle source: a `.tar.gz` archive (path, `file://`, or http(s) URL) is extracted and checksum-verified; an extracted **directory** is trusted as-is (no re-verification) and served directly. Default: latest GitHub release asset, cached in `~/.cache/biomcp/` |
 | `ANALYSIS_R_TIMEOUT_MS` | no | Per-analysis timeout, default `600000` (10 min); exceeded analyses are interrupted |
 | `ANALYSIS_R_MEM_LIMIT_MB` | no | RSS watermark above which new analyses are refused, default `2048` |
 | `ANALYSIS_R_GITHUB_REPO` | no | `owner/repo` to fetch release assets from (default: this project's repository) |

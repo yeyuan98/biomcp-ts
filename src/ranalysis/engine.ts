@@ -6,6 +6,7 @@ type WebRInstance = import('webr').WebR;
 
 const INSTALL_PACKAGES = ['DESeq2', 'edgeR', 'limma', 'jsonlite'];
 const INTERRUPT_SIGNATURE = 'non-local transfer of control';
+const INTERRUPT_WATCHDOG_MS = 60_000;
 
 export class RAnalysisTimeoutError extends Error {
   constructor(message: string) {
@@ -21,9 +22,21 @@ export class RNotAvailableError extends Error {
   }
 }
 
+export class RRuntimeUnresponsiveError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RRuntimeUnresponsiveError';
+  }
+}
+
 export interface EngineRunResult {
   payload: Record<string, unknown>;
   rVersion: string;
+}
+
+export interface InputFile {
+  name: string;
+  content: string;
 }
 
 function timeoutMs(): number {
@@ -45,14 +58,37 @@ class REngine {
   private mirrorServer: MirrorServer | null = null;
   private mirrorUrl: string | null = null;
   private rVersion = '';
+  private poisoned = false;
 
   async ensureReady(): Promise<void> {
+    if (this.poisoned) {
+      throw new RRuntimeUnresponsiveError(
+        'The R runtime previously failed to respond after an interrupt and was discarded; a fresh runtime starts on the next call.'
+      );
+    }
     if (this.readyPromise) return this.readyPromise;
     this.readyPromise = this.bootstrap().catch((err) => {
       this.readyPromise = null;
       throw err;
     });
     return this.readyPromise;
+  }
+
+  private discardRuntime(): void {
+    this.poisoned = true;
+    this.readyPromise = null;
+    const webR = this.webR;
+    this.webR = null;
+    this.webrMod = null;
+    void (async () => {
+      if (webR) {
+        try {
+          await webR.close();
+        } catch {
+          void 0;
+        }
+      }
+    })();
   }
 
   private async bootstrap(): Promise<void> {
@@ -92,6 +128,7 @@ class REngine {
         throw new MirrorError('Package installation did not complete: ' + installResult.slice(0, 200));
       }
     } catch (err) {
+      if (err instanceof RRuntimeUnresponsiveError) throw err;
       await this.shutdown();
       if (err instanceof RAnalysisTimeoutError) throw err;
       throw new MirrorError(
@@ -102,27 +139,45 @@ class REngine {
   }
 
   private async evalRString(code: string): Promise<string> {
-    const w = this.webR!;
+    const w = this.webR;
+    if (!w) throw new RRuntimeUnresponsiveError('R runtime is not running.');
     const r = await w.evalR(code);
     return await r.toString();
   }
 
   private async captureRaw(code: string, timeout: number): Promise<string> {
-    const shelter = await new this.webR!.Shelter();
+    const webR = this.webR;
+    if (!webR) throw new RRuntimeUnresponsiveError('R runtime is not running.');
+    const shelter = await new webR.Shelter();
     let timedOut = false;
+    let watchdogReject: ((err: Error) => void) | null = null;
+    const watchdog = new Promise<never>((_, reject) => {
+      watchdogReject = reject;
+    });
     const timer = setTimeout(() => {
       timedOut = true;
       try {
-        this.webR!.interrupt();
+        webR.interrupt();
       } catch {
-        /* interrupt best-effort */
+        void 0;
       }
+      setTimeout(() => {
+        if (watchdogReject) {
+          this.discardRuntime();
+          watchdogReject(
+            new RRuntimeUnresponsiveError(
+              `R evaluation did not respond to interrupt within ${Math.round(INTERRUPT_WATCHDOG_MS / 1000)}s; the runtime was discarded and a fresh one will start on the next call.`
+            )
+          );
+        }
+      }, INTERRUPT_WATCHDOG_MS);
     }, timeout);
     try {
-      const out = await shelter.captureR(code);
+      const out = await Promise.race([shelter.captureR(code), watchdog]);
       return await out.result.toString();
     } catch (err) {
       const msg = extractMessage(err);
+      if (err instanceof RRuntimeUnresponsiveError) throw err;
       if (timedOut || msg.includes(INTERRUPT_SIGNATURE)) {
         throw new RAnalysisTimeoutError(
           `R analysis exceeded the time limit (${Math.round(timeout / 1000)}s) and was interrupted. Raise ANALYSIS_R_TIMEOUT_MS or reduce input size.`
@@ -131,10 +186,11 @@ class REngine {
       throw err;
     } finally {
       clearTimeout(timer);
+      watchdogReject = null;
       try {
         await shelter.purge();
       } catch {
-        /* purge best-effort */
+        void 0;
       }
     }
   }
@@ -163,21 +219,21 @@ class REngine {
     }
   }
 
-  async writeInput(filename: string, content: string): Promise<void> {
-    await this.ensureReady();
+  private async writeInputsLocked(inputs: InputFile[]): Promise<void> {
     const w = this.webR!;
-    try {
+    if (!(await w.FS.analyzePath('/input')).exists) {
       await w.FS.mkdir('/input');
-    } catch {
-      /* exists */
     }
-    await w.FS.writeFile(`/input/${filename}`, new TextEncoder().encode(content));
+    for (const f of inputs) {
+      await w.FS.writeFile(`/input/${f.name}`, new TextEncoder().encode(f.content));
+    }
   }
 
-  async runScript(code: string): Promise<EngineRunResult> {
+  async runScript(code: string, inputs: InputFile[] = []): Promise<EngineRunResult> {
     await this.ensureReady();
     await this.checkMemory();
     return this.enqueue(async () => {
+      await this.writeInputsLocked(inputs);
       const payload = await this.capture(code, timeoutMs());
       return { payload, rVersion: this.rVersion };
     });
@@ -196,6 +252,7 @@ class REngine {
   }
 
   async shutdown(): Promise<void> {
+    this.poisoned = false;
     this.queueTail = Promise.resolve();
     if (this.mirrorServer) {
       await this.mirrorServer.close();
@@ -203,12 +260,13 @@ class REngine {
       this.mirrorUrl = null;
     }
     if (this.webR) {
-      try {
-        await this.webR.close();
-      } catch {
-        /* best-effort */
-      }
+      const webR = this.webR;
       this.webR = null;
+      try {
+        await webR.close();
+      } catch {
+        void 0;
+      }
     }
     this.webrMod = null;
     this.readyPromise = null;

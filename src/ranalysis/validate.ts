@@ -332,6 +332,18 @@ function validateContrast(contrast: CanonicalContrast, coldata: CanonicalColdata
   }
 }
 
+const UNSAFE_ID_CHARS = /["\r\n\t]/;
+
+function rejectUnsafeStrings(kind: string, values: string[]): void {
+  for (const v of values) {
+    if (UNSAFE_ID_CHARS.test(v)) {
+      throw new ValidationError(
+        `${kind} contains a double quote or control character (not representable in the CSV interchange): ${JSON.stringify(v.slice(0, 60))}.`
+      );
+    }
+  }
+}
+
 function findDuplicates(items: string[]): string[] {
   const seen = new Set<string>();
   const dups = new Set<string>();
@@ -363,6 +375,15 @@ export function canonicalizeAnalysisInput(input: AnalysisToolInput): CanonicalAn
   const coldataRaw: CanonicalColdata =
     typeof input.coldata === 'string' ? canonicalizeColdataCsv(input.coldata) : { ...input.coldata };
 
+  rejectUnsafeStrings('Gene IDs', counts.genes);
+  rejectUnsafeStrings('Sample names', counts.samples);
+  for (const [name, values] of Object.entries(coldataRaw.columns)) {
+    rejectUnsafeStrings(`Coldata column "${name}" name`, [name]);
+    rejectUnsafeStrings(
+      `Coldata column "${name}" values`,
+      values.filter((v): v is string => typeof v === 'string')
+    );
+  }
   validateCounts(counts);
   validateColdata(coldataRaw, counts);
   const coldata = reorderColdata(coldataRaw, counts.samples);

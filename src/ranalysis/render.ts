@@ -13,8 +13,8 @@ const COLUMN_FORMATTERS: Array<[RegExp, (v: number) => string]> = [
   [/^(base_mean|log_cpm|ave_expr|baseMean|logCPM|AveExpr)$/, (v) => v.toFixed(1)],
   [/^(log2fc|log2FoldChange|logFC)$/, (v) => v.toFixed(3)],
   [/^(lfc_se|lfcSE|f_stat|t_stat|stat|F|t)$/, (v) => v.toFixed(2)],
-  [/^(pvalue|PValue|P\\.Value)$/, formatP],
-  [/^(padj|FDR|adj\\.P\\.Val)$/, formatP],
+  [/^(pvalue|PValue|P\.Value)$/, formatP],
+  [/^(padj|FDR|adj\.P\.Val)$/, formatP],
 ];
 
 function formatP(v: number): string {

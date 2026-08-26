@@ -81,8 +81,10 @@ Runtime report: R/webR versions, package versions, memory, mirror endpoint.
 - `coldata`: per-sample metadata — `{samples, columns}` or CSV. String columns
   become factors.
 - `design`: RHS formula over coldata columns (`condition`, `batch + condition`).
-- `contrast` `{variable, numerator, denominator}` **or** `coef` (model-matrix
-  column name). Default: last term of the design.
+- `contrast` `{variable, numerator, denominator}` **or** `coef` — a model-matrix
+  column name for edgeR/limma (`conditiontreated`) or a DESeq2 results name
+  (`condition_treated_vs_control`; model-matrix names are auto-translated).
+  Default: last term of the design.
 - Output: markdown table of the top `top_n` genes by adjusted p-value plus a
   summary block (default `format="table"`); `format="json"` for structured
   output; `include_full=true` adds the complete table as
@@ -111,7 +113,7 @@ over cutting edge.
 - The wasm sandbox has no shell and no host filesystem access. Note that R
   **does** have HTTP fetch capability inside the sandbox (that is how package
   installation works); it cannot reach host files.
-- Downloads are HTTPS release assets, verified by SHA-256 before use.
+- Downloads from GitHub releases are HTTPS and verified: the asset hash is compared against the GitHub-reported digest when available, and every file is checked against the bundle manifest's SHA-256 before use. This verifies **integrity and drift**; authenticity rests on HTTPS + GitHub release provenance (the manifest ships inside the same asset and is not an independent trust anchor). A user-supplied `ANALYSIS_R_MIRROR_URL` overrides the source entirely (an `http://` URL would be unauthenticated) and a plain directory is trusted as-is.
 
 ## Testing
 

@@ -38,7 +38,7 @@ const SOURCES = {
   cran: 'https://cran.r-universe.dev/bin/emscripten/contrib/4.6',
 };
 const CRAN_SRC = 'https://cran.r-project.org/src/contrib';
-const BIOC_SRC = 'https://bioconductor.org/packages/3.24/bioc';
+const BIOC_SRC = 'https://code.bioconductor.org/browse';
 
 function parseDCF(text) {
   const db = {};
@@ -122,7 +122,6 @@ log(`closure: ${closure.length} packages -> ${closure.map((c) => c.pkg).join(', 
 
 if (!closure.some((c) => c.pkg === 'locfit')) throw new Error('closure unexpectedly missing locfit');
 
-const locfitOut = 'locfit' in dbs.bioc || 'locfit' in dbs.cran ? null : 'self-build-required';
 const locfitTgz = join(contribDir, 'locfit_1.5-9.12.tgz');
 if (!existsSync(locfitTgz)) {
   if (args.locfitTgz) {
@@ -223,7 +222,7 @@ const manifest = {
   licenses,
   files,
 };
-writeFileSync(join(args.out, 'manifest.json'), JSON.stringify(manifest, null, 2));
+writeFileSync(join(repoDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
 
 const noticeLines = [
   '# NOTICE — r-wasm-mirror bundle',
@@ -233,7 +232,8 @@ const noticeLines = [
   '',
   'This bundle is a mere aggregate of independently licensed WebAssembly R package',
   'binaries (analogous to a CRAN mirror). Each package remains under its own license.',
-  'Corresponding sources are available at the listed URLs. Common license texts:',
+  'Corresponding sources (devel-track, as built by r-universe) are available at the listed URLs.',
+  'Common license texts:',
   'https://www.gnu.org/licenses/ , https://www.r-project.org/Licenses/GPL-2,',
   'https://www.r-project.org/Licenses/LGPL-3, https://artistic-license.rtfd.org,',
   'https://opensource.org/licenses/MIT, https://opensource.org/licenses/BSD-3-Clause.',
@@ -247,11 +247,11 @@ const noticeLines = [
 for (const [pkg, m] of Object.entries(licenses).sort(([a], [b]) => a.localeCompare(b))) {
   noticeLines.push(`| ${pkg} | ${m.version} | ${m.license} | ${m.source} |`);
 }
-writeFileSync(join(args.out, 'NOTICE'), noticeLines.join('\n') + '\n');
+writeFileSync(join(repoDir, 'NOTICE'), noticeLines.join('\n') + '\n');
 
 if (args.bundle) {
   log(`bundling ${args.bundle}...`);
-  spawnSync('tar', ['-czf', args.bundle, '-C', args.out, 'repo', 'manifest.json', 'NOTICE'], { stdio: 'inherit' });
+  spawnSync('tar', ['-czf', args.bundle, '-C', repoDir, '.'], { stdio: 'inherit' });
   log(`bundle: ${(statSync(args.bundle).size / 1e6).toFixed(1)} MB, sha256 ${sha256File(args.bundle)}`);
 }
 log('done.');

@@ -14,9 +14,11 @@ export interface EdgerOptions {
 }
 
 async function runAnalysis(script: string, request: CanonicalAnalysisRequest, title: string): Promise<{ text: string; isJson: boolean }> {
-  await rEngine.writeInput('counts.csv', toCountsCsv(request));
-  await rEngine.writeInput('coldata.csv', toColdataCsv(request));
-  const { payload } = await rEngine.runScript(script);
+  const inputs = [
+    { name: 'counts.csv', content: toCountsCsv(request) },
+    { name: 'coldata.csv', content: toColdataCsv(request) },
+  ];
+  const { payload } = await rEngine.runScript(script, inputs);
   const analysisPayload = payload as unknown as AnalysisPayload;
   if (request.format === 'json') {
     const out: Record<string, unknown> = {
