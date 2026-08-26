@@ -16,6 +16,7 @@ import { registerGenbankTools } from './tools/genbank.js';
 import { registerGtexTools } from './tools/gtex.js';
 import { registerEnsemblTools } from './tools/ensembl.js';
 import { registerDbToolsIfConfigured, shutdownDbBackend } from './tools/db.js';
+import { registerAnalysisRToolsIfConfigured, shutdownREngine } from './tools/ranalysis.js';
 import { VERSION } from '../version.js';
 
 const server = new McpServer({
@@ -41,12 +42,17 @@ const dbEnabled = registerDbToolsIfConfigured(server);
 if (dbEnabled) {
   console.error(`[biomcp] database tools enabled via DB_TYPE=${process.env.DB_TYPE}`);
 }
+const analysisREnabled = registerAnalysisRToolsIfConfigured(server);
+if (analysisREnabled) {
+  console.error('[biomcp] R analysis tools enabled via ANALYSIS_R');
+}
 
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   process.on('exit', () => {
     void shutdownDbBackend();
+    void shutdownREngine();
   });
 }
 
