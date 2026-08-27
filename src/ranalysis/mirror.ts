@@ -1,3 +1,4 @@
+import '../connections/proxy.js';
 import { createHash } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
