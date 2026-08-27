@@ -28,6 +28,69 @@ function makeBundleDir(root: string): { dir: string; tarPath: string } {
   return { dir: src, tarPath };
 }
 
+describe('MirrorServer file serving (whitelist map)', () => {
+  let tmpRoot: string;
+  let bundleDir: string;
+  let server: InstanceType<typeof import('../../ranalysis/mirror.js').MirrorServer>;
+  let base: string;
+  const realFetch = global.fetch;
+
+  beforeEach(async () => {
+    global.fetch = realFetch;
+    tmpRoot = mkdtempSync(join(tmpdir(), 'biomcp-mirror-server-test-'));
+    bundleDir = join(tmpRoot, 'bundle');
+    mkdirSync(join(bundleDir, 'bin', 'sub'), { recursive: true });
+    writeFileSync(join(bundleDir, 'manifest.json'), '{}');
+    writeFileSync(join(bundleDir, 'bin', 'sub', 'pkg_1.0.0.tgz'), Buffer.from('wasm-bytes'));
+    const { MirrorServer } = await import('../../ranalysis/mirror.js');
+    server = new MirrorServer();
+    base = await server.start(bundleDir);
+  });
+
+  afterEach(async () => {
+    global.fetch = realFetch;
+    await server.close();
+    rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  function get(path: string): Promise<{ status: number; body: string }> {
+    return fetch(base + path).then(async (r) => ({ status: r.status, body: await r.text() }));
+  }
+
+  it('serves a whitelisted file with CORS and content-type', async () => {
+    const r = await get('/bin/sub/pkg_1.0.0.tgz');
+    expect(r.status).toBe(200);
+    expect(r.body).toBe('wasm-bytes');
+    const res = await fetch(base + '/bin/sub/pkg_1.0.0.tgz?x=1');
+    expect(res.status).toBe(200);
+  });
+
+  it('404s missing files, encoded traversal keys, directories, root, and double-slash paths', async () => {
+    for (const path of ['/nosuch.tgz', '/..%2f..%2fetc%2fpasswd', '/bin/sub', '/', '//bin/sub/pkg_1.0.0.tgz']) {
+      const r = await get(path);
+      expect([path, r.status]).toEqual([path, 404]);
+    }
+  });
+
+  it('serves normalized dot-segment requests that stay inside the root', async () => {
+    for (const path of ['/bin/../manifest.json', '/%2e%2e/manifest.json']) {
+      const r = await get(path);
+      expect(r.status).toBe(200);
+    }
+  });
+
+  it('400s malformed percent-encoding instead of crashing', async () => {
+    const r = await get('/%zz');
+    expect(r.status).toBe(400);
+  });
+
+  it('does not serve files outside the bundle root', async () => {
+    writeFileSync(join(tmpRoot, 'outside.txt'), 'secret');
+    const r = await get('/outside.txt');
+    expect(r.status).toBe(404);
+  });
+});
+
 describe('wasm mirror resolution', () => {
   let tmpRoot: string;
   let cacheDir: string;
@@ -104,7 +167,7 @@ describe('wasm mirror resolution', () => {
       ],
     };
     fetchMock.mockImplementation(async (url: string) => {
-      if (url.includes('api.github.com')) {
+      if (new URL(url).hostname === 'api.github.com') {
         return new Response(JSON.stringify(apiBody), { status: 200 });
       }
       return new Response(bundleBytes, { status: 200 });

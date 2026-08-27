@@ -20,6 +20,19 @@ const PAYLOAD = {
   warnings: ['gene g3 has all zeros'],
 };
 
+function countUnescapedPipes(line: string): number {
+  let count = 0;
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '|') {
+      let backslashes = 0;
+      let j = i - 1;
+      while (j >= 0 && line[j] === '\\') { backslashes++; j--; }
+      if (backslashes % 2 === 0) count++;
+    }
+  }
+  return count;
+}
+
 describe('analysis result rendering', () => {
   it('renders a markdown table with header, summary, and rows', () => {
     const md = renderAnalysisTable('DESeq2', PAYLOAD);
@@ -57,6 +70,42 @@ describe('analysis result rendering', () => {
     expect(md).toContain('### Warnings');
     expect(md).toContain('- w0');
     expect(md).toContain('… 2 more');
+  });
+
+  it('escapes backslash and pipe combinations so column count is preserved', () => {
+    const md = renderAnalysisTable('DESeq2', {
+      summary: {},
+      columns: ['gene', 'log2fc'],
+      top: [{ gene: 'x\\|y', log2fc: 1.5 }],
+      warnings: [],
+    });
+    const row = md.split('\n').find((l) => l.startsWith('| x'))!;
+    expect(countUnescapedPipes(row)).toBe(3);
+    expect(row).toContain('x\\\\\\|y');
+  });
+
+  it('escapes summary object keys and values (user-controlled sample names)', () => {
+    const md = renderAnalysisTable('DESeq2', {
+      summary: { size_factors: { 's|1\\|evil': 1.001, plain: 0.999 } },
+      columns: ['gene'],
+      top: [{ gene: 'g1' }],
+      warnings: [],
+    });
+    const line = md.split('\n').find((l) => l.includes('size factors'))!;
+    expect(countUnescapedPipes(line)).toBe(3);
+    expect(line).toContain('s\\|1\\\\\\|evil: 1.001');
+  });
+
+  it('neutralizes bare carriage returns in cells and warnings', () => {
+    const md = renderAnalysisTable('DESeq2', {
+      summary: {},
+      columns: ['gene'],
+      top: [{ gene: 'a\rb' }],
+      warnings: ['w1\r\nnext'],
+    });
+    expect(md).not.toContain('\r');
+    expect(md).toContain('a b');
+    expect(md).toContain('w1 next');
   });
 
   it('renders session info with a package table', () => {

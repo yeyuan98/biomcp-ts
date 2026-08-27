@@ -23,6 +23,10 @@ function formatP(v: number): string {
   return v.toPrecision(3);
 }
 
+function escapeMarkdownCell(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r\n?|\n/g, ' ');
+}
+
 function formatCell(col: string, value: unknown): string {
   if (value === null || value === undefined) return '';
   if (typeof value === 'number') {
@@ -31,7 +35,7 @@ function formatCell(col: string, value: unknown): string {
     }
     return String(value);
   }
-  return String(value).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+  return escapeMarkdownCell(String(value));
 }
 
 function formatSummaryValue(value: unknown): string {
@@ -41,13 +45,13 @@ function formatSummaryValue(value: unknown): string {
     const entries = Object.entries(value as Record<string, unknown>);
     return entries
       .slice(0, 8)
-      .map(([k, v]) => `${k}: ${typeof v === 'number' ? v.toFixed(3) : String(v)}`)
+      .map(([k, v]) => escapeMarkdownCell(`${k}: ${typeof v === 'number' ? v.toFixed(3) : String(v)}`))
       .join('; ');
   }
   if (typeof value === 'number') {
     return Math.abs(value) >= 1e5 || (Math.abs(value) < 1e-3 && value !== 0) ? value.toExponential(2) : String(Math.round(value * 1000) / 1000);
   }
-  return String(value);
+  return escapeMarkdownCell(String(value));
 }
 
 export function renderAnalysisTable(frameworkTitle: string, payload: AnalysisPayload): string {
@@ -82,7 +86,7 @@ export function renderAnalysisTable(frameworkTitle: string, payload: AnalysisPay
     lines.push('');
     lines.push('### Warnings');
     for (const w of payload.warnings.slice(0, 10)) {
-      lines.push(`- ${w.replace(/\r?\n/g, ' ')}`);
+      lines.push(`- ${w.replace(/\r\n?|\n/g, ' ')}`);
     }
     if (payload.warnings.length > 10) lines.push(`- … ${payload.warnings.length - 10} more`);
   }

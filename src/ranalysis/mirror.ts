@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
-import { createReadStream, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { extname, join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
@@ -237,28 +237,35 @@ export class MirrorServer {
   async start(dir: string): Promise<string> {
     if (this.server) return this.url();
     const root = resolve(dir);
+    const files = new Map<string, string>();
+    for (const entry of readdirSync(root, { recursive: true }) as string[]) {
+      const abs = join(root, entry);
+      if (statSync(abs).isFile()) {
+        files.set('/' + entry.split(sep).join('/'), abs);
+      }
+    }
     const server = createServer((req, res) => {
-      let p: string;
+      let key: string;
       try {
-        const url = decodeURIComponent((req.url ?? '').split('?')[0]);
-        p = resolve(join(root, url.replace(/^\/+/, '')));
+        key = decodeURIComponent((req.url ?? '').split('?')[0]);
       } catch {
         res.writeHead(400);
         res.end('bad request');
         return;
       }
-      if (!(p === root || p.startsWith(root + sep)) || !existsSync(p) || statSync(p).isDirectory()) {
+      const f = files.get(key);
+      if (!f) {
         res.writeHead(404);
         res.end('not found');
         return;
       }
-      const size = statSync(p).size;
+      const size = statSync(f).size;
       res.writeHead(200, {
-        'content-type': MIME[extname(p)] ?? 'text/plain',
+        'content-type': MIME[extname(f)] ?? 'text/plain',
         'content-length': size,
         'access-control-allow-origin': '*',
       });
-      createReadStream(p).pipe(res);
+      createReadStream(f).pipe(res);
     });
     await new Promise<void>((resolvePromise, reject) => {
       server.once('error', reject);
