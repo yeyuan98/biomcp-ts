@@ -4,14 +4,14 @@ A high-performance MCP server that gives LLMs access to 40 biomedical tools fede
 
 ## Highlights
 
-- **40 tools** across 14 domains — search, retrieve, and cross-reference biomedical entities (+3 optional database tools)
+- **40 tools** across 14 domains — search, retrieve, and cross-reference biomedical entities (+3 optional database tools, +4 optional R analysis tools)
 - **50+ upstream sources** — MyGene, MyVariant, MyChem, MyDisease, ClinVar, gnomAD, UniProt, Reactome, OpenTargets, CIViC, OncoKB, DisGeNET, GTEx, STRING, DGIdb, ClinicalTrials.gov, PubMed, EuropePMC, Semantic Scholar, PubTator, LitSense, Monarch Initiative, OpenFDA, NIH Reporter, NCBI GEO, SRA, GenBank, Ensembl, and more
 - **Functional genomics & sequences** — GEO series/sample search with SOFT detail parsing, SRA experiment/run metadata, GenBank/RefSeq records with region slices, and GTEx v10 median expression + cis-eQTLs
 - **Section-based fetching** — `entityGet(id, sections)` fans out to multiple sources with per-section timeouts and graceful degradation (failed sections return `{ _error }` instead of crashing)
 - **Federated article search** — queries 5 literature backends simultaneously with PMID/PMCID/DOI deduplication
 - **Patent access** — worldwide patent search and detail via keyed EPO OPS / USPTO ODP; keyless USPTO Public Search and Google Patents (+Wayback archive) fallbacks
 - **Zero-config startup** — works out of the box; optional API keys unlock higher rate limits and premium data
-- **~906 unit tests** (mocked) + **129 integration tests** (live APIs via in-process MCP client, gated skips)
+- **~953 unit tests** (mocked) + **135 integration tests** (live APIs via in-process MCP client, gated skips)
 
 ## Install
 
@@ -135,6 +135,17 @@ Full tool schemas (params, enums, defaults) live in [src/server/README.md](src/s
 | `ensembl_consequence` | Compute variant consequences on demand via Ensembl VEP for NOVEL variants and non-human species: most severe consequence, per-transcript effects (SIFT/PolyPhen), co-located ClinVar/COSMIC/gnomAD data. Known human variants get deeper pre-computed scores via `variant_get`; prefer HGVS input over rsIDs for precision |
 | `ensembl_region` | Query genes/transcripts/known variants in a genomic interval (`chr:start-end`) on the current assembly — locus triage |
 
+### R Analysis (4, optional — `ANALYSIS_R=1`)
+
+| Tool | Description |
+|------|-------------|
+| `analysis_r_deseq2` | Differential expression for RNA-seq counts with Bioconductor DESeq2 (negative binomial, independent filtering, optional LFC shrinkage) in sandboxed WebAssembly R. Inputs: integer count matrix + sample metadata + design formula; output: markdown table of top genes by adjusted p-value with summary (`format="json"`, `include_full=true` for full base64(gzip(TSV)) table) |
+| `analysis_r_edger` | Differential expression with edgeR — TMM normalization, empirical-Bayes dispersion, quasi-likelihood F-test (`test="qlm"`) or 2-group exact test; same input/output contract |
+| `analysis_r_limma` | Differential expression with limma-voom — precision-weighted linear models with empirical-Bayes moderation; same input/output contract |
+| `analysis_r_session_info` | R runtime report: R/webR versions, installed package versions, memory, mirror endpoint — for diagnosing analysis issues |
+
+First use starts a ~1 GB WebAssembly R worker and downloads the wasm package bundle (~62 MB) from GitHub releases (cached). Requires `webr` installed next to biomcp. Guide: [docs/R-ANALYSIS.md](docs/R-ANALYSIS.md).
+
 ### Citation Module
 
 Citations federate 5 providers in fast (~4s) or full (~15-30s) mode. Forward citation lists come from Europe PMC, OpenCitations, and Semantic Scholar; Crossref supplies counts and backward references. Provider matrix and schema details: [src/server/README.md](src/server/README.md).
@@ -146,6 +157,7 @@ Capabilities that ship with the package but stay inactive until enabled. Each li
 | Feature | Enable | Guide |
 |---------|--------|-------|
 | **Database access** — read-only SQL tools (`db_query`, `db_list_tables`, `db_describe_table`) for MySQL and local-file SQLite | Set `DB_TYPE` (+ connection env vars); MySQL also needs `npm install biomcp mysql2` in a local tree | [docs/DATABASE.md](docs/DATABASE.md) |
+| **R analysis** — Bioconductor differential expression (`analysis_r_deseq2`, `analysis_r_edger`, `analysis_r_limma`, `analysis_r_session_info`) running DESeq2/edgeR/limma in sandboxed WebAssembly R; wasm packages download from GitHub releases at first use (~62 MB, cached) | Set `ANALYSIS_R=1`; needs `npm install biomcp webr` in a local tree; expect ~1 GB RSS | [docs/R-ANALYSIS.md](docs/R-ANALYSIS.md) |
 
 ## Documentation
 
@@ -154,6 +166,7 @@ Capabilities that ship with the package but stay inactive until enabled. Each li
 | [docs/AGENT-INSTALL.md](docs/AGENT-INSTALL.md) | Guided installation & client configuration (Claude Desktop, Claude Code, Codex, OpenCode) |
 | [docs/ENV-VARS.md](docs/ENV-VARS.md) | Single source of truth for every environment variable |
 | [docs/DATABASE.md](docs/DATABASE.md) | Database access feature guide |
+| [docs/R-ANALYSIS.md](docs/R-ANALYSIS.md) | R analysis feature guide (Bioconductor in WebAssembly) |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Build, test, publish workflow |
 | [docs/development/CI.md](docs/development/CI.md) | CI pipeline, Dependabot automation, auto-merge safety model |
 | [src/server/README.md](src/server/README.md) | Full tool schemas (params, enums, defaults) |

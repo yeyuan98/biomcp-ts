@@ -154,7 +154,20 @@ Registered only when `DB_TYPE` is set — see [docs/DATABASE.md](../../docs/DATA
 | `db_list_tables` | — | List tables/views with engine, row count, creation time, comments | readOnly |
 | `db_describe_table` | `table_name: string` | Column schema: name, type, nullability, key type, default value | readOnly |
 
-**Total: 40 core tools** across 14 registration modules (+3 optional database tools).
+### R Analysis Tools (`tools/ranalysis.ts`) — 4 tools (optional)
+
+Registered only when `ANALYSIS_R` is set — see [docs/R-ANALYSIS.md](../../docs/R-ANALYSIS.md). Requires the optional peer dependency `webr`.
+
+| Tool | Input Schema | Description | Annotations |
+|------|-------------|-------------|-------------|
+| `analysis_r_deseq2` | shared inputs (below), `alpha?: number (0.001–0.2, default 0.05)`, `fit_type?: "parametric" \| "local" \| "mean"`, `shrink?: boolean` | DESeq2 differential expression (negative binomial, Wald test, independent filtering; optional `lfcShrink(type="normal")`) | — |
+| `analysis_r_edger` | shared inputs, `test?: "qlm" \| "exact"` | edgeR differential expression (filterByExpr, TMM, quasi-likelihood F-test or 2-group exact test) | — |
+| `analysis_r_limma` | shared inputs | limma-voom differential expression (filterByExpr, TMM, voom, eBayes, topTable) | — |
+| `analysis_r_session_info` | — | R runtime report: versions, memory, mirror endpoint | readOnly |
+
+Shared inputs: `counts` (object `{genes, samples, matrix}` or CSV string; raw integer counts, ≤50,000 genes x ≤64 samples), `coldata` (object `{samples, columns}` or CSV; string columns become factors), `design` (RHS formula over coldata columns, whitelisted charset + token denylist), `contrast?` `{variable, numerator, denominator}` or `coef?` (model-matrix column; default: last design term), `top_n?` (1–200, default 50), `include_full?` (boolean), `format?` `"table" \| "json"`. Output: markdown table + summary by default; `include_full` adds base64(gzip(TSV)) of the full results.
+
+**Total: 40 core tools** across 14 registration modules (+3 optional database tools, +4 optional R analysis tools).
 
 ## Error Handling (`errors.ts`)
 

@@ -8,7 +8,7 @@ BioMCP is a standard MCP **stdio** server — any MCP-compatible client can run 
 
 ## 0. Prerequisites
 
-- **Node.js >= 22.13** (`node --version` to check) — required for the built-in SQLite module used by the optional database feature
+- **Node.js >= 22.13** (`node --version` to check) — required for the built-in SQLite module used by the optional database feature; the optional R analysis feature additionally expects ~2 GB of available RAM
 - `npm` / `npx`
 
 ## 1. Choose the invocation path
@@ -139,7 +139,16 @@ Work through this checklist with the user before filling in `env` blocks:
      ```
    - **If SQLite:** nothing to install (built-in `node:sqlite`); plain `npx biomcp` works.
    - Either way, set `DB_TYPE=mysql|sqlite` plus connection variables ([ENV-VARS.md](ENV-VARS.md#database-access-optional-feature)). Without `DB_TYPE` the db tools simply don't appear.
-3. **Behind a corporate proxy?** Set `HTTPS_PROXY`/`HTTP_PROXY` (+ optional `NO_PROXY`) — see [ENV-VARS.md → Proxy](ENV-VARS.md#proxy).
+3. **Does the user want in-process R/Bioconductor analysis?** (`analysis_r_deseq2`, `analysis_r_edger`, `analysis_r_limma`, `analysis_r_session_info`) — full guide in [R-ANALYSIS.md](R-ANALYSIS.md):
+   - The optional `webr` peer dependency must be installed next to biomcp (same local-install-tree pattern as MySQL):
+     ```bash
+     mkdir biomcp-r && cd biomcp-r
+     npm install biomcp webr
+     # run `npx biomcp` from this directory; point the client's command/args here
+     ```
+     One-shot alternative: `npx -p biomcp -p webr biomcp`.
+   - Set `ANALYSIS_R=1` in the env block. First use starts a ~1 GB WebAssembly R worker and downloads the wasm package bundle (~62 MB) from GitHub releases into `~/.cache/biomcp/` (cached; offline override via `ANALYSIS_R_MIRROR_URL`).
+4. **Behind a corporate proxy?** Set `HTTPS_PROXY`/`HTTP_PROXY` (+ optional `NO_PROXY`) — see [ENV-VARS.md → Proxy](ENV-VARS.md#proxy).
 
 Place chosen variables into the client entry's env block:
 

@@ -11,6 +11,7 @@ configuration see [../ENV-VARS.md](../ENV-VARS.md).
 |---|---|---|
 | Gate pipeline | `.github/workflows/ci.yml` | Runs every gate on every PR and push to `main` |
 | Auto-merge | `.github/workflows/dependabot-automerge.yml` | Merges qualifying Dependabot PRs after `ci` passes |
+| R WASM mirror release | `.github/workflows/r-wasm-mirror.yml` | On version bump to `main`, builds (or copy-forwards) the R-analysis wasm package bundle and publishes it as the release asset end-user servers download at first use; fresh builds are gated by golden numeric validation (`scripts/ranalysis/validate-bundle.mjs`) |
 | Dependabot config | `.github/dependabot.yml` | Weekly lockfile-only version updates + grouped security updates |
 | Branch ruleset | GitHub UI: "main no delete" | Blocks deletion/force-push; requires a PR + the `ci` check |
 
