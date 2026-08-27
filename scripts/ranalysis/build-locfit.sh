@@ -10,13 +10,13 @@
 set -euo pipefail
 
 OUT_DIR="${1:?usage: build-locfit.sh <output-dir> [version]}"
+mkdir -p "${OUT_DIR}"
+OUT_DIR="$(cd "${OUT_DIR}" && pwd -P)"
 LOCfit_VERSION="${2:-1.5-9.12}"
 IMAGE="${LOCfit_IMAGE:-ghcr.io/r-wasm/webr@sha256:2bd309d7a4ea1daed82b6fdb8e325b0de715fcd8592c5b6f3b3b88366e70cb76}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "${WORK_DIR}"' EXIT
-
-mkdir -p "${OUT_DIR}"
 
 curl -fsSL --retry 3 --max-time 120 \
   "https://cran.r-project.org/src/contrib/locfit_${LOCfit_VERSION}.tar.gz" \
