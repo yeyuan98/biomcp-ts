@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-27
+
+### Fixed
+
+- **R analysis: proxy-aware mirror downloads** — the wasm bundle downloader now
+  installs the repo's proxy-aware global fetch dispatcher (side-effect import of
+  `connections/proxy.js`) so hosts behind HTTP(S)_PROXY can download the release
+  asset at all (verified live: GitHub release download via direct undici fetch
+  stalls and dies with `SocketError` on such hosts; through the proxy the same
+  62 MB transfer completes in ~5 s). Affects standalone/re-implementation use of
+  the ranalysis path; bundled-server users already got the dispatcher from other
+  tool modules.
+
 ## [0.5.0] - 2026-08-27
 
 ### Added
