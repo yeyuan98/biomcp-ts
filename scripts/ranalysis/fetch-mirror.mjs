@@ -11,7 +11,7 @@ import {
   mkdirSync, writeFileSync, existsSync, statSync, readFileSync, copyFileSync, rmSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join, relative } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 
 const log = (...a) => console.log(`[${new Date().toISOString().slice(11, 19)}]`, ...a);
 const sh = (cmd) => {
@@ -129,7 +129,7 @@ if (!existsSync(locfitTgz)) {
     log(`copied locfit from ${args.locfitTgz}`);
   } else if (!args.skipLocfitBuild) {
     log('building locfit via docker (rwasm)...');
-    const r = spawnSync('bash', [join(process.cwd(), 'scripts', 'ranalysis', 'build-locfit.sh'), contribDir], {
+    const r = spawnSync('bash', [join(process.cwd(), 'scripts', 'ranalysis', 'build-locfit.sh'), resolve(contribDir)], {
       stdio: 'inherit',
     });
     if (r.status !== 0 || !existsSync(locfitTgz)) throw new Error('locfit docker build failed');
