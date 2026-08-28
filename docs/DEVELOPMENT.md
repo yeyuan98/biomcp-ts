@@ -17,7 +17,7 @@ make typecheck    # Type-check src/ + scripts/ without emitting
 make clean        # Remove build artifacts
 ```
 
-After `make build`, `npx .` runs the bundled MCP server locally — the recommended workflow for development testing. `npm start` does the same; `npm run dev` runs from source via tsx with watch mode.
+After `make build`, `npx .` runs the bundled MCP server locally — the recommended workflow for development testing. `npm start` does the same; `npm run dev` runs from source via tsx with watch mode. Note: dev mode needs a prior `npm run build` (or `ANALYSIS_BIOWASM_WORKER_PATH`) for the optional biowasm feature, because the biowasm worker bundle ships from `dist/biowasm-worker.js`.
 
 ### Build pipeline
 

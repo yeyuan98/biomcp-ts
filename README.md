@@ -4,7 +4,7 @@ A high-performance MCP server that gives LLMs access to 40 biomedical tools fede
 
 ## Highlights
 
-- **40 tools** across 14 domains — search, retrieve, and cross-reference biomedical entities (+3 optional database tools, +4 optional R analysis tools)
+- **40 tools** across 14 domains — search, retrieve, and cross-reference biomedical entities (+3 optional database tools, +4 optional R analysis tools, +8 optional biowasm analysis tools)
 - **50+ upstream sources** — MyGene, MyVariant, MyChem, MyDisease, ClinVar, gnomAD, UniProt, Reactome, OpenTargets, CIViC, OncoKB, DisGeNET, GTEx, STRING, DGIdb, ClinicalTrials.gov, PubMed, EuropePMC, Semantic Scholar, PubTator, LitSense, Monarch Initiative, OpenFDA, NIH Reporter, NCBI GEO, SRA, GenBank, Ensembl, and more
 - **Functional genomics & sequences** — GEO series/sample search with SOFT detail parsing, SRA experiment/run metadata, GenBank/RefSeq records with region slices, and GTEx v10 median expression + cis-eQTLs
 - **Section-based fetching** — `entityGet(id, sections)` fans out to multiple sources with per-section timeouts and graceful degradation (failed sections return `{ _error }` instead of crashing)
@@ -146,6 +146,21 @@ Full tool schemas (params, enums, defaults) live in [src/server/README.md](src/s
 
 First use starts a ~1 GB WebAssembly R worker and downloads the wasm package bundle (~62 MB) from GitHub releases (cached). Requires `webr` installed next to biomcp. Guide: [docs/R-ANALYSIS.md](docs/R-ANALYSIS.md).
 
+### Biowasm Analysis (8, optional — `ANALYSIS_BIOWASM=1`)
+
+| Tool | Description |
+|------|-------------|
+| `analysis_bam_summary` | Inspect an alignment (SAM/BAM/CRAM): header contigs, sample/read groups, flagstat mapping metrics, per-contig counts via idxstats when indexed — "what's in this BAM?" before region work |
+| `analysis_bam_view_region` | Reads, depth, pileup, or read extraction in a genomic region (samtools view/depth/mpileup); index-driven, returns counts, coverage tables, SAM rows, or a BAM artifact |
+| `analysis_bcf_summary` | Inspect a VCF/BCF: contigs, sample count and names, INFO/FORMAT field inventory from the header |
+| `analysis_bcf_view_region` | Variants in a region as a narrow field projection (bcftools query): chosen columns, sample subsets, expression filters, variant types — or a sliced VCF.gz artifact |
+| `analysis_bed_op` | Interval algebra on BED tracks (bedtools intersect/merge/subtract/coverage/jaccard/sort) with the streaming `-sorted` algorithm for sorted inputs |
+| `analysis_biowasm_convert` | Format plumbing: SAM/BAM/CRAM via samtools view, VCF/BCF via bcftools view, VCF/BCF → TSV via bcftools query; results are artifact handles reusable as `artifact_id` |
+| `analysis_biowasm_session_info` | Biowasm runtime report: pinned tool versions, asset cache state, engine status, retained artifacts, memory |
+| `analysis_biowasm_cli` | Constrained escape hatch: an allowlisted samtools/bedtools/bcftools subcommand with schema-validated args (no shell, paths under /shared only) |
+
+First use downloads checksum-verified wasm assets (~4.5 MB, cached); no extra npm packages. Region queries on real human-scale files are index-driven (~0.2 % of file read). Guide: [docs/BIOWASM-ANALYSIS.md](docs/BIOWASM-ANALYSIS.md).
+
 ### Citation Module
 
 Citations federate 5 providers in fast (~4s) or full (~15-30s) mode. Forward citation lists come from Europe PMC, OpenCitations, and Semantic Scholar; Crossref supplies counts and backward references. Provider matrix and schema details: [src/server/README.md](src/server/README.md).
@@ -158,6 +173,7 @@ Capabilities that ship with the package but stay inactive until enabled. Each li
 |---------|--------|-------|
 | **Database access** — read-only SQL tools (`db_query`, `db_list_tables`, `db_describe_table`) for MySQL and local-file SQLite | Set `DB_TYPE` (+ connection env vars); MySQL also needs `npm install biomcp mysql2` in a local tree | [docs/DATABASE.md](docs/DATABASE.md) |
 | **R analysis** — Bioconductor differential expression (`analysis_r_deseq2`, `analysis_r_edger`, `analysis_r_limma`, `analysis_r_session_info`) running DESeq2/edgeR/limma in sandboxed WebAssembly R; wasm packages download from GitHub releases at first use (~62 MB, cached) | Set `ANALYSIS_R=1`; needs `npm install biomcp webr` in a local tree; expect ~1 GB RSS | [docs/R-ANALYSIS.md](docs/R-ANALYSIS.md) |
+| **Biowasm analysis** — samtools/bedtools/bcftools (BAM/BED/VCF) in sandboxed WebAssembly; streams/indexes real human-scale datasets (~300 MB BAM scans, region queries touch ~0.2 % of the file); assets ~4.5 MB cached at first use; no extra npm packages | Set `ANALYSIS_BIOWASM=1` | [docs/BIOWASM-ANALYSIS.md](docs/BIOWASM-ANALYSIS.md) |
 
 ## Documentation
 
@@ -167,6 +183,7 @@ Capabilities that ship with the package but stay inactive until enabled. Each li
 | [docs/ENV-VARS.md](docs/ENV-VARS.md) | Single source of truth for every environment variable |
 | [docs/DATABASE.md](docs/DATABASE.md) | Database access feature guide |
 | [docs/R-ANALYSIS.md](docs/R-ANALYSIS.md) | R analysis feature guide (Bioconductor in WebAssembly) |
+| [docs/BIOWASM-ANALYSIS.md](docs/BIOWASM-ANALYSIS.md) | Biowasm analysis feature guide (samtools/bedtools/bcftools in WebAssembly) |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Build, test, publish workflow |
 | [docs/development/CI.md](docs/development/CI.md) | CI pipeline, Dependabot automation, auto-merge safety model |
 | [src/server/README.md](src/server/README.md) | Full tool schemas (params, enums, defaults) |

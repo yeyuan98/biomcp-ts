@@ -1,5 +1,8 @@
 import { resolveMirror, MirrorServer, MirrorError } from './mirror.js';
 import { SESSION_INFO_SCRIPT } from './rscripts.js';
+import { SerializationQueue } from '../wasmcore/queue.js';
+import { assertWithinMemoryLimit } from '../wasmcore/memwatch.js';
+import { runWithWatchdog } from '../wasmcore/watchdog.js';
 
 type WebRModule = typeof import('webr');
 type WebRInstance = import('webr').WebR;
@@ -7,6 +10,8 @@ type WebRInstance = import('webr').WebR;
 const INSTALL_PACKAGES = ['DESeq2', 'edgeR', 'limma', 'jsonlite'];
 const INTERRUPT_SIGNATURE = 'non-local transfer of control';
 const INTERRUPT_WATCHDOG_MS = 60_000;
+const MEM_LIMIT_ENV_VAR = 'ANALYSIS_R_MEM_LIMIT_MB';
+const DEFAULT_MEM_LIMIT_MB = 2048;
 
 export class RAnalysisTimeoutError extends Error {
   constructor(message: string) {
@@ -44,17 +49,11 @@ function timeoutMs(): number {
   return Number.isFinite(v) && v > 0 ? v : 600_000;
 }
 
-function memLimitBytes(): number {
-  const v = Number(process.env.ANALYSIS_R_MEM_LIMIT_MB);
-  const mb = Number.isFinite(v) && v > 0 ? v : 2048;
-  return mb * 1024 * 1024;
-}
-
 class REngine {
   private webrMod: WebRModule | null = null;
   private webR: WebRInstance | null = null;
   private readyPromise: Promise<void> | null = null;
-  private queueTail: Promise<unknown> = Promise.resolve();
+  private readonly queue = new SerializationQueue();
   private mirrorServer: MirrorServer | null = null;
   private mirrorUrl: string | null = null;
   private rVersion = '';
@@ -149,44 +148,30 @@ class REngine {
     const webR = this.webR;
     if (!webR) throw new RRuntimeUnresponsiveError('R runtime is not running.');
     const shelter = await new webR.Shelter();
-    let timedOut = false;
-    let watchdogReject: ((err: Error) => void) | null = null;
-    const watchdog = new Promise<never>((_, reject) => {
-      watchdogReject = reject;
-    });
-    const timer = setTimeout(() => {
-      timedOut = true;
-      try {
-        webR.interrupt();
-      } catch {
-        void 0;
-      }
-      setTimeout(() => {
-        if (watchdogReject) {
-          this.discardRuntime();
-          watchdogReject(
-            new RRuntimeUnresponsiveError(
-              `R evaluation did not respond to interrupt within ${Math.round(INTERRUPT_WATCHDOG_MS / 1000)}s; the runtime was discarded and a fresh one will start on the next call.`
-            )
-          );
-        }
-      }, INTERRUPT_WATCHDOG_MS);
-    }, timeout);
+    const cancelMessage = `R analysis exceeded the time limit (${Math.round(timeout / 1000)}s) and was interrupted. Raise ANALYSIS_R_TIMEOUT_MS or reduce input size.`;
     try {
-      const out = await Promise.race([shelter.captureR(code), watchdog]);
-      return await out.result.toString();
+      return await runWithWatchdog(
+        async () => {
+          const captured = await shelter.captureR(code);
+          return await captured.result.toString();
+        },
+        {
+          timeoutMs: timeout,
+          watchdogMs: INTERRUPT_WATCHDOG_MS,
+          cancel: () => webR.interrupt(),
+          discard: () => this.discardRuntime(),
+          isCancelError: (err) => extractMessage(err).includes(INTERRUPT_SIGNATURE),
+          cancelMessage,
+          discardError: new RRuntimeUnresponsiveError(
+            `R evaluation did not respond to interrupt within ${Math.round(INTERRUPT_WATCHDOG_MS / 1000)}s; the runtime was discarded and a fresh one will start on the next call.`
+          ),
+        }
+      );
     } catch (err) {
-      const msg = extractMessage(err);
       if (err instanceof RRuntimeUnresponsiveError) throw err;
-      if (timedOut || msg.includes(INTERRUPT_SIGNATURE)) {
-        throw new RAnalysisTimeoutError(
-          `R analysis exceeded the time limit (${Math.round(timeout / 1000)}s) and was interrupted. Raise ANALYSIS_R_TIMEOUT_MS or reduce input size.`
-        );
-      }
+      if (err instanceof Error && err.message === cancelMessage) throw new RAnalysisTimeoutError(cancelMessage);
       throw err;
     } finally {
-      clearTimeout(timer);
-      watchdogReject = null;
       try {
         await shelter.purge();
       } catch {
@@ -204,19 +189,8 @@ class REngine {
     }
   }
 
-  enqueue<T>(job: () => Promise<T>): Promise<T> {
-    const run = this.queueTail.then(job, job);
-    this.queueTail = run.catch(() => undefined);
-    return run;
-  }
-
   async checkMemory(): Promise<void> {
-    const rss = process.memoryUsage().rss;
-    if (rss > memLimitBytes()) {
-      throw new Error(
-        `Memory usage (${(rss / 1024 / 1024).toFixed(0)} MB) exceeds ANALYSIS_R_MEM_LIMIT_MB (${Math.round(memLimitBytes() / 1024 / 1024)} MB); refusing a new analysis.`
-      );
-    }
+    assertWithinMemoryLimit(MEM_LIMIT_ENV_VAR, DEFAULT_MEM_LIMIT_MB);
   }
 
   private async writeInputsLocked(inputs: InputFile[]): Promise<void> {
@@ -232,7 +206,7 @@ class REngine {
   async runScript(code: string, inputs: InputFile[] = []): Promise<EngineRunResult> {
     await this.ensureReady();
     await this.checkMemory();
-    return this.enqueue(async () => {
+    return this.queue.enqueue(async () => {
       await this.writeInputsLocked(inputs);
       const payload = await this.capture(code, timeoutMs());
       return { payload, rVersion: this.rVersion };
@@ -241,7 +215,7 @@ class REngine {
 
   async sessionInfo(): Promise<EngineRunResult> {
     await this.ensureReady();
-    return this.enqueue(async () => {
+    return this.queue.enqueue(async () => {
       const payload = await this.capture(SESSION_INFO_SCRIPT, Math.min(timeoutMs(), 120_000));
       return { payload, rVersion: this.rVersion };
     });
@@ -253,7 +227,7 @@ class REngine {
 
   async shutdown(): Promise<void> {
     this.poisoned = false;
-    this.queueTail = Promise.resolve();
+    this.queue.reset();
     if (this.mirrorServer) {
       await this.mirrorServer.close();
       this.mirrorServer = null;

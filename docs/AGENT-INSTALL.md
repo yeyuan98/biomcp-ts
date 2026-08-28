@@ -147,8 +147,11 @@ Work through this checklist with the user before filling in `env` blocks:
      # run `npx biomcp` from this directory; point the client's command/args here
      ```
      One-shot alternative: `npx -p biomcp -p webr biomcp`.
-   - Set `ANALYSIS_R=1` in the env block. First use starts a ~1 GB WebAssembly R worker and downloads the wasm package bundle (~62 MB) from GitHub releases into `~/.cache/biomcp/` (cached; offline override via `ANALYSIS_R_MIRROR_URL`).
-4. **Behind a corporate proxy?** Set `HTTPS_PROXY`/`HTTP_PROXY` (+ optional `NO_PROXY`) — see [ENV-VARS.md → Proxy](ENV-VARS.md#proxy).
+    - Set `ANALYSIS_R=1` in the env block. First use starts a ~1 GB WebAssembly R worker and downloads the wasm package bundle (~62 MB) from GitHub releases into `~/.cache/biomcp/` (cached; offline override via `ANALYSIS_R_MIRROR_URL`).
+4. **Does the user want samtools/bedtools/bcftools over BAM/BED/VCF files?** (`analysis_bam_summary`, `analysis_bam_view_region`, `analysis_bcf_summary`, `analysis_bcf_view_region`, `analysis_bed_op`, `analysis_biowasm_convert`, `analysis_biowasm_session_info`, `analysis_biowasm_cli`) — full guide in [BIOWASM-ANALYSIS.md](BIOWASM-ANALYSIS.md):
+   - This is the **simplest** optional feature: set `ANALYSIS_BIOWASM=1` only — no local install tree needed (unlike `webr`/`mysql2`); the wasm assets (~4.5 MB, checksum-verified) download at first use into `~/.cache/biomcp/`.
+   - To read BAM/VCF/BED files from disk, also set `ANALYSIS_BIOWASM_DATA_DIR` to the allowlisted directory (unset = host files denied).
+5. **Behind a corporate proxy?** Set `HTTPS_PROXY`/`HTTP_PROXY` (+ optional `NO_PROXY`) — see [ENV-VARS.md → Proxy](ENV-VARS.md#proxy).
 
 Place chosen variables into the client entry's env block:
 
