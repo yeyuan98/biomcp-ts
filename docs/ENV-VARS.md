@@ -84,6 +84,5 @@ Never read by the shipped server — used only by the optional integration / per
 | `BIOMCP_DB_IT_HOST` / `BIOMCP_DB_IT_PORT` | MySQL server under test (suite skips unless both are set) |
 | `BIOMCP_DB_IT_USER` / `BIOMCP_DB_IT_PASSWORD` / `BIOMCP_DB_IT_DATABASE` | Credentials (defaults: `root` / empty / `bio`) |
 | `BIOMCP_DB_IT_SQLITE_PATH` | SQLite file(s) under test, same comma-list syntax as `DB_SQLITE_PATH` (suite skips unless set) |
-| `ANALYSIS_BIOWASM_PERF` | Enables the biowasm perf smoke suite (region-query IO fraction, full-scan RSS budget; advisory, not CI-blocking) |
 
 See [src/__tests__/README.md](../src/__tests__/README.md#database-tests).

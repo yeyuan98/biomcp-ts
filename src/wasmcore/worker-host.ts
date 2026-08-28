@@ -35,6 +35,8 @@ export interface WorkerHostOptions {
   gracefulShutdownMs?: number;
   /** Passed to the worker as workerData. */
   workerData?: unknown;
+  /** V8 resource limits for the worker isolate; caps damage from runaway allocations. */
+  resourceLimits?: Record<string, number>;
 }
 
 interface PendingRequest {
@@ -52,6 +54,7 @@ export class WorkerHost {
   private readonly onNotification: (message: unknown) => void;
   private readonly gracefulShutdownMs: number;
   private readonly workerData: unknown;
+  private readonly resourceLimits: Record<string, number> | undefined;
   private worker: WorkerLike | null = null;
   private nextId = 1;
   private readonly pending = new Map<number, PendingRequest>();
@@ -65,6 +68,7 @@ export class WorkerHost {
     this.onNotification = options.onNotification ?? (() => undefined);
     this.gracefulShutdownMs = options.gracefulShutdownMs ?? 1_500;
     this.workerData = options.workerData;
+    this.resourceLimits = options.resourceLimits;
     this.workerPath = path;
     this.spawn(path);
   }
@@ -73,6 +77,9 @@ export class WorkerHost {
     const opts: Record<string, unknown> = { type: 'module' };
     if (this.workerData !== undefined) {
       opts.workerData = this.workerData;
+    }
+    if (this.resourceLimits) {
+      opts.resourceLimits = this.resourceLimits;
     }
     return opts;
   }
@@ -153,6 +160,19 @@ export class WorkerHost {
   }
 
   /**
+   * Hard kill for watchdog use: terminates the worker immediately and rejects
+   * every pending request right away (no cooperative grace window).
+   */
+  kill(): void {
+    const worker = this.worker;
+    this.terminating = true;
+    this.markDead(new Error('Worker was killed by the host.'));
+    if (worker) {
+      void worker.terminate().catch(() => undefined);
+    }
+  }
+
+  /**
    * Cooperative shutdown: ask the worker to exit, then hard-terminate after a
    * grace period. Any pending requests are rejected.
    */
@@ -164,7 +184,6 @@ export class WorkerHost {
       try {
         await new Promise<void>((resolvePromise) => {
           const timer = setTimeout(resolvePromise, this.gracefulShutdownMs);
-          timer.unref?.();
           this.request({ cmd: 'shutdown' }).then(
             () => {
               clearTimeout(timer);

@@ -733,6 +733,13 @@ class CountingSink implements Sink {
     } else {
       this.truncated = true;
     }
+    if (bytes > TAIL_SAMPLE_BUDGET) {
+      const keep = TAIL_SAMPLE_BUDGET - 1;
+      this.tailParts = [text.slice(0, Math.max(keep, 0))];
+      this.tailBytes = Math.max(keep, 0) + 1;
+      this.truncated = true;
+      return;
+    }
     this.tailParts.push(text);
     this.tailBytes += bytes;
     while (this.tailBytes > TAIL_SAMPLE_BUDGET && this.tailParts.length > 1) {
@@ -957,8 +964,10 @@ port!.on('message', (raw: unknown) => {
   }
   if (!msg || typeof msg.id !== 'number') return;
   if (msg.cmd === 'shutdown') {
+    post({ id: msg.id, ok: true });
     closeAllFds();
-    process.exit(0);
+    setTimeout(() => process.exit(0), 0).unref();
+    return;
   }
   if (msg.cmd === 'init') {
     (async () => {

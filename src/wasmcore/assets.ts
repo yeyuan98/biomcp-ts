@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
-import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { extname, join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
@@ -47,7 +47,17 @@ interface AssetState {
 
 export function sha256File(path: string): string {
   const h = createHash('sha256');
-  h.update(readFileSync(path));
+  const fd = openSync(path, 'r');
+  try {
+    const chunk = Buffer.alloc(1024 * 1024);
+    for (;;) {
+      const n = readSync(fd, chunk, 0, chunk.length, null);
+      if (n <= 0) break;
+      h.update(n === chunk.length ? chunk : chunk.subarray(0, n));
+    }
+  } finally {
+    closeSync(fd);
+  }
   return h.digest('hex');
 }
 

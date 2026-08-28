@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { basename, extname, resolve, sep } from 'node:path';
 import type { BiowasmInputFile, BiowasmMount, BiowasmToolName } from './engine.js';
 import {
@@ -51,7 +51,14 @@ export function resolveHostDataPath(raw: string): string {
   if (!existsSync(p)) {
     throw new ValidationError(`host_path "${raw}" (${p}) does not exist.`);
   }
-  return p;
+  const realRoot = realpathSync(root);
+  const realPath = realpathSync(p);
+  if (realPath !== realRoot && !realPath.startsWith(realRoot + sep)) {
+    throw new ValidationError(
+      `host_path "${raw}" resolves through symlinks to ${realPath}, outside the real ${DATA_DIR_ENV_VAR} root ${realRoot}.`,
+    );
+  }
+  return realPath;
 }
 
 export type SniffedFormat = 'sam' | 'vcf' | 'bed' | 'text';
@@ -250,6 +257,11 @@ export const CLI_SUBCOMMANDS: Record<BiowasmToolName, readonly string[]> = {
 
 const SHELL_METACHARS = /[;&|<>`$()]/;
 const PATH_LIKE = /\/|\.(bam|sam|cram|bai|csi|tbi|crai|vcf|bcf|bed|gz|tsv|csv|txt|fa|fasta|fna|dat)$/i;
+const OUTPUT_FLAGS = new Set(['-o', '--output', '--output-filename', '-g']);
+
+function isAbsolutePathArg(arg: string): boolean {
+  return arg.startsWith('/');
+}
 
 export function validateCliArgs(tool: BiowasmToolName, args: string[]): void {
   if (args.length === 0) {
@@ -280,6 +292,16 @@ export function validateCliArgs(tool: BiowasmToolName, args: string[]): void {
       throw new ValidationError(
         `path-like arg "${arg}" must live under /shared (in-band inputs land in /shared/data; write outputs to /shared/out).`,
       );
+    }
+  }
+  for (let i = 0; i < args.length - 1; i++) {
+    if (OUTPUT_FLAGS.has(args[i])) {
+      const target = args[i + 1];
+      if (isAbsolutePathArg(target) && target !== '/dev/null' && !target.startsWith('/shared/out/')) {
+        throw new ValidationError(
+          `output target "${target}" must live under /shared/out (or be /dev/null) so writes go through the budgeted streaming filesystem.`,
+        );
+      }
     }
   }
 }

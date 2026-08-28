@@ -9,7 +9,9 @@ class FakeWorkerHost {
   readonly requests: Array<Record<string, unknown>> = [];
   readonly notifications: Array<unknown> = [];
   terminateCalls = 0;
+  killCalls = 0;
   terminated = false;
+  private static readonly GRACE_MS = 5_000;
   private nextId = 1;
   private pending = new Map<number, { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void }>();
   private handlers: Array<{ tool: string; impl: () => Promise<Record<string, unknown>> }> = [];
@@ -72,8 +74,18 @@ class FakeWorkerHost {
 
   async terminate(): Promise<void> {
     this.terminateCalls++;
+    const death = new Error('Worker was terminated by the host.');
+    setTimeout(() => {
+      this.terminated = true;
+      for (const [, p] of this.pending) p.reject(death);
+      this.pending.clear();
+    }, FakeWorkerHost.GRACE_MS);
+  }
+
+  kill(): void {
+    this.killCalls++;
     this.terminated = true;
-    const death = new Error('Worker exited unexpectedly (exit code 1).');
+    const death = new Error('Worker was killed by the host.');
     for (const [, p] of this.pending) p.reject(death);
     this.pending.clear();
   }
@@ -253,7 +265,7 @@ describe('biowasm engine (worker boundary mocked)', () => {
     const stuck = currentHost();
     stuck.setDefault(null); // hang every request
     await expect(biowasmEngine.run({ tool: 'samtools', args: ['view'] })).rejects.toBeInstanceOf(BiowasmTimeoutError);
-    expect(stuck.terminateCalls).toBeGreaterThanOrEqual(1);
+    expect(stuck.killCalls).toBeGreaterThanOrEqual(1);
     // Poison-pill: the next call respawns a fresh worker and succeeds.
     const result = await biowasmEngine.run({ tool: 'samtools', args: ['view'] });
     expect(result.exitCode).toBe(0);

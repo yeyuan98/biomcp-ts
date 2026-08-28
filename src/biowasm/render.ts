@@ -1,6 +1,18 @@
-import { readFileSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, readSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { LIMITS } from './schemas.js';
+
+function readPreview(hostPath: string, bytes: number): string {
+  const fd = openSync(hostPath, 'r');
+  try {
+    const buf = Buffer.alloc(bytes);
+    const n = readSync(fd, buf, 0, bytes, 0);
+    return buf.subarray(0, Math.max(n, 0)).toString('utf8');
+  } finally {
+    closeSync(fd);
+  }
+}
+
 
 export const PREVIEW_BYTES = 2048;
 
@@ -124,7 +136,7 @@ export function renderArtifactBlock(
   lines.push('');
   lines.push('Reuse as `source: {artifact_id: "' + artifact.id + '"}` in any analysis_biowasm tool.');
   try {
-    const preview = readFileSync(artifact.hostPath).subarray(0, PREVIEW_BYTES).toString('utf8');
+    const preview = readPreview(artifact.hostPath, PREVIEW_BYTES);
     lines.push('');
     lines.push(`Preview (first ${PREVIEW_BYTES} bytes, decoded as text):`);
     lines.push('```');

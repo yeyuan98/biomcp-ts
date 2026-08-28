@@ -1,0 +1,29 @@
+baseline peakRSS=67MB (both runtimes + 518MB of lazily mounted human data)
+--- samtools on NA12878 chr20 WGS BAM (312MB, ~6M reads) ---
+view -H (header only)                             11ms heap=    16MB peakRSS=   77MB | chr20.bam=0.0MB/4r
+   region 100kb reads = 5
+view -c region 100kb                              10ms heap=    16MB peakRSS=   77MB | chr20.bam=0.6MB/76r bam.bai=0.2MB/4r
+   region 5Mb reads = 7
+view -c region 5Mb                               256ms heap=    16MB peakRSS=   77MB | chr20.bam=26.2MB/3302r bam.bai=0.2MB/4r
+idxstats (index-only)                              1ms heap=    16MB peakRSS=   77MB | chr20.bam=0.0MB/4r bam.bai=0.2MB/4r
+flagstat (full 312MB scan)                      2744ms heap=    16MB peakRSS=  138MB | chr20.bam=297.1MB/36512r
+   total reads = 8
+view -c (full 312MB scan)                       2719ms heap=    16MB peakRSS=  138MB | chr20.bam=297.1MB/36512r
+   out size = 26.2 MB
+view -b region 5Mb -> file                      2172ms heap=    16MB peakRSS=  253MB | chr20.bam=26.2MB/3302r bam.bai=0.2MB/4r
+--- bcftools on 1000G chr22 VCF.gz (206MB, 2504 samples) ---
+view -h (header)                                  11ms heap=    16MB peakRSS=  260MB | vcf.gz=0.0MB/4r gz.tbi=0.0MB/5r
+   region 100kb out chars = 32148795
+view -H -r 100kb region                          625ms heap=    16MB peakRSS=  279MB | vcf.gz=0.6MB/167r gz.tbi=0.1MB/10r
+   1Mb snps-only out chars = 290977827
+view -H -r 1Mb -v snps                          5500ms heap=    16MB peakRSS=  279MB | vcf.gz=6.0MB/1564r gz.tbi=0.1MB/10r
+   filtered AF>0.5 out chars = 12526745
+view -i AF>0.5 2Mb region                       4350ms heap=    16MB peakRSS=  279MB | vcf.gz=8.6MB/2261r gz.tbi=0.1MB/10r
+   query 500kb out chars = 369743
+query -f 500kb region                            316ms heap=    16MB peakRSS=  279MB | vcf.gz=2.6MB/673r gz.tbi=0.1MB/10r
+   FULL-FILE filter AF>0.3 out chars = 0
+view -i AF>0.3 FULL 206MB scan                 93201ms heap=    16MB peakRSS=  279MB | vcf.gz=196.1MB/51337r gz.tbi=0.0MB/5r
+--- pipeline: samtools region -> file -> bcftools/bedtools consume ---
+samtools: region->bam + index + idxstats           0ms heap=    16MB peakRSS=  279MB | chr20.bam=2.7MB/338r bam.bai=0.2MB/4r
+   depth -a 10kb -> 137KB file
+samtools depth -a 10kb -> file                     2ms heap=    16MB peakRSS=  279MB | chr20.bam=0.1MB/16r bam.bai=0.2MB/4r

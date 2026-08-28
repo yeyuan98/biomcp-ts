@@ -45,6 +45,18 @@ function captured(res: BiowasmRunResult): string {
   return res.stdout.mode === 'capture' ? res.stdout.text : res.stdout.head;
 }
 
+function truncationNote(res: BiowasmRunResult): string | null {
+  if (res.stdout.mode === 'capture' && res.stdout.truncated) {
+    return 'is_truncated: output exceeded the 2 MiB capture cap; totals are undercounts — narrow the region, subset samples, or request format="artifact"';
+  }
+  return null;
+}
+
+function notesWithTruncation(res: BiowasmRunResult, ioLine: string): string[] {
+  const note = truncationNote(res);
+  return note ? [ioLine, note] : [ioLine];
+}
+
 function requireSuccess(res: BiowasmRunResult, label: string): BiowasmRunResult {
   if (res.exitCode !== 0) {
     const err = new Error(
@@ -350,7 +362,7 @@ export async function runBamViewRegion(
     const rows = parseTsvRows(captured(res));
     const io = aggregate(results);
     if (output.format === 'json') {
-      return toJson({ kind: 'bam_depth', region: regionArg, positions: rows.length, depth: rows.map((r) => Number(r[2])), io_stats: ioStatsPayload(io.bytesRead, io.elapsedMs) });
+      return toJson({ kind: 'bam_depth', region: regionArg, positions: rows.length, depth: rows.map((r) => Number(r[2])), is_truncated: res.stdout.mode === 'capture' && res.stdout.truncated, io_stats: ioStatsPayload(io.bytesRead, io.elapsedMs) });
     }
     let columns = ['chrom', 'position', 'depth'];
     let tableRows = rows;
@@ -368,7 +380,7 @@ export async function runBamViewRegion(
         rows: tableRows,
         topN: output.topN,
         noun,
-        notes: [ioStatsLine(io.bytesRead, io.elapsedMs)],
+        notes: notesWithTruncation(res, ioStatsLine(io.bytesRead, io.elapsedMs)),
       }),
     };
   }
@@ -384,7 +396,7 @@ export async function runBamViewRegion(
     const rows = parseTsvRows(captured(res));
     const io = aggregate(results);
     if (output.format === 'json') {
-      return toJson({ kind: 'bam_pileup', region: regionArg, positions: rows.length, pileup: rows, io_stats: ioStatsPayload(io.bytesRead, io.elapsedMs) });
+      return toJson({ kind: 'bam_pileup', region: regionArg, positions: rows.length, pileup: rows, is_truncated: res.stdout.mode === 'capture' && res.stdout.truncated, io_stats: ioStatsPayload(io.bytesRead, io.elapsedMs) });
     }
     return {
       text: renderRowTable({
@@ -394,7 +406,7 @@ export async function runBamViewRegion(
         rows,
         topN: output.topN,
         noun: 'positions',
-        notes: [ioStatsLine(io.bytesRead, io.elapsedMs)],
+        notes: notesWithTruncation(res, ioStatsLine(io.bytesRead, io.elapsedMs)),
       }),
     };
   }
@@ -409,16 +421,20 @@ export async function runBamViewRegion(
   const io = aggregate(results);
   if (output.format === 'json') {
     const rows = parseTsvRows(captured(res));
-    return toJson({ kind: 'bam_reads', region: regionArg, reads: rows.length, sam: rows, io_stats: ioStatsPayload(io.bytesRead, io.elapsedMs) });
+    return toJson({ kind: 'bam_reads', region: regionArg, reads: rows.length, sam: rows, is_truncated: res.stdout.mode === 'capture' && res.stdout.truncated, io_stats: ioStatsPayload(io.bytesRead, io.elapsedMs) });
   }
   return {
-    text: renderTextTable(
-      `Reads — ${regionArg}`,
-      [['source', source.label], ['region', regionArg]],
-      captured(res),
-      output.topN,
-      'reads (SAM rows)',
-    ) + '\n\n' + ioStatsLine(io.bytesRead, io.elapsedMs),
+    text:
+      renderTextTable(
+        `Reads — ${regionArg}`,
+        [['source', source.label], ['region', regionArg]],
+        captured(res),
+        output.topN,
+        'reads (SAM rows)',
+      ) +
+      '\n\n' +
+      ioStatsLine(io.bytesRead, io.elapsedMs) +
+      (truncationNote(res) ? `\n\n${truncationNote(res)}` : ''),
   };
 }
 
@@ -566,6 +582,7 @@ export async function runBcfViewRegion(
       region: regionArg,
       columns: projection.fields,
       variants: rows.map((r) => Object.fromEntries(projection.fields.map((f, i) => [f, r[i] ?? '']))),
+      is_truncated: res.stdout.mode === 'capture' && res.stdout.truncated,
       io_stats: ioStatsPayload(io.bytesRead, io.elapsedMs),
     });
   }
@@ -585,7 +602,7 @@ export async function runBcfViewRegion(
       rows,
       topN: output.topN,
       noun: 'variants',
-      notes: [ioStatsLine(io.bytesRead, io.elapsedMs)],
+      notes: notesWithTruncation(res, ioStatsLine(io.bytesRead, io.elapsedMs)),
     }),
   };
 }
@@ -675,13 +692,13 @@ export async function runBedOp(
         columns: [],
         rows: [],
         topN: output.topN,
-        notes: [ioStatsLine(io.bytesRead, io.elapsedMs)],
+        notes: notesWithTruncation(res, ioStatsLine(io.bytesRead, io.elapsedMs)),
       }),
     };
   }
 
   if (output.format === 'json') {
-    return toJson({ kind: `bed_${op}`, rows, io_stats: ioStatsPayload(io.bytesRead, io.elapsedMs) });
+    return toJson({ kind: `bed_${op}`, rows, is_truncated: res.stdout.mode === 'capture' && res.stdout.truncated, io_stats: ioStatsPayload(io.bytesRead, io.elapsedMs) });
   }
   return {
     text: renderRowTable({
@@ -691,7 +708,7 @@ export async function runBedOp(
       rows,
       topN: output.topN,
       noun: 'intervals',
-      notes: [ioStatsLine(io.bytesRead, io.elapsedMs)],
+      notes: notesWithTruncation(res, ioStatsLine(io.bytesRead, io.elapsedMs)),
     }),
   };
 }
@@ -848,6 +865,7 @@ export async function runBiowasmCli(
       exit_code: res.exitCode,
       stdout: clipText(text, 512 * 1024),
       stderr: clipText(stderr, 64 * 1024),
+      is_truncated: res.stdout.mode === 'capture' && res.stdout.truncated,
       io_stats: ioStatsPayload(io.bytesRead, io.elapsedMs),
     });
   }
@@ -860,5 +878,6 @@ export async function runBiowasmCli(
   if (stderr) {
     rendered += '\n\nstderr:\n\n```\n' + clipText(stderr, 2048) + '\n```';
   }
-  return { text: rendered + '\n\n' + ioStatsLine(io.bytesRead, io.elapsedMs) };
+  const trunc = truncationNote(res);
+  return { text: rendered + '\n\n' + ioStatsLine(io.bytesRead, io.elapsedMs) + (trunc ? `\n\n${trunc}` : '') };
 }

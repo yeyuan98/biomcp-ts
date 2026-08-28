@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, openSync, rmSync, statSync, writeSync, closeSync, ftruncateSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, rmSync, statSync, writeFileSync, writeSync, closeSync, ftruncateSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WorkerHost, WorkerRpcError } from '../wasmcore/worker-host.js';
@@ -121,7 +121,6 @@ function resolveWorkerPath(): string | null {
 
 interface ArtifactState {
   hostPath: string;
-  fd: number;
   size: number;
 }
 
@@ -175,13 +174,6 @@ class BiowasmEngine {
   }
 
   private closeArtifacts(): void {
-    for (const [, art] of this.artifacts) {
-      try {
-        closeSync(art.fd);
-      } catch {
-        void 0;
-      }
-    }
     this.artifacts.clear();
   }
 
@@ -190,8 +182,8 @@ class BiowasmEngine {
     if (!art) {
       const safe = basename(vfsPath).replace(/[^A-Za-z0-9._-]/g, '_') || 'output';
       const hostPath = join(this.artifactsDir, `${Date.now().toString(36)}-${this.artifactSeq++}-${safe}`);
-      const fd = openSync(hostPath, 'a');
-      art = { hostPath, fd, size: statSync(hostPath).size };
+      writeFileSync(hostPath, '');
+      art = { hostPath, size: 0 };
       this.artifacts.set(vfsPath, art);
     }
     return art;
@@ -205,7 +197,12 @@ class BiowasmEngine {
         const chunk = msg.chunk;
         if (!chunk || chunk.byteLength === 0) return;
         const art = this.artifactFor(msg.vfsPath);
-        writeSync(art.fd, chunk);
+        const fd = openSync(art.hostPath, 'a');
+        try {
+          writeSync(fd, chunk);
+        } finally {
+          closeSync(fd);
+        }
         art.size += chunk.byteLength;
         this.host?.notify({ cmd: 'flush-ack', vfsPath: msg.vfsPath, hostPath: art.hostPath, ackedBytes: art.size });
         return;
@@ -213,7 +210,12 @@ class BiowasmEngine {
       case 'truncate': {
         const art = this.artifacts.get(msg.vfsPath);
         if (art && typeof msg.size === 'number' && msg.size < art.size) {
-          ftruncateSync(art.fd, msg.size);
+          const fd = openSync(art.hostPath, 'r+');
+          try {
+            ftruncateSync(fd, msg.size);
+          } finally {
+            closeSync(fd);
+          }
           art.size = msg.size;
         }
         return;
@@ -230,7 +232,6 @@ class BiowasmEngine {
         const art = this.artifacts.get(msg.vfsPath);
         if (art) {
           try {
-            closeSync(art.fd);
             rmSync(art.hostPath, { force: true });
           } catch {
             void 0;
@@ -268,6 +269,7 @@ class BiowasmEngine {
     const host = new WorkerHost(workerPath, {
       onNotification: (m) => this.handleNotification(m),
       workerData: { assetsDir, tools: [...BIOWASM_TOOLS_ORDER] },
+      resourceLimits: { maxOldGenerationSizeMb: 2048, maxYoungGenerationSizeMb: 128 },
     });
     this.host = host;
     try {
@@ -305,6 +307,11 @@ class BiowasmEngine {
       if (!host) {
         throw new BiowasmRuntimeUnresponsiveError('The biowasm worker is not running.');
       }
+      for (const out of request.outputs ?? []) {
+        // Fresh host file per run: prior artifact ids keep pointing at their
+        // original (now immutable) files instead of silently changing content.
+        this.artifacts.delete(out.vfsPath);
+      }
       const started = Date.now();
       const timeout = request.timeoutMs ?? timeoutMs();
       const cancelMessage =
@@ -326,7 +333,7 @@ class BiowasmEngine {
           {
             timeoutMs: timeout,
             watchdogMs: 500,
-            cancel: () => void host.terminate(),
+            cancel: () => host.kill(),
             discard: () => this.poison(),
             isCancelError: () => false,
             cancelMessage,
@@ -352,6 +359,12 @@ class BiowasmEngine {
         this.poison();
         throw new BiowasmRuntimeUnresponsiveError(
           `The biowasm worker failed during the run: ${extractMessage(err)}. A fresh worker starts on the next call.`,
+        );
+      }
+      if (host.isDead()) {
+        this.poison();
+        throw new BiowasmRuntimeUnresponsiveError(
+          'The biowasm worker died while the run was finishing; a fresh worker starts on the next call.',
         );
       }
       const outputs = response.outputs.map((o: BiowasmWorkerOutput): BiowasmArtifact => {
