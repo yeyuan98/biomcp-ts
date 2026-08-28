@@ -2,3 +2,6 @@ node_modules
 dist
 scripts/external-databases/*/raw/
 opencode.jsonc
+
+# local-only development plan docs (never committed/pushed)
+docs/development/*-PLAN.md

@@ -1,7 +1,7 @@
 # biowasm-prototype — evidence & design reference
 
-Artifacts backing `docs/development/BIOWASM-INTEGRATION-PLAN.md` (§1 empirical
-validation). These are throwaway research prototypes, kept for auditability and
+Evidence and design reference for the biowasm integration effort (§1 empirical
+validation of its development plan, kept local-only alongside this directory). These are throwaway research prototypes, kept for auditability and
 as the design reference for the M2 engine implementation; they are deliberately
 NOT wired into `src/`.
 
