@@ -51,6 +51,31 @@ export function sha256File(path: string): string {
   return h.digest('hex');
 }
 
+/**
+ * Extract a tar.gz archive into destDir with path-traversal protection.
+ * Shared by VerifiedAssetStore and dependents that resolve archive mirrors.
+ */
+export function extractTarGzArchive(tarPath: string, destDir: string, fail: (message: string) => Error, label: string): void {
+  mkdirSync(destDir, { recursive: true });
+  const listing = spawnSync('tar', ['-tzf', tarPath], { encoding: 'utf8' });
+  if (listing.status !== 0) {
+    rmSync(destDir, { recursive: true, force: true });
+    throw fail(`${label} bundle is not a valid tar.gz archive: ${listing.stderr.slice(0, 300)}`);
+  }
+  for (const member of (listing.stdout ?? '').split('\n')) {
+    if (member === '' || member === './' || member === '.') continue;
+    if (member.startsWith('/') || member.split('/').includes('..')) {
+      rmSync(destDir, { recursive: true, force: true });
+      throw fail(`${label} bundle contains an unsafe member path: ${member}`);
+    }
+  }
+  const r = spawnSync('tar', ['-xzf', tarPath, '-C', destDir], { encoding: 'buffer' });
+  if (r.status !== 0) {
+    rmSync(destDir, { recursive: true, force: true });
+    throw fail(`Failed to extract ${label.toLowerCase()} bundle (tar exit ${r.status}): ${(r.stderr ?? '').toString().slice(0, 500)}`);
+  }
+}
+
 export function cacheDir(): string {
   const root = process.env.BIOMCP_CACHE_DIR ?? CACHE_ROOT;
   if (!existsSync(root)) mkdirSync(root, { recursive: true });
@@ -82,25 +107,7 @@ export class VerifiedAssetStore {
   }
 
   private extractTarGz(tarPath: string, destDir: string): void {
-    const { label } = this.cfg;
-    mkdirSync(destDir, { recursive: true });
-    const listing = spawnSync('tar', ['-tzf', tarPath], { encoding: 'utf8' });
-    if (listing.status !== 0) {
-      rmSync(destDir, { recursive: true, force: true });
-      throw this.fail(`${label} bundle is not a valid tar.gz archive: ${listing.stderr.slice(0, 300)}`);
-    }
-    for (const member of (listing.stdout ?? '').split('\n')) {
-      if (member === '' || member === './' || member === '.') continue;
-      if (member.startsWith('/') || member.split('/').includes('..')) {
-        rmSync(destDir, { recursive: true, force: true });
-        throw this.fail(`${label} bundle contains an unsafe member path: ${member}`);
-      }
-    }
-    const r = spawnSync('tar', ['-xzf', tarPath, '-C', destDir], { encoding: 'buffer' });
-    if (r.status !== 0) {
-      rmSync(destDir, { recursive: true, force: true });
-      throw this.fail(`Failed to extract ${label.toLowerCase()} bundle (tar exit ${r.status}): ${(r.stderr ?? '').toString().slice(0, 500)}`);
-    }
+    extractTarGzArchive(tarPath, destDir, (message) => this.fail(message), this.cfg.label);
   }
 
   private async fetchJson(url: string): Promise<any> {

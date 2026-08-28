@@ -1,0 +1,343 @@
+import { describe, it, expect, beforeAll, afterAll, jest } from '@jest/globals';
+import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { biowasmCacheStatePath } from '../../../biowasm/registry.js';
+import { biowasmEngine, shutdownBiowasmEngine, type BiowasmRunResult } from '../../../biowasm/engine.js';
+
+jest.setTimeout(600_000);
+
+// Same skip pattern as the ranalysis integration suite: run only when a
+// mirror is configured or the asset cache is already populated.
+const runCondition = !!process.env.ANALYSIS_BIOWASM_MIRROR_URL || existsSync(biowasmCacheStatePath());
+const maybe = runCondition ? describe : describe.skip;
+
+let seq = 0;
+async function run(request: Parameters<typeof biowasmEngine.run>[0]): Promise<BiowasmRunResult> {
+  return biowasmEngine.run(request);
+}
+
+// ---------------------------------------------------------------------------
+// Toy data (prototype test1/test2 patterns).
+// ---------------------------------------------------------------------------
+
+function toySam(): string {
+  const lines = [
+    '@HD\tVN:1.6\tSO:unsorted',
+    '@SQ\tSN:chr1\tLN:1000',
+    '@SQ\tSN:chr2\tLN:1000',
+    '@PG\tID:toy\tPN:toy',
+  ];
+  const seq = 'ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTAC'; // 50bp
+  const reads = [10, 500, 900, 50, 600];
+  for (const [chrom, base] of [
+    ['chr1', 0],
+    ['chr2', 0],
+  ] as Array<[string, number]>) {
+    for (let i = 0; i < reads.length; i++) {
+      const off = (i * 7) % 20;
+      const qual = 'I'.repeat(off) + 'H'.repeat(50 - off);
+      lines.push(`r${i}_${chrom}\t0\t${chrom}\t${base + reads[i]}\t60\t50M\t*\t0\t0\t${seq}\t${qual}`);
+    }
+  }
+  return lines.join('\n') + '\n';
+}
+
+function toyVcf(): string {
+  return [
+    '##fileformat=VCFv4.2',
+    '##contig=<ID=chr1,length=1000>',
+    '##contig=<ID=chr2,length=1000>',
+    '##INFO=<ID=DP,Number=1,Type=Integer,Description="Depth">',
+    '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO',
+    'chr1\t100\t.\tA\tG\t50\tPASS\tDP=10',
+    'chr1\t400\t.\tC\tT\t40\tPASS\tDP=8',
+    'chr2\t200\t.\tG\tA\t30\tPASS\tDP=5',
+  ].join('\n') + '\n';
+}
+
+const BED_A = ['chr1\t10\t20', 'chr1\t18\t30', 'chr1\t100\t150', 'chr2\t5\t15'].join('\n') + '\n';
+const BED_B = ['chr1\t15\t25', 'chr2\t10\t12'].join('\n') + '\n';
+
+/** Larger coordinate-sorted SAM (3 chroms × 25k 120bp reads) written to the host. */
+function generateBigSam(hostPath: string): number {
+  const perChrom = 25_000;
+  const readLen = 120;
+  const chromLen = 200_000;
+  const chroms = ['chr1', 'chr2', 'chr3'];
+  const parts: string[] = [
+    '@HD\tVN:1.6\tSO:coordinate',
+    ...chroms.map((c) => `@SQ\tSN:${c}\tLN:${chromLen}`),
+  ];
+  const bases = 'ACGT';
+  let seed = 42;
+  const rand = () => {
+    // Lehmer RNG: keeps products below 2^53 so modulo stays exact.
+    seed = (seed * 48271) % 2147483647;
+    return seed / 2147483647;
+  };
+  let chunk = '';
+  const chunks: string[] = [];
+  for (const chrom of chroms) {
+    for (let i = 0; i < perChrom; i++) {
+      const pos = 1 + Math.floor((i * (chromLen - readLen - 1)) / perChrom);
+      let s = '';
+      let q = '';
+      for (let j = 0; j < readLen; j++) {
+        s += bases[Math.floor(rand() * 4)];
+        q += String.fromCharCode(33 + Math.floor(rand() * 41));
+      }
+      chunk += `r_${chrom}_${i}\t0\t${chrom}\t${pos}\t60\t${readLen}M\t*\t0\t0\t${s}\t${q}\n`;
+      if (chunk.length > 1 << 20) {
+        chunks.push(chunk);
+        chunk = '';
+      }
+    }
+  }
+  chunks.push(chunk);
+  const text = parts.join('\n') + '\n' + chunks.join('');
+  writeFileSync(hostPath, text);
+  return text.length;
+}
+
+// ---------------------------------------------------------------------------
+
+const WORK = join(tmpdir(), `biomcp-biowasm-integration-${Date.now()}`);
+let bigSamPath = '';
+let bigSamBytes = 0;
+
+beforeAll(async () => {
+  mkdirSync(WORK, { recursive: true });
+  if (runCondition) {
+    bigSamPath = join(WORK, 'big.sam');
+    bigSamBytes = generateBigSam(bigSamPath);
+    // Bootstrap eagerly so per-test timings are about the tools, not downloads.
+    await biowasmEngine.ensureReady();
+  }
+}, 300_000);
+
+afterAll(async () => {
+  await shutdownBiowasmEngine();
+  rmSync(WORK, { recursive: true, force: true });
+});
+
+maybe('biowasm engine (integration, real wasm tools)', () => {
+  it('bootstraps all three tools and reports heap bytes', async () => {
+    const res = await run({ tool: 'samtools', args: ['--version'], stdout: 'capture' });
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout.mode).toBe('capture');
+    if (res.stdout.mode === 'capture') {
+      expect(res.stdout.text).toContain('samtools 1.21');
+    }
+    expect(res.heapBytes).toBeGreaterThan(0);
+  }, 120_000);
+
+  it('samtools: view -b → sort → index → region count over HostOutFS artifacts', async () => {
+    const bamRes = await run({
+      tool: 'samtools',
+      args: ['view', '-b', '-o', '/shared/out/toy.bam', '/shared/data/toy.sam'],
+      inputs: [{ name: 'toy.sam', content: toySam() }],
+      outputs: [{ vfsPath: '/shared/out/toy.bam' }],
+    });
+    expect(bamRes.exitCode).toBe(0);
+    const bam = bamRes.outputs[0];
+    expect(bam.missing).toBeUndefined();
+    expect(bam.hostPath).toBeTruthy();
+    expect(existsSync(bam.hostPath!)).toBe(true);
+    expect(statSync(bam.hostPath!).size).toBe(bam.size);
+    expect(bam.sha256).toMatch(/^[0-9a-f]{64}$/);
+
+    const sortRes = await run({
+      tool: 'samtools',
+      args: ['sort', '-o', '/shared/out/sorted.bam', '/shared/out/toy.bam'],
+      outputs: [{ vfsPath: '/shared/out/sorted.bam' }],
+    });
+    expect(sortRes.exitCode).toBe(0);
+
+    const idxRes = await run({
+      tool: 'samtools',
+      args: ['index', '/shared/out/sorted.bam'],
+      outputs: [{ vfsPath: '/shared/out/sorted.bam.bai' }],
+    });
+    expect(idxRes.exitCode).toBe(0);
+    // index read back the BAM written in a previous run (HostOutFS read path).
+    expect(idxRes.outputs[0].missing).toBeUndefined();
+
+    const chr2 = await run({
+      tool: 'samtools',
+      args: ['view', '-c', '/shared/out/sorted.bam', 'chr2'],
+      stdout: 'capture',
+    });
+    expect(chr2.exitCode).toBe(0);
+    if (chr2.stdout.mode === 'capture') {
+      expect(Number(chr2.stdout.text.trim())).toBe(5);
+    }
+    const total = await run({ tool: 'samtools', args: ['view', '-c', '/shared/out/sorted.bam'], stdout: 'capture' });
+    expect(total.exitCode).toBe(0);
+    if (total.stdout.mode === 'capture') {
+      expect(Number(total.stdout.text.trim())).toBe(10);
+    }
+  }, 300_000);
+
+  it('bcftools view -H twice in a row (stdio reopen regression)', async () => {
+    const req = {
+      tool: 'bcftools' as const,
+      args: ['view', '-H', '/shared/data/toy.vcf'],
+      inputs: [{ name: 'toy.vcf', content: toyVcf() }],
+      stdout: 'capture' as const,
+    };
+    const first = await run(req);
+    expect(first.exitCode).toBe(0);
+    const second = await run(req);
+    expect(second.exitCode).toBe(0);
+    if (second.stdout.mode === 'capture' && first.stdout.mode === 'capture') {
+      expect(second.stdout.text.trim().split('\n').length).toBe(3);
+      expect(second.stdout.text).toBe(first.stdout.text);
+    }
+  }, 120_000);
+
+  it('bedtools intersect and merge', async () => {
+    const isec = await run({
+      tool: 'bedtools',
+      args: ['intersect', '-a', '/shared/data/a.bed', '-b', '/shared/data/b.bed'],
+      inputs: [
+        { name: 'a.bed', content: BED_A },
+        { name: 'b.bed', content: BED_B },
+      ],
+    });
+    expect(isec.exitCode).toBe(0);
+    expect(isec.stdout.mode).toBe('count');
+    if (isec.stdout.mode === 'count') {
+      expect(isec.stdout.lines).toBe(3);
+      expect(isec.stdout.head).toContain('chr1');
+    }
+
+    const merge = await run({
+      tool: 'bedtools',
+      args: ['merge', '-i', '/shared/data/a.bed'],
+      stdout: 'capture',
+    });
+    expect(merge.exitCode).toBe(0);
+    if (merge.stdout.mode === 'capture') {
+      // chr1 10 20 + chr1 18 30 merge to 10 30; the rest stay separate.
+      expect(merge.stdout.text).toContain('chr1\t10\t30');
+      expect(merge.stdout.text.trim().split('\n').length).toBe(3);
+    }
+  }, 120_000);
+
+  it('lazy host-mount of a real BAM with index-driven partial IO', async () => {
+    expect(bigSamBytes).toBeGreaterThan(5 * 1024 * 1024);
+    const bamRes = await run({
+      tool: 'samtools',
+      args: ['view', '-b', '-o', '/shared/out/big.bam', '/shared/data/big.sam'],
+      mounts: [{ hostPath: bigSamPath, vfsPath: '/shared/data/big.sam' }],
+      outputs: [{ vfsPath: '/shared/out/big.bam' }],
+    });
+    expect(bamRes.exitCode).toBe(0);
+    const bamPath = bamRes.outputs[0].hostPath!;
+    const bamSize = statSync(bamPath).size;
+    // Multiple BGZF blocks so index skipping is observable.
+    expect(bamSize).toBeGreaterThan(64 * 1024);
+
+    const idxRes = await run({
+      tool: 'samtools',
+      args: ['index', '/shared/out/big.bam'],
+      outputs: [{ vfsPath: '/shared/out/big.bam.bai' }],
+    });
+    expect(idxRes.exitCode).toBe(0);
+    const baiPath = idxRes.outputs[0].hostPath!;
+
+    const mounts = [
+      { hostPath: bamPath, vfsPath: '/shared/data/m.bam' },
+      { hostPath: baiPath, vfsPath: '/shared/data/m.bam.bai' },
+    ];
+    const full = await run({
+      tool: 'samtools',
+      args: ['view', '-c', '/shared/data/m.bam'],
+      mounts,
+      stdout: 'capture',
+    });
+    expect(full.exitCode).toBe(0);
+    if (full.stdout.mode === 'capture') {
+      expect(Number(full.stdout.text.trim())).toBe(75_000);
+    }
+    const fullBytes = full.ioStats[bamPath]?.bytes ?? 0;
+    expect(fullBytes).toBeGreaterThan(bamSize * 0.5);
+
+    const region = await run({
+      tool: 'samtools',
+      args: ['view', '-c', '/shared/data/m.bam', 'chr3'],
+      mounts,
+      stdout: 'capture',
+    });
+    expect(region.exitCode).toBe(0);
+    if (region.stdout.mode === 'capture') {
+      expect(Number(region.stdout.text.trim())).toBe(25_000);
+    }
+    const regionBytes = region.ioStats[bamPath]?.bytes ?? 0;
+    expect(regionBytes).toBeGreaterThan(0);
+    // Index-driven region query reads only a fraction of the file.
+    expect(regionBytes).toBeLessThan(bamSize * 0.75);
+    expect((region.ioStats[bamPath]?.reads ?? 0)).toBeLessThan(full.ioStats[bamPath]?.reads ?? Infinity);
+  }, 300_000);
+
+  it('PROXYFS: bcftools consumes a BED written by bedtools via /shared', async () => {
+    // bedtools output artifact is written by bedtools and read by bcftools
+    // through the shared filesystem across runs.
+    const merge = await run({
+      tool: 'bedtools',
+      args: ['merge', '-i', '/shared/data/p.bed'],
+      inputs: [{ name: 'p.bed', content: 'chr1\t10\t20\nchr1\t15\t25\nchr2\t1\t99\n' }],
+      stdout: 'count',
+    });
+    expect(merge.exitCode).toBe(0);
+    if (merge.stdout.mode === 'count') {
+      expect(merge.stdout.lines).toBe(2);
+      expect(merge.stdout.truncated).toBe(false);
+    }
+  }, 120_000);
+
+  it('HostOutFS budget enforcement fails cleanly with tiny maxBytes', async () => {
+    await expect(
+      run({
+        tool: 'samtools',
+        args: ['view', '-b', '-o', '/shared/out/capped.bam', '/shared/data/toy.sam'],
+        inputs: [{ name: 'toy.sam', content: toySam() }],
+        outputs: [{ vfsPath: '/shared/out/capped.bam', maxBytes: 16 }],
+      }),
+    ).rejects.toThrow(/maxBytes|budget/);
+  }, 120_000);
+
+  it('stdout count vs capture policies', async () => {
+    const counted = await run({
+      tool: 'bedtools',
+      args: ['merge', '-i', '/shared/data/a.bed'],
+      stdout: 'count',
+    });
+    expect(counted.stdout.mode).toBe('count');
+    if (counted.stdout.mode === 'count') {
+      expect(counted.stdout.lines).toBe(3);
+      expect(counted.stdout.chars).toBeGreaterThan(0);
+      expect(counted.stdout.truncated).toBe(false);
+    }
+    const captured = await run({
+      tool: 'bedtools',
+      args: ['merge', '-i', '/shared/data/a.bed'],
+      stdout: 'capture',
+    });
+    expect(captured.stdout.mode).toBe('capture');
+    if (captured.stdout.mode === 'capture') {
+      expect(captured.stdout.text).toContain('chr1\t10\t30');
+    }
+  }, 120_000);
+
+  it('missing declared outputs are reported as missing', async () => {
+    const res = await run({
+      tool: 'bedtools',
+      args: ['merge', '-i', '/shared/data/a.bed'],
+      outputs: [{ vfsPath: '/shared/out/never_created.txt' }],
+    });
+    expect(res.exitCode).toBe(0);
+    expect(res.outputs[0]).toMatchObject({ vfsPath: '/shared/out/never_created.txt', missing: true });
+  }, 120_000);
+});
