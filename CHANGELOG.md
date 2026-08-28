@@ -5,11 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] - 2026-08-28
 
 ### Added
 
 - **Biowasm analysis optional feature** — samtools 1.21, bedtools 2.31.0, and bcftools 1.10 compiled to WebAssembly (biowasm) inside the MCP server: no native installs, containers, or extra npm packages; assets (~4.5 MB) download once into `~/.cache/biomcp/`, sha256-verified against dev-time pins (`ANALYSIS_BIOWASM_MIRROR_URL` mirrors `ANALYSIS_R_MIRROR_URL` semantics for offline use). Engine: one `worker_threads` worker with a shared virtual filesystem — host files lazy-mount with fd-backed positional reads (region queries touch only the relevant index blocks), tool writes stream to the host under a byte budget, stdout passes through count/capture sinks with hard caps (the ~20× V8 string-amplification hazard is ruled out by construction), and timeouts terminate+respawn the worker (poison-pill pattern). Eight env-gated tools (`ANALYSIS_BIOWASM=1`): `analysis_bam_summary`, `analysis_bam_view_region`, `analysis_bcf_summary`, `analysis_bcf_view_region` (field projections + sample subsets instead of raw cohort VCF rows), `analysis_bed_op`, `analysis_biowasm_convert` (artifact-to-artifact format plumbing), `analysis_biowasm_session_info`, and the constrained escape hatch `analysis_biowasm_cli` (subcommand allowlist, arg-array execution, `/shared`-only paths). Shared input contract: inline content (format-sniffed) / prior `artifact_id` / `host_path` under an `ANALYSIS_BIOWASM_DATA_DIR` allowlist (normalized prefix checks, `..` rejected), structured regions, bounded outputs (top_n, 2 MB caps, artifact handles with previews and optional ≤ 2 MB base64(gzip) inlining), io_stats in every response. Guide: [docs/BIOWASM-ANALYSIS.md](docs/BIOWASM-ANALYSIS.md); also ENV-VARS.md (incl. the `BIOMPC_CACHE_DIR`→`BIOMCP_CACHE_DIR` typo fix), README.md, src/server/README.md, AGENT-INSTALL.md, and DEVELOPMENT.md (dev mode needs a prior build for the worker bundle).
+- **`wasmcore` module** (`src/wasmcore/`) — runtime-agnostic WebAssembly support core extracted from the R-analysis engine, now shared infrastructure for every wasm-based feature: `SerializationQueue` (promise-chain single-flight job ordering), `runWithWatchdog` (timeout → cancel → watchdog → discard ladder), a parametrized RSS watermark check, `VerifiedAssetStore`/`StaticFileServer` (sha256-manifest-verified asset downloads with GitHub-release flow, digest-skip caching, traversal-safe extraction; the machinery behind both wasm mirrors), and `WorkerHost` (worker_threads lifecycle: unref'd spawn, id-based request/response RPC, immediate `kill()` for watchdog use, poison-on-crash, injectable factory for tests, optional `resourceLimits`).
+
+### Changed
+
+- **R analysis depends on `wasmcore`** — `src/ranalysis/engine.ts` now sources its serialization queue, timeout watchdog, and memory watermark from `src/wasmcore/`, and `src/ranalysis/mirror.ts` is a thin R-specific adapter (env names, asset regex, MIME map) over the generalized `wasmcore/assets.ts` verified-download machinery. No behavior change: public API, error taxonomy, and message texts are identical (full suite green throughout the refactor).
+
+### Fixed
+
+- **Biowasm E2E remediation** (found by independent opencode-CLI testing): region queries on indexless sources now dispatch to streaming BED filters (`view -L`, `depth -b`, `mpileup -l`) instead of silently returning zero rows; `analysis_bcf_summary` reports variant counts (plus per-contig stats when an index is present); stringified `source`/`b_source`/`index` parameters are tolerated (LLM clients stringify secondary union params — verified against the MCP SDK validation path, emitted JSON schema unchanged); `analysis_biowasm_cli` surfaces real exit codes and `is_error` instead of masking failures (exit statuses are recovered via a worker-side `Module._main` replica because the pinned Emscripten glue swallows every status inside `callMain`).
+
+### Known issues
+
+- `analysis_bam_view_region` with `mode="depth"` on indexless sources (streaming BED fallback) emits doubled output — a zero-filled pass followed by the correct pass (e.g. 42 rows for a 21-position region). The indexed path (`host_path` with a sibling `.bai`) is unaffected, as are count/reads modes. Under investigation; use an indexed source for depth until fixed.
 
 ## [0.5.1] - 2026-08-27
 
