@@ -1,0 +1,45 @@
+{
+  "id": "biowasm-q05-bed-algebra",
+  "name": "BED covered-fraction algebra",
+  "level": "L1",
+  "purpose": "L1 interval algebra: covered fraction of A by B (100/300 = 0.3333; jaccard 0.25 is the trap).",
+  "prompt": "I have two BED tracks. Track A: chr1 100 200, chr1 300 400, chr1 500 600. Track B: chr1 150 350. What fraction of track A's bases are covered by track B?",
+  "externalData": [],
+  "inlineResources": [],
+  "timeoutMs": 300000,
+  "checks": [
+    {
+      "type": "tool_seq",
+      "seq": [
+        [
+          "biomcp_analysis_bed_op",
+          "completed"
+        ]
+      ]
+    },
+    {
+      "type": "group",
+      "anyOf": [
+        {
+          "type": "number_near",
+          "expect": 0.3333,
+          "tolerance": 0.01
+        },
+        {
+          "type": "number_near",
+          "expect": 33.33,
+          "tolerance": 1
+        }
+      ]
+    },
+    {
+      "type": "rubric",
+      "flag": "no-fabrication",
+      "manual": true,
+      "desc": "Class-b finding if the agent reports jaccard 0.25 as the answer (bedtools jaccard intersection 100 / union 400) instead of the asked covered fraction 100/300."
+    }
+  ],
+  "expectedOutputs": [
+    "expected/q05-fraction.json"
+  ]
+}

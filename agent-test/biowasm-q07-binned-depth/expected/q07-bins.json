@@ -1,0 +1,724 @@
+{
+  "tool_call": "biomcp_analysis_bam_view_region mode=depth region=20:10000000-10050000 depth_bins=500",
+  "region": "20:10000000-10050000",
+  "bin_size": 500,
+  "bin_count": 101,
+  "positions_total": 50001,
+  "bin1": {
+    "chrom": "20",
+    "bin_start": 9999501,
+    "bin_end": 10000000,
+    "positions": 1,
+    "mean_depth": 5
+  },
+  "bin2_mean": 6.64,
+  "bins": [
+    {
+      "chrom": "20",
+      "bin_start": 9999501,
+      "bin_end": 10000000,
+      "positions": 1,
+      "mean_depth": 5
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10000001,
+      "bin_end": 10000500,
+      "positions": 500,
+      "mean_depth": 6.64
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10000501,
+      "bin_end": 10001000,
+      "positions": 500,
+      "mean_depth": 5.01
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10001001,
+      "bin_end": 10001500,
+      "positions": 500,
+      "mean_depth": 4.34
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10001501,
+      "bin_end": 10002000,
+      "positions": 500,
+      "mean_depth": 6.07
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10002001,
+      "bin_end": 10002500,
+      "positions": 500,
+      "mean_depth": 3.1
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10002501,
+      "bin_end": 10003000,
+      "positions": 500,
+      "mean_depth": 3.52
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10003001,
+      "bin_end": 10003500,
+      "positions": 500,
+      "mean_depth": 3.66
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10003501,
+      "bin_end": 10004000,
+      "positions": 500,
+      "mean_depth": 5.75
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10004001,
+      "bin_end": 10004500,
+      "positions": 500,
+      "mean_depth": 4.1
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10004501,
+      "bin_end": 10005000,
+      "positions": 500,
+      "mean_depth": 3.02
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10005001,
+      "bin_end": 10005500,
+      "positions": 500,
+      "mean_depth": 5.71
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10005501,
+      "bin_end": 10006000,
+      "positions": 500,
+      "mean_depth": 6.33
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10006001,
+      "bin_end": 10006500,
+      "positions": 500,
+      "mean_depth": 6.67
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10006501,
+      "bin_end": 10007000,
+      "positions": 500,
+      "mean_depth": 3.6
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10007001,
+      "bin_end": 10007500,
+      "positions": 500,
+      "mean_depth": 4.28
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10007501,
+      "bin_end": 10008000,
+      "positions": 500,
+      "mean_depth": 6.95
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10008001,
+      "bin_end": 10008500,
+      "positions": 500,
+      "mean_depth": 5.45
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10008501,
+      "bin_end": 10009000,
+      "positions": 500,
+      "mean_depth": 2.56
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10009001,
+      "bin_end": 10009500,
+      "positions": 500,
+      "mean_depth": 2.65
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10009501,
+      "bin_end": 10010000,
+      "positions": 500,
+      "mean_depth": 5.17
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10010001,
+      "bin_end": 10010500,
+      "positions": 500,
+      "mean_depth": 4.46
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10010501,
+      "bin_end": 10011000,
+      "positions": 500,
+      "mean_depth": 8.08
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10011001,
+      "bin_end": 10011500,
+      "positions": 500,
+      "mean_depth": 5.68
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10011501,
+      "bin_end": 10012000,
+      "positions": 500,
+      "mean_depth": 5.02
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10012001,
+      "bin_end": 10012500,
+      "positions": 500,
+      "mean_depth": 1.92
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10012501,
+      "bin_end": 10013000,
+      "positions": 500,
+      "mean_depth": 3.17
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10013001,
+      "bin_end": 10013500,
+      "positions": 500,
+      "mean_depth": 6.23
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10013501,
+      "bin_end": 10014000,
+      "positions": 500,
+      "mean_depth": 4.84
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10014001,
+      "bin_end": 10014500,
+      "positions": 500,
+      "mean_depth": 5.64
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10014501,
+      "bin_end": 10015000,
+      "positions": 500,
+      "mean_depth": 5.99
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10015001,
+      "bin_end": 10015500,
+      "positions": 500,
+      "mean_depth": 4.09
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10015501,
+      "bin_end": 10016000,
+      "positions": 500,
+      "mean_depth": 1.03
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10016001,
+      "bin_end": 10016500,
+      "positions": 500,
+      "mean_depth": 3.07
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10016501,
+      "bin_end": 10017000,
+      "positions": 500,
+      "mean_depth": 4.28
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10017001,
+      "bin_end": 10017500,
+      "positions": 500,
+      "mean_depth": 3.7
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10017501,
+      "bin_end": 10018000,
+      "positions": 500,
+      "mean_depth": 4.24
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10018001,
+      "bin_end": 10018500,
+      "positions": 500,
+      "mean_depth": 6.93
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10018501,
+      "bin_end": 10019000,
+      "positions": 500,
+      "mean_depth": 6.21
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10019001,
+      "bin_end": 10019500,
+      "positions": 500,
+      "mean_depth": 4.89
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10019501,
+      "bin_end": 10020000,
+      "positions": 500,
+      "mean_depth": 5.19
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10020001,
+      "bin_end": 10020500,
+      "positions": 500,
+      "mean_depth": 6.49
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10020501,
+      "bin_end": 10021000,
+      "positions": 500,
+      "mean_depth": 4.4
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10021001,
+      "bin_end": 10021500,
+      "positions": 500,
+      "mean_depth": 5.03
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10021501,
+      "bin_end": 10022000,
+      "positions": 500,
+      "mean_depth": 7.05
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10022001,
+      "bin_end": 10022500,
+      "positions": 500,
+      "mean_depth": 6.75
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10022501,
+      "bin_end": 10023000,
+      "positions": 500,
+      "mean_depth": 7.54
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10023001,
+      "bin_end": 10023500,
+      "positions": 500,
+      "mean_depth": 6.75
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10023501,
+      "bin_end": 10024000,
+      "positions": 500,
+      "mean_depth": 6.87
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10024001,
+      "bin_end": 10024500,
+      "positions": 500,
+      "mean_depth": 5.04
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10024501,
+      "bin_end": 10025000,
+      "positions": 500,
+      "mean_depth": 6.15
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10025001,
+      "bin_end": 10025500,
+      "positions": 500,
+      "mean_depth": 8.59
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10025501,
+      "bin_end": 10026000,
+      "positions": 500,
+      "mean_depth": 6.79
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10026001,
+      "bin_end": 10026500,
+      "positions": 500,
+      "mean_depth": 4.1
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10026501,
+      "bin_end": 10027000,
+      "positions": 500,
+      "mean_depth": 4.07
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10027001,
+      "bin_end": 10027500,
+      "positions": 500,
+      "mean_depth": 4.47
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10027501,
+      "bin_end": 10028000,
+      "positions": 500,
+      "mean_depth": 7.43
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10028001,
+      "bin_end": 10028500,
+      "positions": 500,
+      "mean_depth": 6.78
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10028501,
+      "bin_end": 10029000,
+      "positions": 500,
+      "mean_depth": 5.75
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10029001,
+      "bin_end": 10029500,
+      "positions": 500,
+      "mean_depth": 5.25
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10029501,
+      "bin_end": 10030000,
+      "positions": 500,
+      "mean_depth": 6.36
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10030001,
+      "bin_end": 10030500,
+      "positions": 500,
+      "mean_depth": 4.74
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10030501,
+      "bin_end": 10031000,
+      "positions": 500,
+      "mean_depth": 3.38
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10031001,
+      "bin_end": 10031500,
+      "positions": 500,
+      "mean_depth": 5.24
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10031501,
+      "bin_end": 10032000,
+      "positions": 500,
+      "mean_depth": 6.92
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10032001,
+      "bin_end": 10032500,
+      "positions": 500,
+      "mean_depth": 4.83
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10032501,
+      "bin_end": 10033000,
+      "positions": 500,
+      "mean_depth": 5.03
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10033001,
+      "bin_end": 10033500,
+      "positions": 500,
+      "mean_depth": 3.79
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10033501,
+      "bin_end": 10034000,
+      "positions": 500,
+      "mean_depth": 5.15
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10034001,
+      "bin_end": 10034500,
+      "positions": 500,
+      "mean_depth": 4.95
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10034501,
+      "bin_end": 10035000,
+      "positions": 500,
+      "mean_depth": 6.27
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10035001,
+      "bin_end": 10035500,
+      "positions": 500,
+      "mean_depth": 5.48
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10035501,
+      "bin_end": 10036000,
+      "positions": 500,
+      "mean_depth": 5.71
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10036001,
+      "bin_end": 10036500,
+      "positions": 500,
+      "mean_depth": 3.92
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10036501,
+      "bin_end": 10037000,
+      "positions": 500,
+      "mean_depth": 3.83
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10037001,
+      "bin_end": 10037500,
+      "positions": 500,
+      "mean_depth": 4.99
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10037501,
+      "bin_end": 10038000,
+      "positions": 500,
+      "mean_depth": 5.67
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10038001,
+      "bin_end": 10038500,
+      "positions": 500,
+      "mean_depth": 7.06
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10038501,
+      "bin_end": 10039000,
+      "positions": 500,
+      "mean_depth": 4.31
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10039001,
+      "bin_end": 10039500,
+      "positions": 500,
+      "mean_depth": 5.57
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10039501,
+      "bin_end": 10040000,
+      "positions": 500,
+      "mean_depth": 4.68
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10040001,
+      "bin_end": 10040500,
+      "positions": 500,
+      "mean_depth": 6.95
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10040501,
+      "bin_end": 10041000,
+      "positions": 500,
+      "mean_depth": 6.48
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10041001,
+      "bin_end": 10041500,
+      "positions": 500,
+      "mean_depth": 4.48
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10041501,
+      "bin_end": 10042000,
+      "positions": 500,
+      "mean_depth": 3.15
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10042001,
+      "bin_end": 10042500,
+      "positions": 500,
+      "mean_depth": 4.81
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10042501,
+      "bin_end": 10043000,
+      "positions": 500,
+      "mean_depth": 5.71
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10043001,
+      "bin_end": 10043500,
+      "positions": 500,
+      "mean_depth": 4.91
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10043501,
+      "bin_end": 10044000,
+      "positions": 500,
+      "mean_depth": 5.92
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10044001,
+      "bin_end": 10044500,
+      "positions": 500,
+      "mean_depth": 5.86
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10044501,
+      "bin_end": 10045000,
+      "positions": 500,
+      "mean_depth": 5.62
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10045001,
+      "bin_end": 10045500,
+      "positions": 500,
+      "mean_depth": 6.04
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10045501,
+      "bin_end": 10046000,
+      "positions": 500,
+      "mean_depth": 5.19
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10046001,
+      "bin_end": 10046500,
+      "positions": 500,
+      "mean_depth": 5.39
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10046501,
+      "bin_end": 10047000,
+      "positions": 500,
+      "mean_depth": 3.64
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10047001,
+      "bin_end": 10047500,
+      "positions": 500,
+      "mean_depth": 3.5
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10047501,
+      "bin_end": 10048000,
+      "positions": 500,
+      "mean_depth": 4.4
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10048001,
+      "bin_end": 10048500,
+      "positions": 500,
+      "mean_depth": 3.82
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10048501,
+      "bin_end": 10049000,
+      "positions": 500,
+      "mean_depth": 3.63
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10049001,
+      "bin_end": 10049500,
+      "positions": 500,
+      "mean_depth": 5.2
+    },
+    {
+      "chrom": "20",
+      "bin_start": 10049501,
+      "bin_end": 10050000,
+      "positions": 500,
+      "mean_depth": 6.75
+    }
+  ]
+}

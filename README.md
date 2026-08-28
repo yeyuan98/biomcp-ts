@@ -187,6 +187,7 @@ Capabilities that ship with the package but stay inactive until enabled. Each li
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Build, test, publish workflow |
 | [docs/development/CI.md](docs/development/CI.md) | CI pipeline, Dependabot automation, auto-merge safety model |
 | [src/server/README.md](src/server/README.md) | Full tool schemas (params, enums, defaults) |
+| [agent-test/README.md](agent-test/README.md) | User-agent E2E tests for the analysis tools |
 
 ## License
 

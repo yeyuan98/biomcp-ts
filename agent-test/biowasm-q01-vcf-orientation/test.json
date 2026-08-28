@@ -1,0 +1,53 @@
+{
+  "id": "biowasm-q01-vcf-orientation",
+  "name": "VCF orientation (cohort chr22 1kg)",
+  "level": "L0",
+  "purpose": "L0 orientation: can the agent characterize a large cohort VCF before querying it?",
+  "prompt": "I have a big variant file at {DATA_DIR}/1kg.chr22.vcf.gz. Before doing anything with it, what's in it? Is it worth querying further?",
+  "externalData": [
+    {
+      "path": "1kg.chr22.vcf.gz",
+      "sha256": "a90c16c4ff2b3196476d506ae13cb3047fae8670163c7c932c4b0239aef3daf5",
+      "bytes": 205612353
+    },
+    {
+      "path": "1kg.chr22.vcf.gz.tbi",
+      "sha256": "27de6b77af65d300bb968e8e372439deb949389e4395eb0dd251f9ba7d73bbed",
+      "bytes": 36251
+    }
+  ],
+  "inlineResources": [],
+  "timeoutMs": 600000,
+  "checks": [
+    {
+      "type": "tool_seq",
+      "seq": [
+        [
+          "biomcp_analysis_bcf_summary",
+          "completed"
+        ]
+      ]
+    },
+    {
+      "type": "group",
+      "anyOf": [
+        {
+          "type": "json_path",
+          "tool": "biomcp_analysis_bcf_summary",
+          "path": "variant_count",
+          "op": "near",
+          "expect": 1103547,
+          "tolerance": 0
+        },
+        {
+          "type": "number_near",
+          "expect": 1103547,
+          "context": "variant"
+        }
+      ]
+    }
+  ],
+  "expectedOutputs": [
+    "expected/q01-summary.json"
+  ]
+}

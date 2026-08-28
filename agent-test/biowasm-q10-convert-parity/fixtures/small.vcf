@@ -1,0 +1,44 @@
+##fileformat=VCFv4.2
+##contig=<ID=ctg1,length=10000>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	s1
+ctg1	101	.	A	C	50	PASS	.	GT	0|1
+ctg1	126	.	C	G	50	PASS	.	GT	1|0
+ctg1	151	.	G	T	50	PASS	.	GT	0|1
+ctg1	176	.	T	A	50	PASS	.	GT	1|0
+ctg1	201	.	A	C	50	PASS	.	GT	0|1
+ctg1	226	.	C	G	50	PASS	.	GT	1|0
+ctg1	251	.	G	T	50	PASS	.	GT	0|1
+ctg1	276	.	T	A	50	PASS	.	GT	1|0
+ctg1	301	.	A	C	50	PASS	.	GT	0|1
+ctg1	326	.	C	G	50	PASS	.	GT	1|0
+ctg1	351	.	G	T	50	PASS	.	GT	0|1
+ctg1	376	.	T	A	50	PASS	.	GT	1|0
+ctg1	401	.	A	C	50	PASS	.	GT	0|1
+ctg1	426	.	C	G	50	PASS	.	GT	1|0
+ctg1	451	.	G	T	50	PASS	.	GT	0|1
+ctg1	476	.	T	A	50	PASS	.	GT	1|0
+ctg1	501	.	A	C	50	PASS	.	GT	0|1
+ctg1	526	.	C	G	50	PASS	.	GT	1|0
+ctg1	551	.	G	T	50	PASS	.	GT	0|1
+ctg1	576	.	T	A	50	PASS	.	GT	1|0
+ctg1	601	.	A	C	50	PASS	.	GT	0|1
+ctg1	626	.	C	G	50	PASS	.	GT	1|0
+ctg1	651	.	G	T	50	PASS	.	GT	0|1
+ctg1	676	.	T	A	50	PASS	.	GT	1|0
+ctg1	701	.	A	C	50	PASS	.	GT	0|1
+ctg1	726	.	C	G	50	PASS	.	GT	1|0
+ctg1	751	.	G	T	50	PASS	.	GT	0|1
+ctg1	776	.	T	A	50	PASS	.	GT	1|0
+ctg1	801	.	A	C	50	PASS	.	GT	0|1
+ctg1	826	.	C	G	50	PASS	.	GT	1|0
+ctg1	851	.	G	T	50	PASS	.	GT	0|1
+ctg1	876	.	T	A	50	PASS	.	GT	1|0
+ctg1	901	.	A	C	50	PASS	.	GT	0|1
+ctg1	926	.	C	G	50	PASS	.	GT	1|0
+ctg1	951	.	G	T	50	PASS	.	GT	0|1
+ctg1	976	.	T	A	50	PASS	.	GT	1|0
+ctg1	1001	.	A	C	50	PASS	.	GT	0|1
+ctg1	1026	.	C	G	50	PASS	.	GT	1|0
+ctg1	1051	.	G	T	50	PASS	.	GT	0|1
+ctg1	1076	.	T	A	50	PASS	.	GT	1|0

@@ -1,0 +1,86 @@
+{
+  "id": "biowasm-q04-contig-trap",
+  "name": "Contig naming trap and recovery",
+  "level": "L1",
+  "purpose": "L1 contig trap: 'chr20' fails (contig is '20'); error-then-orient-then-retry flow.",
+  "prompt": "Get me the depth profile for chr20:1-1000 in {DATA_DIR}/na12878.chr20.bam.",
+  "externalData": [
+    {
+      "path": "na12878.chr20.bam",
+      "sha256": "dfc164c34dd94e1c46ea94cad915489171ae8913da200ca4e5cae03a554f1996",
+      "bytes": 311550121
+    },
+    {
+      "path": "na12878.chr20.bam.bai",
+      "sha256": "525860a53fa5e8264258006cff2f1f5f275c4014726192989d1dae26dd4810cf",
+      "bytes": 179968
+    }
+  ],
+  "inlineResources": [],
+  "timeoutMs": 480000,
+  "checks": [
+    {
+      "type": "group",
+      "anyOf": [
+        {
+          "type": "group",
+          "allOf": [
+            {
+              "type": "tool_seq",
+              "seq": [
+                [
+                  "biomcp_analysis_bam_view_region",
+                  "error"
+                ],
+                [
+                  "biomcp_analysis_bam_summary",
+                  "completed"
+                ],
+                [
+                  "biomcp_analysis_bam_view_region",
+                  "completed"
+                ]
+              ]
+            },
+            {
+              "type": "args",
+              "tool": "biomcp_analysis_bam_view_region",
+              "path": "region.chrom",
+              "op": "equals",
+              "expect": "20",
+              "occurrence": 3
+            }
+          ]
+        },
+        {
+          "type": "group",
+          "allOf": [
+            {
+              "type": "args",
+              "tool": "biomcp_analysis_bam_view_region",
+              "path": "region.chrom",
+              "op": "equals",
+              "expect": "20",
+              "occurrence": 1
+            },
+            {
+              "type": "status",
+              "tool": "biomcp_analysis_bam_view_region",
+              "status": "completed",
+              "occurrence": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "number_near",
+      "expect": 1000,
+      "context": "position"
+    }
+  ],
+  "expectedOutputs": [
+    "expected/q04-positions.json",
+    "expected/q04-first-call-error.txt"
+  ]
+}

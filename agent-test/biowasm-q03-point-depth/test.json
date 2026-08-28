@@ -1,0 +1,59 @@
+{
+  "id": "biowasm-q03-point-depth",
+  "name": "Point depth at 20:10,000,000",
+  "level": "L0",
+  "purpose": "L0 point query: exact depth at a single locus (20:10,000,000).",
+  "prompt": "How deep is the coverage at position 20:10,000,000 in {DATA_DIR}/na12878.chr20.bam?",
+  "externalData": [
+    {
+      "path": "na12878.chr20.bam",
+      "sha256": "dfc164c34dd94e1c46ea94cad915489171ae8913da200ca4e5cae03a554f1996",
+      "bytes": 311550121
+    },
+    {
+      "path": "na12878.chr20.bam.bai",
+      "sha256": "525860a53fa5e8264258006cff2f1f5f275c4014726192989d1dae26dd4810cf",
+      "bytes": 179968
+    }
+  ],
+  "inlineResources": [],
+  "timeoutMs": 300000,
+  "checks": [
+    {
+      "type": "args",
+      "tool": "biomcp_analysis_bam_view_region",
+      "path": "region.chrom",
+      "op": "equals",
+      "expect": "20"
+    },
+    {
+      "type": "args",
+      "tool": "biomcp_analysis_bam_view_region",
+      "path": "region.start",
+      "op": "equals",
+      "expect": 10000000,
+      "occurrence": 1
+    },
+    {
+      "type": "group",
+      "anyOf": [
+        {
+          "type": "json_path",
+          "tool": "biomcp_analysis_bam_view_region",
+          "path": "depth.0",
+          "op": "near",
+          "expect": 5,
+          "tolerance": 0
+        },
+        {
+          "type": "number_near",
+          "expect": 5,
+          "context": "depth|coverage|20"
+        }
+      ]
+    }
+  ],
+  "expectedOutputs": [
+    "expected/q03-depth.json"
+  ]
+}

@@ -1,0 +1,7 @@
+@HD	VN:1.6	SO:coordinate
+@SQ	SN:chr1	LN:1000
+@SQ	SN:chr2	LN:900
+read1	0	chr1	100	60	4M2I4M	=	500	404	AAAAAAAAAA	!!!!!!!!!!
+read2	0	chr1	200	60	10M	=	600	500	CCCCCCCCCC	!!!!!!!!!!
+read3	16	chr2	150	60	10M	=	650	600	GGGGGGGGGG	!!!!!!!!!!
+read4	0	chr1	300	60	10M	=	700	600	TTTTTTTTTT	!!!!!!!!!!

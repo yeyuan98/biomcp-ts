@@ -1,0 +1,34 @@
+{
+  "id": "biowasm-q14-session-info",
+  "name": "Session tool/version introspection",
+  "level": "L0",
+  "purpose": "L0 session introspection: available analysis tools and pinned versions (samtools 1.21).",
+  "prompt": "What analysis tools and versions do I have available in this session?",
+  "externalData": [],
+  "inlineResources": [],
+  "timeoutMs": 300000,
+  "checks": [
+    {
+      "type": "tool_seq",
+      "seq": [
+        [
+          "biomcp_analysis_biowasm_session_info",
+          "completed"
+        ]
+      ]
+    },
+    {
+      "type": "text",
+      "op": "contains",
+      "expect": "1.21"
+    },
+    {
+      "type": "no_such_tool",
+      "tool": "biomcp_analysis_bed_op",
+      "desc": "session-info probe: no interval tool expected"
+    }
+  ],
+  "expectedOutputs": [
+    "expected/q14-versions.json"
+  ]
+}

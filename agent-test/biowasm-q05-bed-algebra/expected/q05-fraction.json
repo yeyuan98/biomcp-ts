@@ -1,0 +1,7 @@
+{
+  "track_a_total_bp": 300,
+  "overlap_bp": 100,
+  "fraction": 0.3333,
+  "percent": 33.33,
+  "jaccard_note": "bedtools jaccard on these tracks yields 0.25 (100/400 union) — NOT the asked fraction; class-b finding if the agent reports it."
+}

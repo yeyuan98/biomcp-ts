@@ -1,0 +1,44 @@
+{
+  "id": "biowasm-q07-binned-depth",
+  "name": "Binned mean depth (500 bp bins)",
+  "level": "L2",
+  "purpose": "L2 aggregation: 500 bp binned mean depth; absolute bin-edge interpretation (101 bins over 20:10000000-10050000).",
+  "prompt": "Give me the mean depth in 500 bp bins across 20:10000000-10050000 in {DATA_DIR}/na12878.chr20.bam.",
+  "externalData": [
+    {
+      "path": "na12878.chr20.bam",
+      "sha256": "dfc164c34dd94e1c46ea94cad915489171ae8913da200ca4e5cae03a554f1996",
+      "bytes": 311550121
+    },
+    {
+      "path": "na12878.chr20.bam.bai",
+      "sha256": "525860a53fa5e8264258006cff2f1f5f275c4014726192989d1dae26dd4810cf",
+      "bytes": 179968
+    }
+  ],
+  "inlineResources": [],
+  "timeoutMs": 480000,
+  "checks": [
+    {
+      "type": "args",
+      "tool": "biomcp_analysis_bam_view_region",
+      "path": "depth_bins",
+      "op": "equals",
+      "expect": 500
+    },
+    {
+      "type": "number_near",
+      "expect": 6.64,
+      "tolerance": 0.5
+    },
+    {
+      "type": "rubric",
+      "flag": "bin-edge-interpretation",
+      "manual": true,
+      "desc": "Bins are absolute-genome (bin_start = floor((p-1)/500)*500+1): bin 1 is 9,999,501-10,000,000 with a single position, so the 50,001-position region yields 101 bins, not 100. Verify the reported bin count/table against expected/q07-bins.json (101 bins)."
+    }
+  ],
+  "expectedOutputs": [
+    "expected/q07-bins.json"
+  ]
+}

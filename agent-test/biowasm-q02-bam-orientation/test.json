@@ -1,0 +1,41 @@
+{
+  "id": "biowasm-q02-bam-orientation",
+  "name": "BAM orientation (NA12878 chr20)",
+  "level": "L0",
+  "purpose": "L0 orientation: can the agent characterize a BAM and judge fitness for region-level work?",
+  "prompt": "What's in the alignment at {DATA_DIR}/na12878.chr20.bam? Is it usable for region-level work like coverage or read extraction?",
+  "externalData": [
+    {
+      "path": "na12878.chr20.bam",
+      "sha256": "dfc164c34dd94e1c46ea94cad915489171ae8913da200ca4e5cae03a554f1996",
+      "bytes": 311550121
+    },
+    {
+      "path": "na12878.chr20.bam.bai",
+      "sha256": "525860a53fa5e8264258006cff2f1f5f275c4014726192989d1dae26dd4810cf",
+      "bytes": 179968
+    }
+  ],
+  "inlineResources": [],
+  "timeoutMs": 600000,
+  "checks": [
+    {
+      "type": "tool_seq",
+      "seq": [
+        [
+          "biomcp_analysis_bam_summary",
+          "completed"
+        ]
+      ]
+    },
+    {
+      "type": "number_near",
+      "expect": 99.45,
+      "tolerance": 1,
+      "context": "mapped"
+    }
+  ],
+  "expectedOutputs": [
+    "expected/q02-summary.json"
+  ]
+}

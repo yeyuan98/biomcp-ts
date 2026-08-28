@@ -1,0 +1,28 @@
+{
+  "id": "biowasm-q10-convert-parity",
+  "name": "VCF to BCF conversion parity",
+  "level": "L2",
+  "purpose": "L2 conversion parity: VCF to BCF with an unchanged variant count (40).",
+  "prompt": "Here is a small VCF:\n##fileformat=VCFv4.2\n##contig=<ID=ctg1,length=10000>\n##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\ts1\nctg1\t101\t.\tA\tC\t50\tPASS\t.\tGT\t0|1\nctg1\t126\t.\tC\tG\t50\tPASS\t.\tGT\t1|0\nctg1\t151\t.\tG\tT\t50\tPASS\t.\tGT\t0|1\nctg1\t176\t.\tT\tA\t50\tPASS\t.\tGT\t1|0\nctg1\t201\t.\tA\tC\t50\tPASS\t.\tGT\t0|1\nctg1\t226\t.\tC\tG\t50\tPASS\t.\tGT\t1|0\nctg1\t251\t.\tG\tT\t50\tPASS\t.\tGT\t0|1\nctg1\t276\t.\tT\tA\t50\tPASS\t.\tGT\t1|0\nctg1\t301\t.\tA\tC\t50\tPASS\t.\tGT\t0|1\nctg1\t326\t.\tC\tG\t50\tPASS\t.\tGT\t1|0\nctg1\t351\t.\tG\tT\t50\tPASS\t.\tGT\t0|1\nctg1\t376\t.\tT\tA\t50\tPASS\t.\tGT\t1|0\nctg1\t401\t.\tA\tC\t50\tPASS\t.\tGT\t0|1\nctg1\t426\t.\tC\tG\t50\tPASS\t.\tGT\t1|0\nctg1\t451\t.\tG\tT\t50\tPASS\t.\tGT\t0|1\nctg1\t476\t.\tT\tA\t50\tPASS\t.\tGT\t1|0\nctg1\t501\t.\tA\tC\t50\tPASS\t.\tGT\t0|1\nctg1\t526\t.\tC\tG\t50\tPASS\t.\tGT\t1|0\nctg1\t551\t.\tG\tT\t50\tPASS\t.\tGT\t0|1\nctg1\t576\t.\tT\tA\t50\tPASS\t.\tGT\t1|0\nctg1\t601\t.\tA\tC\t50\tPASS\t.\tGT\t0|1\nctg1\t626\t.\tC\tG\t50\tPASS\t.\tGT\t1|0\nctg1\t651\t.\tG\tT\t50\tPASS\t.\tGT\t0|1\nctg1\t676\t.\tT\tA\t50\tPASS\t.\tGT\t1|0\nctg1\t701\t.\tA\tC\t50\tPASS\t.\tGT\t0|1\nctg1\t726\t.\tC\tG\t50\tPASS\t.\tGT\t1|0\nctg1\t751\t.\tG\tT\t50\tPASS\t.\tGT\t0|1\nctg1\t776\t.\tT\tA\t50\tPASS\t.\tGT\t1|0\nctg1\t801\t.\tA\tC\t50\tPASS\t.\tGT\t0|1\nctg1\t826\t.\tC\tG\t50\tPASS\t.\tGT\t1|0\nctg1\t851\t.\tG\tT\t50\tPASS\t.\tGT\t0|1\nctg1\t876\t.\tT\tA\t50\tPASS\t.\tGT\t1|0\nctg1\t901\t.\tA\tC\t50\tPASS\t.\tGT\t0|1\nctg1\t926\t.\tC\tG\t50\tPASS\t.\tGT\t1|0\nctg1\t951\t.\tG\tT\t50\tPASS\t.\tGT\t0|1\nctg1\t976\t.\tT\tA\t50\tPASS\t.\tGT\t1|0\nctg1\t1001\t.\tA\tC\t50\tPASS\t.\tGT\t0|1\nctg1\t1026\t.\tC\tG\t50\tPASS\t.\tGT\t1|0\nctg1\t1051\t.\tG\tT\t50\tPASS\t.\tGT\t0|1\nctg1\t1076\t.\tT\tA\t50\tPASS\t.\tGT\t1|0\n\nConvert it to BCF and confirm the variant count is unchanged.",
+  "externalData": [],
+  "inlineResources": [
+    "fixtures/small.vcf"
+  ],
+  "timeoutMs": 300000,
+  "checks": [
+    {
+      "type": "status",
+      "tool": "biomcp_analysis_biowasm_convert",
+      "status": "completed"
+    },
+    {
+      "type": "number_near",
+      "expect": 40,
+      "tolerance": 0,
+      "context": "variant"
+    }
+  ],
+  "expectedOutputs": [
+    "expected/q10-count.json"
+  ]
+}
