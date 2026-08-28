@@ -1,4 +1,13 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+// Deterministic worker-bundle stand-in: ANALYSIS_BIOWASM_WORKER_PATH must point
+// at an EXISTING file for bootstrap to proceed, regardless of whether a real
+// dist/ build is present on the machine running the tests.
+const FAKE_WORKER_FILE = join(mkdtempSync(join(tmpdir(), 'biowasm-engine-test-')), 'biowasm-worker.js');
+writeFileSync(FAKE_WORKER_FILE, '');
 
 // ---------------------------------------------------------------------------
 // Fake WorkerHost: stands in for src/wasmcore/worker-host.js.
@@ -159,6 +168,7 @@ describe('biowasm engine (worker boundary mocked)', () => {
       delete process.env[k];
     }
     process.env.BIOMCP_CACHE_DIR = `/tmp/biomcp-engine-test-${Date.now()}`;
+    process.env.ANALYSIS_BIOWASM_WORKER_PATH = FAKE_WORKER_FILE;
     jest.clearAllMocks();
     jest.resetModules();
     FakeWorkerHost.instances = [];
@@ -206,15 +216,12 @@ describe('biowasm engine (worker boundary mocked)', () => {
 
   it('maps a missing worker bundle to BiowasmNotAvailableError with build hint', async () => {
     const { biowasmEngine, BiowasmNotAvailableError } = await importEngine();
-    // No ANALYSIS_BIOWASM_WORKER_PATH, no dist bundle next to src/… in jest.
+    // A set-but-nonexistent worker path resolves to null deterministically,
+    // independent of whether the machine running the tests has a dist/ build.
+    process.env.ANALYSIS_BIOWASM_WORKER_PATH = join(tmpdir(), 'biowasm-engine-test-no-such', 'biowasm-worker.js');
     const err = await biowasmEngine.ensureReady().catch((e: unknown) => e);
-    if (err instanceof BiowasmNotAvailableError) {
-      expect(String(err.message)).toMatch(/npm run build|ANALYSIS_BIOWASM_WORKER_PATH/);
-    } else {
-      // dist/biowasm-worker.js exists from a prior build — the spawn is then
-      // mocked, so just verify bootstrap completed.
-      expect(WorkerHostMock).toHaveBeenCalled();
-    }
+    expect(err).toBeInstanceOf(BiowasmNotAvailableError);
+    expect(String(err.message)).toMatch(/npm run build|ANALYSIS_BIOWASM_WORKER_PATH/);
   });
 
   it('runs a tool and maps the worker response', async () => {
