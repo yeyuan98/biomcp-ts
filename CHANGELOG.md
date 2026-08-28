@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Biowasm: indexless depth on order-violating input now errors instead of doubling** — `analysis_bam_view_region` with `mode="depth"` on indexless sources previously emitted doubled, self-contradictory output (a zero-filled pass followed by the correct pass, e.g. 42 rows for a 21-position region) when the input's read order regressed across references: vanilla samtools 1.21 intends to reject such input ("Data is not position sorted") but that guard is unreachable for cross-reference regressions in `bam2depth.c` (`dh->last_ref` is overwritten before the check runs). The analyzer now detects the doubled signature (a repeated `(chrom, pos)` row — impossible on valid single-interval `depth -a -b` output, which is strictly monotone per contig) and fails with an actionable error: provide an indexed source (sibling `.bai`), re-sort via `analysis_biowasm_cli` (`samtools sort`), or use `mode="count"`/`"reads"`, which tolerate any order. Native `depth -a -b` args and the indexed `-r` path are unchanged; valid coordinate-sorted input produces byte-identical output. Known limitation: a region large enough to hit the 2 MB capture cap before the doubled section can hide the duplicate, leaving flagged (`is_truncated`) output.
+
 ## [0.6.0] - 2026-08-28
 
 ### Added
@@ -22,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known issues
 
-- `analysis_bam_view_region` with `mode="depth"` on indexless sources (streaming BED fallback) emits doubled output — a zero-filled pass followed by the correct pass (e.g. 42 rows for a 21-position region). The indexed path (`host_path` with a sibling `.bai`) is unaffected, as are count/reads modes. Under investigation; use an indexed source for depth until fixed.
+- (none currently tracked)
 
 ## [0.5.1] - 2026-08-27
 

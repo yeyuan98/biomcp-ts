@@ -278,4 +278,82 @@ describe('biowasm analyzers failure semantics (engine mocked)', () => {
       expect(table.text).toContain('| chr1 | 1000 | 2 |');
     });
   });
+
+  describe('depth doubling detection (indexless bed fallback)', () => {
+    const sam = ['@HD\tVN:1.6\tSO:coordinate', '@SQ\tSN:chr1\tLN:1000', '@SQ\tSN:chr2\tLN:1000'].join('\n') + '\n';
+
+    // Real observed doubled output shape: samtools depth -a -b emits a zero-filled
+    // pass followed by the real pass when read order regresses across references.
+    const doubledDepthRows = (): string[][] => {
+      const rows: string[][] = [];
+      for (let p = 290; p <= 310; p += 1) rows.push(['chr1', String(p), '0']);
+      for (let p = 290; p <= 310; p += 1) rows.push(['chr1', String(p), p >= 300 && p <= 309 ? '1' : '0']);
+      return rows;
+    };
+    const doubledDepthStdout = doubledDepthRows()
+      .map((row) => row.join('\t'))
+      .join('\n');
+
+    it('findDuplicateDepthPosition returns the first repeated chrom:pos on doubled output', () => {
+      expect(analyzers.findDuplicateDepthPosition(doubledDepthRows())).toBe('chr1:290');
+    });
+
+    it('findDuplicateDepthPosition returns null for clean sorted output (single pass)', () => {
+      const rows: string[][] = [];
+      for (let p = 290; p <= 310; p += 1) rows.push(['chr1', String(p), p >= 300 && p <= 309 ? '1' : '0']);
+      expect(analyzers.findDuplicateDepthPosition(rows)).toBeNull();
+    });
+
+    it('findDuplicateDepthPosition returns null for the same position on different chroms', () => {
+      expect(analyzers.findDuplicateDepthPosition([['chr1', '100', '1'], ['chr2', '100', '2']])).toBeNull();
+    });
+
+    it('rejects doubled depth output with coordinate-sorted ValidationError (table format)', async () => {
+      runMock.mockResolvedValue(runResult({ stdout: { mode: 'capture', text: doubledDepthStdout, truncated: false } }));
+      const source = canonicalizeSource({ content: sam });
+      await expect(
+        analyzers.runBamViewRegion(source, { chrom: 'chr1', start: 90, end: 220 }, 'depth', undefined, {
+          format: 'table',
+          topN: 50,
+          includeContent: false,
+        }),
+      ).rejects.toThrow(/coordinate-sorted/);
+      expect(runMock.mock.calls[0][0].args).toEqual(['depth', '-a', '-b', '/shared/data/region-chr1_90_220.bed', source.vfsPath]);
+    });
+
+    it('rejects doubled depth output with coordinate-sorted ValidationError (json format)', async () => {
+      runMock.mockResolvedValue(runResult({ stdout: { mode: 'capture', text: doubledDepthStdout, truncated: false } }));
+      const source = canonicalizeSource({ content: sam });
+      await expect(
+        analyzers.runBamViewRegion(source, { chrom: 'chr1', start: 90, end: 220 }, 'depth', undefined, {
+          format: 'json',
+          topN: 50,
+          includeContent: false,
+        }),
+      ).rejects.toThrow(/coordinate-sorted/);
+    });
+
+    it('rejects doubled depth output with coordinate-sorted ValidationError (json + depthBins, before binning)', async () => {
+      runMock.mockResolvedValue(runResult({ stdout: { mode: 'capture', text: doubledDepthStdout, truncated: false } }));
+      const source = canonicalizeSource({ content: sam });
+      await expect(
+        analyzers.runBamViewRegion(source, { chrom: 'chr1', start: 90, end: 220 }, 'depth', 50, {
+          format: 'json',
+          topN: 50,
+          includeContent: false,
+        }),
+      ).rejects.toThrow(/coordinate-sorted/);
+    });
+
+    it('does not reject doubled-shaped output on an indexed source (positional -r path)', async () => {
+      runMock.mockResolvedValue(runResult({ stdout: { mode: 'capture', text: doubledDepthStdout, truncated: false } }));
+      await expect(
+        analyzers.runBamViewRegion(hostSource({ hasIndex: true }), { chrom: 'chr1', start: 90, end: 220 }, 'depth', undefined, {
+          format: 'json',
+          topN: 50,
+          includeContent: false,
+        }),
+      ).resolves.toHaveProperty('text');
+    });
+  });
 });

@@ -65,8 +65,20 @@ index is available.
 ### `analysis_bam_view_region`
 
 Reads, depth, or pileup in a genomic region (`view -c`/`depth`/`mpileup`), or
-a BAM artifact of the reads (`view -b`) for downstream tools. Region access is
-index-driven.
+a BAM artifact of the reads (`view -b`) for downstream tools. Indexed sources
+(host file + sibling `.bai`/`.crai`) use fast positional retrieval; indexless
+sources stream through a synthesized BED region filter (`-L`/`-b`/`-l`).
+
+Sortedness contract for the indexless fallback: `count`/`reads` accept any read
+order, but `depth` requires coordinate-sorted input — samtools `depth -a`
+silently emits doubled, self-contradictory output (a zero-filled pass followed
+by the real pass) when read order regresses across references, so the analyzer
+detects that signature (a repeated `(chrom, pos)` row, impossible on valid
+single-interval output) and fails with an actionable error (provide an index,
+re-sort via `analysis_biowasm_cli`, or use count/reads). Limitation: a region
+large enough to hit the 2 MB capture cap before the doubled section can hide
+the duplicate, leaving flagged (`is_truncated`) output. `pileup` also assumes
+sorted input.
 
 ### `analysis_bcf_summary`
 

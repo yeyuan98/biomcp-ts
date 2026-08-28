@@ -241,6 +241,24 @@ function parseTsvRows(text: string): string[][] {
   return rows;
 }
 
+/**
+ * samtools depth -a silently emits doubled output (a zero-filled pass followed by
+ * the real pass) when the input's read order regresses across references: the
+ * "Data is not position sorted" guard in bam2depth.c is unreachable for
+ * cross-reference regressions. Valid single-interval `depth -a -b` output is
+ * strictly monotone per contig, so any repeated (chrom,pos) proves the input is
+ * not coordinate-sorted. Returns the first duplicated position, e.g. "chr1:290".
+ */
+export function findDuplicateDepthPosition(rows: string[][]): string | null {
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const key = `${row[0]}:${row[1]}`;
+    if (seen.has(key)) return key;
+    seen.add(key);
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // analysis_bam_summary / analysis_bcf_summary.
 // ---------------------------------------------------------------------------
@@ -417,6 +435,20 @@ export async function runBamViewRegion(
       stdout: 'capture',
     });
     const rows = parseTsvRows(captured(res));
+    // Indexless fallback only: the indexed -r path is iterator-driven and cannot
+    // double-report. Detection must precede binning/rendering so doubled rows
+    // never reach the output in any format.
+    if (bed) {
+      const duplicatedAt = findDuplicateDepthPosition(rows);
+      if (duplicatedAt) {
+        throw new ValidationError(
+          `depth of "${source.label}" at ${regionArg} failed: the source is not coordinate-sorted ` +
+            `(position ${duplicatedAt} was emitted twice — samtools depth silently double-reports ` +
+            'order-violating input). Provide an indexed source (a sibling .bai), re-sort it via ' +
+            'analysis_biowasm_cli (samtools sort) and retry, or use mode="count"/"reads", which tolerate any order.',
+        );
+      }
+    }
     const io = aggregate(results);
     if (output.format === 'json') {
       return toJson({ kind: 'bam_depth', region: regionArg, positions: rows.length, depth: rows.map((r) => Number(r[2])), is_truncated: res.stdout.mode === 'capture' && res.stdout.truncated, io_stats: ioStatsPayload(io.bytesRead, io.elapsedMs) });
