@@ -15,28 +15,58 @@ export const LIMITS = {
 
 export const DEFAULT_PROJECTION_FIELDS = ['CHROM', 'POS', 'REF', 'ALT'] as const;
 
+// LLM clients occasionally stringify object params ("b_source": "{\"content\":
+// ...}"). The preprocess below transparently JSON-parses strings back into
+// objects server-side before the union validates. Preprocess throws are
+// converted to tool-error results by the MCP SDK's handler catch, so a
+// non-JSON string fails with this descriptive message instead of a cryptic
+// zod union error. The emitted JSON schema is unchanged (ZodEffects renders
+// as the inner schema under zod-to-json-schema strictUnions).
+const STRINGIFIED_SOURCE_HINT =
+  'Expected a JSON object like {"content": "..."}; received a string that is not valid JSON';
+
+function parseStringifiedJson(raw: unknown): unknown {
+  if (typeof raw !== 'string') return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error(STRINGIFIED_SOURCE_HINT);
+  }
+}
+
+// "auto" is a documented non-JSON literal value of indexSchema — pass it through.
+function parseStringifiedIndex(raw: unknown): unknown {
+  return raw === 'auto' ? raw : parseStringifiedJson(raw);
+}
+
 export const sourceSchema = z
-  .union([
-    z.object({
-      content: z.string().max(LIMITS.MAX_CONTENT_CHARS).describe('In-band file content (BED/VCF/SAM text); capped at 20 MiB'),
-    }).strict(),
-    z.object({
-      artifact_id: z.string().max(LIMITS.MAX_ARTIFACT_ID).describe('artifact_id from a previous analysis_*_ tool response'),
-    }).strict(),
-    z.object({
-      host_path: z.string().max(LIMITS.MAX_HOST_PATH).describe('Absolute path under ANALYSIS_BIOWASM_DATA_DIR (must be set)'),
-    }).strict(),
-  ])
+  .preprocess(
+    parseStringifiedJson,
+    z.union([
+      z.object({
+        content: z.string().max(LIMITS.MAX_CONTENT_CHARS).describe('In-band file content (BED/VCF/SAM text); capped at 20 MiB'),
+      }).strict(),
+      z.object({
+        artifact_id: z.string().max(LIMITS.MAX_ARTIFACT_ID).describe('artifact_id from a previous analysis_*_ tool response'),
+      }).strict(),
+      z.object({
+        host_path: z.string().max(LIMITS.MAX_HOST_PATH).describe('Absolute path under ANALYSIS_BIOWASM_DATA_DIR (must be set)'),
+      }).strict(),
+    ]),
+  )
   .describe(
     'Data source: inline content, prior artifact, or allowlisted host file (variants are strict — mixed-key objects are rejected, no silent stripping)',
   );
 
 export const indexSchema = z
-  .union([
-    z.literal('auto'),
-    z.object({ content: z.string().max(LIMITS.MAX_CONTENT_CHARS) }),
-    z.object({ host_path: z.string().max(LIMITS.MAX_HOST_PATH) }),
-  ])
+  .preprocess(
+    parseStringifiedIndex,
+    z.union([
+      z.literal('auto'),
+      z.object({ content: z.string().max(LIMITS.MAX_CONTENT_CHARS) }),
+      z.object({ host_path: z.string().max(LIMITS.MAX_HOST_PATH) }),
+    ]),
+  )
   .default('auto')
   .describe('Index sidecar for indexed access (default "auto": try <file>.bai/.csi/.tbi/.crai)');
 

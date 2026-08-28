@@ -17,6 +17,7 @@ import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve as pathResolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parentPort, workerData } from 'node:worker_threads';
+import { runMain, type RunMainModule } from './run-main.js';
 
 // ---------------------------------------------------------------------------
 // Protocol types (imported type-only by the engine).
@@ -123,12 +124,10 @@ interface EmscriptenFS {
   isFile(mode: number): boolean;
 }
 
-interface BiowasmModule {
+interface BiowasmModule extends RunMainModule {
   FS: EmscriptenFS;
   PROXYFS: unknown;
-  callMain(args: string[]): number | undefined;
   ExitStatus?: new (status: number) => Error;
-  HEAPU8: Uint8Array;
 }
 
 type ModuleFactory = (overrides: Record<string, unknown>) => Promise<BiowasmModule>;
@@ -900,11 +899,12 @@ async function handleRun(msg: {
     currentErrSink = errSink;
     let exitCode: number | null;
     try {
-      // biowasm builds take bare subcommand args (no leading tool name).
-      exitCode = loaded.Module.callMain(msg.args) ?? 0;
+      // biowasm builds take bare subcommand args (no leading tool name);
+      // runMain recovers the real exit status the glue's callMain swallows.
+      exitCode = runMain(loaded.Module, msg.tool, msg.args);
     } catch (err) {
       if (isExitStatus(err, loaded.Module)) {
-        exitCode = (err as { status?: number }).status ?? 0;
+        exitCode = (err as { status?: number }).status ?? null;
       } else {
         throw err;
       }

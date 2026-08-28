@@ -1,4 +1,6 @@
 import { describe, it, expect } from '@jest/globals';
+import { z } from 'zod';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
   LIMITS,
   DEFAULT_PROJECTION_FIELDS,
@@ -37,6 +39,52 @@ describe('biowasm shared schemas', () => {
     expect(sourceSchema.safeParse({ content: 'x', host_path: '/data/a.bam' }).success).toBe(false);
     expect(sourceSchema.safeParse({ content: 'x', extra: 1 }).success).toBe(false);
     expect(sourceSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('tolerates stringified-object sources (transparent JSON.parse)', () => {
+    expect(sourceSchema.parse('{"content":"chr1\\t10\\t20\\n"}')).toEqual({ content: 'chr1\t10\t20\n' });
+    expect(sourceSchema.parse('{"artifact_id":"bw1"}')).toEqual({ artifact_id: 'bw1' });
+    expect(sourceSchema.parse('{"host_path":"/data/a.bam"}')).toEqual({ host_path: '/data/a.bam' });
+    expect(indexSchema.parse('auto')).toBe('auto');
+    expect(indexSchema.parse('{"content":"idx"}')).toEqual({ content: 'idx' });
+    expect(indexSchema.parse('{"host_path":"/data/a.bam.bai"}')).toEqual({ host_path: '/data/a.bam.bai' });
+  });
+
+  it('rejects non-JSON strings with the descriptive preprocess message', () => {
+    const message = 'Expected a JSON object like {"content": "..."}; received a string that is not valid JSON';
+    expect(() => sourceSchema.parse('chr1\t10\t20\n')).toThrow(message);
+    expect(() => sourceSchema.safeParse('{not json')).toThrow(message);
+    expect(() => indexSchema.parse('nope')).toThrow(message);
+  });
+
+  it('still rejects stringified mixed-key sources (strict semantics survive the round-trip)', () => {
+    expect(sourceSchema.safeParse('{"content":"x","artifact_id":"bw1"}').success).toBe(false);
+    expect(sourceSchema.safeParse('{"content":"x","extra":1}').success).toBe(false);
+  });
+
+  it('emits the exact same JSON schema as the bare union (ZodEffects renders transparently)', () => {
+    const opts = { strictUnions: true, pipeStrategy: 'input' } as const;
+    const bare = z
+      .union([
+        z.object({
+          content: z.string().max(LIMITS.MAX_CONTENT_CHARS).describe('In-band file content (BED/VCF/SAM text); capped at 20 MiB'),
+        }).strict(),
+        z.object({
+          artifact_id: z.string().max(LIMITS.MAX_ARTIFACT_ID).describe('artifact_id from a previous analysis_*_ tool response'),
+        }).strict(),
+        z.object({
+          host_path: z.string().max(LIMITS.MAX_HOST_PATH).describe('Absolute path under ANALYSIS_BIOWASM_DATA_DIR (must be set)'),
+        }).strict(),
+      ])
+      .describe(
+        'Data source: inline content, prior artifact, or allowlisted host file (variants are strict — mixed-key objects are rejected, no silent stripping)',
+      );
+    const emitted = zodToJsonSchema(sourceSchema, opts);
+    expect(JSON.stringify(emitted)).toBe(JSON.stringify(zodToJsonSchema(bare, opts)));
+    const json = emitted as { anyOf?: Array<Record<string, unknown>>; description?: string };
+    expect(json.anyOf).toHaveLength(3);
+    for (const variant of json.anyOf ?? []) expect(variant.additionalProperties).toBe(false);
+    expect(json.description).toContain('strict');
   });
 
   it('caps in-band content at MAX_CONTENT_CHARS', () => {

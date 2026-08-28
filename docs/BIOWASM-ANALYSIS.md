@@ -138,7 +138,14 @@ budget 2 GB. bedtools loads the B track into the wasm heap unless
 `sorted_inputs` is set — prefer sorted or bounded B tracks. bcftools is
 pinned at 1.10 (CDN availability; newer subcommands may be absent). Runs
 serialize on one worker; CRAM without an embedded reference needs a `faidx`
-reference.
+reference. wasm builds historically lose exit statuses: the biowasm glue's
+`callMain` swallows the Emscripten `ExitStatus` on every path, so failures
+used to render as `exit code 0`. biomcp recovers real statuses by calling the
+module's `_main` directly (glue-compatible argv, status-propagating) and, for
+builds that exit 0 after a fatal error, falls back to fatal-stderr pattern
+matching (`[E::…]`, `samtools <cmd>: …`, `[main_…]`); `[W::…]` warnings and
+`[mpileup] N samples…` INFO lines are treated as benign. `analysis_biowasm_cli`
+never throws — it renders `exit_code` and an `is_error` flag honestly.
 
 ## Version pinning
 

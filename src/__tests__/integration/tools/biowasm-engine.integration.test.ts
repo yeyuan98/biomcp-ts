@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { biowasmCacheStatePath } from '../../../biowasm/registry.js';
 import { biowasmEngine, shutdownBiowasmEngine, type BiowasmRunResult } from '../../../biowasm/engine.js';
+import { canonicalizeSource, type ResolvedSource } from '../../../biowasm/validate.js';
+import { runBamViewRegion, runBcfSummary } from '../../../biowasm/analyzers.js';
 
 jest.setTimeout(600_000);
 
@@ -53,6 +55,34 @@ function toyVcf(): string {
     'chr1\t100\t.\tA\tG\t50\tPASS\tDP=10',
     'chr1\t400\t.\tC\tT\t40\tPASS\tDP=8',
     'chr2\t200\t.\tG\tA\t30\tPASS\tDP=5',
+  ].join('\n') + '\n';
+}
+
+/** Coordinate-sorted toy SAM: 2 reads on chr1 (100-149, 130-179), 1 on chr2. */
+function regionSam(): string {
+  const seq = 'ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTAC';
+  const qual = 'I'.repeat(50);
+  return [
+    '@HD\tVN:1.6\tSO:coordinate',
+    '@SQ\tSN:chr1\tLN:1000',
+    '@SQ\tSN:chr2\tLN:1000',
+    `r1\t0\tchr1\t100\t60\t50M\t*\t0\t0\t${seq}\t${qual}`,
+    `r2\t0\tchr1\t130\t60\t50M\t*\t0\t0\t${seq}\t${qual}`,
+    `r3\t0\tchr2\t300\t60\t50M\t*\t0\t0\t${seq}\t${qual}`,
+  ].join('\n') + '\n';
+}
+
+/** Position-descending chr1 reads — triggers "Data is not position sorted". */
+function descendingSam(): string {
+  const seq = 'ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTAC';
+  const qual = 'I'.repeat(50);
+  return [
+    '@HD\tVN:1.6\tSO:unsorted',
+    '@SQ\tSN:chr1\tLN:1000',
+    '@SQ\tSN:chr2\tLN:1000',
+    `rA\t0\tchr1\t500\t60\t50M\t*\t0\t0\t${seq}\t${qual}`,
+    `rB\t0\tchr1\t100\t60\t50M\t*\t0\t0\t${seq}\t${qual}`,
+    `rC\t0\tchr2\t300\t60\t50M\t*\t0\t0\t${seq}\t${qual}`,
   ].join('\n') + '\n';
 }
 
@@ -340,4 +370,158 @@ maybe('biowasm engine (integration, real wasm tools)', () => {
     expect(res.exitCode).toBe(0);
     expect(res.outputs[0]).toMatchObject({ vfsPath: '/shared/out/never_created.txt', missing: true });
   }, 120_000);
+
+  // -------------------------------------------------------------------------
+  // E2E remediation regressions: index-aware region dispatch (D1) and
+  // bcf record counts (D2), under real exit-code recovery (D4).
+  // -------------------------------------------------------------------------
+
+  const out = { format: 'table' as const, topN: 50, includeContent: false };
+
+  it('region -L fallback counts reads on an unsorted indexless source', async () => {
+    const count = await runBamViewRegion(
+      canonicalizeSource({ content: descendingSam() }),
+      { chrom: 'chr2' },
+      'count',
+      undefined,
+      out,
+    );
+    expect(count.text).toContain('| reads | 1 |');
+  }, 300_000);
+
+  it('-r (indexed) and -L (indexless) region queries agree on sorted+indexed input', async () => {
+    const bamRes = await run({
+      tool: 'samtools',
+      args: ['view', '-b', '-o', '/shared/out/parity.bam', '/shared/data/parity.sam'],
+      inputs: [{ name: 'parity.sam', content: regionSam() }],
+      outputs: [{ vfsPath: '/shared/out/parity.bam' }],
+    });
+    expect(bamRes.exitCode).toBe(0);
+    const bamPath = bamRes.outputs[0].hostPath!;
+    const idxRes = await run({
+      tool: 'samtools',
+      args: ['index', '/shared/out/parity.bam'],
+      outputs: [{ vfsPath: '/shared/out/parity.bam.bai' }],
+    });
+    expect(idxRes.exitCode).toBe(0);
+    const baiPath = idxRes.outputs[0].hostPath!;
+    const base = { kind: 'host_path' as const, label: 'parity', vfsPath: '/shared/data/parity.bam', inputs: [], approxBytes: 0 };
+    const indexed: ResolvedSource = {
+      ...base,
+      mounts: [
+        { hostPath: bamPath, vfsPath: '/shared/data/parity.bam' },
+        { hostPath: baiPath, vfsPath: '/shared/data/parity.bam.bai' },
+      ],
+      hasIndex: true,
+    };
+    const indexless: ResolvedSource = {
+      ...base,
+      mounts: [{ hostPath: bamPath, vfsPath: '/shared/data/parity.bam' }],
+      hasIndex: false,
+    };
+
+    const viaIndex = await runBamViewRegion(indexed, { chrom: 'chr1', start: 100, end: 160 }, 'count', undefined, out);
+    const viaStream = await runBamViewRegion(indexless, { chrom: 'chr1', start: 100, end: 160 }, 'count', undefined, out);
+    expect(viaIndex.text).toContain('| reads | 2 |');
+    expect(viaStream.text).toContain('| reads | 2 |');
+
+    // Depth parity: -a over [99,160) emits every position 100..160 on both paths.
+    const deepOut = { format: 'table' as const, topN: 200, includeContent: false };
+    const dIdx = await runBamViewRegion(indexed, { chrom: 'chr1', start: 100, end: 160 }, 'depth', undefined, deepOut);
+    const dStream = await runBamViewRegion(indexless, { chrom: 'chr1', start: 100, end: 160 }, 'depth', undefined, deepOut);
+    expect(dIdx.text).toContain('Showing 61 of 61 positions');
+    expect(dStream.text).toContain('Showing 61 of 61 positions');
+  }, 300_000);
+
+  it('overlapping BED intervals do not double-count (streaming -L path)', async () => {
+    const res = await run({
+      tool: 'samtools',
+      args: ['view', '-c', '-L', '/shared/data/overlap.bed', '/shared/data/parity.sam'],
+      inputs: [
+        { name: 'parity.sam', content: regionSam() },
+        { name: 'overlap.bed', content: 'chr1\t99\t200\nchr1\t129\t220\n' },
+      ],
+      stdout: 'capture',
+    });
+    expect(res.exitCode).toBe(0);
+    if (res.stdout.mode === 'capture') expect(Number(res.stdout.text.trim())).toBe(2);
+  }, 300_000);
+
+  it('whole-contig huge-end BED is clamped to the reference', async () => {
+    const res = await run({
+      tool: 'samtools',
+      args: ['view', '-c', '-L', '/shared/data/huge.bed', '/shared/data/parity.sam'],
+      inputs: [
+        { name: 'parity.sam', content: regionSam() },
+        { name: 'huge.bed', content: 'chr1\t0\t2147483647\n' },
+      ],
+      stdout: 'capture',
+    });
+    expect(res.exitCode).toBe(0);
+    if (res.stdout.mode === 'capture') expect(Number(res.stdout.text.trim())).toBe(2);
+  }, 300_000);
+
+  it('mpileup -l works indexless and benign [mpileup] stderr does not fail the run', async () => {
+    const pileup = await runBamViewRegion(
+      canonicalizeSource({ content: regionSam() }),
+      { chrom: 'chr1', start: 90, end: 220 },
+      'pileup',
+      undefined,
+      out,
+    );
+    expect(pileup.text).toContain('Pileup — chr1:90-220');
+    expect(pileup.text).toContain('| chr1 | 100 |');
+  }, 300_000);
+
+  it('indexless depth on unsorted input throws with the sortedness failure', async () => {
+    await expect(
+      runBamViewRegion(
+        canonicalizeSource({ content: descendingSam() }),
+        { chrom: 'chr1', start: 90, end: 220 },
+        'depth',
+        undefined,
+        out,
+      ),
+    ).rejects.toThrow(/Data is not position sorted/);
+  }, 300_000);
+
+  it('bcf_summary reports per-contig record counts when an index exists', async () => {
+    const gz = await run({
+      tool: 'bcftools',
+      args: ['view', '-Oz', '-o', '/shared/out/counts.vcf.gz', '/shared/data/counts.vcf'],
+      inputs: [{ name: 'counts.vcf', content: toyVcf() }],
+      outputs: [{ vfsPath: '/shared/out/counts.vcf.gz' }],
+    });
+    expect(gz.exitCode).toBe(0);
+    const gzPath = gz.outputs[0].hostPath!;
+    const tbi = await run({
+      tool: 'bcftools',
+      args: ['index', '-t', '/shared/out/counts.vcf.gz'],
+      outputs: [{ vfsPath: '/shared/out/counts.vcf.gz.tbi' }],
+    });
+    expect(tbi.exitCode).toBe(0);
+    const tbiPath = tbi.outputs[0].hostPath!;
+    const source: ResolvedSource = {
+      kind: 'host_path',
+      label: 'counts.vcf.gz',
+      vfsPath: '/shared/data/counts.vcf.gz',
+      inputs: [],
+      mounts: [
+        { hostPath: gzPath, vfsPath: '/shared/data/counts.vcf.gz' },
+        { hostPath: tbiPath, vfsPath: '/shared/data/counts.vcf.gz.tbi' },
+      ],
+      hasIndex: true,
+      approxBytes: 0,
+    };
+    const summary = await runBcfSummary(source, { format: 'json', topN: 50, includeContent: false });
+    const parsed = JSON.parse(summary.text) as {
+      variant_count: number;
+      records_per_contig: Array<{ contig: string; length: number; records: number }>;
+    };
+    expect(parsed.variant_count).toBe(3);
+    expect(parsed.records_per_contig).toEqual([
+      { contig: 'chr1', length: 1000, records: 2 },
+      { contig: 'chr2', length: 1000, records: 1 },
+    ]);
+  }, 300_000);
 });

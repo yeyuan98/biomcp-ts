@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import type {
   BiowasmArtifact,
+  BiowasmInputFile,
   BiowasmRunResult,
   BiowasmToolName,
 } from './engine.js';
@@ -57,10 +58,34 @@ function notesWithTruncation(res: BiowasmRunResult, ioLine: string): string[] {
   return note ? [ioLine, note] : [ioLine];
 }
 
-function requireSuccess(res: BiowasmRunResult, label: string): BiowasmRunResult {
-  if (res.exitCode !== 0) {
+/**
+ * Fatal-stderr patterns for wasm builds whose exit status was unrecoverable
+ * (or whose C code exits 0 after printing a fatal error). Each alternative is
+ * motivated by an observed failure line:
+ *   /^\[E::/m                      — htslib: [E::idx_find_and_load], [E::hts_open_format]
+ *   /^Error:/m                     — unbracketed tool-level Error: lines
+ *   /^(samtools|bcftools) [a-z_]+: /m — "samtools view: Could not read file...",
+ *                                      "samtools depth: Data is not position sorted"
+ *   /^\[main_[a-z]+\]/m            — "[main_samview] invalid region"
+ * Explicitly NON-fatal: "[W::" warnings and the "[mpileup] N samples in N
+ * input files" INFO line (benign on every successful mpileup run).
+ */
+const FATAL_STDERR_PATTERNS: readonly RegExp[] = [
+  /^\[E::/m,
+  /^Error:/m,
+  /^(samtools|bcftools) [a-z_]+: /m,
+  /^\[main_[a-z]+\]/m,
+];
+
+export function looksFailed(res: BiowasmRunResult): boolean {
+  if (res.exitCode !== 0 && res.exitCode !== null) return true;
+  return FATAL_STDERR_PATTERNS.some((pattern) => pattern.test(res.stderr));
+}
+
+export function requireSuccess(res: BiowasmRunResult, label: string): BiowasmRunResult {
+  if (looksFailed(res)) {
     const err = new Error(
-      `${label} failed (exit code ${res.exitCode ?? 'null'}).${res.stderr.trim() ? ` ${stderrNote(res)}` : ''}`,
+      `${label} failed (exit code ${exitCodeLabel(res.exitCode)}).${res.stderr.trim() ? ` ${stderrNote(res)}` : ''}`,
     );
     throw err;
   }
@@ -84,11 +109,14 @@ async function runEngine(
   results: BiowasmRunResult[],
   label: string,
   request: Parameters<EngineModule['biowasmEngine']['run']>[0],
+  opts: { raw?: boolean } = {},
 ): Promise<BiowasmRunResult> {
   const { biowasmEngine } = await engineModule();
   const res = await biowasmEngine.run(request);
   results.push(res);
-  return requireSuccess(res, label);
+  // raw: surface the result untouched (analysis_biowasm_cli renders
+  // diagnostics honestly instead of throwing on nonzero rc / fatal stderr).
+  return opts.raw ? res : requireSuccess(res, label);
 }
 
 function registerEngineArtifact(tool: string, artifact: BiowasmArtifact, description: string): ArtifactRecord {
@@ -302,6 +330,30 @@ function regionFileName(source: ResolvedSource, region: string, ext: string): st
   return `${base}.${safe}.${ext}`;
 }
 
+// Whole-contig BED end when no header length is available. htslib clamps the
+// interval to the reference length (verified on the pinned build).
+const WHOLE_CONTIG_BED_END = 2_147_483_647;
+
+function headerContigLength(source: ResolvedSource, chrom: string): number | null {
+  if (source.kind !== 'content') return null;
+  for (const [name, length] of parseSamHeader(source.inputs[0]?.content ?? '').contigs) {
+    if (name === chrom && /^\d+$/.test(length)) return Number(length);
+  }
+  return null;
+}
+
+/**
+ * Indexless region fallback: regions become BED-filtered streaming queries
+ * (-L/-b/-l), which need no index. The BED is staged as an extra engine
+ * input under a collision-free name (in-band inputs are in-<hash>.<ext>).
+ */
+function regionBedInput(source: ResolvedSource, region: { chrom: string; start?: number; end?: number }): BiowasmInputFile {
+  const start = region.start ?? 1;
+  const end = region.end ?? headerContigLength(source, region.chrom) ?? WHOLE_CONTIG_BED_END;
+  const safe = `${region.chrom}_${start}_${end}`.replace(/[^A-Za-z0-9._-]/g, '_');
+  return { name: `region-${safe}.bed`, content: `${region.chrom}\t${start - 1}\t${end}\n` };
+}
+
 export async function runBamViewRegion(
   source: ResolvedSource,
   region: { chrom: string; start?: number; end?: number },
@@ -311,12 +363,15 @@ export async function runBamViewRegion(
 ): Promise<AnalyzerResult> {
   const regionArg = formatRegion(region);
   const results: BiowasmRunResult[] = [];
+  const bed = source.hasIndex ? null : regionBedInput(source, region);
+  const bedPath = bed ? `/shared/data/${bed.name}` : '';
+  const inputs = bed ? [...source.inputs, bed] : source.inputs;
 
   if (mode === 'count') {
     const res = await runEngine(results, 'samtools view -c', {
       tool: 'samtools',
-      args: ['view', '-c', source.vfsPath, regionArg],
-      inputs: source.inputs,
+      args: bed ? ['view', '-c', '-L', bedPath, source.vfsPath] : ['view', '-c', source.vfsPath, regionArg],
+      inputs,
       mounts: source.mounts,
       stdout: 'capture',
     });
@@ -341,8 +396,10 @@ export async function runBamViewRegion(
     const outName = regionFileName(source, regionArg, 'bam');
     const res = await runEngine(results, 'samtools view -b -o', {
       tool: 'samtools',
-      args: ['view', '-b', '-o', `/shared/out/${outName}`, source.vfsPath, regionArg],
-      inputs: source.inputs,
+      args: bed
+        ? ['view', '-b', '-o', `/shared/out/${outName}`, '-L', bedPath, source.vfsPath]
+        : ['view', '-b', '-o', `/shared/out/${outName}`, source.vfsPath, regionArg],
+      inputs,
       mounts: source.mounts,
       outputs: [{ vfsPath: `/shared/out/${outName}` }],
     });
@@ -354,8 +411,8 @@ export async function runBamViewRegion(
   if (mode === 'depth') {
     const res = await runEngine(results, 'samtools depth', {
       tool: 'samtools',
-      args: ['depth', '-a', '-r', regionArg, source.vfsPath],
-      inputs: source.inputs,
+      args: bed ? ['depth', '-a', '-b', bedPath, source.vfsPath] : ['depth', '-a', '-r', regionArg, source.vfsPath],
+      inputs,
       mounts: source.mounts,
       stdout: 'capture',
     });
@@ -388,8 +445,8 @@ export async function runBamViewRegion(
   if (mode === 'pileup') {
     const res = await runEngine(results, 'samtools mpileup', {
       tool: 'samtools',
-      args: ['mpileup', '-r', regionArg, source.vfsPath],
-      inputs: source.inputs,
+      args: bed ? ['mpileup', '-l', bedPath, source.vfsPath] : ['mpileup', '-r', regionArg, source.vfsPath],
+      inputs,
       mounts: source.mounts,
       stdout: 'capture',
     });
@@ -413,8 +470,8 @@ export async function runBamViewRegion(
 
   const res = await runEngine(results, 'samtools view', {
     tool: 'samtools',
-    args: ['view', source.vfsPath, regionArg],
-    inputs: source.inputs,
+    args: bed ? ['view', '-L', bedPath, source.vfsPath] : ['view', source.vfsPath, regionArg],
+    inputs,
     mounts: source.mounts,
     stdout: 'capture',
   });
@@ -467,6 +524,29 @@ export async function runBcfSummary(source: ResolvedSource, output: CanonicalOut
     mounts: source.mounts,
     stdout: 'capture',
   });
+  // Counting sink: `view -H` streams records with bounded memory (V8
+  // amplification rule) — lines = variant count.
+  const count = await runEngine(results, 'bcftools view -H', {
+    tool: 'bcftools',
+    args: ['view', '-H', source.vfsPath],
+    inputs: source.inputs,
+    mounts: source.mounts,
+    stdout: 'count',
+  });
+  const variantCount = count.stdout.mode === 'count' ? count.stdout.lines : -1;
+  let indexRows: string[][] | null = null;
+  if (source.hasIndex) {
+    // `bcftools index -s` prints "contig  length  records" per contig; fails
+    // with [E::idx_find_and_load] when the index is missing (gated above).
+    const idx = await runEngine(results, 'bcftools index -s', {
+      tool: 'bcftools',
+      args: ['index', '-s', source.vfsPath],
+      inputs: source.inputs,
+      mounts: source.mounts,
+      stdout: 'capture',
+    });
+    indexRows = parseTsvRows(captured(idx));
+  }
   const info = parseVcfHeader(captured(header));
   const io = aggregate(results);
 
@@ -477,7 +557,17 @@ export async function runBcfSummary(source: ResolvedSource, output: CanonicalOut
       file_format: info.fileFormat,
       sample_count: info.samples.length,
       samples: info.samples,
+      variant_count: variantCount,
       contigs: info.contigs.map(([id, length]) => ({ id, length: length === '?' ? null : Number(length) })),
+      ...(indexRows
+        ? {
+            records_per_contig: indexRows.map(([contig, length, records]) => ({
+              contig,
+              length: Number(length),
+              records: Number(records),
+            })),
+          }
+        : {}),
       info_fields: info.info.map(([id, type, number, description]) => ({ id, type, number, description })),
       format_fields: info.formats.map(([id, type, number, description]) => ({ id, type, number, description })),
       io_stats: ioStatsPayload(io.bytesRead, io.elapsedMs),
@@ -490,6 +580,7 @@ export async function runBcfSummary(source: ResolvedSource, output: CanonicalOut
     ['file format', info.fileFormat ?? 'n/a'],
     ['samples', String(info.samples.length)],
     ['sample names', info.samples.length > 0 ? sampleList : 'n/a'],
+    ['variants', String(variantCount)],
     ['contigs', String(info.contigs.length)],
     ['INFO fields', String(info.info.length)],
     ['FORMAT fields', String(info.formats.length)],
@@ -519,7 +610,17 @@ export async function runBcfSummary(source: ResolvedSource, output: CanonicalOut
     topN: output.topN,
     noun: 'contigs',
   });
-  const body = [summaryBlock, infoBlock, formatBlock, contigBlock].join('\n\n');
+  const countsBlock = indexRows
+    ? renderRowTable({
+        title: 'Records per contig (from the index)',
+        summary: [],
+        columns: ['contig', 'length', 'records'],
+        rows: indexRows,
+        topN: output.topN,
+        noun: 'contigs',
+      })
+    : null;
+  const body = [summaryBlock, infoBlock, formatBlock, contigBlock, ...(countsBlock ? [countsBlock] : [])].join('\n\n');
   return { text: clipText(`${body}\n\n${ioStatsLine(io.bytesRead, io.elapsedMs)}`, 2 * 1024 * 1024) };
 }
 
@@ -844,6 +945,10 @@ export async function runBiowasmSessionInfo(): Promise<AnalyzerResult> {
 // analysis_biowasm_cli.
 // ---------------------------------------------------------------------------
 
+export function exitCodeLabel(exitCode: number | null): string {
+  return exitCode === null ? 'unknown (no status)' : String(exitCode);
+}
+
 export async function runBiowasmCli(
   tool: BiowasmToolName,
   args: string[],
@@ -851,7 +956,10 @@ export async function runBiowasmCli(
 ): Promise<AnalyzerResult> {
   validateCliArgs(tool, args);
   const results: BiowasmRunResult[] = [];
-  const res = await runEngine(results, `${tool} ${args.join(' ')}`, { tool, args, stdout: 'capture' });
+  // raw: this tool exists to surface raw diagnostics — it must render
+  // nonzero exit codes and fatal stderr instead of throwing.
+  const res = await runEngine(results, `${tool} ${args.join(' ')}`, { tool, args, stdout: 'capture' }, { raw: true });
+  const failed = looksFailed(res);
   const io = aggregate(results);
   const text = captured(res);
   const lines = text.split('\n').filter((l) => l !== '');
@@ -863,6 +971,7 @@ export async function runBiowasmCli(
       tool,
       args,
       exit_code: res.exitCode,
+      is_error: failed,
       stdout: clipText(text, 512 * 1024),
       stderr: clipText(stderr, 64 * 1024),
       is_truncated: res.stdout.mode === 'capture' && res.stdout.truncated,
@@ -870,11 +979,15 @@ export async function runBiowasmCli(
     });
   }
   const summary: Array<[string, string]> = [
-    ['exit code', String(res.exitCode ?? 'null')],
+    ['exit code', exitCodeLabel(res.exitCode)],
+    ['is_error', failed ? 'true' : 'false'],
     ['stdout lines', String(lines.length)],
     ...(stderr ? [['stderr lines', String(stderr.split('\n').length)] as [string, string]] : []),
   ];
   let rendered = renderTextTable(`${tool} ${args.join(' ')}`, summary, text, output.topN, 'output lines');
+  if (failed) {
+    rendered += '\n\n**error:** the tool reported a failure (see stderr below).';
+  }
   if (stderr) {
     rendered += '\n\nstderr:\n\n```\n' + clipText(stderr, 2048) + '\n```';
   }

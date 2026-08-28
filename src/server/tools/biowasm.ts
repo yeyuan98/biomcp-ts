@@ -66,7 +66,7 @@ export function registerBiowasmTools(server: McpServer): void {
     'analysis_bam_view_region',
     {
       description:
-        'Reads, depth, or pileup in a genomic region of an alignment (samtools view/depth/mpileup): mode="count" answers "how many reads overlap this locus?" (index-driven, touches only the relevant index blocks); "depth" gives a per-base (optionally binned via depth_bins) coverage profile; "pileup" gives base-level pileup rows; "reads" returns SAM rows or, with format="artifact", a BAM artifact for downstream analysis_bed_op / analysis_biowasm_convert work. Region queries need an indexed source (host_path with sibling .bai/.crai or an explicit index). Use analysis_bam_summary first to see contigs.' +
+        'Reads, depth, or pileup in a genomic region of an alignment (samtools view/depth/mpileup): mode="count" answers "how many reads overlap this locus?" (index-driven, touches only the relevant index blocks); "depth" gives a per-base (optionally binned via depth_bins) coverage profile; "pileup" gives base-level pileup rows; "reads" returns SAM rows or, with format="artifact", a BAM artifact for downstream analysis_bed_op / analysis_biowasm_convert work. Region queries work on any source: indexed sources use fast positional retrieval; indexless sources stream through a synthesized BED region filter (-L/-b/-l), which for depth/pileup requires coordinate-sorted input (count/reads accept any order; unsorted depth fails with "Data is not position sorted"). Use analysis_bam_summary first to see contigs.' +
         SOURCE_NOTES,
       inputSchema: {
         ...SOURCE_INPUT,
@@ -93,7 +93,7 @@ export function registerBiowasmTools(server: McpServer): void {
     'analysis_bcf_summary',
     {
       description:
-        'Inspect a VCF/BCF before querying variants — "what is in this variant file?": contigs, sample count and names (watch for cohort-scale files), and the full INFO/FORMAT field inventory from the header (bcftools view -h; no index needed). Follow up with analysis_bcf_view_region to pull a narrow projection of variants.' +
+        'Inspect a VCF/BCF before querying variants — "what is in this variant file?": total variant record count, contigs, sample count and names (watch for cohort-scale files), and the full INFO/FORMAT field inventory from the header (bcftools view -h/-H; no index needed; with an index, per-contig record counts are included). Follow up with analysis_bcf_view_region to pull a narrow projection of variants.' +
         SOURCE_NOTES,
       inputSchema: { ...SOURCE_INPUT, ...OUTPUT_INPUT },
       annotations: { readOnlyHint: true, openWorldHint: false },
@@ -145,7 +145,7 @@ export function registerBiowasmTools(server: McpServer): void {
     'analysis_bed_op',
     {
       description:
-        'Interval algebra on BED tracks (bedtools): intersect, merge, subtract, coverage, jaccard, or sort. Binary ops take `source` (A) and `b_source` (B); set sorted_inputs=true for the memory-frugal -sorted algorithm on coordinate-sorted inputs (B-side inputs are otherwise loaded into the wasm heap — prefer sorted or bounded B). Produces a bounded table/json; pairs with analysis_bam_view_region artifacts and analysis_biowasm_convert.' +
+        'Interval algebra on BED tracks (bedtools): intersect, merge, subtract, coverage, jaccard, or sort. Binary ops take `source` (A) and `b_source` (B) — pass b_source as an OBJECT like {"content": "chr1\\t10\\t20\\nchr1\\t100\\t200\\n"} or {"host_path": "..."}, never as a JSON-encoded string; set sorted_inputs=true for the memory-frugal -sorted algorithm on coordinate-sorted inputs (B-side inputs are otherwise loaded into the wasm heap — prefer sorted or bounded B). Produces a bounded table/json; pairs with analysis_bam_view_region artifacts and analysis_biowasm_convert.' +
         SOURCE_NOTES,
       inputSchema: {
         source: SOURCE_INPUT.source,
