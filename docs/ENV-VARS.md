@@ -48,7 +48,22 @@ Activates the `analysis_r_deseq2` / `analysis_r_edger` / `analysis_r_limma` / `a
 | `ANALYSIS_R_TIMEOUT_MS` | no | Per-analysis timeout, default `600000` (10 min); exceeded analyses are interrupted |
 | `ANALYSIS_R_MEM_LIMIT_MB` | no | RSS watermark above which new analyses are refused, default `2048` |
 | `ANALYSIS_R_GITHUB_REPO` | no | `owner/repo` to fetch release assets from (default: this project's repository) |
-| `BIOMPC_CACHE_DIR` | no | Base directory for the mirror cache (default `~/.cache/biomcp`) |
+| `BIOMCP_CACHE_DIR` | no | Base directory for the mirror cache (default `~/.cache/biomcp`) |
+
+## Biowasm analysis (optional feature)
+
+Activates the `analysis_bam_summary` / `analysis_bam_view_region` / `analysis_bcf_summary` / `analysis_bcf_view_region` / `analysis_bed_op` / `analysis_biowasm_convert` / `analysis_biowasm_session_info` / `analysis_biowasm_cli` tools (samtools/bedtools/bcftools in sandboxed WebAssembly). Full guide: [BIOWASM-ANALYSIS.md](BIOWASM-ANALYSIS.md).
+
+> No npm peer dependency — unlike R analysis there is nothing to install; the wasm assets (~4.5 MB) download at first use into `~/.cache/biomcp/` (checksum-verified).
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `ANALYSIS_BIOWASM` | yes (`1`/`true`) | Activates the biowasm analysis tools |
+| `ANALYSIS_BIOWASM_TIMEOUT_MS` | no | Per-run timeout, default `600000` (10 min); exceeded runs terminate and respawn the worker |
+| `ANALYSIS_BIOWASM_MEM_LIMIT_MB` | no | RSS watermark above which new runs are refused, default `2048` |
+| `ANALYSIS_BIOWASM_DATA_DIR` | no | Allowlist root for `host_path` sources (unset = host files denied); every path is resolved and prefix-checked after normalization |
+| `ANALYSIS_BIOWASM_MIRROR_URL` | no | Override the wasm asset source: a `.tar.gz` archive (path, `file://`, or http(s) URL) is extracted and pin-verified; an extracted **directory** is trusted as-is. Default: the biowasm CDN, cached in `~/.cache/biomcp/` |
+| `ANALYSIS_BIOWASM_WORKER_PATH` | no | Explicit path to the biowasm worker bundle (`dist/biowasm-worker.js`); dev mode running from `src/` needs this or a prior `npm run build` |
 
 ## Proxy
 
@@ -62,12 +77,13 @@ Honored by every upstream request via proxy-aware global fetch (undici).
 
 ## Test-only
 
-Never read by the shipped server — used only by the optional live-database integration suites:
+Never read by the shipped server — used only by the optional integration / perf suites:
 
 | Variable | Purpose |
 |----------|---------|
 | `BIOMCP_DB_IT_HOST` / `BIOMCP_DB_IT_PORT` | MySQL server under test (suite skips unless both are set) |
 | `BIOMCP_DB_IT_USER` / `BIOMCP_DB_IT_PASSWORD` / `BIOMCP_DB_IT_DATABASE` | Credentials (defaults: `root` / empty / `bio`) |
 | `BIOMCP_DB_IT_SQLITE_PATH` | SQLite file(s) under test, same comma-list syntax as `DB_SQLITE_PATH` (suite skips unless set) |
+| `ANALYSIS_BIOWASM_PERF` | Enables the biowasm perf smoke suite (region-query IO fraction, full-scan RSS budget; advisory, not CI-blocking) |
 
 See [src/__tests__/README.md](../src/__tests__/README.md#database-tests).

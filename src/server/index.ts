@@ -17,6 +17,7 @@ import { registerGtexTools } from './tools/gtex.js';
 import { registerEnsemblTools } from './tools/ensembl.js';
 import { registerDbToolsIfConfigured, shutdownDbBackend } from './tools/db.js';
 import { registerAnalysisRToolsIfConfigured, shutdownREngine } from './tools/ranalysis.js';
+import { registerBiowasmToolsIfConfigured, shutdownBiowasmEngine } from './tools/biowasm.js';
 import { VERSION } from '../version.js';
 
 const server = new McpServer({
@@ -46,6 +47,10 @@ const analysisREnabled = registerAnalysisRToolsIfConfigured(server);
 if (analysisREnabled) {
   console.error('[biomcp] R analysis tools enabled via ANALYSIS_R');
 }
+const biowasmEnabled = registerBiowasmToolsIfConfigured(server);
+if (biowasmEnabled) {
+  console.error('[biomcp] Biowasm analysis tools enabled via ANALYSIS_BIOWASM');
+}
 
 async function main() {
   const transport = new StdioServerTransport();
@@ -53,6 +58,7 @@ async function main() {
   process.on('exit', () => {
     void shutdownDbBackend();
     void shutdownREngine();
+    void shutdownBiowasmEngine();
   });
 }
 

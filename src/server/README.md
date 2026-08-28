@@ -167,7 +167,24 @@ Registered only when `ANALYSIS_R` is set — see [docs/R-ANALYSIS.md](../../docs
 
 Shared inputs: `counts` (object `{genes, samples, matrix}` or CSV string; raw integer counts, ≤50,000 genes x ≤64 samples), `coldata` (object `{samples, columns}` or CSV; string columns become factors), `design` (RHS formula over coldata columns, whitelisted charset + token denylist), `contrast?` `{variable, numerator, denominator}` or `coef?` (model-matrix column; default: last design term), `top_n?` (1–200, default 50), `include_full?` (boolean), `format?` `"table" \| "json"`. Output: markdown table + summary by default; `include_full` adds base64(gzip(TSV)) of the full results.
 
-**Total: 40 core tools** across 14 registration modules (+3 optional database tools, +4 optional R analysis tools).
+### Biowasm Analysis Tools (`tools/biowasm.ts`) — 8 tools (optional)
+
+Registered only when `ANALYSIS_BIOWASM` is set — see [docs/BIOWASM-ANALYSIS.md](../../docs/BIOWASM-ANALYSIS.md). No npm peer dependency; wasm assets (~4.5 MB) download and pin-verify at first use.
+
+| Tool | Input Schema | Description | Annotations |
+|------|-------------|-------------|-------------|
+| `analysis_bam_summary` | shared source inputs (below), output shaping | Alignment inspection: header contigs/lengths, sample + read groups, flagstat metrics, idxstats per-contig counts when an index is available | readOnly |
+| `analysis_bam_view_region` | shared source inputs, `region: {chrom, start?, end?}` (required; 1-based inclusive, span ≤ 100 Mb), `mode?: "count" \| "depth" \| "pileup" \| "reads"` (default count), `depth_bins?: number (1–1,000,000)`, output shaping | Region access to an alignment (samtools view -c/depth/mpileup/view -b); reads+`format="artifact"` returns a BAM artifact | — |
+| `analysis_bcf_summary` | shared source inputs, output shaping | VCF/BCF header inspection: contigs, sample count + names, INFO/FORMAT inventory | readOnly |
+| `analysis_bcf_view_region` | shared source inputs, `region` (required), `projection?: {fields?: ("CHROM" \| "POS" \| "ID" \| "REF" \| "ALT" \| "QUAL" \| "FILTER" \| "INFO" \| "AF" \| "AC" \| "AN" \| "DP" \| "TYPE" \| "GT" \| "GQ" \| "DP_SAMPLE" \| "AD")[] (default CHROM,POS,REF,ALT; ≤ 20), samples?: string[] (≤ 10,000)}`, `filter?: string` (bcftools expression, ≤ 512 chars, denylisted), `variant_types?: ("snps" \| "indels" \| "mnps" \| "other")[]`, output shaping | Variants in a region as a narrow projection (bcftools query -r/-t -s -i -v); `format="artifact"` slices to a VCF.gz artifact | — |
+| `analysis_bed_op` | `source` (A track, shared schema), `b_source?` (B track; required for binary ops), `op: "intersect" \| "merge" \| "subtract" \| "coverage" \| "jaccard" \| "sort"`, `sorted_inputs?: boolean (default false — adds -sorted)`, `strand?: boolean (default false — -s)`, `fraction_overlap?: number (0–1, -f)`, output shaping | Interval algebra (bedtools); table/json only (bedtools prints to stdout) | — |
+| `analysis_biowasm_convert` | shared source inputs, `to: "SAM" \| "BAM" \| "CRAM" \| "VCF" \| "BCF" \| "TSV"` (input format inferred from the source), projection/filter (TSV), output shaping | Format plumbing; result is an artifact handle (id, host path, sha256, size, ≤ 2 KB preview) reusable as `artifact_id` | — |
+| `analysis_biowasm_session_info` | — | Runtime report: pinned tool versions, asset cache state, engine status, artifact count, memory | readOnly |
+| `analysis_biowasm_cli` | `tool: "samtools" \| "bedtools" \| "bcftools"`, `args: string[] (1–32; subcommand-level allowlist — phase 1 simplification; no shell metacharacters, no "..", paths only under /shared)` | Constrained escape hatch for allowlisted subcommands; output captured under a 2 MB cap | — |
+
+Shared source inputs: `source` (strict union — exactly one of `{content}` ≤ 20 MiB with format sniffing, `{artifact_id}` from a prior response, or `{host_path}` under `ANALYSIS_BIOWASM_DATA_DIR`), `index?` (`"auto"` default with sibling `.bai/.csi/.tbi/.crai` detection, or `{content}`/`{host_path}`). Output shaping: `format?` `"table"` (markdown, default) \| `"json"` \| `"artifact"` (where supported), `top_n?` (1–200, default 50), `include_content?` (inline artifacts ≤ 2 MB as base64(gzip)). Every response embeds io_stats (bytes read, elapsed).
+
+**Total: 40 core tools** across 14 registration modules (+3 optional database tools, +4 optional R analysis tools, +8 optional biowasm analysis tools).
 
 ## Error Handling (`errors.ts`)
 
@@ -287,6 +304,9 @@ src/server/
     geo.ts            2 GEO tools (search, get + optional download)
     sra.ts            2 SRA tools (search, get)
     genbank.ts        3 GenBank tools (search, get, genes)
-    gtex.ts           2 GTEx tools (expression, eqtl)
-    ensembl.ts        4 Ensembl tools (lookup, homology, consequence, region)
+    gtex.ts            2 GTEx tools (expression, eqtl)
+    ensembl.ts         4 Ensembl tools (lookup, homology, consequence, region)
+    db.ts              3 database tools (optional, DB_TYPE)
+    ranalysis.ts       4 R analysis tools (optional, ANALYSIS_R)
+    biowasm.ts         8 biowasm analysis tools (optional, ANALYSIS_BIOWASM)
 ```
