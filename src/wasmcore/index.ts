@@ -1,4 +1,6 @@
 export { SerializationQueue } from './queue.js';
+export { runShards, ShardBatchError } from './shards.js';
+export type { RunShardsOptions, ShardContext } from './shards.js';
 export { memLimitBytes, assertWithinMemoryLimit } from './memwatch.js';
 export { runWithWatchdog } from './watchdog.js';
 export type { WatchdogOptions, WatchdogHandle } from './watchdog.js';
