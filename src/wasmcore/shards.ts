@@ -147,6 +147,8 @@ export async function runShards<T, R>(
   const workers: Array<Promise<void>> = [];
   for (let w = 0; w < workerCount; w += 1) workers.push(worker());
   await Promise.all(workers);
+  // The batch is settled: stop holding the caller's signal hostage.
+  opts.signal?.removeEventListener('abort', forwardAbort);
 
   // Annotated read via the reader (see failureOf).
   const failure = failureOf();

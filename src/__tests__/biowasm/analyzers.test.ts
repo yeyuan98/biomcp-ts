@@ -436,6 +436,33 @@ describe('biowasm analyzers failure semantics (engine mocked)', () => {
       expect(JSON.parse(b.text).variant_count).toBe(5);
       expect(runMock.mock.calls.some((c) => c[0].args[2] === '-r')).toBe(false);
     });
+
+    it('duplicate ##contig IDs are deduped — records are not double-counted', async () => {
+      workerSlotsMock.mockReturnValue(2);
+      const dupHeader =
+        '##fileformat=VCFv4.2\n##contig=<ID=chr1,length=1000>\n##contig=<ID=chr1,length=1000>\n##contig=<ID=chr2,length=900>\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n';
+      runMock.mockImplementation((request: RunRequest) => {
+        const args = request.args;
+        if (args[0] === 'index') return Promise.resolve(indexFail);
+        if (args[0] === 'view' && args[1] === '-h') {
+          return Promise.resolve(runResult({ stdout: { mode: 'capture', text: dupHeader, truncated: false } }));
+        }
+        if (args[0] === 'view' && args[1] === '-H' && args[2] === '-r') {
+          return Promise.resolve(countResult(args[3] === 'chr1' ? 3 : 2));
+        }
+        return Promise.resolve(countResult(5));
+      });
+      const source = hostSource({ hasIndex: true });
+      const json = await analyzers.runBcfSummary(
+        source,
+        { format: 'json', topN: 50, includeContent: false },
+        { proceedOnLargeInput: true },
+      );
+      const shardCalls = runMock.mock.calls.filter((c) => c[0].args[2] === '-r');
+      // One shard per UNIQUE contig — chr1 declared twice, sharded once.
+      expect(shardCalls.map((c) => c[0].args[3]).sort()).toEqual(['chr1', 'chr2']);
+      expect(JSON.parse(json.text).variant_count).toBe(5);
+    });
   });
 
   describe('depth doubling detection (indexless bed fallback)', () => {

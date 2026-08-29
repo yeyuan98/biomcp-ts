@@ -716,6 +716,62 @@ describe('biowasm engine (worker boundary mocked)', () => {
     expect(biowasmEngine.workerSlots()).toBe(1);
   });
 
+  it('pool=3 with systemic spawn failures: callers degrade without unhandled rejections', async () => {
+    process.env.ANALYSIS_BIOWASM_WORKERS = '3';
+    const { biowasmEngine } = await importEngine();
+    const release = gate();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (err: unknown) => unhandled.push(err);
+    process.on('unhandledRejection', onUnhandled);
+    const restore = installImpl(
+      (_host, index) => (index === 0 ? () => release.promise.then(() => ({ ...OK_RUN })) : async () => ({ ...OK_RUN })),
+      { failInitFor: (index) => index > 0 },
+    );
+    try {
+      await biowasmEngine.ensureReady();
+      const first = biowasmEngine.run({ tool: 'samtools', args: ['a'] });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const second = biowasmEngine.run({ tool: 'samtools', args: ['b'] });
+      const third = biowasmEngine.run({ tool: 'samtools', args: ['c'] });
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      // All three spawn capacities were attempted exactly once (slot 0 + two
+      // failed lazies), and every caller survived via the fallback routing.
+      expect(FakeWorkerHost.instances).toHaveLength(3);
+      release.resolve();
+      await expect(first).resolves.toMatchObject({ exitCode: 0 });
+      await expect(second).resolves.toMatchObject({ exitCode: 0 });
+      await expect(third).resolves.toMatchObject({ exitCode: 0 });
+      expect(unhandled).toHaveLength(0);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+      restore();
+    }
+  });
+
+  it('poolStatus counts only booted slots as alive', async () => {
+    process.env.ANALYSIS_BIOWASM_WORKERS = '2';
+    const { biowasmEngine } = await importEngine();
+    // Nothing booted yet: configured reflects the env, alive is zero.
+    expect(biowasmEngine.poolStatus()).toMatchObject({ configured: 2, alive: 0, busy: 0 });
+    await biowasmEngine.ensureReady();
+    expect(biowasmEngine.poolStatus()).toMatchObject({ configured: 2, alive: 1 });
+    // A lazily spawned slot that fails init is removed and not counted.
+    const restore = installImpl((_host, index) => async () => ({ ...OK_RUN }), { failInitFor: (index) => index > 0 });
+    try {
+      const release = gate();
+      FakeWorkerHost.instances[0]!.setDefault(() => release.promise.then(() => ({ ...OK_RUN })));
+      const first = biowasmEngine.run({ tool: 'samtools', args: ['a'] });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const second = biowasmEngine.run({ tool: 'samtools', args: ['b'] });
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      release.resolve();
+      await Promise.all([first, second]);
+      expect(biowasmEngine.poolStatus().alive).toBe(1);
+    } finally {
+      restore();
+    }
+  });
+
   it('shutdown with a live pool terminates every worker', async () => {
     process.env.ANALYSIS_BIOWASM_WORKERS = '2';
     const { biowasmEngine } = await importEngine();

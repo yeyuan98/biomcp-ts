@@ -79,6 +79,9 @@ const FIXTURES = [
 ];
 
 const MANIFEST_PATH = new URL('./fixtures-manifest.json', import.meta.url).pathname;
+// Anchor every repo-relative path to THIS file, not the caller's CWD.
+const SCRIPT_DIR = new URL('.', import.meta.url).pathname;
+const REPO_ROOT = new URL('../', import.meta.url).pathname;
 const DOWNLOAD_SCRIPTS = [
   'biowasm-q01-vcf-orientation',
   'biowasm-q02-bam-orientation',
@@ -90,7 +93,7 @@ const DOWNLOAD_SCRIPTS = [
   'biowasm-q09-slice-artifact',
   'biowasm-q12-truncation-honesty',
   'biowasm-q13-impossible-task',
-].map((d) => join('agent-test', d, 'resources.download.sh'));
+].map((d) => join(SCRIPT_DIR, d, 'resources.download.sh'));
 
 const PROD_BASE = 'https://zenodo.org';
 const SANDBOX_BASE = 'https://sandbox.zenodo.org';
@@ -114,10 +117,10 @@ const discard = flag('--discard');
 const verifyDownload = flag('--verify-download');
 const updateScripts = flag('--update-scripts');
 const listOnly = flag('--list');
-const recordId = opt('--record');
+const recordId = opt('--record') ?? opt('--record-id');
 const newVersion = flag('--new-version');
 const dataRoot = resolve(
-  opt('--data-root') ?? process.env.AGENT_TEST_DATA ?? join('agent-test', '.runs', 'data'),
+  opt('--data-root') ?? process.env.AGENT_TEST_DATA ?? join(REPO_ROOT, 'agent-test', '.runs', 'data'),
 );
 
 function readEnvFile() {
@@ -152,9 +155,15 @@ if (!token && !listOnly && !updateScripts) {
 }
 
 // Proxy awareness (repo convention: EnvHttpProxyAgent only when env present).
-if (process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.HTTP_PROXY ?? process.env.http_proxy) {
+const proxyUrl = process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.HTTP_PROXY ?? process.env.http_proxy;
+if (proxyUrl) {
   setGlobalDispatcher(new EnvHttpProxyAgent());
-  console.log(`proxy: routing via ${process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.HTTP_PROXY ?? process.env.http_proxy}`);
+  // Origin only — embedded proxy credentials must never reach the log.
+  try {
+    console.log(`proxy: routing via ${new URL(proxyUrl).origin}`);
+  } catch {
+    console.log('proxy: routing via the configured proxy');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +180,9 @@ const MAX_ATTEMPTS = 3;
 const USER_AGENT = 'biomcp-zenodo-publish/1.0 (+https://github.com/yeyuan98/biomcp-ts)';
 
 async function api(method, url, { json, body, contentLength, contentType } = {}) {
+  // Streamed bodies cannot be retried: the stream is consumed by the first
+  // attempt. Fail loudly (with the leftover-draft hint) instead.
+  const canRetry = body === undefined;
   for (let attempt = 1; ; attempt++) {
     let res;
     try {
@@ -191,7 +203,7 @@ async function api(method, url, { json, body, contentLength, contentType } = {})
         bodyTimeout: 0,
       });
     } catch (err) {
-      if (attempt < MAX_ATTEMPTS) {
+      if (canRetry && attempt < MAX_ATTEMPTS) {
         console.warn(`  ${method} ${redact(url)} network error (${err.message}); retry ${attempt}/${MAX_ATTEMPTS - 1}`);
         await sleep(3000 * attempt);
         continue;
@@ -199,7 +211,8 @@ async function api(method, url, { json, body, contentLength, contentType } = {})
       die(`request failed: ${method} ${redact(url)} — ${err.message}`);
     }
     if (res.statusCode === 429 && attempt < MAX_ATTEMPTS) {
-      const retryAfter = Number(res.headers['retry-after'] ?? '5');
+      const raw = Number(res.headers['retry-after']);
+      const retryAfter = Number.isFinite(raw) && raw >= 0 ? raw : 5;
       console.warn(`  429 rate-limited; sleeping ${retryAfter}s (attempt ${attempt}/${MAX_ATTEMPTS - 1})`);
       res.body.dump?.();
       await sleep(retryAfter * 1000);
@@ -246,8 +259,10 @@ function fetchMissing(fixtures) {
   for (const f of fixtures) byScript.set(f.fetchedBy, [...(byScript.get(f.fetchedBy) ?? []), f]);
   for (const [script, files] of byScript) {
     console.log(`fetching via ${script}: ${files.map((f) => f.name).join(', ')}`);
-    const r = spawnSync('bash', [script, dataRoot], { stdio: 'inherit', timeout: 45 * 60_000 });
-    if (r.status !== 0) die(`download script failed (${script}, exit ${r.status})`);
+    const r = spawnSync('bash', [join(SCRIPT_DIR, script), dataRoot], { stdio: 'inherit', timeout: 45 * 60_000 });
+    if (r.status !== 0 || r.error) {
+      die(`download script failed (${script}, exit ${r.status ?? 'null'}${r.error ? `: ${r.error.message}` : ''})`);
+    }
   }
 }
 
@@ -256,10 +271,14 @@ async function verifyLocal(f) {
   const sha = createHash('sha256');
   const md5 = createHash('md5');
   let bytes = 0;
-  for await (const chunk of createReadStream(path)) {
-    sha.update(chunk);
-    md5.update(chunk);
-    bytes += chunk.length;
+  try {
+    for await (const chunk of createReadStream(path)) {
+      sha.update(chunk);
+      md5.update(chunk);
+      bytes += chunk.length;
+    }
+  } catch (err) {
+    die(`cannot read local fixture ${path}: ${err.message}`);
   }
   const sha256 = sha.digest('hex');
   if (bytes !== f.bytes || sha256 !== f.sha256) {
@@ -280,11 +299,11 @@ if (listOnly) {
 }
 
 if (updateScripts) {
-  const id = opt('--record-id') ?? (() => {
+  const id = recordId ?? (() => {
     if (!existsSync(MANIFEST_PATH)) return undefined;
     return JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')).record_id;
   })();
-  if (!id) die('--update-scripts needs --record-id <id> or a committed fixtures-manifest.json');
+  if (!id) die('--update-scripts needs --record <id> (or a committed fixtures-manifest.json)');
   updateDownloadScripts(String(id));
   console.log(`OK: download scripts now lead with Zenodo record ${id}`);
   process.exit(0);
@@ -309,11 +328,10 @@ if (discard) {
 }
 
 // Stage + verify local fixtures (integrity check #1).
-let present = FIXTURES.filter((f) => existsSync(join(dataRoot, f.name)));
-if (present.length < FIXTURES.length) {
-  console.log(`missing ${FIXTURES.length - present.length} fixture(s) under ${dataRoot}; fetching via the canonical download scripts`);
-  fetchMissing(FIXTURES.filter((f) => !existsSync(join(dataRoot, f.name))));
-  present = FIXTURES;
+const missing = FIXTURES.filter((f) => !existsSync(join(dataRoot, f.name)));
+if (missing.length > 0) {
+  console.log(`missing ${missing.length} fixture(s) under ${dataRoot}; fetching via the canonical download scripts`);
+  fetchMissing(missing);
 }
 const local = {};
 for (const f of FIXTURES) {
@@ -356,12 +374,16 @@ for (const f of FIXTURES) {
     contentType: 'application/octet-stream',
   });
   if (up.status !== 200 && up.status !== 201) {
-    die(`upload failed for ${f.name} (${up.status}): ${JSON.stringify(up.body).slice(0, 400)}`);
+    die(
+      `upload failed for ${f.name} (${up.status}): ${JSON.stringify(up.body).slice(0, 400)}\n` +
+        `draft ${depId} left behind — inspect ${base}/deposit/${depId}, or discard with --discard --record ${depId}`,
+    );
   }
   const remoteMd5 = String(up.body?.checksum ?? '').replace(/^md5:/, '');
   if (remoteMd5 !== local[f.name].md5) {
     die(
-      `upload integrity mismatch for ${f.name}: Zenodo md5 ${remoteMd5} != local ${local[f.name].md5} — delete the draft and retry`,
+      `upload integrity mismatch for ${f.name}: Zenodo md5 ${remoteMd5} != local ${local[f.name].md5}\n` +
+        `draft ${depId} left behind — discard with --discard --record ${depId} and retry`,
     );
   }
   console.log(`OK: ${f.name} uploaded, md5 verified (${remoteMd5})`);
@@ -376,7 +398,6 @@ const gitUser = (() => {
 const metadata = {
   title: 'biomcp agent-test fixtures — 1000 Genomes public twins (chr22 phase3 VCF, NA12878 chr20 BAM)',
   upload_type: 'dataset',
-  publication_type: undefined,
   description: [
     '<p>Byte-exact test fixtures for the <a href="https://github.com/yeyuan98/biomcp-ts">biomcp-ts</a> agent-test suite (MCP biomedical analysis tools). Each file is a verified public twin of 1000 Genomes Project data, mirrored for fast, reliable, checksum-pinned provisioning.</p>',
     '<p><b>Provenance and verification</b> (sha256 pins enforced at download time by the pinned scripts in the repository):</p>',
@@ -396,14 +417,16 @@ const metadata = {
   version,
   language: 'eng',
   notes: 'Mirrored by agent-test/zenodo-publish.mjs in the biomcp-ts repository; consumers download keyless via https://zenodo.org/records/&lt;id&gt;/files/&lt;name&gt;?download=1.',
- _communities: undefined,
 };
-delete metadata.publication_type;
-delete metadata._communities;
 
 console.log('attaching metadata…');
 const meta = await api('PUT', `${base}/api/deposit/depositions/${depId}`, { json: { metadata } });
-if (meta.status !== 200) die(`metadata update failed (${meta.status}): ${JSON.stringify(meta.body).slice(0, 600)}`);
+if (meta.status !== 200) {
+  die(
+    `metadata update failed (${meta.status}): ${JSON.stringify(meta.body).slice(0, 600)}\n` +
+      `draft ${depId} left behind — fix and retry against it, or discard with --discard --record ${depId}`,
+  );
+}
 console.log('OK: metadata accepted');
 
 if (!publish) {
@@ -418,7 +441,12 @@ if (!publish) {
 
 console.log('publishing…');
 const pub = await api('POST', `${base}/api/deposit/depositions/${depId}/actions/publish`);
-if (pub.status !== 202) die(`publish failed (${pub.status}): ${JSON.stringify(pub.body).slice(0, 400)}`);
+if (pub.status !== 202) {
+  die(
+    `publish failed (${pub.status}): ${JSON.stringify(pub.body).slice(0, 400)}\n` +
+      `draft ${depId} left behind — it is still private; fix and retry, or discard with --discard --record ${depId}`,
+  );
+}
 const recid = pub.body?.record_id ?? pub.body?.id ?? depId;
 const doi = pub.body?.doi ?? pub.body?.metadata?.doi;
 let conceptDoi = pub.body?.conceptdoi ?? pub.body?.concept_doi;
@@ -442,6 +470,7 @@ if (verifyDownload) {
   for (const f of FIXTURES) {
     const url = `${publicBase}/records/${recid}/files/${encodeURIComponent(f.name)}?download=1`;
     const sha = await keylessGetSha256(url);
+    if (sha === null) die(`re-download of ${f.name} failed (non-200) against ${url}`);
     if (sha !== f.sha256) die(`re-downloaded ${f.name} sha256 mismatch (${sha})`);
     console.log(`OK: re-downloaded ${f.name} sha256 verified`);
   }
@@ -479,38 +508,63 @@ function updateDownloadScripts(recordId) {
   for (const script of DOWNLOAD_SCRIPTS) {
     if (!existsSync(script)) die(`download script missing: ${script}`);
     let text = readFileSync(script, 'utf8');
-    if (text.includes(`ZENODO=${zenodoBase}`)) {
-      console.log(`  ${script}: already at record ${recordId}`);
-      continue;
-    }
-    if (text.includes('ZENODO=https://')) {
-      // Replace an older record id.
-      text = text.replace(/^ZENODO=https:\/\/zenodo\.org\/records\/\d+.*$/m, `ZENODO=${zenodoBase}`);
-    } else {
-      // Insert after the last mirror-base assignment (EBI=/NCBI= block).
-      const lines = text.split('\n');
-      let insertAt = -1;
-      for (let i = 0; i < lines.length; i++) {
-        if (/^(EBI|NCBI|BASE)=/.test(lines[i])) insertAt = i + 1;
+    // --- ZENODO= base line: swap an older record id, or insert after the
+    //     last mirror-base anchor (EBI=/NCBI=/BASE= block). ---
+    if (!text.includes(`ZENODO=${zenodoBase}`)) {
+      if (/^ZENODO=https:\/\/zenodo\.org\/records\/\d+.*$/m.test(text)) {
+        text = text.replace(/^ZENODO=https:\/\/zenodo\.org\/records\/\d+.*$/m, `ZENODO=${zenodoBase}`);
+      } else {
+        const lines = text.split('\n');
+        let insertAt = -1;
+        for (let i = 0; i < lines.length; i++) {
+          if (/^(EBI|NCBI|BASE)=/.test(lines[i])) insertAt = i + 1;
+        }
+        if (insertAt < 0) die(`${script}: no mirror-base anchor found for the ZENODO= insertion`);
+        lines.splice(
+          insertAt,
+          0,
+          '',
+          '# Public Zenodo dataset mirror (keyless; see agent-test/fixtures-manifest.json):',
+          `ZENODO=${zenodoBase}`,
+        );
+        text = lines.join('\n');
       }
-      if (insertAt < 0) die(`${script}: no mirror-base anchor found for the ZENODO= insertion`);
-      lines.splice(
-        insertAt,
-        0,
-        '',
-        '# Public Zenodo dataset mirror (keyless; see agent-test/fixtures-manifest.json):',
-        `ZENODO=${zenodoBase}`,
-      );
-      text = lines.join('\n');
     }
-    // Prepend the Zenodo URL to every fixture ensure() call.
+    // --- ensure lines: the URL MUST land at the HEAD OF THE URL LIST —
+    //     ensure <dest> <sha> <size> <url>... — never in the sha/size slots
+    //     (a mis-slotted URL makes verify() compare a sha hex against a URL,
+    //     fail, and rm -f a perfectly good cached file). Strip any existing
+    //     Zenodo arg first so re-runs and record swaps never double-prepend. ---
+    let patched = 0;
+    let referenced = 0;
     for (const f of FIXTURES) {
-      const ensureRe = new RegExp(`^(ensure "\\$DIR/${f.name.replace(/\./g, '\\.')}")`, 'm');
-      text = text.replace(ensureRe, `$1 "$ZENODO/files/${f.name}?download=1"`);
+      const esc = f.name.replace(/\./g, '\\.');
+      // dest + sha + size (whitespace-padded alignment tolerated); the URL
+      // list starts after the third quoted argument.
+      const headOfUrlList = new RegExp(`^(ensure "\\$DIR/${esc}"\\s+"[^"]+"\\s+"[^"]+")`, 'm');
+      if (!new RegExp(`^ensure "\\$DIR/${esc}"`, 'm').test(text)) continue;
+      referenced += 1;
+      // Strip the correctly-slotted form (this updater) …
+      text = text.replace(
+        new RegExp(`^(ensure "\\$DIR/${esc}"\\s+"[^"]+"\\s+"[^"]+")\\s+"?\\$ZENODO/files/${esc}\\?download=1"?`, 'm'),
+        '$1',
+      );
+      // … and the legacy mis-slotted form (URL right after the dest path).
+      text = text.replace(
+        new RegExp(`^(ensure "\\$DIR/${esc}")\\s+"?\\$ZENODO/files/${esc}\\?download=1"?`, 'm'),
+        '$1',
+      );
+      if (!headOfUrlList.test(text)) die(`${script}: ensure anchor lost for ${f.name} — refusing a partial edit`);
+      text = text.replace(headOfUrlList, `$1 "$ZENODO/files/${f.name}?download=1"`);
+      patched += 1;
     }
-    // Follow redirects (harmless for EBI/NCBI; future-proofs the Zenodo mirror).
-    text = text.replace(/(\bcurl\b)( --fail)/, '$1 -L$2');
+    if (referenced > 0 && patched !== referenced) {
+      die(`${script}: patched ${patched} of ${referenced} fixture ensure lines — refusing a partial edit`);
+    }
+    // --- curl -L (follow redirects; harmless for EBI/NCBI, future-proofs
+    //     the Zenodo mirror). Idempotent, order-tolerant. ---
+    text = text.replace(/(\bcurl\b)(?![^\n]*\s-L\b)( --fail)/, '$1 -L$2');
     writeFileSync(script, text);
-    console.log(`  ${script}: updated`);
+    console.log(`  ${script}: updated${referenced === 0 ? ' (no fixture ensure lines — base only)' : ` (${patched} ensure line(s))`}`);
   }
 }

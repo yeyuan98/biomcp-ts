@@ -183,11 +183,16 @@ in `~/.env`, scopes `deposit:write` + `deposit:actions`, Bearer-header auth
 only — never committed):
 
 ```bash
+# Full usage: node agent-test/zenodo-publish.mjs [--sandbox|--prod] [--publish]
+#   [--discard [--record <id>]] [--data-root DIR] [--verify-download]
+#   [--record <id> --new-version] [--update-scripts] [--list]
 node agent-test/zenodo-publish.mjs --sandbox            # sandbox draft rehearsal
 node agent-test/zenodo-publish.mjs --prod               # prod draft (private, inspectable)
 node agent-test/zenodo-publish.mjs --prod --publish     # IRREVERSIBLE public release
+node agent-test/zenodo-publish.mjs --prod --publish --verify-download  # + full re-download sha256
 node agent-test/zenodo-publish.mjs --prod --discard --record <id>   # remove a draft
-node agent-test/zenodo-publish.mjs --update-scripts     # point the 10 scripts at the record
+node agent-test/zenodo-publish.mjs --update-scripts     # point the 10 scripts at the manifest record
+node agent-test/zenodo-publish.mjs --update-scripts --record <new-id>  # …or at an explicit record
 ```
 
 Integrity ladder (all enforced by the script): local sha256 pin verification

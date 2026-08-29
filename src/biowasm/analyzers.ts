@@ -807,9 +807,16 @@ export async function runBcfSummary(source: ResolvedSource, output: CanonicalOut
     if (source.hasIndex && exec?.proceedOnLargeInput && info.contigs.length >= 2) {
       const { biowasmEngine } = await engineModule();
       const poolSize = biowasmEngine.workerSlots();
-      const contigs = info.contigs
-        .map(([id]) => id)
-        .filter((id) => id !== '' && id !== '*' && !/[,:;]/.test(id));
+      // Dedupe first: a duplicated ##contig ID would shard that contig twice
+      // and double-count its records (the doubling bug class this repo
+      // exists to avoid); then drop IDs that make pathological -r args.
+      const contigs = [
+        ...new Set(
+          info.contigs
+            .map(([id]) => id)
+            .filter((id) => id !== '' && id !== '*' && !id.startsWith('=') && !id.startsWith('-') && !/[,:;]/.test(id)),
+        ),
+      ];
       if (poolSize > 1 && contigs.length >= 2) {
         const batchStartedMs = Date.now();
         const baseBytes = results.reduce((acc, r) => acc + bytesReadOf(r), 0);
@@ -960,7 +967,7 @@ export async function runBcfSummary(source: ResolvedSource, output: CanonicalOut
   });
   const countsBlock = indexRows
     ? renderRowTable({
-        title: 'Records per contig (from the index)',
+        title: 'Records per contig',
         summary: [],
         columns: ['contig', 'length', 'records'],
         rows: indexRows,

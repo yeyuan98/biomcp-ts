@@ -183,12 +183,18 @@ function extractMessage(err: unknown): string {
  * State shared by every worker slot. The artifact filename sequence is
  * engine-wide so names stay collision-free across slots (single-threaded
  * main thread, no locking); asset provisioning is memoized so concurrently
- * bootstrapping slots never double-download.
+ * bootstrapping slots never double-download — with two honesty rules from
+ * the pre-pool engine preserved: the public assetsDirectory() only turns
+ * non-null once a worker bundle was actually found next to the provisioned
+ * assets (markAssetsReady), and a failed worker init invalidates the memo so
+ * the next respawn re-provisions (deleted/corrupted caches self-heal).
  */
 interface EngineShared {
   readonly artifactsDir: string;
   nextArtifactSeq(): number;
   provisionAssets(): Promise<string>;
+  markAssetsReady(dir: string): void;
+  invalidateAssets(): void;
 }
 
 /**
@@ -203,6 +209,8 @@ class BiowasmSlot {
   private host: WorkerHost | null = null;
   private readyPromise: Promise<void> | null = null;
   private poisoned = false;
+  /** Set once the init RPC resolved — a mid-bootstrap host is not yet alive. */
+  private booted = false;
   private readonly queue = new SerializationQueue();
   private readonly artifacts = new Map<string, ArtifactState>();
   private runSeq = 0;
@@ -228,11 +236,12 @@ class BiowasmSlot {
   }
 
   isAlive(): boolean {
-    return this.host !== null && !this.poisoned && !this.host.isDead();
+    return this.booted && this.host !== null && !this.poisoned && !this.host.isDead();
   }
 
   private async teardown(): Promise<void> {
     this.readyPromise = null;
+    this.booted = false;
     this.closeArtifacts();
     const host = this.host;
     this.host = null;
@@ -244,6 +253,7 @@ class BiowasmSlot {
   private poison(): void {
     this.poisoned = true;
     this.readyPromise = null;
+    this.booted = false;
     const host = this.host;
     this.host = null;
     if (host) {
@@ -352,6 +362,15 @@ class BiowasmSlot {
   }
 
   private async bootstrap(): Promise<void> {
+    // Worker-bundle check FIRST: fail fast without touching the asset cache
+    // (and without flipping the engine's public assetsDirectory()).
+    const workerPath = resolveWorkerPath();
+    if (!workerPath) {
+      throw new BiowasmNotAvailableError(
+        'The biowasm worker bundle was not found. Run `npm run build` to produce dist/biowasm-worker.js, ' +
+          `or set ${WORKER_PATH_ENV_VAR} to an existing worker bundle path.`,
+      );
+    }
     let assetsDir: string;
     try {
       assetsDir = await this.shared.provisionAssets();
@@ -360,13 +379,6 @@ class BiowasmSlot {
         `The biowasm wasm assets could not be provisioned: ${extractMessage(err)} ` +
           `Assets cache under: ${biowasmCacheDirPath()} (set BIOMCP_CACHE_DIR to relocate). ` +
           `Set ANALYSIS_BIOWASM_MIRROR_URL to a local directory, .tar.gz archive, or http(s) URL holding the pinned tool files to provision offline.`,
-      );
-    }
-    const workerPath = resolveWorkerPath();
-    if (!workerPath) {
-      throw new BiowasmNotAvailableError(
-        'The biowasm worker bundle was not found. Run `npm run build` to produce dist/biowasm-worker.js, ' +
-          `or set ${WORKER_PATH_ENV_VAR} to an existing worker bundle path.`,
       );
     }
     mkdirSync(this.shared.artifactsDir, { recursive: true });
@@ -386,10 +398,16 @@ class BiowasmSlot {
       ]);
     } catch (err) {
       await this.teardown();
+      // A failed init may reflect a broken asset cache (the pre-pool engine
+      // re-provisioned on every bootstrap): drop the memo so the next
+      // respawn re-verifies instead of looping on the same dead assets.
+      this.shared.invalidateAssets();
       throw new BiowasmNotAvailableError(
         `The biowasm worker failed to start from ${workerPath} (assets: ${assetsDir}): ${extractMessage(err)}.`,
       );
     }
+    this.booted = true;
+    this.shared.markAssetsReady(assetsDir);
   }
 
   async run(request: BiowasmRunRequest): Promise<BiowasmRunResult> {
@@ -559,8 +577,11 @@ class BiowasmEngine {
   private readonly maxWorkers = workerCount();
   /** Slots created + permanently failed lazy spawns; caps total attempts. */
   private attemptedSpawns = 0;
-  private assetsDir: string | null = null;
+  /** Provisioning memo (dir of a verified asset set). */
+  private provisionedDir: string | null = null;
   private assetsPromise: Promise<string> | null = null;
+  /** Public readiness marker: set only after a worker bundle was found. */
+  private assetsDir: string | null = null;
   private readonly artifactsDir = join(cacheDir(), 'biowasm-artifacts');
   private artifactSeq = 0;
   private rrSeq = 0;
@@ -568,14 +589,22 @@ class BiowasmEngine {
     artifactsDir: this.artifactsDir,
     nextArtifactSeq: () => this.artifactSeq++,
     provisionAssets: () => this.provisionOnce(),
+    markAssetsReady: (dir) => {
+      this.assetsDir = dir;
+    },
+    invalidateAssets: () => {
+      this.assetsPromise = null;
+      this.provisionedDir = null;
+      this.assetsDir = null;
+    },
   };
 
   private provisionOnce(): Promise<string> {
-    if (this.assetsDir) return Promise.resolve(this.assetsDir);
+    if (this.provisionedDir) return Promise.resolve(this.provisionedDir);
     if (!this.assetsPromise) {
       this.assetsPromise = provisionBiowasmAssets()
         .then((resolution) => {
-          this.assetsDir = resolution.dir;
+          this.provisionedDir = resolution.dir;
           return resolution.dir;
         })
         .catch((err: unknown) => {
@@ -663,14 +692,18 @@ class BiowasmEngine {
         );
       }
     }
-    const target = this.route();
-    if (target.spawn !== null) {
+    // Every not-yet-booted target is awaited (shared, memoized bootstrap) and
+    // every spawn failure re-routes — a degraded spawn promise is never
+    // dropped, so systemic spawn failures can't surface as unhandled
+    // rejections. Terminates: failed spawns consume attemptedSpawns capacity
+    // and slot 0 / alive slots carry no spawn promise.
+    let target = this.route();
+    while (target.spawn !== null) {
       try {
         await target.spawn;
+        break; // bootstrapped — run on it
       } catch {
-        // Lazy spawn failed (memoized in route()); degrade to queueing.
-        const fallback = this.route();
-        return fallback.slot.run(request);
+        target = this.route(); // spawn failed — re-route
       }
     }
     return target.slot.run(request);
