@@ -190,7 +190,7 @@ Registered only when `ANALYSIS_BIOWASM` is set — see [docs/BIOWASM-ANALYSIS.md
 
 Shared source inputs: `source` (strict union — exactly one of `{content}` ≤ 20 MiB with format sniffing, `{artifact_id}` from a prior response, or `{host_path}` under `ANALYSIS_BIOWASM_DATA_DIR`), `index?` (`"auto"` default with sibling `.bai/.csi/.tbi/.crai` detection, or `{content}`/`{host_path}`). Output shaping: `format?` `"table"` (markdown, default) \| `"json"` \| `"artifact"` (where supported), `top_n?` (1–200, default 50), `include_content?` (inline artifacts ≤ 2 MB as base64(gzip)). Every response embeds io_stats (bytes read, elapsed).
 
-**Total: 40 core tools** across 14 registration modules (+3 optional database tools, +4 optional R analysis tools, +8 optional biowasm analysis tools).
+**Total: 41 core tools** across 15 registration modules (40 biomedical + the `biomcp_configure` meta tool; +3 optional database tools, +4 optional R analysis tools, +8 optional biowasm analysis tools).
 
 ## Error Handling (`errors.ts`)
 
@@ -312,6 +312,7 @@ src/server/
     genbank.ts        3 GenBank tools (search, get, genes)
     gtex.ts            2 GTEx tools (expression, eqtl)
     ensembl.ts         4 Ensembl tools (lookup, homology, consequence, region)
+    configure.ts       1 config meta tool (biomcp_configure — always registered; .biomcp.json + env observability)
     db.ts              3 database tools (optional, DB_TYPE)
     ranalysis.ts       4 R analysis tools (optional, ANALYSIS_R)
     biowasm.ts         8 biowasm analysis tools (optional, ANALYSIS_BIOWASM)

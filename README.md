@@ -4,14 +4,14 @@ A high-performance MCP server that gives LLMs access to 40 biomedical tools fede
 
 ## Highlights
 
-- **40 tools** across 14 domains — search, retrieve, and cross-reference biomedical entities (+3 optional database tools, +4 optional R analysis tools, +8 optional biowasm analysis tools)
+- **41 tools** across 15 registration modules — search, retrieve, and cross-reference biomedical entities, plus the `biomcp_configure` meta tool for configuration observability (+3 optional database tools, +4 optional R analysis tools, +8 optional biowasm analysis tools)
 - **50+ upstream sources** — MyGene, MyVariant, MyChem, MyDisease, ClinVar, gnomAD, UniProt, Reactome, OpenTargets, CIViC, OncoKB, DisGeNET, GTEx, STRING, DGIdb, ClinicalTrials.gov, PubMed, EuropePMC, Semantic Scholar, PubTator, LitSense, Monarch Initiative, OpenFDA, NIH Reporter, NCBI GEO, SRA, GenBank, Ensembl, and more
 - **Functional genomics & sequences** — GEO series/sample search with SOFT detail parsing, SRA experiment/run metadata, GenBank/RefSeq records with region slices, and GTEx v10 median expression + cis-eQTLs
 - **Section-based fetching** — `entityGet(id, sections)` fans out to multiple sources with per-section timeouts and graceful degradation (failed sections return `{ _error }` instead of crashing)
 - **Federated article search** — queries 5 literature backends simultaneously with PMID/PMCID/DOI deduplication
 - **Patent access** — worldwide patent search and detail via keyed EPO OPS / USPTO ODP; keyless USPTO Public Search and Google Patents (+Wayback archive) fallbacks
 - **Zero-config startup** — works out of the box; optional API keys unlock higher rate limits and premium data
-- **~953 unit tests** (mocked) + **135 integration tests** (live APIs via in-process MCP client, gated skips)
+- **1234 unit tests** (mocked, 74 suites) + **integration tests** across 19 files (live APIs via in-process MCP client, gated skips)
 
 ## Install
 

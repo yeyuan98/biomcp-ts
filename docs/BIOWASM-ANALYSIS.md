@@ -15,6 +15,7 @@ This is an **optional feature**, enabled like database access.
 ANALYSIS_BIOWASM=1
 ```
 
+Agents can also enable this feature via the always-available `biomcp_configure` tool (`{"action":"set","values":{"features.analysis_biowasm.enabled":true}}`, or the `.biomcp.json` file it writes). Note that `ANALYSIS_BIOWASM_DATA_DIR` — the host-path allowlist — is deliberately env-only and cannot be set through the file/tool.
 Unlike R analysis there is **no npm peer dependency** — nothing to install next
 to biomcp; a plain `npx biomcp` works. The wasm assets (~4.5 MB for all three
 tools) download **once** at first use into `~/.cache/biomcp/` and are

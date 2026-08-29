@@ -41,6 +41,11 @@ src/__tests__/
     mcp-harness.ts       # In-process MCP client harness (InMemoryTransport)
     assertions.ts        # Type-guard validators (expectGeneSearchResult, ...)
     retry.ts             # retryOnRateLimit for integration tests
+  biowasm/               # biowasm analyzers, artifacts, engine, registry, schemas, validation
+  config/
+    handler.test.ts      # biomcp_configure brain: registry drift guards, loader precedence,
+                         #   set/reset closed-set validation, masking, cwd refusal
+    store.test.ts        # .biomcp.json persistence: atomic writes, symlink/size guards, git exclude
   connections/
     fetch-utils.test.ts
     graphql.test.ts
@@ -50,6 +55,7 @@ src/__tests__/
     registry.test.ts
     rest.test.ts
     retry.test.ts
+  db/                    # db tools gating, env parsing, mysql translator, sqlite backend, validator
   entities/
     article.test.ts
     citation.test.ts
@@ -67,18 +73,41 @@ src/__tests__/
     trial.test.ts
     variant.test.ts
   integration/
-    tools/               # 9 files — real API calls via the MCP harness
-      gene-tools.test.ts
-      drug-tools.test.ts
-      variant-tools.test.ts
-      disease-tools.test.ts
+    tools/               # 18 files — real API calls via the MCP harness
       article-tools.test.ts
+      biowasm-engine.integration.test.ts
+      biowasm-tools.integration.test.ts
+      db-tools.test.ts
+      disease-tools.test.ts
+      drug-tools.test.ts
+      ensembl-tools.test.ts
+      genbank-tools.test.ts
+      gene-tools.test.ts
+      geo-tools.test.ts
+      gtex-tools.test.ts
+      patent-tools.test.ts
+      pdb-tools.test.ts
+      ranalysis-tools.integration.test.ts
+      sra-tools.test.ts
       trial-tools.test.ts
       utility-tools.test.ts
-      pdb-tools.test.ts
-      patent-tools.test.ts
+      variant-tools.test.ts
+    depmap/
+      manifest.test.ts
+  ranalysis/             # R engine, mirror, render, input validation
+  scripts/
+    depmap/              # ETL script unit tests (csv, datasets, ingest, manifest, staging)
   server/
+    biowasm-tools.test.ts
+    configure-tools.test.ts     # biomcp_configure MCP tool over a real McpServer (tmp cwd)
+    ensembl-tools.test.ts
     errors.test.ts
+    genbank-tools.test.ts
+    geo-tools.test.ts
+    gtex-tools.test.ts
+    progress-forwarder.test.ts
+    ranalysis-tools.test.ts
+    sra-tools.test.ts
     tool-registration.test.ts   # Tool registration counts (mocked, unit)
     tool-utils.test.ts          # applyLimit, sliceArraysRecursive
     validation.test.ts
@@ -86,12 +115,15 @@ src/__tests__/
   transform/
     gene.test.ts
     pdb.test.ts
+  wasmcore/              # shared wasm support core (assets, memwatch, progress, queue)
 ```
 
 ## Test Counts
 
-- **Unit:** 29 suites / 629 tests (`npm test`)
-- **Integration:** 9 files / 97 tests (`npm run test:integration`), 5 keyed skips: 4 patent OPS/ODP tests (gated on `EPO_OPS_CONSUMER_KEY`/`EPO_OPS_CONSUMER_SECRET` and `USPTO_API_KEY` describes) + 1 OncoKB annotation test (`it.skip`, requires `ONCOKB_TOKEN`)
+Counts below are refresh-when-touched — update them when you add suites to the touched area.
+
+- **Unit:** 74 suites / 1234 tests (`npm test`)
+- **Integration:** 19 files / 173 declared tests (`npm run test:integration`), 5 keyed skips: 4 patent OPS/ODP tests (gated on `EPO_OPS_CONSUMER_KEY`/`EPO_OPS_CONSUMER_SECRET` and `USPTO_API_KEY` describes) + 1 OncoKB annotation test (`it.skip`, requires `ONCOKB_TOKEN`)
 
 ## Testing Approach
 

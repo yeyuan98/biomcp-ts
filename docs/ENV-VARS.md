@@ -4,7 +4,7 @@ Single source of truth for every environment variable BioMCP reads. BioMCP works
 
 ## Project config file `.biomcp.json` (alternative to env blocks)
 
-The optional-feature variables in the three feature sections below (and only those — API keys, proxy, and security boundaries stay env-only) can instead live in a `.biomcp.json` file in the **server's working directory** (the project root for project-scoped clients like Claude Code or OpenCode). The file is loaded once at server startup:
+The optional-feature variables in the three feature sections below (and only those — API keys, proxy, cache location, and security boundaries stay env-only) can instead live in a `.biomcp.json` file in the **server's working directory** (the project root for project-scoped clients like Claude Code or OpenCode). The file is loaded once at server startup:
 
 ```json
 {
