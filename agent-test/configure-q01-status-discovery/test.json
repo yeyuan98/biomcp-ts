@@ -1,0 +1,45 @@
+{
+  "id": "configure-q01-status-discovery",
+  "name": "Configuration status discovery",
+  "level": "L0",
+  "purpose": "L0 discovery: the agent finds biomcp_configure and reports the optional features and their enabled state.",
+  "prompt": "What biomcp configuration and optional features exist, and what is enabled right now? Use the biomcp tools to find out.",
+  "externalData": [],
+  "inlineResources": [],
+  "timeoutMs": 300000,
+  "checks": [
+    {
+      "type": "tool_seq",
+      "seq": [
+        [
+          "biomcp_configure",
+          "completed"
+        ]
+      ]
+    },
+    {
+      "type": "json_path",
+      "tool": "biomcp_configure",
+      "occurrence": 1,
+      "path": "features",
+      "op": "exists"
+    },
+    {
+      "type": "text",
+      "op": "contains",
+      "expect": "analysis_biowasm"
+    },
+    {
+      "type": "text",
+      "op": "contains",
+      "expect": "database"
+    },
+    {
+      "type": "text",
+      "op": "regex",
+      "expect": "configure-q01-status-discovery",
+      "source": "tool:biomcp_configure",
+      "desc": "cwd canary: config_path must embed the per-rep run dir (server cwd = opencode --dir project dir)"
+    }
+  ]
+}

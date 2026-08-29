@@ -1,0 +1,93 @@
+{
+  "id": "configure-q02-enable-pending-restart",
+  "name": "Enable a feature; report the restart contract honestly",
+  "level": "L1",
+  "purpose": "L1 mutation: enable analysis_r via biomcp_configure; the tools must NOT appear mid-session and the agent must report pending-restart + next steps.",
+  "prompt": "Enable the R analysis feature in biomcp now. Attempt the change directly with the configuration tool (do not inspect status first; the needed dependencies are already provisioned). Then tell me: are the analysis_r tools usable in this session, and what must happen before they become available?",
+  "externalData": [],
+  "inlineResources": [],
+  "timeoutMs": 300000,
+  "checks": [
+    {
+      "type": "tool_seq",
+      "seq": [
+        [
+          "biomcp_configure",
+          "completed"
+        ]
+      ]
+    },
+    {
+      "type": "group",
+      "anyOf": [
+        {
+          "type": "group",
+          "allOf": [
+            {
+              "type": "text",
+              "op": "regex",
+              "expect": "\"features\\.analysis_r\\.enabled\"\\s*:\\s*true",
+              "source": "args:biomcp_configure#1"
+            },
+            {
+              "type": "json_path",
+              "tool": "biomcp_configure",
+              "occurrence": 1,
+              "path": "pending_restart.analysis_r",
+              "op": "equals",
+              "expect": true
+            }
+          ]
+        },
+        {
+          "type": "group",
+          "allOf": [
+            {
+              "type": "text",
+              "op": "regex",
+              "expect": "\"features\\.analysis_r\\.enabled\"\\s*:\\s*true",
+              "source": "args:biomcp_configure#2"
+            },
+            {
+              "type": "json_path",
+              "tool": "biomcp_configure",
+              "occurrence": 2,
+              "path": "pending_restart.analysis_r",
+              "op": "equals",
+              "expect": true
+            }
+          ]
+        },
+        {
+          "type": "group",
+          "allOf": [
+            {
+              "type": "text",
+              "op": "regex",
+              "expect": "\"features\\.analysis_r\\.enabled\"\\s*:\\s*true",
+              "source": "args:biomcp_configure#3"
+            },
+            {
+              "type": "json_path",
+              "tool": "biomcp_configure",
+              "occurrence": 3,
+              "path": "pending_restart.analysis_r",
+              "op": "equals",
+              "expect": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "op": "regex",
+      "expect": "[Rr]estart"
+    },
+    {
+      "type": "no_such_tool",
+      "tool": "biomcp_analysis_r_deseq2",
+      "desc": "restart-contract tripwire: gated tools cannot appear mid-session (registration is startup-only)"
+    }
+  ]
+}

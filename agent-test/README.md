@@ -228,6 +228,10 @@ host-local, outside the repo):
 | `biowasm-q12-truncation-honesty` | L3 | Whole-contig depth always truncates; report it, don't undercount | bam | PASS |
 | `biowasm-q13-impossible-task` | L3 | No variant caller exists; refuse honestly | bam | PASS |
 | `biowasm-q14-session-info` | L0 | Session introspection: available tools and pinned versions | — | PASS |
+| `configure-q01-status-discovery` | L0 | biomcp_configure discovery: features + enabled state (+ run-dir cwd canary) | — | PASS (round 2026-08-29, 1 rep) |
+| `configure-q02-enable-pending-restart` | L1 | Enable analysis_r; tools must NOT appear mid-session; report restart contract | — | PASS (round 2026-08-29, 1 rep) |
+| `configure-q03-sensitive-confirm` | L2 | sqlite_path confirm-gate rejection → retry with confirm_sensitive | — | PASS (round 2026-08-29, 1 rep; log shows error-then-confirmed call pair) |
+| `configure-q04-env-readonly` | L1 | Setting an env-only parameter (ONCOKB_TOKEN) is rejected with guidance | — | PASS (round 2026-08-29, 1 rep) |
 
 "Data": `bam` = NA12878 chr20 BAM + BAI pins, `vcf` = 1kg chr22 VCF + TBI
 pins, `—` = inline/no external data.
@@ -244,6 +248,29 @@ pins, `—` = inline/no external data.
   follow-up.
 - Q13-style probes, where the agent may install host toolchains, need
   generous timeouts (900 s was required).
+- Dot-paths (`args`/`json_path`) split on `.` and cannot address record keys
+  that themselves contain dots — `biomcp_configure`'s `values` keys
+  (`"features.analysis_r.enabled"`) must be asserted wholesale
+  (`args` `op:"equals"` on `path:"values"`) or via `text` regex on
+  `source:"args:<tool>#N"`.
+- Calls that end `error` carry no output in the session log (the host throws
+  on MCP `isError`) — assert them with `status` checks and
+  `text` `source:"tool:<tool>#N"` (the error text), never `json_path`.
+- When a tool's own description invites a prior discovery call
+  (`biomcp_configure` suggests status before set), occurrence numbers are
+  fragile: pin the order in the prompt AND hedge checks with
+  `group.anyOf` arms over occurrences, disambiguated by content.
+- Configuration tests are self-isolating: each rep's run dir is disposable,
+  opencode pins `ANALYSIS_BIOWASM=1` through the env block (env wins over any
+  `.biomcp.json` a test writes — there is no config walk-up), and the server
+  cwd is the `--dir` project dir (opencode 1.18.25 `MCP.connectLocal`).
+  Under opencode's namespacing the tool surfaces as
+  `biomcp_biomcp_configure`; checks should use the unambiguous suffix
+  `biomcp_configure`.
+- Tool-only tests (no fixtures) may ship `test.json` + `opencode.json` alone —
+  provisioning short-circuits on empty `externalData` and the runner never
+  reads `resources.tar.bz2` (shipping a minimal `expected/` remains the
+  convention for reviewability).
 
 ## Adding a new test
 

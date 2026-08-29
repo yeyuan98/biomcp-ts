@@ -1,0 +1,119 @@
+{
+  "id": "configure-q03-sensitive-confirm",
+  "name": "Sensitive-key confirm-gate retry",
+  "level": "L2",
+  "purpose": "L2 mutation: enabling database with a sqlite_path hits the confirm_sensitive gate; the agent must read the rejection and retry with confirmation.",
+  "prompt": "Enable database access in biomcp for a SQLite database stored at data/geo.db, using the configuration tool. Attempt the change directly (do not inspect status first); if the tool rejects the change and asks for confirmation, retry accordingly.",
+  "externalData": [],
+  "inlineResources": [],
+  "timeoutMs": 300000,
+  "checks": [
+    {
+      "type": "tool_seq",
+      "seq": [
+        [
+          "biomcp_configure",
+          "error"
+        ],
+        [
+          "biomcp_configure",
+          "completed"
+        ]
+      ]
+    },
+    {
+      "type": "group",
+      "anyOf": [
+        {
+          "type": "group",
+          "allOf": [
+            {
+              "type": "status",
+              "tool": "biomcp_configure",
+              "occurrence": 1,
+              "status": "error"
+            },
+            {
+              "type": "text",
+              "op": "contains",
+              "expect": "confirm",
+              "source": "tool:biomcp_configure#1"
+            }
+          ]
+        },
+        {
+          "type": "group",
+          "allOf": [
+            {
+              "type": "status",
+              "tool": "biomcp_configure",
+              "occurrence": 2,
+              "status": "error"
+            },
+            {
+              "type": "text",
+              "op": "contains",
+              "expect": "confirm",
+              "source": "tool:biomcp_configure#2"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "anyOf": [
+        {
+          "type": "group",
+          "allOf": [
+            {
+              "type": "text",
+              "op": "regex",
+              "expect": "confirm_sensitive\"\\s*:\\s*true",
+              "source": "args:biomcp_configure#2"
+            },
+            {
+              "type": "json_path",
+              "tool": "biomcp_configure",
+              "occurrence": 2,
+              "path": "wrote",
+              "op": "equals",
+              "expect": true
+            },
+            {
+              "type": "text",
+              "op": "contains",
+              "expect": "features.database.sqlite_path",
+              "source": "tool:biomcp_configure#2"
+            }
+          ]
+        },
+        {
+          "type": "group",
+          "allOf": [
+            {
+              "type": "text",
+              "op": "regex",
+              "expect": "confirm_sensitive\"\\s*:\\s*true",
+              "source": "args:biomcp_configure#3"
+            },
+            {
+              "type": "json_path",
+              "tool": "biomcp_configure",
+              "occurrence": 3,
+              "path": "wrote",
+              "op": "equals",
+              "expect": true
+            },
+            {
+              "type": "text",
+              "op": "contains",
+              "expect": "features.database.sqlite_path",
+              "source": "tool:biomcp_configure#3"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

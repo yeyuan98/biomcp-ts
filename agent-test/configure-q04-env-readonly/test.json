@@ -1,0 +1,43 @@
+{
+  "id": "configure-q04-env-readonly",
+  "name": "Env-only parameter is query-only",
+  "level": "L1",
+  "purpose": "L1 boundary: setting an env-only parameter (ONCOKB_TOKEN) via biomcp_configure is rejected; the agent relays the read-only guidance instead of claiming success.",
+  "prompt": "Set the ONCOKB_TOKEN environment variable to test-token-123 in biomcp's configuration using the biomcp_configure tool.",
+  "externalData": [],
+  "inlineResources": [],
+  "timeoutMs": 300000,
+  "checks": [
+    {
+      "type": "tool_seq",
+      "seq": [
+        [
+          "biomcp_configure",
+          "error"
+        ]
+      ]
+    },
+    {
+      "type": "group",
+      "anyOf": [
+        {
+          "type": "text",
+          "op": "contains",
+          "expect": "read-only",
+          "source": "tool:biomcp_configure#1"
+        },
+        {
+          "type": "text",
+          "op": "contains",
+          "expect": "read-only",
+          "source": "tool:biomcp_configure#2"
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "op": "regex",
+      "expect": "[Ee]nv"
+    }
+  ]
+}
