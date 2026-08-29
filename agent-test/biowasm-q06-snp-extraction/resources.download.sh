@@ -42,6 +42,9 @@ mkdir -p "$DIR"
 EBI=https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502
 BASE=ALL.chr22.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz
 
+# Public Zenodo dataset mirror (keyless; see agent-test/fixtures-manifest.json):
+ZENODO=https://zenodo.org/records/22156404
+
 SHA_VCF=a90c16c4ff2b3196476d506ae13cb3047fae8670163c7c932c4b0239aef3daf5
 SIZE_VCF=205612353
 SHA_TBI=27de6b77af65d300bb968e8e372439deb949389e4395eb0dd251f9ba7d73bbed
@@ -52,7 +55,7 @@ fetch() { # fetch <dest> <url>...
   shift
   for url in "$@"; do
     echo ">> downloading $(basename "$dest") from $url"
-    if curl --fail --retry 3 --retry-delay 2 --connect-timeout 30 -C - -sS -o "$dest" "$url"; then
+    if curl -L --fail --retry 3 --retry-delay 2 --connect-timeout 30 -C - -sS -o "$dest" "$url"; then
       return 0
     fi
     echo "   WARN: transfer from $url failed; partial file (if any) kept for -C - resume; trying next mirror" >&2
@@ -93,7 +96,7 @@ ensure() { # ensure <dest> <expected-sha256> <expected-size> <url>...
   verify "$dest" "$want_sha" "$want_size"
 }
 
-ensure "$DIR/1kg.chr22.vcf.gz"     "$SHA_VCF" "$SIZE_VCF" "$EBI/$BASE"
-ensure "$DIR/1kg.chr22.vcf.gz.tbi" "$SHA_TBI" "$SIZE_TBI" "$EBI/$BASE.tbi"
+ensure "$DIR/1kg.chr22.vcf.gz"     "$SHA_VCF" "$SIZE_VCF" "$ZENODO/files/1kg.chr22.vcf.gz?download=1" "$EBI/$BASE"
+ensure "$DIR/1kg.chr22.vcf.gz.tbi" "$SHA_TBI" "$SIZE_TBI" "$ZENODO/files/1kg.chr22.vcf.gz.tbi?download=1" "$EBI/$BASE.tbi"
 
 echo "DONE: VCF fixture complete in $DIR"

@@ -179,10 +179,9 @@ const MAX_ATTEMPTS = 3;
 // one), and undici sends no UA by default.
 const USER_AGENT = 'biomcp-zenodo-publish/1.0 (+https://github.com/yeyuan98/biomcp-ts)';
 
-async function api(method, url, { json, body, contentLength, contentType } = {}) {
-  // Streamed bodies cannot be retried: the stream is consumed by the first
-  // attempt. Fail loudly (with the leftover-draft hint) instead.
-  const canRetry = body === undefined;
+async function api(method, url, { json, bodyFactory, contentLength, contentType, dieContext = '' } = {}) {
+  // `bodyFactory` (not a stream) so a retry gets a FRESH stream — proxied
+  // multi-hundred-MB uploads do see transient ECONNRESETs.
   for (let attempt = 1; ; attempt++) {
     let res;
     try {
@@ -197,18 +196,18 @@ async function api(method, url, { json, body, contentLength, contentType } = {})
           ...(contentLength !== undefined ? { 'Content-Length': String(contentLength) } : {}),
         },
         ...(json !== undefined ? { body: JSON.stringify(json) } : {}),
-        ...(body !== undefined ? { body } : {}),
+        ...(bodyFactory !== undefined ? { body: bodyFactory() } : {}),
         // Large proxied transfers: no client-side deadlines.
         headersTimeout: 0,
         bodyTimeout: 0,
       });
     } catch (err) {
-      if (canRetry && attempt < MAX_ATTEMPTS) {
-        console.warn(`  ${method} ${redact(url)} network error (${err.message}); retry ${attempt}/${MAX_ATTEMPTS - 1}`);
-        await sleep(3000 * attempt);
+      if (attempt < MAX_ATTEMPTS) {
+        console.warn(`  ${method} ${redact(url)} network error (${err.message}); retrying with a fresh stream (${attempt}/${MAX_ATTEMPTS - 1})`);
+        await sleep(5000 * attempt);
         continue;
       }
-      die(`request failed: ${method} ${redact(url)} — ${err.message}`);
+      die(`request failed: ${method} ${redact(url)} — ${err.message}${dieContext}`);
     }
     if (res.statusCode === 429 && attempt < MAX_ATTEMPTS) {
       const raw = Number(res.headers['retry-after']);
@@ -369,9 +368,10 @@ for (const f of FIXTURES) {
   const url = `${bucket}/${encodeURIComponent(f.name)}`;
   console.log(`uploading ${f.name} (${f.bytes} B)…`);
   const up = await api('PUT', url, {
-    body: createReadStream(local[f.name].path),
+    bodyFactory: () => createReadStream(local[f.name].path),
     contentLength: f.bytes,
     contentType: 'application/octet-stream',
+    dieContext: `\ndraft ${depId} left behind — discard with --discard --record ${depId} and retry`,
   });
   if (up.status !== 200 && up.status !== 201) {
     die(

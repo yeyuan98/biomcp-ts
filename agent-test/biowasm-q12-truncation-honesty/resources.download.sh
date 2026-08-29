@@ -44,6 +44,9 @@ EBI=https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/data/NA12878/alignment
 NCBI=https://ftp.ncbi.nlm.nih.gov/1000genomes/ftp/phase3/data/NA12878/alignment
 BASE=NA12878.chrom20.ILLUMINA.bwa.CEU.low_coverage.20121211.bam
 
+# Public Zenodo dataset mirror (keyless; see agent-test/fixtures-manifest.json):
+ZENODO=https://zenodo.org/records/22156404
+
 SHA_BAM=dfc164c34dd94e1c46ea94cad915489171ae8913da200ca4e5cae03a554f1996
 SIZE_BAM=311550121
 # Dual pin: byte-identical copies from EBI, NCBI and the pristine local fixture all
@@ -59,7 +62,7 @@ fetch() { # fetch <dest> <url>...
   shift
   for url in "$@"; do
     echo ">> downloading $(basename "$dest") from $url"
-    if curl --fail --retry 3 --retry-delay 2 --connect-timeout 30 -C - -sS -o "$dest" "$url"; then
+    if curl -L --fail --retry 3 --retry-delay 2 --connect-timeout 30 -C - -sS -o "$dest" "$url"; then
       return 0
     fi
     echo "   WARN: transfer from $url failed; partial file (if any) kept for -C - resume; trying next mirror" >&2
@@ -100,7 +103,7 @@ ensure() { # ensure <dest> <"accepted-sha256..."> <expected-size> <url>...
   verify "$dest" "$want_sha" "$want_size"
 }
 
-ensure "$DIR/na12878.chr20.bam"     "$SHA_BAM" "$SIZE_BAM" "$EBI/$BASE" "$NCBI/$BASE"
-ensure "$DIR/na12878.chr20.bam.bai" "$SHA_BAI_PRIMARY" "$SIZE_BAI" "$EBI/$BASE.bai" "$NCBI/$BASE.bai"
+ensure "$DIR/na12878.chr20.bam"     "$SHA_BAM" "$SIZE_BAM" "$ZENODO/files/na12878.chr20.bam?download=1" "$EBI/$BASE" "$NCBI/$BASE"
+ensure "$DIR/na12878.chr20.bam.bai" "$SHA_BAI_PRIMARY" "$SIZE_BAI" "$ZENODO/files/na12878.chr20.bam.bai?download=1" "$EBI/$BASE.bai" "$NCBI/$BASE.bai"
 
 echo "DONE: BAM fixture complete in $DIR"
