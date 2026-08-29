@@ -161,6 +161,45 @@ Small in-band fixtures (SAM/VCF/BED text) are embedded in prompts and shipped
 unpacked plus archived in each test's `resources.tar.bz2` (built with
 `tar cjf`, kept <= 1 MB). Never commit run artifacts or big data.
 
+### Zenodo dataset mirror (keyless)
+
+The four big fixture files are also published as ONE public Zenodo dataset
+(record id + DOI + per-file URLs in
+[`fixtures-manifest.json`](fixtures-manifest.json)). The download scripts try
+the Zenodo mirror FIRST — plain HTTPS, **no API key or auth**:
+
+```
+https://zenodo.org/records/<record_id>/files/<name>?download=1
+```
+
+with the original EBI (and NCBI, for the BAM) mirrors as fallbacks, and the
+per-file sha256 pins remaining the single verification authority regardless
+of which mirror served the bytes. A record outage degrades silently to the
+public FTP mirrors.
+
+Publishing / re-publishing is curator-only via
+[`zenodo-publish.mjs`](zenodo-publish.mjs) (`ZENODO_API` / `ZENODO_SANDBOX_API`
+in `~/.env`, scopes `deposit:write` + `deposit:actions`, Bearer-header auth
+only — never committed):
+
+```bash
+node agent-test/zenodo-publish.mjs --sandbox            # sandbox draft rehearsal
+node agent-test/zenodo-publish.mjs --prod               # prod draft (private, inspectable)
+node agent-test/zenodo-publish.mjs --prod --publish     # IRREVERSIBLE public release
+node agent-test/zenodo-publish.mjs --prod --discard --record <id>   # remove a draft
+node agent-test/zenodo-publish.mjs --update-scripts     # point the 10 scripts at the record
+```
+
+Integrity ladder (all enforced by the script): local sha256 pin verification
+before upload → Zenodo md5 vs local md5 after each file upload → after
+publish, keyless HEAD content-length checks against the public record →
+optional `--verify-download` full re-download sha256. Publishing is a
+deliberate human step (files on published records are only editable for
+30 days; a new fixture set publishes as a NEW VERSION — new record id under
+the same concept DOI — and `--update-scripts` re-points the downloaders).
+Known network quirk: Zenodo's WAF rejects `User-Agent`-less deposit-API
+requests (undici sends none by default); the publisher always sends one.
+
 ## Test index
 
 Statuses below are from the first full evaluation round
