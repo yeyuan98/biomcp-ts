@@ -232,6 +232,17 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/**
+ * Escape EVERY regex metacharacter (incl. backslash) so a string can be
+ * interpolated literally into a RegExp source — the dot-only escape this
+ * replaces tripped CodeQL's incomplete-sanitization query (backslash was
+ * not escaped, so a `\` in the input would have acted as an escape
+ * introducer). `/` and `-` are correctly absent: they are special only in
+ * regex literals / inside character classes, and this feeds `new RegExp`
+ * sources outside classes.
+ */
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 async function keylessHead(url) {
   const res = await undiciRequest(url, { method: 'HEAD', headers: { 'User-Agent': USER_AGENT }, headersTimeout: 60_000 });
   await res.body.dump?.();
@@ -512,7 +523,9 @@ function updateDownloadScripts(recordId) {
     //     last mirror-base anchor (EBI=/NCBI=/BASE= block). ---
     if (!text.includes(`ZENODO=${zenodoBase}`)) {
       if (/^ZENODO=https:\/\/zenodo\.org\/records\/\d+.*$/m.test(text)) {
-        text = text.replace(/^ZENODO=https:\/\/zenodo\.org\/records\/\d+.*$/m, `ZENODO=${zenodoBase}`);
+        // Function replacer: the record id (CLI-supplied) must be inserted
+        // literally — string replacements interpret $-sequences.
+        text = text.replace(/^ZENODO=https:\/\/zenodo\.org\/records\/\d+.*$/m, () => `ZENODO=${zenodoBase}`);
       } else {
         const lines = text.split('\n');
         let insertAt = -1;
@@ -538,7 +551,7 @@ function updateDownloadScripts(recordId) {
     let patched = 0;
     let referenced = 0;
     for (const f of FIXTURES) {
-      const esc = f.name.replace(/\./g, '\\.');
+      const esc = escapeRegExp(f.name);
       // dest + sha + size (whitespace-padded alignment tolerated); the URL
       // list starts after the third quoted argument.
       const headOfUrlList = new RegExp(`^(ensure "\\$DIR/${esc}"\\s+"[^"]+"\\s+"[^"]+")`, 'm');
@@ -555,7 +568,10 @@ function updateDownloadScripts(recordId) {
         '$1',
       );
       if (!headOfUrlList.test(text)) die(`${script}: ensure anchor lost for ${f.name} — refusing a partial edit`);
-      text = text.replace(headOfUrlList, `$1 "$ZENODO/files/${f.name}?download=1"`);
+      // Function replacer: the inserted text is literal regardless of name
+      // content (string replacements interpret $-sequences), and the head
+      // group is taken from the parameter — never re-emitted as `$1`.
+      text = text.replace(headOfUrlList, (_m, head) => `${head} "$ZENODO/files/${f.name}?download=1"`);
       patched += 1;
     }
     if (referenced > 0 && patched !== referenced) {

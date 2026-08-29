@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.7.1] - 2026-08-29
 
+### Fixed
+
+- **CodeQL `js/incomplete-sanitization` in `agent-test/zenodo-publish.mjs`** — the `--update-scripts` fixture-name escape covered only dots, so a backslash in a name would have acted as a regex escape introducer in the dynamically built patterns (latent only: the four repo-controlled names contain no other metacharacters — the fixed escape is byte-identical for all of them). Now a canonical full-metacharacter escape (`[.*+?^${}()|[\]\\]`); the same pass hardened the replacement side (function replacers, so `$`-sequences and CLI-supplied record ids are inserted literally), and the fix is verified by a hostile-metacharacter round-trip, a hashed no-op check against the committed scripts (record 22156404), a swap-and-back round-trip, and the fake-curl functional dry-runs (cached files untouched; Zenodo-first URL order preserved).
+
 ### Added
 
 - **wasmcore `runShards`** — a generic bounded-concurrency shard scheduler for file-based compute fan-outs (regions, contigs, files) in `src/wasmcore/shards.ts`: order-preserving dispatch with a monotonic aggregate-progress contract (settled shards contribute their final value, live shards their latest; clamped against non-monotonic callers; throttled with a final flush; `now()` clock seam for deterministic tests), a fail-fast error taxonomy (one internal `AbortController`; the first cause wins and post-abort secondary errors are suppressed; rejection only after in-flight settlement; `isFatal` rethrows the original error vs the default `ShardBatchError` wrap), and external-signal cancellation. First consumer lands with the biowasm worker pool below.
