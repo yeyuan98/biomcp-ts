@@ -60,7 +60,10 @@ Offline/air-gapped use: point `ANALYSIS_BIOWASM_MIRROR_URL` at a directory,
 
 What is in this BAM? Header contigs and lengths, sample/read groups, flagstat
 mapping metrics, and per-contig mapped/unmapped counts (idxstats) when an
-index is available.
+index is available. Large host inputs are estimate-gated: when the full
+flagstat stream is estimated to exceed ~45 s the tool returns guidance
+instead — re-run with `proceed_on_large_input=true` to stream anyway (see
+"Performance envelope and protocol semantics" below).
 
 ### `analysis_bam_view_region`
 
@@ -82,8 +85,13 @@ sorted input.
 
 ### `analysis_bcf_summary`
 
-What is in this VCF/BCF? Contigs, sample count and names, and the INFO/FORMAT
-field inventory from the header (no index needed).
+What is in this VCF/BCF? Variant record count — instantly from the index when
+the sidecar carries per-contig counts (see the index fast path below), else a
+gated streaming count — contigs, sample count and names, and the INFO/FORMAT
+field inventory from the header (no index needed). Sample-dense host files
+are estimate-gated: when the streaming count is estimated to exceed ~45 s the
+tool returns guidance instead — re-run with `proceed_on_large_input=true` to
+stream anyway (progress will be reported).
 
 ### `analysis_bcf_view_region`
 
@@ -144,7 +152,9 @@ tools above.
 
 Limits: region span ≤ 100 Mb; text output ≤ 2 MB (`is_truncated` when
 clipped); in-band content ≤ 20 MiB; artifacts retained: 200 (LRU-evicted);
-per-call timeout `ANALYSIS_BIOWASM_TIMEOUT_MS` (default 10 min); memory
+run timeouts `ANALYSIS_BIOWASM_TIMEOUT_MS` (inactivity deadline, default
+10 min) and `ANALYSIS_BIOWASM_MAX_RUN_MS` (absolute ceiling, default 1 h —
+both under "Run timeouts" below); memory
 watermark `ANALYSIS_BIOWASM_MEM_LIMIT_MB` (default 2048); per-run output byte
 budget 2 GB. bedtools loads the B track into the wasm heap unless
 `sorted_inputs` is set — prefer sorted or bounded B tracks. bcftools is
@@ -158,6 +168,101 @@ builds that exit 0 after a fatal error, falls back to fatal-stderr pattern
 matching (`[E::…]`, `samtools <cmd>: …`, `[main_…]`); `[W::…]` warnings and
 `[mpileup] N samples…` INFO lines are treated as benign. `analysis_biowasm_cli`
 never throws — it renders `exit_code` and an `is_error` flag honestly.
+
+## Performance envelope and protocol semantics
+
+### Measured throughput envelope
+
+All numbers measured on the development host with the pinned wasm builds and
+the 1000 Genomes twins used by the agent-test suite:
+
+| Operation class | Example | Measured |
+|---|---|---|
+| Indexed region query | BAM region query via `.bai` | touches ~0.2 % of file bytes (lazy fd-backed mounts) |
+| Header / index metadata | `bcftools view -h` on a 206 MB VCF | 0.12 s (13 KB output) |
+| BAM full-stream | `samtools view -c` over 311 MB | ~110 MB/s (2.9 s) |
+| Dense-VCF full-stream | `bcftools view -H` count over 206 MB, 2,504 samples | ~0.9 MB/s (228 s; ~11 GB of expanded text) |
+
+The only legitimately slow class is the full-stream parse of sample-dense
+VCFs — text expansion is linear in sample count, so a 2 GB cohort file
+extrapolates to ~35–40 min. Everything else, orientation included, is
+seconds or less. MCP clients, however, impose their own deadlines: opencode,
+for instance, aborts a silent tool call at 60 s (then sends
+`notifications/cancelled`) but keeps waiting while progress notifications
+arrive — the same 100 s probe failed at 60.0 s when silent and completed at
+100.1 s when reporting every 5 s. The mechanisms below exist because of that
+gap; none of them change the lazy-mounted, never-copied input model.
+
+### Progress notifications
+
+- Emitted only when the client supplies a `_meta.progressToken`; tokenless
+  clients get silence and behavior is unchanged.
+- Payload is bytes-based: `progress` is the cumulative number of bytes read
+  (monotonic across an analyzer's sequential engine runs, so multi-run tools
+  report valid MCP progress); against the pre-flight file size it reads as a
+  fraction of the total.
+- Cadence is at least 5 s (throttled worker-side; the first message always
+  emits). Pure-compute phases with zero I/O emit nothing — coherent with the
+  activity-based timeout below, and the streaming parsers that need progress
+  read continuously.
+- `message` carries elapsed time plus a short stderr tail, so a stuck run is
+  diagnosable from the client log.
+
+### Cancellation
+
+A client cancel — or the client's own timeout firing — frees the engine
+immediately instead of leaving a zombie run blocking the serialized queue:
+
+- Queued runs reject before starting ("cancelled before start").
+- Running runs: the worker is killed through the existing watchdog cancel
+  path and the request resolves as cancelled (`BiowasmCancelledError`
+  surfaces as a clear isError result). Disk artifacts and source indexes
+  persist; the engine's in-memory artifact map is cleared and a fresh
+  worker respawns on the next call (tool re-init ~2–3 s) — the same
+  recovery as the timeout path.
+
+### Large-input estimate gate
+
+`analysis_bam_summary` and `analysis_bcf_summary` — and only those two —
+full-stream a mounted host file as part of their work. Before doing so they
+estimate the streaming time with a documented heuristic built from the
+measured envelope above:
+
+- BAM-class ≈ 110 MB/s.
+- VCF-class ≈ 0.9 MB/s × 2504/sampleCount, clamped to [0.9, 110] MB/s. The
+  sample count is sniffed from the header read (0.12 s on the 206 MB twin);
+  a failed sniff assumes the dense worst case of 2,504.
+- The gate fires when the estimate exceeds 45 s — deliberately below the
+  60 s client deadline — and returns fast guidance (the estimate, the
+  throughput model, and alternatives: region queries, slice-to-artifact
+  then summarize, sample subsetting) instead of running.
+- Escape hatch: re-run with `proceed_on_large_input=true` to stream anyway;
+  progress will be reported while it runs.
+- In-band content and artifact sources are never gated — only mounted host
+  inputs are. `analysis_biowasm_cli` is never gated; it is the escape hatch
+  by design.
+
+### `bcf_summary` index fast path
+
+When an index sidecar carries per-contig record counts,
+`analysis_bcf_summary` runs `bcftools index -s` first: the summed records
+column is the variant count and the streaming `view -H` pass (gate included)
+is skipped entirely — `index -s` reads only the sidecar, so the cost scales
+with contig count, not file size. The fast path is non-fatal: when `index
+-s` fails or produces unparseable output (counts absent from the sidecar),
+`records_per_contig` is omitted, a note explains that the count came from
+the streaming pass, and the gated streaming count supplies `variant_count`.
+
+### Run timeouts
+
+- `ANALYSIS_BIOWASM_TIMEOUT_MS` (default 600000 / 10 min) is an
+  **inactivity** deadline: every worker progress message (advancing bytes)
+  resets it, so a GB-scale VCF that keeps streaming stays alive.
+- `ANALYSIS_BIOWASM_MAX_RUN_MS` (default 3600000 / 1 h) is the absolute
+  ceiling no activity can extend — the backstop against runaway runs.
+- Exceeding either terminates and respawns the worker exactly like the
+  cancellation path above; both knobs are documented in
+  [ENV-VARS.md](ENV-VARS.md).
 
 ## Version pinning
 

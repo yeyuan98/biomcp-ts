@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import {
   OUTPUT_INPUT,
+  PROCEED_INPUT,
   PROJECTION_INPUT,
   REGION_INPUT,
   SOURCE_INPUT,
@@ -21,7 +22,9 @@ import {
   runConvert,
   runBiowasmSessionInfo,
   runBiowasmCli,
+  type AnalyzerExecOptions,
 } from '../../biowasm/analyzers.js';
+import { progressForwarder, type ProgressCapableExtra } from './progress.js';
 
 export function isBiowasmEnabled(): boolean {
   const v = process.env.ANALYSIS_BIOWASM;
@@ -36,6 +39,32 @@ function toErrorResult(error: unknown): { content: { type: 'text'; text: string 
   return { content: [{ type: 'text', text: String(error instanceof Error ? error.message : error) }], isError: true };
 }
 
+/**
+ * Worker cancellation surfaces from the engine as BiowasmCancelledError
+ * (matched by name so this module needs no static engine import). The SDK
+ * has no dedicated content shape for it — a clear isError text result is
+ * the established pattern.
+ */
+function toToolError(error: unknown): { content: { type: 'text'; text: string }[]; isError: true } {
+  if (error instanceof Error && error.name === 'BiowasmCancelledError') {
+    return { content: [{ type: 'text', text: 'Request cancelled by the client — the engine run was aborted; no results were produced.' }], isError: true };
+  }
+  return toErrorResult(error);
+}
+
+/**
+ * Build analyzer exec options from the handler extra: the request's
+ * AbortSignal plus a progress forwarder when the client sent a
+ * `_meta.progressToken` (null forwarder otherwise → silence).
+ */
+function analyzerExec(extra: (ProgressCapableExtra & { signal?: AbortSignal }) | undefined, proceedOnLargeInput?: boolean): AnalyzerExecOptions {
+  return {
+    signal: extra?.signal,
+    onProgress: progressForwarder(extra)?.onProgress,
+    proceedOnLargeInput,
+  };
+}
+
 const SOURCE_NOTES =
   '\n**Input:** `source` accepts inline `content` (BED/VCF/SAM text, format-sniffed), a prior `artifact_id` from any analysis_biowasm response, or a `host_path` under `ANALYSIS_BIOWASM_DATA_DIR` (unset = host files denied). Optional `index` supplies a sidecar explicitly or auto-detects `<file>.bai/.csi/.tbi/.crai` next to host files. ' +
   '**Output:** `format` "table" (markdown, `top_n` rows, 2 MB cap), "json" (structured), or "artifact" where supported (handle + preview; `include_content=true` inlines artifacts <= 2 MB as base64(gzip)). Every response embeds io_stats (bytes read, elapsed) for cost reasoning.';
@@ -45,19 +74,19 @@ export function registerBiowasmTools(server: McpServer): void {
     'analysis_bam_summary',
     {
       description:
-        'Inspect an alignment (SAM/BAM/CRAM) before deeper work — "what is in this BAM?": header contigs and lengths, sample and read groups, flagstat mapping metrics, and per-contig mapped/unmapped counts via idxstats when an index is available. Follow up with analysis_bam_view_region for loci of interest; analysis_biowasm_convert for format plumbing.' +
+        'Inspect an alignment (SAM/BAM/CRAM) before deeper work — "what is in this BAM?": header contigs and lengths, sample and read groups, flagstat mapping metrics, and per-contig mapped/unmapped counts via idxstats when an index is available. Follow up with analysis_bam_view_region for loci of interest; analysis_biowasm_convert for format plumbing. Large host files are estimate-gated: when the full flagstat stream is estimated to exceed ~45 s the tool returns guidance instead — re-run with proceed_on_large_input=true to stream anyway (progress will be reported).' +
         SOURCE_NOTES,
-      inputSchema: { ...SOURCE_INPUT, ...OUTPUT_INPUT },
+      inputSchema: { ...SOURCE_INPUT, ...OUTPUT_INPUT, ...PROCEED_INPUT },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async (raw) => {
+    async (raw, extra) => {
       try {
         const source = canonicalizeSource(raw.source, raw.index);
         const output = canonicalizeOutput(raw);
-        const result = await runBamSummary(source, output);
+        const result = await runBamSummary(source, output, analyzerExec(extra, raw.proceed_on_large_input));
         return toResult(result.text);
       } catch (error) {
-        return toErrorResult(error);
+        return toToolError(error);
       }
     },
   );
@@ -77,14 +106,14 @@ export function registerBiowasmTools(server: McpServer): void {
       },
       annotations: { readOnlyHint: false, openWorldHint: false },
     },
-    async (raw) => {
+    async (raw, extra) => {
       try {
         const source = canonicalizeSource(raw.source, raw.index);
         const output = canonicalizeOutput(raw);
-        const result = await runBamViewRegion(source, raw.region, raw.mode, raw.depth_bins, output);
+        const result = await runBamViewRegion(source, raw.region, raw.mode, raw.depth_bins, output, analyzerExec(extra));
         return toResult(result.text);
       } catch (error) {
-        return toErrorResult(error);
+        return toToolError(error);
       }
     },
   );
@@ -93,19 +122,19 @@ export function registerBiowasmTools(server: McpServer): void {
     'analysis_bcf_summary',
     {
       description:
-        'Inspect a VCF/BCF before querying variants — "what is in this variant file?": total variant record count, contigs, sample count and names (watch for cohort-scale files), and the full INFO/FORMAT field inventory from the header (bcftools view -h/-H; no index needed; with an index, per-contig record counts are included). Follow up with analysis_bcf_view_region to pull a narrow projection of variants.' +
+        'Inspect a VCF/BCF before querying variants — "what is in this variant file?": total variant record count (from the index per-contig counts when available, else a streaming count), contigs, sample count and names (watch for cohort-scale files), and the full INFO/FORMAT field inventory from the header (bcftools view -h; with an index, per-contig record counts are included). Follow up with analysis_bcf_view_region to pull a narrow projection of variants. Large sample-dense host files are estimate-gated: when the streaming count is estimated to exceed ~45 s the tool returns guidance instead — re-run with proceed_on_large_input=true to stream anyway (progress will be reported).' +
         SOURCE_NOTES,
-      inputSchema: { ...SOURCE_INPUT, ...OUTPUT_INPUT },
+      inputSchema: { ...SOURCE_INPUT, ...OUTPUT_INPUT, ...PROCEED_INPUT },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async (raw) => {
+    async (raw, extra) => {
       try {
         const source = canonicalizeSource(raw.source, raw.index);
         const output = canonicalizeOutput(raw);
-        const result = await runBcfSummary(source, output);
+        const result = await runBcfSummary(source, output, analyzerExec(extra, raw.proceed_on_large_input));
         return toResult(result.text);
       } catch (error) {
-        return toErrorResult(error);
+        return toToolError(error);
       }
     },
   );
@@ -129,14 +158,14 @@ export function registerBiowasmTools(server: McpServer): void {
       },
       annotations: { readOnlyHint: false, openWorldHint: false },
     },
-    async (raw) => {
+    async (raw, extra) => {
       try {
         const source = canonicalizeSource(raw.source, raw.index);
         const output = canonicalizeOutput(raw);
-        const result = await runBcfViewRegion(source, raw.region, canonicalizeProjection(raw.projection), raw.filter, raw.variant_types, output);
+        const result = await runBcfViewRegion(source, raw.region, canonicalizeProjection(raw.projection), raw.filter, raw.variant_types, output, analyzerExec(extra));
         return toResult(result.text);
       } catch (error) {
-        return toErrorResult(error);
+        return toToolError(error);
       }
     },
   );
@@ -158,7 +187,7 @@ export function registerBiowasmTools(server: McpServer): void {
       },
       annotations: { readOnlyHint: false, openWorldHint: false },
     },
-    async (raw) => {
+    async (raw, extra) => {
       try {
         const a = canonicalizeSource(raw.source);
         const b = raw.b_source ? canonicalizeSource(raw.b_source) : undefined;
@@ -169,10 +198,11 @@ export function registerBiowasmTools(server: McpServer): void {
           b,
           { sortedInputs: raw.sorted_inputs, strand: raw.strand, fraction: raw.fraction_overlap },
           output,
+          analyzerExec(extra),
         );
         return toResult(result.text);
       } catch (error) {
-        return toErrorResult(error);
+        return toToolError(error);
       }
     },
   );
@@ -191,14 +221,14 @@ export function registerBiowasmTools(server: McpServer): void {
       },
       annotations: { readOnlyHint: false, openWorldHint: false },
     },
-    async (raw) => {
+    async (raw, extra) => {
       try {
         const source = canonicalizeSource(raw.source, raw.index);
         const output = canonicalizeOutput(raw);
-        const result = await runConvert(source, raw.to, canonicalizeProjection(raw.projection), raw.filter, output);
+        const result = await runConvert(source, raw.to, canonicalizeProjection(raw.projection), raw.filter, output, analyzerExec(extra));
         return toResult(result.text);
       } catch (error) {
-        return toErrorResult(error);
+        return toToolError(error);
       }
     },
   );
@@ -216,7 +246,7 @@ export function registerBiowasmTools(server: McpServer): void {
         const result = await runBiowasmSessionInfo();
         return toResult(result.text);
       } catch (error) {
-        return toErrorResult(error);
+        return toToolError(error);
       }
     },
   );
@@ -236,13 +266,13 @@ export function registerBiowasmTools(server: McpServer): void {
       },
       annotations: { readOnlyHint: false, openWorldHint: false },
     },
-    async (raw) => {
+    async (raw, extra) => {
       try {
         validateCliArgs(raw.tool, raw.args);
-        const result = await runBiowasmCli(raw.tool, raw.args, { format: 'table', topN: 50, includeContent: false });
+        const result = await runBiowasmCli(raw.tool, raw.args, { format: 'table', topN: 50, includeContent: false }, analyzerExec(extra));
         return toResult(result.text);
       } catch (error) {
-        return toErrorResult(error);
+        return toToolError(error);
       }
     },
   );

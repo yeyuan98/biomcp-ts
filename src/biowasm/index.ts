@@ -1,5 +1,5 @@
 export { biowasmEngine, shutdownBiowasmEngine, resetBiowasmEngineForTests } from './engine.js';
-export { BiowasmTimeoutError, BiowasmNotAvailableError, BiowasmRuntimeUnresponsiveError } from './engine.js';
+export { BiowasmTimeoutError, BiowasmNotAvailableError, BiowasmRuntimeUnresponsiveError, BiowasmCancelledError } from './engine.js';
 export type {
   BiowasmRunRequest,
   BiowasmRunResult,

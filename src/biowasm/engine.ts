@@ -5,6 +5,7 @@ import { WorkerHost, WorkerRpcError } from '../wasmcore/worker-host.js';
 import { SerializationQueue } from '../wasmcore/queue.js';
 import { assertWithinMemoryLimit } from '../wasmcore/memwatch.js';
 import { runWithWatchdog } from '../wasmcore/watchdog.js';
+import { PROGRESS_MSG_TYPE } from '../wasmcore/progress.js';
 import { cacheDir, sha256File } from '../wasmcore/assets.js';
 import { BIOWASM_TOOLS_ORDER, biowasmCacheDirPath, provisionBiowasmAssets } from './registry.js';
 import type {
@@ -18,6 +19,8 @@ import type {
 
 const TIMEOUT_ENV_VAR = 'ANALYSIS_BIOWASM_TIMEOUT_MS';
 const DEFAULT_TIMEOUT_MS = 600_000;
+const MAX_RUN_ENV_VAR = 'ANALYSIS_BIOWASM_MAX_RUN_MS';
+const DEFAULT_MAX_RUN_MS = 3_600_000;
 const MEM_LIMIT_ENV_VAR = 'ANALYSIS_BIOWASM_MEM_LIMIT_MB';
 const DEFAULT_MEM_LIMIT_MB = 2048;
 const WORKER_PATH_ENV_VAR = 'ANALYSIS_BIOWASM_WORKER_PATH';
@@ -28,6 +31,13 @@ export class BiowasmTimeoutError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'BiowasmTimeoutError';
+  }
+}
+
+export class BiowasmCancelledError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BiowasmCancelledError';
   }
 }
 
@@ -70,6 +80,12 @@ export interface BiowasmArtifact {
   missing?: boolean;
 }
 
+export interface BiowasmRunProgress {
+  bytes: number;
+  elapsedMs: number;
+  message?: string;
+}
+
 export interface BiowasmRunRequest {
   tool: BiowasmToolName;
   args: string[];
@@ -78,6 +94,14 @@ export interface BiowasmRunRequest {
   outputs?: BiowasmOutputRequest[];
   stdout?: 'count' | 'capture';
   timeoutMs?: number;
+  /**
+   * Client cancellation. Aborting while queued rejects the run before it
+   * starts; aborting mid-run kills the worker (a fresh one respawns on the
+   * next call) and rejects with BiowasmCancelledError.
+   */
+  signal?: AbortSignal;
+  /** Per-run progress sink (bytes read so far); never sent to the worker. */
+  onProgress?: (p: BiowasmRunProgress) => void;
 }
 
 export interface BiowasmRunResult {
@@ -95,6 +119,11 @@ export type { BiowasmCountSummary, BiowasmCaptureSummary, BiowasmStdoutSummary, 
 function timeoutMs(): number {
   const v = Number(process.env[TIMEOUT_ENV_VAR]);
   return Number.isFinite(v) && v > 0 ? v : DEFAULT_TIMEOUT_MS;
+}
+
+function maxRunMs(): number {
+  const v = Number(process.env[MAX_RUN_ENV_VAR]);
+  return Number.isFinite(v) && v > 0 ? v : DEFAULT_MAX_RUN_MS;
 }
 
 /**
@@ -124,6 +153,14 @@ interface ArtifactState {
   size: number;
 }
 
+/** The run whose RPC is in flight; progress messages are routed to it. */
+interface ActiveRun {
+  runId: number;
+  startedMs: number;
+  onProgress?: (p: BiowasmRunProgress) => void;
+  noteActivity(): void;
+}
+
 function extractMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -136,6 +173,8 @@ class BiowasmEngine {
   private readonly artifacts = new Map<string, ArtifactState>();
   private readonly artifactsDir = join(cacheDir(), 'biowasm-artifacts');
   private artifactSeq = 0;
+  private runSeq = 0;
+  private currentRun: ActiveRun | null = null;
   private assetsDir: string | null = null;
 
   async ensureReady(): Promise<void> {
@@ -190,6 +229,7 @@ class BiowasmEngine {
   }
 
   private handleNotification(raw: unknown): void {
+    if (this.handleProgressMessage(raw)) return;
     const msg = raw as { cmd?: string; vfsPath?: string; chunk?: Uint8Array; size?: number; from?: string; to?: string };
     if (!msg || typeof msg.cmd !== 'string' || typeof msg.vfsPath !== 'string') return;
     switch (msg.cmd) {
@@ -243,6 +283,32 @@ class BiowasmEngine {
       default:
         return;
     }
+  }
+
+  /**
+   * Routes worker progress messages (wasmcore 'progress' convention) to the
+   * CURRENT run's onProgress, keyed by runId; stale messages from killed
+   * workers (unknown runIds) are ignored. Any progress also resets the run's
+   * inactivity deadline.
+   */
+  private handleProgressMessage(raw: unknown): boolean {
+    const msg = raw as { type?: unknown; runId?: unknown; value?: unknown; message?: unknown };
+    if (!msg || typeof msg !== 'object' || msg.type !== PROGRESS_MSG_TYPE) return false;
+    const run = this.currentRun;
+    if (!run || msg.runId !== run.runId) return true;
+    run.noteActivity();
+    if (run.onProgress && typeof msg.value === 'number') {
+      try {
+        run.onProgress({
+          bytes: msg.value,
+          elapsedMs: Date.now() - run.startedMs,
+          message: typeof msg.message === 'string' ? msg.message : undefined,
+        });
+      } catch {
+        void 0;
+      }
+    }
+    return true;
   }
 
   private async bootstrap(): Promise<void> {
@@ -301,38 +367,71 @@ class BiowasmEngine {
         );
       }
     }
+    const signal = request.signal;
     return this.queue.enqueue(async () => {
-      await this.checkMemory();
+      if (signal?.aborted) {
+        throw new BiowasmCancelledError('cancelled before start');
+      }
       const host = this.host;
       if (!host) {
         throw new BiowasmRuntimeUnresponsiveError('The biowasm worker is not running.');
       }
-      for (const out of request.outputs ?? []) {
-        // Fresh host file per run: prior artifact ids keep pointing at their
-        // original (now immutable) files instead of silently changing content.
-        this.artifacts.delete(out.vfsPath);
-      }
+      // Once dequeued, any abort kills the worker even mid pre-flight: the
+      // pending (or next) RPC then rejects with the kill error and is
+      // reclassified below as a cancellation. While queued, the entry check
+      // above already rejected the run.
+      let aborting = false;
+      const onAbort = () => {
+        aborting = true;
+        host.kill();
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
       const started = Date.now();
-      const timeout = request.timeoutMs ?? timeoutMs();
-      const cancelMessage =
-        `Biowasm tool run exceeded the time limit (${Math.round(timeout / 1000)}s) and the worker was terminated. ` +
-        'Raise ANALYSIS_BIOWASM_TIMEOUT_MS or reduce the input size.';
       let response: BiowasmWorkerRunResponse;
+      let cancelMessage = '';
       try {
+        await this.checkMemory();
+        for (const out of request.outputs ?? []) {
+          // Fresh host file per run: prior artifact ids keep pointing at their
+          // original (now immutable) files instead of silently changing content.
+          this.artifacts.delete(out.vfsPath);
+        }
+        const runId = ++this.runSeq;
+        // ANALYSIS_BIOWASM_TIMEOUT_MS is an inactivity deadline (reset by
+        // worker progress); ANALYSIS_BIOWASM_MAX_RUN_MS is the absolute
+        // ceiling no activity can extend.
+        const timeout = request.timeoutMs ?? timeoutMs();
+        const maxRun = maxRunMs();
+        cancelMessage =
+          `Biowasm tool run exceeded its time limit (inactivity limit ${Math.round(timeout / 1000)}s, ` +
+          `max run ${Math.round(maxRun / 1000)}s) and the worker was terminated. ` +
+          `Raise ${TIMEOUT_ENV_VAR} (inactivity) or ${MAX_RUN_ENV_VAR} (absolute ceiling), or reduce the input size.`;
         response = await runWithWatchdog(
-          () =>
-            host.request<BiowasmWorkerRunResponse>({
+          (handle) => {
+            this.currentRun = {
+              runId,
+              startedMs: started,
+              onProgress: request.onProgress,
+              noteActivity: () => handle.activity(),
+            };
+            return host.request<BiowasmWorkerRunResponse>({
               cmd: 'run',
+              // Correlation token echoed by worker progress messages.
+              // signal/onProgress stay here: functions and AbortSignals are
+              // not structured-cloneable and are never sent to the worker.
+              runId,
               tool: request.tool,
               args: request.args,
               inputs: request.inputs,
               mounts: request.mounts,
               outputs: request.outputs,
               stdoutSink: request.stdout ?? 'count',
-            }),
+            });
+          },
           {
             timeoutMs: timeout,
             watchdogMs: 500,
+            maxRunMs: maxRun,
             cancel: () => host.kill(),
             discard: () => this.poison(),
             isCancelError: () => false,
@@ -342,7 +441,20 @@ class BiowasmEngine {
             ),
           },
         );
+        if (host.isDead()) {
+          this.poison();
+          if (aborting) {
+            throw new BiowasmCancelledError('cancelled by client');
+          }
+          throw new BiowasmRuntimeUnresponsiveError(
+            'The biowasm worker died while the run was finishing; a fresh worker starts on the next call.',
+          );
+        }
       } catch (err) {
+        if (aborting) {
+          this.poison();
+          throw new BiowasmCancelledError('cancelled by client');
+        }
         if (err instanceof WorkerRpcError) {
           // The worker answered with a run-level failure; it is still healthy.
           throw new Error(err.message);
@@ -351,7 +463,7 @@ class BiowasmEngine {
           this.poison();
           throw err;
         }
-        if (err instanceof Error && err.message === cancelMessage) {
+        if (err instanceof Error && cancelMessage !== '' && err.message === cancelMessage) {
           this.poison();
           throw new BiowasmTimeoutError(cancelMessage);
         }
@@ -360,12 +472,9 @@ class BiowasmEngine {
         throw new BiowasmRuntimeUnresponsiveError(
           `The biowasm worker failed during the run: ${extractMessage(err)}. A fresh worker starts on the next call.`,
         );
-      }
-      if (host.isDead()) {
-        this.poison();
-        throw new BiowasmRuntimeUnresponsiveError(
-          'The biowasm worker died while the run was finishing; a fresh worker starts on the next call.',
-        );
+      } finally {
+        this.currentRun = null;
+        signal?.removeEventListener('abort', onAbort);
       }
       const outputs = response.outputs.map((o: BiowasmWorkerOutput): BiowasmArtifact => {
         if (o.missing) {

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import type {
   BiowasmArtifact,
   BiowasmInputFile,
@@ -28,6 +28,21 @@ import {
 
 export interface AnalyzerResult {
   text: string;
+}
+
+/**
+ * Execution options threaded from the MCP server layer into every engine run:
+ * - `signal`: the request's AbortSignal (SDK wires notifications/cancelled).
+ * - `onProgress`: progress sink; runEngine wraps it so multi-run analyzers
+ *   report CUMULATIVE monotonic bytes (sum of completed runs' ioStats bytes
+ *   plus the current run's live bytes) — valid MCP progress semantics.
+ * - `proceedOnLargeInput`: the request's proceed_on_large_input flag,
+ *   consumed by the estimate-based large-input gate of the summary tools.
+ */
+export interface AnalyzerExecOptions {
+  signal?: AbortSignal;
+  onProgress?: (progress: { bytes: number; elapsedMs: number; message?: string }) => void;
+  proceedOnLargeInput?: boolean;
 }
 
 type EngineModule = typeof import('./engine.js');
@@ -105,14 +120,138 @@ function aggregate(results: BiowasmRunResult[]): { bytesRead: number; elapsedMs:
   };
 }
 
+// ---------------------------------------------------------------------------
+// Large-input gate (Fix C): estimate-based guard for the full-stream passes
+// of the two summary tools. The model is a documented heuristic built from
+// measured throughput on the pinned wasm builds:
+//   BAM-class  ≈ 110 MB/s full-stream (view -c: 311 MB in 2.87 s)
+//   VCF-class  ≈ 0.9 MB/s at 2504 samples, scaled by 2504/sampleCount and
+//                clamped to [0.9, 110] MB/s (view -H: 206 MB in 227.8 s)
+// The gate fires when the estimate exceeds 45 s (below the 60 s client
+// deadline) and the caller did not set proceed_on_large_input. In-band
+// content and artifacts are never gated; only mounted host inputs are.
+// ---------------------------------------------------------------------------
+
+const GATE_THRESHOLD_SECONDS = 45;
+const BAM_STREAM_MB_PER_SEC = 110;
+const VCF_DENSE_SAMPLES = 2504;
+const VCF_DENSE_MB_PER_SEC = 0.9;
+const VCF_STREAM_MB_PER_SEC_CEILING = 110;
+const BYTES_PER_MB = 1024 * 1024;
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * BYTES_PER_MB) return `${(bytes / (1024 * BYTES_PER_MB)).toFixed(1)} GiB`;
+  if (bytes >= BYTES_PER_MB) return `${(bytes / BYTES_PER_MB).toFixed(1)} MiB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KiB`;
+}
+
+/**
+ * Total size of the source's mounted host files (its own statSync —
+ * validate.ts only realpath's host paths). Null when the source is not a
+ * gated kind (in-band content, artifact) or the stat fails.
+ */
+function mountedHostBytes(source: ResolvedSource): number | null {
+  if (source.kind !== 'host_path' || source.mounts.length === 0) return null;
+  try {
+    let total = 0;
+    for (const mount of source.mounts) total += statSync(mount.hostPath).size;
+    return total;
+  } catch {
+    return null;
+  }
+}
+
+function assertStreamGate(
+  tool: string,
+  source: ResolvedSource,
+  exec: AnalyzerExecOptions | undefined,
+  estimatedSeconds: number,
+  totalBytes: number,
+  model: string,
+  alternatives: string,
+): void {
+  if (exec?.proceedOnLargeInput) return;
+  if (estimatedSeconds <= GATE_THRESHOLD_SECONDS) return;
+  const minutes = Math.max(1, Math.round(estimatedSeconds / 60));
+  throw new ValidationError(
+    `${tool} would full-stream ${formatBytes(totalBytes)} from "${source.label}" — estimated ~${minutes} min ` +
+      `(${model}), beyond the ${GATE_THRESHOLD_SECONDS} s large-input threshold. ` +
+      `${alternatives} ` +
+      'Re-run with proceed_on_large_input=true to stream anyway (progress will be reported).',
+  );
+}
+
+/** Sample-count sniff from a captured `bcftools view -h` stdout: null when no #CHROM line parsed. */
+function sniffVcfSampleCount(headerText: string): number | null {
+  const chromLine = headerText.split('\n').find((l) => l.startsWith('#CHROM'));
+  if (!chromLine) return null;
+  return Math.max(1, chromLine.split('\t').length - 9);
+}
+
+function vcfStreamBytesPerSec(sampleCount: number): number {
+  const mbPerSec = Math.min(VCF_STREAM_MB_PER_SEC_CEILING, Math.max(VCF_DENSE_MB_PER_SEC, VCF_DENSE_MB_PER_SEC * (VCF_DENSE_SAMPLES / sampleCount)));
+  return mbPerSec * BYTES_PER_MB;
+}
+
+function gateBamSummaryStream(source: ResolvedSource, exec: AnalyzerExecOptions | undefined): void {
+  const totalBytes = mountedHostBytes(source);
+  if (totalBytes === null) return;
+  assertStreamGate(
+    'analysis_bam_summary',
+    source,
+    exec,
+    totalBytes / (BAM_STREAM_MB_PER_SEC * BYTES_PER_MB),
+    totalBytes,
+    `throughput model: BAM-class full-stream ≈ ${BAM_STREAM_MB_PER_SEC} MB/s`,
+    'Alternatives: provide an indexed source and query regions instead (analysis_bam_view_region), or slice the loci of interest to an artifact (analysis_bam_view_region with format="artifact") and summarize the slice.',
+  );
+}
+
+function gateVcfSummaryStream(source: ResolvedSource, headerText: string, exec: AnalyzerExecOptions | undefined): void {
+  const totalBytes = mountedHostBytes(source);
+  if (totalBytes === null) return;
+  const sniffed = sniffVcfSampleCount(headerText);
+  const sampleCount = sniffed ?? VCF_DENSE_SAMPLES;
+  assertStreamGate(
+    'analysis_bcf_summary',
+    source,
+    exec,
+    totalBytes / vcfStreamBytesPerSec(sampleCount),
+    totalBytes,
+    `throughput model: VCF-class ≈ ${(vcfStreamBytesPerSec(sampleCount) / BYTES_PER_MB).toFixed(1)} MB/s = 0.9 MB/s × ${VCF_DENSE_SAMPLES}/${sampleCount} samples, clamped to [0.9, 110] MB/s, ` +
+      (sniffed !== null ? `sample count sniffed from the header (${sniffed})` : `sample count assumed dense worst case ${VCF_DENSE_SAMPLES} (header sniff failed)`) +
+      (source.hasIndex ? '; the mounted index sidecar carries no record counts (bcftools index -s unavailable), so streaming is the only count path' : ''),
+    'Alternatives: slice to an artifact via analysis_bcf_view_region (format="artifact", optionally with a samples subset) and summarize the slice; query regions directly (analysis_bcf_view_region); or re-run with proceed_on_large_input=true to stream the full file (progress is reported and the call can be cancelled).',
+  );
+}
+
 async function runEngine(
   results: BiowasmRunResult[],
   label: string,
   request: Parameters<EngineModule['biowasmEngine']['run']>[0],
-  opts: { raw?: boolean } = {},
+  opts: { raw?: boolean; exec?: AnalyzerExecOptions } = {},
 ): Promise<BiowasmRunResult> {
   const { biowasmEngine } = await engineModule();
-  const res = await biowasmEngine.run(request);
+  const exec = opts.exec;
+  let runRequest = request;
+  if (exec !== undefined && (exec.signal !== undefined || exec.onProgress !== undefined)) {
+    // Completed runs only: `results` receives the current run after it
+    // finishes, so the base here is exactly the bytes already accounted for.
+    const baseBytes = results.reduce((acc, r) => acc + bytesReadOf(r), 0);
+    const baseMs = results.reduce((acc, r) => acc + r.ms, 0);
+    runRequest = {
+      ...request,
+      ...(exec.signal !== undefined ? { signal: exec.signal } : {}),
+      ...(exec.onProgress !== undefined
+        ? {
+            onProgress: (p: { bytes: number; elapsedMs: number; message?: string }) => {
+              exec.onProgress!({ bytes: baseBytes + p.bytes, elapsedMs: baseMs + p.elapsedMs, message: p.message });
+            },
+          }
+        : {}),
+    };
+  }
+  const res = await biowasmEngine.run(runRequest);
   results.push(res);
   // raw: surface the result untouched (analysis_biowasm_cli renders
   // diagnostics honestly instead of throwing on nonzero rc / fatal stderr).
@@ -263,31 +402,49 @@ export function findDuplicateDepthPosition(rows: string[][]): string | null {
 // analysis_bam_summary / analysis_bcf_summary.
 // ---------------------------------------------------------------------------
 
-export async function runBamSummary(source: ResolvedSource, output: CanonicalOutput): Promise<AnalyzerResult> {
+export async function runBamSummary(source: ResolvedSource, output: CanonicalOutput, exec?: AnalyzerExecOptions): Promise<AnalyzerResult> {
   const results: BiowasmRunResult[] = [];
-  const header = await runEngine(results, 'samtools view -H', {
-    tool: 'samtools',
-    args: ['view', '-H', source.vfsPath],
-    inputs: source.inputs,
-    mounts: source.mounts,
-    stdout: 'capture',
-  });
-  const flagstat = await runEngine(results, 'samtools flagstat', {
-    tool: 'samtools',
-    args: ['flagstat', source.vfsPath],
-    inputs: source.inputs,
-    mounts: source.mounts,
-    stdout: 'capture',
-  });
-  let idxRows: string[][] | null = null;
-  if (source.hasIndex) {
-    const idx = await runEngine(results, 'samtools idxstats', {
+  // The flagstat pass streams the entire source — estimate-gate mounted host
+  // inputs before any engine run (Fix C).
+  gateBamSummaryStream(source, exec);
+  const header = await runEngine(
+    results,
+    'samtools view -H',
+    {
       tool: 'samtools',
-      args: ['idxstats', source.vfsPath],
+      args: ['view', '-H', source.vfsPath],
       inputs: source.inputs,
       mounts: source.mounts,
       stdout: 'capture',
-    });
+    },
+    { exec },
+  );
+  const flagstat = await runEngine(
+    results,
+    'samtools flagstat',
+    {
+      tool: 'samtools',
+      args: ['flagstat', source.vfsPath],
+      inputs: source.inputs,
+      mounts: source.mounts,
+      stdout: 'capture',
+    },
+    { exec },
+  );
+  let idxRows: string[][] | null = null;
+  if (source.hasIndex) {
+    const idx = await runEngine(
+      results,
+      'samtools idxstats',
+      {
+        tool: 'samtools',
+        args: ['idxstats', source.vfsPath],
+        inputs: source.inputs,
+        mounts: source.mounts,
+        stdout: 'capture',
+      },
+      { exec },
+    );
     idxRows = parseIdxstats(captured(idx));
   }
   const head = parseSamHeader(captured(header));
@@ -378,6 +535,7 @@ export async function runBamViewRegion(
   mode: BamViewMode,
   depthBins: number | undefined,
   output: CanonicalOutput,
+  exec?: AnalyzerExecOptions,
 ): Promise<AnalyzerResult> {
   const regionArg = formatRegion(region);
   const results: BiowasmRunResult[] = [];
@@ -386,13 +544,18 @@ export async function runBamViewRegion(
   const inputs = bed ? [...source.inputs, bed] : source.inputs;
 
   if (mode === 'count') {
-    const res = await runEngine(results, 'samtools view -c', {
-      tool: 'samtools',
-      args: bed ? ['view', '-c', '-L', bedPath, source.vfsPath] : ['view', '-c', source.vfsPath, regionArg],
-      inputs,
-      mounts: source.mounts,
-      stdout: 'capture',
-    });
+    const res = await runEngine(
+      results,
+      'samtools view -c',
+      {
+        tool: 'samtools',
+        args: bed ? ['view', '-c', '-L', bedPath, source.vfsPath] : ['view', '-c', source.vfsPath, regionArg],
+        inputs,
+        mounts: source.mounts,
+        stdout: 'capture',
+      },
+      { exec },
+    );
     const count = Number(captured(res).trim());
     const io = aggregate(results);
     if (output.format === 'json') {
@@ -412,28 +575,38 @@ export async function runBamViewRegion(
 
   if (mode === 'reads' && output.format === 'artifact') {
     const outName = regionFileName(source, regionArg, 'bam');
-    const res = await runEngine(results, 'samtools view -b -o', {
-      tool: 'samtools',
-      args: bed
-        ? ['view', '-b', '-o', `/shared/out/${outName}`, '-L', bedPath, source.vfsPath]
-        : ['view', '-b', '-o', `/shared/out/${outName}`, source.vfsPath, regionArg],
-      inputs,
-      mounts: source.mounts,
-      outputs: [{ vfsPath: `/shared/out/${outName}` }],
-    });
+    const res = await runEngine(
+      results,
+      'samtools view -b -o',
+      {
+        tool: 'samtools',
+        args: bed
+          ? ['view', '-b', '-o', `/shared/out/${outName}`, '-L', bedPath, source.vfsPath]
+          : ['view', '-b', '-o', `/shared/out/${outName}`, source.vfsPath, regionArg],
+        inputs,
+        mounts: source.mounts,
+        outputs: [{ vfsPath: `/shared/out/${outName}` }],
+      },
+      { exec },
+    );
     const artifact = registerEngineArtifact('samtools', res.outputs[0], `reads in ${regionArg} from ${source.label}`);
     const io = aggregate(results);
     return { text: renderArtifactBlock(`Reads artifact — ${regionArg}`, artifact, output.includeContent) + '\n\n' + ioStatsLine(io.bytesRead, io.elapsedMs) };
   }
 
   if (mode === 'depth') {
-    const res = await runEngine(results, 'samtools depth', {
-      tool: 'samtools',
-      args: bed ? ['depth', '-a', '-b', bedPath, source.vfsPath] : ['depth', '-a', '-r', regionArg, source.vfsPath],
-      inputs,
-      mounts: source.mounts,
-      stdout: 'capture',
-    });
+    const res = await runEngine(
+      results,
+      'samtools depth',
+      {
+        tool: 'samtools',
+        args: bed ? ['depth', '-a', '-b', bedPath, source.vfsPath] : ['depth', '-a', '-r', regionArg, source.vfsPath],
+        inputs,
+        mounts: source.mounts,
+        stdout: 'capture',
+      },
+      { exec },
+    );
     const rows = parseTsvRows(captured(res));
     // Indexless fallback only: the indexed -r path is iterator-driven and cannot
     // double-report. Detection must precede binning/rendering so doubled rows
@@ -475,13 +648,18 @@ export async function runBamViewRegion(
   }
 
   if (mode === 'pileup') {
-    const res = await runEngine(results, 'samtools mpileup', {
-      tool: 'samtools',
-      args: bed ? ['mpileup', '-l', bedPath, source.vfsPath] : ['mpileup', '-r', regionArg, source.vfsPath],
-      inputs,
-      mounts: source.mounts,
-      stdout: 'capture',
-    });
+    const res = await runEngine(
+      results,
+      'samtools mpileup',
+      {
+        tool: 'samtools',
+        args: bed ? ['mpileup', '-l', bedPath, source.vfsPath] : ['mpileup', '-r', regionArg, source.vfsPath],
+        inputs,
+        mounts: source.mounts,
+        stdout: 'capture',
+      },
+      { exec },
+    );
     const rows = parseTsvRows(captured(res));
     const io = aggregate(results);
     if (output.format === 'json') {
@@ -500,13 +678,18 @@ export async function runBamViewRegion(
     };
   }
 
-  const res = await runEngine(results, 'samtools view', {
-    tool: 'samtools',
-    args: bed ? ['view', '-L', bedPath, source.vfsPath] : ['view', source.vfsPath, regionArg],
-    inputs,
-    mounts: source.mounts,
-    stdout: 'capture',
-  });
+  const res = await runEngine(
+    results,
+    'samtools view',
+    {
+      tool: 'samtools',
+      args: bed ? ['view', '-L', bedPath, source.vfsPath] : ['view', source.vfsPath, regionArg],
+      inputs,
+      mounts: source.mounts,
+      stdout: 'capture',
+    },
+    { exec },
+  );
   const io = aggregate(results);
   if (output.format === 'json') {
     const rows = parseTsvRows(captured(res));
@@ -547,39 +730,87 @@ function binDepth(rows: string[][], binSize: number): string[][] {
 // analysis_bcf_summary.
 // ---------------------------------------------------------------------------
 
-export async function runBcfSummary(source: ResolvedSource, output: CanonicalOutput): Promise<AnalyzerResult> {
+/**
+ * `bcftools index -s` prints "contig  length  records" per contig. Only rows
+ * with numeric length/records columns count; anything else (headers, noise)
+ * is filtered so a garbage capture degrades to the streaming fallback.
+ */
+function parseIndexStatsRows(text: string): string[][] {
+  const rows: string[][] = [];
+  for (const [contig, length, records] of parseTsvRows(text)) {
+    if (/^\d+$/.test(length ?? '') && /^\d+$/.test(records ?? '')) {
+      rows.push([contig, length, records]);
+    }
+  }
+  return rows;
+}
+
+export async function runBcfSummary(source: ResolvedSource, output: CanonicalOutput, exec?: AnalyzerExecOptions): Promise<AnalyzerResult> {
   const results: BiowasmRunResult[] = [];
-  const header = await runEngine(results, 'bcftools view -h', {
-    tool: 'bcftools',
-    args: ['view', '-h', source.vfsPath],
-    inputs: source.inputs,
-    mounts: source.mounts,
-    stdout: 'capture',
-  });
-  // Counting sink: `view -H` streams records with bounded memory (V8
-  // amplification rule) — lines = variant count.
-  const count = await runEngine(results, 'bcftools view -H', {
-    tool: 'bcftools',
-    args: ['view', '-H', source.vfsPath],
-    inputs: source.inputs,
-    mounts: source.mounts,
-    stdout: 'count',
-  });
-  const variantCount = count.stdout.mode === 'count' ? count.stdout.lines : -1;
+  // Fix C fast path: `index -s` is instant when the sidecar carries record
+  // counts, so it runs FIRST — its summed records column IS the variant
+  // count and the streaming `view -H` pass is skipped entirely. It is
+  // NON-FATAL: on failure (or unparseable output) records_per_contig is
+  // omitted and the streaming count below supplies variant_count.
   let indexRows: string[][] | null = null;
+  let indexNote: string | null = null;
   if (source.hasIndex) {
-    // `bcftools index -s` prints "contig  length  records" per contig; fails
-    // with [E::idx_find_and_load] when the index is missing (gated above).
-    const idx = await runEngine(results, 'bcftools index -s', {
+    const idx = await runEngine(
+      results,
+      'bcftools index -s',
+      {
+        tool: 'bcftools',
+        args: ['index', '-s', source.vfsPath],
+        inputs: source.inputs,
+        mounts: source.mounts,
+        stdout: 'capture',
+      },
+      { raw: true, exec },
+    );
+    const rows = looksFailed(idx) ? [] : parseIndexStatsRows(captured(idx));
+    if (rows.length > 0) {
+      indexRows = rows;
+    } else {
+      indexNote = `Index record counts unavailable (\`bcftools index -s\` ${
+        looksFailed(idx) ? stderrNote(idx) || `failed (exit code ${exitCodeLabel(idx.exitCode)})` : 'produced no parseable rows'
+      }); variant count came from the streaming pass.`;
+    }
+  }
+  const header = await runEngine(
+    results,
+    'bcftools view -h',
+    {
       tool: 'bcftools',
-      args: ['index', '-s', source.vfsPath],
+      args: ['view', '-h', source.vfsPath],
       inputs: source.inputs,
       mounts: source.mounts,
       stdout: 'capture',
-    });
-    indexRows = parseTsvRows(captured(idx));
-  }
+    },
+    { exec },
+  );
   const info = parseVcfHeader(captured(header));
+  let variantCount: number;
+  if (indexRows !== null) {
+    variantCount = indexRows.reduce((acc, row) => acc + Number(row[2]), 0);
+  } else {
+    // Streaming fallback (no index, or index -s failed): the estimate-based
+    // large-input gate applies ONLY to this path. The sample-count sniff
+    // reuses the header run above (#CHROM columns) — no extra engine pass.
+    gateVcfSummaryStream(source, captured(header), exec);
+    const count = await runEngine(
+      results,
+      'bcftools view -H',
+      {
+        tool: 'bcftools',
+        args: ['view', '-H', source.vfsPath],
+        inputs: source.inputs,
+        mounts: source.mounts,
+        stdout: 'count',
+      },
+      { exec },
+    );
+    variantCount = count.stdout.mode === 'count' ? count.stdout.lines : -1;
+  }
   const io = aggregate(results);
 
   if (output.format === 'json') {
@@ -617,7 +848,14 @@ export async function runBcfSummary(source: ResolvedSource, output: CanonicalOut
     ['INFO fields', String(info.info.length)],
     ['FORMAT fields', String(info.formats.length)],
   ];
-  const summaryBlock = renderRowTable({ title: 'VCF/BCF summary', summary, columns: [], rows: [], topN: output.topN });
+  const summaryBlock = renderRowTable({
+    title: 'VCF/BCF summary',
+    summary,
+    columns: [],
+    rows: [],
+    topN: output.topN,
+    ...(indexNote ? { notes: [indexNote] } : {}),
+  });
   const infoBlock = renderRowTable({
     title: 'INFO fields',
     summary: [],
@@ -667,6 +905,7 @@ export async function runBcfViewRegion(
   filter: string | undefined,
   variantTypes: string[] | undefined,
   output: CanonicalOutput,
+  exec?: AnalyzerExecOptions,
 ): Promise<AnalyzerResult> {
   const regionArg = formatRegion(region);
   const regionFlag = source.hasIndex ? '-r' : '-t';
@@ -677,35 +916,45 @@ export async function runBcfViewRegion(
 
   if (output.format === 'artifact') {
     const outName = regionFileName(source, regionArg, 'vcf.gz');
-    const res = await runEngine(results, 'bcftools view -Oz -o', {
-      tool: 'bcftools',
-      args: ['view', '-Oz', '-o', `/shared/out/${outName}`, regionFlag, regionArg, ...sampleArgs, ...filterArgs, ...typeArgs, source.vfsPath],
-      inputs: source.inputs,
-      mounts: source.mounts,
-      outputs: [{ vfsPath: `/shared/out/${outName}` }],
-    });
+    const res = await runEngine(
+      results,
+      'bcftools view -Oz -o',
+      {
+        tool: 'bcftools',
+        args: ['view', '-Oz', '-o', `/shared/out/${outName}`, regionFlag, regionArg, ...sampleArgs, ...filterArgs, ...typeArgs, source.vfsPath],
+        inputs: source.inputs,
+        mounts: source.mounts,
+        outputs: [{ vfsPath: `/shared/out/${outName}` }],
+      },
+      { exec },
+    );
     const artifact = registerEngineArtifact('bcftools', res.outputs[0], `variants in ${regionArg} from ${source.label}`);
     const io = aggregate(results);
     return { text: renderArtifactBlock(`VCF artifact — ${regionArg}`, artifact, output.includeContent) + '\n\n' + ioStatsLine(io.bytesRead, io.elapsedMs) };
   }
 
-  const res = await runEngine(results, 'bcftools query', {
-    tool: 'bcftools',
-    args: [
-      'query',
-      '-f',
-      composeQueryFormat(projection.fields),
-      regionFlag,
-      regionArg,
-      ...sampleArgs,
-      ...filterArgs,
-      ...typeArgs,
-      source.vfsPath,
-    ],
-    inputs: source.inputs,
-    mounts: source.mounts,
-    stdout: 'capture',
-  });
+  const res = await runEngine(
+    results,
+    'bcftools query',
+    {
+      tool: 'bcftools',
+      args: [
+        'query',
+        '-f',
+        composeQueryFormat(projection.fields),
+        regionFlag,
+        regionArg,
+        ...sampleArgs,
+        ...filterArgs,
+        ...typeArgs,
+        source.vfsPath,
+      ],
+      inputs: source.inputs,
+      mounts: source.mounts,
+      stdout: 'capture',
+    },
+    { exec },
+  );
   const rows = parseTsvRows(captured(res));
   const io = aggregate(results);
 
@@ -760,6 +1009,7 @@ export async function runBedOp(
   b: ResolvedSource | undefined,
   options: BedOpOptions,
   output: CanonicalOutput,
+  exec?: AnalyzerExecOptions,
 ): Promise<AnalyzerResult> {
   if (BED_BINARY_OPS.has(op) && !b) {
     throw new ValidationError(`op "${op}" requires b_source (the B interval track).`);
@@ -799,7 +1049,7 @@ export async function runBedOp(
       break;
   }
   const results: BiowasmRunResult[] = [];
-  const res = await runEngine(results, `bedtools ${op}`, { tool: 'bedtools', args, inputs, mounts, stdout: 'capture' });
+  const res = await runEngine(results, `bedtools ${op}`, { tool: 'bedtools', args, inputs, mounts, stdout: 'capture' }, { exec });
   const rows = parseTsvRows(captured(res));
   const io = aggregate(results);
 
@@ -873,6 +1123,7 @@ export async function runConvert(
   projection: CanonicalProjection,
   filter: string | undefined,
   output: CanonicalOutput,
+  exec?: AnalyzerExecOptions,
 ): Promise<AnalyzerResult> {
   const from = inferSourceFormat(source);
   const base = (source.vfsPath.split('/').pop() ?? 'input').replace(/\.[^.]+$/, '');
@@ -918,13 +1169,18 @@ export async function runConvert(
   }
 
   const results: BiowasmRunResult[] = [];
-  const res = await runEngine(results, `${tool} convert`, {
-    tool,
-    args,
-    inputs: source.inputs,
-    mounts: source.mounts,
-    outputs: [{ vfsPath: outVfs }],
-  });
+  const res = await runEngine(
+    results,
+    `${tool} convert`,
+    {
+      tool,
+      args,
+      inputs: source.inputs,
+      mounts: source.mounts,
+      outputs: [{ vfsPath: outVfs }],
+    },
+    { exec },
+  );
   const artifact = registerEngineArtifact(tool, res.outputs[0], `convert ${from} -> ${to} from ${source.label}`);
   const io = aggregate(results);
   return {
@@ -985,12 +1241,13 @@ export async function runBiowasmCli(
   tool: BiowasmToolName,
   args: string[],
   output: CanonicalOutput,
+  exec?: AnalyzerExecOptions,
 ): Promise<AnalyzerResult> {
   validateCliArgs(tool, args);
   const results: BiowasmRunResult[] = [];
   // raw: this tool exists to surface raw diagnostics — it must render
   // nonzero exit codes and fatal stderr instead of throwing.
-  const res = await runEngine(results, `${tool} ${args.join(' ')}`, { tool, args, stdout: 'capture' }, { raw: true });
+  const res = await runEngine(results, `${tool} ${args.join(' ')}`, { tool, args, stdout: 'capture' }, { raw: true, exec });
   const failed = looksFailed(res);
   const io = aggregate(results);
   const text = captured(res);

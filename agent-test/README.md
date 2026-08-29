@@ -170,7 +170,7 @@ host-local, outside the repo):
 
 | ID | Level | Purpose | Data | Status |
 |----|-------|---------|------|--------|
-| `biowasm-q01-vcf-orientation` | L0 | Characterize a 206 MB cohort VCF before querying it | vcf | FAIL — every biomcp call on the large host file exceeds the MCP client timeout (report F1) |
+| `biowasm-q01-vcf-orientation` | L0 | Characterize a 206 MB cohort VCF before querying it | vcf | PASS (post-F1-fix) — the large-input gate fires with actionable guidance; agent recovers via proceed_on_large_input streaming (progress keeps the client alive) or slice-to-artifact; no timeout cascade |
 | `biowasm-q02-bam-orientation` | L0 | Characterize a BAM; judge fitness for region-level work | bam | PASS |
 | `biowasm-q03-point-depth` | L0 | Exact depth at a single locus (20:10,000,000) | bam | PASS |
 | `biowasm-q04-contig-trap` | L1 | `chr20` fails (contig is `20`); error -> orient -> retry | bam | PASS (recovered) |

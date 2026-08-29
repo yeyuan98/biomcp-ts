@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { biowasmCacheStatePath } from '../../../biowasm/registry.js';
-import { biowasmEngine, shutdownBiowasmEngine, type BiowasmRunResult } from '../../../biowasm/engine.js';
+import { biowasmEngine, BiowasmCancelledError, shutdownBiowasmEngine, type BiowasmRunResult } from '../../../biowasm/engine.js';
 import { canonicalizeSource, type ResolvedSource } from '../../../biowasm/validate.js';
 import { runBamViewRegion, runBcfSummary } from '../../../biowasm/analyzers.js';
 
@@ -165,6 +165,8 @@ function generateBigSam(hostPath: string): number {
 const WORK = join(tmpdir(), `biomcp-biowasm-integration-${Date.now()}`);
 let bigSamPath = '';
 let bigSamBytes = 0;
+/** Shared by the cancel test: the indexed big-BAM mounts built by the lazy-mount test above it. */
+let lazyMounts: Array<{ hostPath: string; vfsPath: string }> | null = null;
 
 beforeAll(async () => {
   mkdirSync(WORK, { recursive: true });
@@ -311,6 +313,7 @@ maybe('biowasm engine (integration, real wasm tools)', () => {
       { hostPath: bamPath, vfsPath: '/shared/data/m.bam' },
       { hostPath: baiPath, vfsPath: '/shared/data/m.bam.bai' },
     ];
+    lazyMounts = mounts;
     const full = await run({
       tool: 'samtools',
       args: ['view', '-c', '/shared/data/m.bam'],
@@ -593,4 +596,39 @@ maybe('biowasm engine (integration, real wasm tools)', () => {
       { contig: 'chr2', length: 1000, records: 1 },
     ]);
   }, 300_000);
+
+  // Runs LAST on purpose: cancelling poisons the worker and clears the engine
+  // artifact map, which would break earlier tests that rely on staged
+  // /shared/data files surviving across runs.
+  it('mid-run cancellation: BiowasmCancelledError within the kill grace, then a fresh worker succeeds', async () => {
+    const mounts = lazyMounts;
+    expect(mounts).toBeTruthy();
+    const controller = new AbortController();
+    const progressBytes: number[] = [];
+    let abortAt = 0;
+    // Full-stream count over the indexed BAM: the streaming pass the cancel
+    // path targets (the 206 MB VCF fixture is not provisioned by this suite).
+    const pending = biowasmEngine.run({
+      tool: 'samtools',
+      args: ['view', '-c', '/shared/data/m.bam'],
+      mounts: mounts!,
+      stdout: 'capture',
+      signal: controller.signal,
+      onProgress: (p) => {
+        progressBytes.push(p.bytes);
+        if (!controller.signal.aborted) {
+          abortAt = Date.now();
+          controller.abort(); // cancel right after the first progress event
+        }
+      },
+    });
+    const err = (await pending.catch((e: unknown) => e)) as Error;
+    expect(err).toBeInstanceOf(BiowasmCancelledError);
+    expect(err.message).toBe('cancelled by client');
+    expect(progressBytes.length).toBeGreaterThanOrEqual(1);
+    expect(Date.now() - abortAt).toBeLessThan(3_000); // kill lands within the grace window
+    // The cancelled run poisoned the worker; the next call respawns and succeeds.
+    const follow = await run({ tool: 'samtools', args: ['--version'], stdout: 'capture' });
+    expect(follow.exitCode).toBe(0);
+  }, 120_000);
 });

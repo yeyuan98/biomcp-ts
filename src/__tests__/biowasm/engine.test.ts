@@ -138,7 +138,7 @@ jest.unstable_mockModule('../../biowasm/registry.js', () => ({
   BiowasmAssetError: class BiowasmAssetError extends Error {},
 }));
 
-const ENV_KEYS = ['ANALYSIS_BIOWASM_TIMEOUT_MS', 'ANALYSIS_BIOWASM_MEM_LIMIT_MB', 'ANALYSIS_BIOWASM_WORKER_PATH', 'BIOMCP_CACHE_DIR'] as const;
+const ENV_KEYS = ['ANALYSIS_BIOWASM_TIMEOUT_MS', 'ANALYSIS_BIOWASM_MAX_RUN_MS', 'ANALYSIS_BIOWASM_MEM_LIMIT_MB', 'ANALYSIS_BIOWASM_WORKER_PATH', 'BIOMCP_CACHE_DIR'] as const;
 const SAVED_ENV: Record<string, string | undefined> = {};
 
 const OK_RUN = {
@@ -358,5 +358,144 @@ describe('biowasm engine (worker boundary mocked)', () => {
     const result = await biowasmEngine.run({ tool: 'samtools', args: ['view'] });
     expect(result.exitCode).toBe(0);
     expect(WorkerHostMock).toHaveBeenCalledTimes(2);
+  });
+
+  // -------------------------------------------------------------------------
+  // Cancellation (Fix B) + progress routing (Fix A), worker boundary mocked.
+  // -------------------------------------------------------------------------
+
+  it('rejects a queued run whose signal aborted before dequeue, without spawning it', async () => {
+    const { biowasmEngine, BiowasmCancelledError } = await importEngine();
+    await biowasmEngine.ensureReady();
+    const host = currentHost();
+    host.setDefault(() => new Promise((resolve) => setTimeout(() => resolve({ ...OK_RUN }), 80)));
+    const controller = new AbortController();
+    const first = biowasmEngine.run({ tool: 'samtools', args: ['a'] });
+    const second = biowasmEngine.run({ tool: 'samtools', args: ['b'], signal: controller.signal });
+    setTimeout(() => controller.abort(), 20); // abort while `second` is still queued
+    await expect(first).resolves.toMatchObject({ exitCode: 0 });
+    await expect(second).rejects.toBeInstanceOf(BiowasmCancelledError);
+    await expect(second).rejects.toThrow('cancelled before start');
+    const runCmds = host.requests.filter((r) => r.cmd === 'run');
+    expect(runCmds).toHaveLength(1);
+    expect(runCmds[0]).toMatchObject({ args: ['a'] });
+  });
+
+  it('aborts a running run: host.kill called, kill rejection reclassified as BiowasmCancelledError', async () => {
+    const { biowasmEngine, BiowasmCancelledError, BiowasmRuntimeUnresponsiveError } = await importEngine();
+    await biowasmEngine.ensureReady();
+    const host = currentHost();
+    host.setDefault(null); // hang; kill() rejects the pending RPC with the generic message
+    const controller = new AbortController();
+    const pending = biowasmEngine.run({ tool: 'samtools', args: ['view'], signal: controller.signal });
+    setTimeout(() => controller.abort(), 25);
+    const err = (await pending.catch((e: unknown) => e)) as Error;
+    expect(err).toBeInstanceOf(BiowasmCancelledError);
+    expect(err).not.toBeInstanceOf(BiowasmRuntimeUnresponsiveError);
+    expect(err.message).toBe('cancelled by client');
+    expect(host.killCalls).toBeGreaterThanOrEqual(1);
+  });
+
+  it('routes worker progress messages to the current run and ignores unknown runIds', async () => {
+    const { biowasmEngine } = await importEngine();
+    await biowasmEngine.ensureReady();
+    const host = currentHost();
+    const events: Array<{ bytes: number; elapsedMs: number; message?: string }> = [];
+    host.setDefault(
+      () =>
+        new Promise((resolve) => {
+          const opts = host.options as { onNotification?: (m: unknown) => void };
+          const runId = host.requests[host.requests.length - 1]!.runId;
+          opts.onNotification?.({ type: 'progress', runId: 999_999, value: 7 }); // unknown → ignored
+          opts.onNotification?.({ type: 'progress', runId, value: 42, message: 'streaming' });
+          opts.onNotification?.({ type: 'progress', runId, value: 50 });
+          resolve({ ...OK_RUN });
+        }),
+    );
+    const result = await biowasmEngine.run({
+      tool: 'samtools',
+      args: ['view'],
+      stdout: 'capture',
+      onProgress: (p) => events.push(p),
+    });
+    expect(result.exitCode).toBe(0);
+    expect(events.map((e) => e.bytes)).toEqual([42, 50]);
+    expect(events[0]!.message).toBe('streaming');
+    expect(events[0]!.elapsedMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('ignores stale progress messages emitted after the run was killed', async () => {
+    const { biowasmEngine, BiowasmCancelledError } = await importEngine();
+    await biowasmEngine.ensureReady();
+    const host = currentHost();
+    host.setDefault(null);
+    const events: unknown[] = [];
+    const controller = new AbortController();
+    const pending = biowasmEngine.run({
+      tool: 'samtools',
+      args: ['view'],
+      signal: controller.signal,
+      onProgress: () => events.push('late'),
+    });
+    setTimeout(() => controller.abort(), 25);
+    await expect(pending).rejects.toBeInstanceOf(BiowasmCancelledError);
+    const opts = host.options as { onNotification?: (m: unknown) => void };
+    expect(() => opts.onNotification?.({ type: 'progress', runId: 1, value: 99, message: 'from the killed worker' })).not.toThrow();
+    expect(events).toHaveLength(0);
+  });
+
+  it('progress activity resets the inactivity deadline but not the max-run ceiling', async () => {
+    process.env.ANALYSIS_BIOWASM_TIMEOUT_MS = '120';
+    process.env.ANALYSIS_BIOWASM_MAX_RUN_MS = '420';
+    const { biowasmEngine, BiowasmTimeoutError } = await importEngine();
+    await biowasmEngine.ensureReady();
+    const host = currentHost();
+    let bytes = 0;
+    host.setDefault(
+      () =>
+        new Promise((resolve) => {
+          const opts = host.options as { onNotification?: (m: unknown) => void };
+          const runId = host.requests[host.requests.length - 1]!.runId;
+          const iv = setInterval(() => {
+            bytes += 10;
+            opts.onNotification?.({ type: 'progress', runId, value: bytes });
+          }, 50);
+          setTimeout(() => {
+            clearInterval(iv);
+            resolve({ ...OK_RUN }); // would finish at 600 ms — beyond the 420 ms ceiling
+          }, 600);
+        }),
+    );
+    const started = Date.now();
+    await expect(biowasmEngine.run({ tool: 'samtools', args: ['view'] })).rejects.toBeInstanceOf(BiowasmTimeoutError);
+    const elapsed = Date.now() - started;
+    // Steady progress kept the run alive past the 120 ms inactivity deadline…
+    expect(elapsed).toBeGreaterThanOrEqual(380);
+    // …but the 420 ms absolute ceiling still fired.
+    expect(elapsed).toBeLessThan(2_000);
+    expect(host.killCalls).toBeGreaterThanOrEqual(1);
+  });
+
+  it('a run with steady progress outlives the inactivity deadline when under the ceiling', async () => {
+    process.env.ANALYSIS_BIOWASM_TIMEOUT_MS = '120';
+    process.env.ANALYSIS_BIOWASM_MAX_RUN_MS = '5000';
+    const { biowasmEngine } = await importEngine();
+    await biowasmEngine.ensureReady();
+    const host = currentHost();
+    host.setDefault(
+      () =>
+        new Promise((resolve) => {
+          const opts = host.options as { onNotification?: (m: unknown) => void };
+          const runId = host.requests[host.requests.length - 1]!.runId;
+          const iv = setInterval(() => opts.onNotification?.({ type: 'progress', runId, value: 1 }), 50);
+          setTimeout(() => {
+            clearInterval(iv);
+            resolve({ ...OK_RUN }); // 350 ms > the 120 ms inactivity deadline
+          }, 350);
+        }),
+    );
+    const result = await biowasmEngine.run({ tool: 'samtools', args: ['view'] });
+    expect(result.exitCode).toBe(0);
+    expect(host.killCalls).toBe(0);
   });
 });
