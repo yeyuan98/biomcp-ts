@@ -1207,6 +1207,7 @@ export async function runBiowasmSessionInfo(): Promise<AnalyzerResult> {
   }
   const { biowasmEngine } = await engineModule();
   const initialized = biowasmEngine.assetsDirectory() !== null;
+  const pool = biowasmEngine.poolStatus();
   const summary: Array<[string, string]> = [];
   for (const name of BIOWASM_TOOLS_ORDER) {
     summary.push([`${name} version`, BIOWASM_TOOLS[name].version]);
@@ -1215,6 +1216,7 @@ export async function runBiowasmSessionInfo(): Promise<AnalyzerResult> {
     ['asset cache', biowasmCacheDirPath()],
     ['assets verified', verifiedAt],
     ['engine initialized', initialized ? 'yes' : 'no (starts on first tool call)'],
+    ['worker pool', `${pool.configured} configured, ${pool.alive} alive, ${pool.busy} busy`],
     ['artifacts retained', String(artifactCount())],
     ['node rss mb', String(Math.round(process.memoryUsage().rss / 1024 / 1024))],
   );

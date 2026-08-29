@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **wasmcore `runShards`** — a generic bounded-concurrency shard scheduler for file-based compute fan-outs (regions, contigs, files) in `src/wasmcore/shards.ts`: order-preserving dispatch with a monotonic aggregate-progress contract (settled shards contribute their final value, live shards their latest; clamped against non-monotonic callers; throttled with a final flush; `now()` clock seam for deterministic tests), a fail-fast error taxonomy (one internal `AbortController`; the first cause wins and post-abort secondary errors are suppressed; rejection only after in-flight settlement; `isFatal` rethrows the original error vs the default `ShardBatchError` wrap), and external-signal cancellation. First consumer lands with the biowasm worker pool below.
+- **Biowasm worker pool (`ANALYSIS_BIOWASM_WORKERS`)** — the engine is now a router over N serialized workers (default 1 = the previous strictly-serial behavior): concurrent tool calls execute in parallel, one long VCF stream no longer blocks every other call. Extra workers spawn lazily under contention (synchronous reservation — no double-spawn; one-shot spawn-failure memoization — no retry storms), each worker keeps slot-scoped state (own VFS/mounts, per-slot progress routing and flush-ack replies, per-slot artifact backing maps) while the artifact registry and the artifact filename sequence stay pool-global, and cancellation/timeouts/crashes isolate to their own worker (a slot killed mid-run respawns for its queued jobs instead of failing them). `analysis_biowasm_session_info` reports pool status; `ANALYSIS_BIOWASM_MEM_LIMIT_MB` is documented as the whole-process watermark covering the pool.
+
 ## [0.7.0] - 2026-08-29
 
 ### Added

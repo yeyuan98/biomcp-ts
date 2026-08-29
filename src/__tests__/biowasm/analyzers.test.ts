@@ -19,6 +19,8 @@ jest.unstable_mockModule('../../biowasm/engine.js', () => ({
     assetsDirectory: () => null,
     ensureReady: async () => undefined,
     shutdown: async () => undefined,
+    workerSlots: () => 1,
+    poolStatus: () => ({ configured: 1, alive: 0, busy: 0 }),
   },
   shutdownBiowasmEngine: async () => undefined,
 }));

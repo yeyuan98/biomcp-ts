@@ -83,6 +83,28 @@ large enough to hit the 2 MB capture cap before the doubled section can hide
 the duplicate, leaving flagged (`is_truncated`) output. `pileup` also assumes
 sorted input.
 
+### Worker pool (`ANALYSIS_BIOWASM_WORKERS`)
+
+The engine is a pool of serialized workers. With the default `1` every run
+serializes exactly as before; set `ANALYSIS_BIOWASM_WORKERS=N` (≥ 1) and
+**concurrent tool calls execute in parallel** on N single-threaded wasm
+workers — one long VCF stream no longer blocks the other calls (each worker
+runs its own copy of the tools with its own virtual filesystem; host inputs
+are mounted read-only per worker, so parallel mounts of the same file are
+safe). Extra workers spawn lazily: a call that would queue while every
+existing worker is busy reserves one more (up to N) and awaits its ~2–3 s
+bootstrap; a spawn failure is remembered — no retry storms — and the call
+queues instead. Cancellation, timeouts, and crashes isolate to their own
+worker (the rest of the pool keeps running); artifact ids are pool-global
+(they resolve to host files). Progress stays per-call. Memory: each worker
+carries its own V8 heap (capped at 2 GB) plus wasm linear memory, and
+`ANALYSIS_BIOWASM_MEM_LIMIT_MB` is a whole-process watermark covering the
+pool — size N with `N × ~2 GB` comfortably inside your budget.
+`analysis_biowasm_session_info` reports the pool status (configured / alive /
+busy). The wasm builds themselves are single-threaded (no pthreads), so a
+single call's throughput never changes — the pool buys concurrency across
+calls.
+
 ### `analysis_bcf_summary`
 
 What is in this VCF/BCF? Variant record count — instantly from the index when
@@ -159,7 +181,8 @@ watermark `ANALYSIS_BIOWASM_MEM_LIMIT_MB` (default 2048); per-run output byte
 budget 2 GB. bedtools loads the B track into the wasm heap unless
 `sorted_inputs` is set — prefer sorted or bounded B tracks. bcftools is
 pinned at 1.10 (CDN availability; newer subcommands may be absent). Runs
-serialize on one worker; CRAM without an embedded reference needs a `faidx`
+serialize per worker (`ANALYSIS_BIOWASM_WORKERS`, default 1; see "Worker
+pool" above); CRAM without an embedded reference needs a `faidx`
 reference. wasm builds historically lose exit statuses: the biowasm glue's
 `callMain` swallows the Emscripten `ExitStatus` on every path, so failures
 used to render as `exit code 0`. biomcp recovers real statuses by calling the
