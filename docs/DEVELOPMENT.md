@@ -56,6 +56,26 @@ npm run test:integration
 docker run --rm -d -p 3306:3306 -e MYSQL_ROOT_PASSWORD=secret -e MYSQL_DATABASE=bio mysql:8.4
 ```
 
+### Agent tests (user-agent E2E)
+
+`agent-test/` holds standardized user-agent (LLM) E2E tests for the MCP tools:
+each test defines a prompt plus objective checks, and the single-file runner
+`agent-test/run.mjs` executes it via the host `opencode` CLI against the built
+bundle, then grades the recorded session log mechanically (rubric flags are the
+only human step). Needs `npm run build` and an authenticated `opencode`; see
+[agent-test/README.md](../agent-test/README.md) for the check vocabulary,
+fixture provisioning, and the test index.
+
+```bash
+node agent-test/run.mjs --list                        # index table
+node agent-test/run.mjs --only biowasm-q03-point-depth
+```
+
+Exit codes: `0` all PASS/PASS*/SKIP-only, `1` any FAIL, `2` harness
+ERROR/INTERRUPTED. Logs, per-rep `result.json`, `summary.json`, and
+provenance land under `agent-test/.runs/` (gitignored; complete reps are
+reused across runs unless `--force`).
+
 ## Publishing
 
 ```bash
@@ -76,3 +96,4 @@ Version lives in `package.json`; notable changes go to [CHANGELOG.md](../CHANGEL
 | `src/transform/` | Upstream payload → normalized schema mappers |
 | `scripts/` | Self-contained ETL scripts for API-less external databases (not part of the npm package); orchestrated via Makefile targets, e.g. `make depmap-build` — see [scripts/external-databases/](../scripts/external-databases/README.md) |
 | `docs/` | Feature guides (`DATABASE.md`, `ENV-VARS.md`, `AGENT-INSTALL.md`) |
+| `agent-test/` | User-agent (LLM) E2E tests for the analysis tools — see [agent-test/README.md](../agent-test/README.md) |

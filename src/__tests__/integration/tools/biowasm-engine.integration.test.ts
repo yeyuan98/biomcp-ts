@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { biowasmCacheStatePath } from '../../../biowasm/registry.js';
-import { biowasmEngine, shutdownBiowasmEngine, type BiowasmRunResult } from '../../../biowasm/engine.js';
+import { biowasmEngine, BiowasmCancelledError, shutdownBiowasmEngine, type BiowasmRunResult } from '../../../biowasm/engine.js';
 import { canonicalizeSource, type ResolvedSource } from '../../../biowasm/validate.js';
 import { runBamViewRegion, runBcfSummary } from '../../../biowasm/analyzers.js';
 
@@ -86,6 +86,36 @@ function descendingSam(): string {
   ].join('\n') + '\n';
 }
 
+/**
+ * Cross-reference order regression: read3 (chr2) precedes read4 (chr1:300),
+ * violating coordinate order across references (within chr1 the order is
+ * ascending, so the native "Data is not position sorted" guard never fires).
+ */
+function crossRefUnsortedSam(): string {
+  return [
+    '@HD\tVN:1.6\tSO:coordinate',
+    '@SQ\tSN:chr1\tLN:1000',
+    '@SQ\tSN:chr2\tLN:900',
+    'read1\t0\tchr1\t100\t60\t4M2I4M\t=\t500\t404\tAAAAAAAAAA\t!!!!!!!!!!',
+    'read2\t0\tchr1\t200\t60\t10M\t=\t600\t500\tCCCCCCCCCC\t!!!!!!!!!!',
+    'read3\t16\tchr2\t150\t60\t10M\t=\t650\t600\tGGGGGGGGGG\t!!!!!!!!!!',
+    'read4\t0\tchr1\t300\t60\t10M\t=\t700\t600\tTTTTTTTTTT\t!!!!!!!!!!',
+  ].join('\n') + '\n';
+}
+
+/** Same reads as crossRefUnsortedSam, coordinate-sorted: read4 (chr1) before read3 (chr2). */
+function crossRefSortedSam(): string {
+  return [
+    '@HD\tVN:1.6\tSO:coordinate',
+    '@SQ\tSN:chr1\tLN:1000',
+    '@SQ\tSN:chr2\tLN:900',
+    'read1\t0\tchr1\t100\t60\t4M2I4M\t=\t500\t404\tAAAAAAAAAA\t!!!!!!!!!!',
+    'read2\t0\tchr1\t200\t60\t10M\t=\t600\t500\tCCCCCCCCCC\t!!!!!!!!!!',
+    'read4\t0\tchr1\t300\t60\t10M\t=\t700\t600\tTTTTTTTTTT\t!!!!!!!!!!',
+    'read3\t16\tchr2\t150\t60\t10M\t=\t650\t600\tGGGGGGGGGG\t!!!!!!!!!!',
+  ].join('\n') + '\n';
+}
+
 const BED_A = ['chr1\t10\t20', 'chr1\t18\t30', 'chr1\t100\t150', 'chr2\t5\t15'].join('\n') + '\n';
 const BED_B = ['chr1\t15\t25', 'chr2\t10\t12'].join('\n') + '\n';
 
@@ -135,6 +165,8 @@ function generateBigSam(hostPath: string): number {
 const WORK = join(tmpdir(), `biomcp-biowasm-integration-${Date.now()}`);
 let bigSamPath = '';
 let bigSamBytes = 0;
+/** Shared by the cancel test: the indexed big-BAM mounts built by the lazy-mount test above it. */
+let lazyMounts: Array<{ hostPath: string; vfsPath: string }> | null = null;
 
 beforeAll(async () => {
   mkdirSync(WORK, { recursive: true });
@@ -281,6 +313,7 @@ maybe('biowasm engine (integration, real wasm tools)', () => {
       { hostPath: bamPath, vfsPath: '/shared/data/m.bam' },
       { hostPath: baiPath, vfsPath: '/shared/data/m.bam.bai' },
     ];
+    lazyMounts = mounts;
     const full = await run({
       tool: 'samtools',
       args: ['view', '-c', '/shared/data/m.bam'],
@@ -485,6 +518,45 @@ maybe('biowasm engine (integration, real wasm tools)', () => {
     ).rejects.toThrow(/Data is not position sorted/);
   }, 300_000);
 
+  it('indexless depth rejects cross-reference order regressions (samtools depth -a doubles them silently)', async () => {
+    await expect(
+      runBamViewRegion(
+        canonicalizeSource({ content: crossRefUnsortedSam() }),
+        { chrom: 'chr1', start: 90, end: 310 },
+        'depth',
+        undefined,
+        { format: 'json' as const, topN: 50, includeContent: false },
+      ),
+    ).rejects.toThrow(/coordinate-sorted/);
+  }, 300_000);
+
+  it('indexless depth on the coordinate-sorted twin emits exactly one row per position', async () => {
+    const res = await runBamViewRegion(
+      canonicalizeSource({ content: crossRefSortedSam() }),
+      { chrom: 'chr1', start: 90, end: 310 },
+      'depth',
+      undefined,
+      { format: 'json' as const, topN: 50, includeContent: false },
+    );
+    const parsed = JSON.parse(res.text) as { kind: string; region: string; positions: number; depth: number[] };
+    expect(parsed.kind).toBe('bam_depth');
+    expect(parsed.region).toBe('chr1:90-310');
+    // [90, 310] holds 221 positions; positions === depth.length === 221 proves
+    // one entry per position (the analyzer rejects duplicated rows outright).
+    expect(parsed.positions).toBe(221);
+    expect(parsed.depth).toHaveLength(221);
+    // read4 anchors chr1:300 (10M → 300-309) → index 300-90 = 210.
+    expect(parsed.depth[210]).toBe(1);
+    // read1 anchors chr1:100 (4M2I4M consumes 8 reference bases: 100-107).
+    expect(parsed.depth[10]).toBe(1);
+    expect(parsed.depth[17]).toBe(1);
+    expect(parsed.depth[18]).toBe(0);
+    // The gap 290..299 (indices 200..209) carries no coverage.
+    for (let idx = 290 - 90; idx <= 299 - 90; idx++) {
+      expect(parsed.depth[idx]).toBe(0);
+    }
+  }, 300_000);
+
   it('bcf_summary reports per-contig record counts when an index exists', async () => {
     const gz = await run({
       tool: 'bcftools',
@@ -524,4 +596,39 @@ maybe('biowasm engine (integration, real wasm tools)', () => {
       { contig: 'chr2', length: 1000, records: 1 },
     ]);
   }, 300_000);
+
+  // Runs LAST on purpose: cancelling poisons the worker and clears the engine
+  // artifact map, which would break earlier tests that rely on staged
+  // /shared/data files surviving across runs.
+  it('mid-run cancellation: BiowasmCancelledError within the kill grace, then a fresh worker succeeds', async () => {
+    const mounts = lazyMounts;
+    expect(mounts).toBeTruthy();
+    const controller = new AbortController();
+    const progressBytes: number[] = [];
+    let abortAt = 0;
+    // Full-stream count over the indexed BAM: the streaming pass the cancel
+    // path targets (the 206 MB VCF fixture is not provisioned by this suite).
+    const pending = biowasmEngine.run({
+      tool: 'samtools',
+      args: ['view', '-c', '/shared/data/m.bam'],
+      mounts: mounts!,
+      stdout: 'capture',
+      signal: controller.signal,
+      onProgress: (p) => {
+        progressBytes.push(p.bytes);
+        if (!controller.signal.aborted) {
+          abortAt = Date.now();
+          controller.abort(); // cancel right after the first progress event
+        }
+      },
+    });
+    const err = (await pending.catch((e: unknown) => e)) as Error;
+    expect(err).toBeInstanceOf(BiowasmCancelledError);
+    expect(err.message).toBe('cancelled by client');
+    expect(progressBytes.length).toBeGreaterThanOrEqual(1);
+    expect(Date.now() - abortAt).toBeLessThan(3_000); // kill lands within the grace window
+    // The cancelled run poisoned the worker; the next call respawns and succeeds.
+    const follow = await run({ tool: 'samtools', args: ['--version'], stdout: 'capture' });
+    expect(follow.exitCode).toBe(0);
+  }, 120_000);
 });

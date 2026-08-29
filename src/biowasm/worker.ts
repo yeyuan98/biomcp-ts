@@ -17,6 +17,12 @@ import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve as pathResolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parentPort, workerData } from 'node:worker_threads';
+import {
+  createProgressThrottle,
+  PROGRESS_MIN_INTERVAL_MS,
+  PROGRESS_MSG_TYPE,
+  type ProgressThrottle,
+} from '../wasmcore/progress.js';
 import { runMain, type RunMainModule } from './run-main.js';
 
 // ---------------------------------------------------------------------------
@@ -229,11 +235,58 @@ const locationShim = {
 
 const ioStats = new Map<string, BiowasmIoStat>();
 
+// ---------------------------------------------------------------------------
+// Per-run progress emission (wasmcore 'progress' convention). runMain blocks
+// the worker event loop, so emission happens synchronously inside the read
+// path (worker_threads postMessage is async-delivered but sync to call) and is
+// throttled to at most one message per PROGRESS_MIN_INTERVAL_MS.
+// ---------------------------------------------------------------------------
+
+const STDERR_TAIL_CHARS = 200;
+
+let progressRun: { runId: string | number; startedMs: number; throttle: ProgressThrottle } | null = null;
+let runIoBytes = 0;
+let stderrTail = '';
+
+function beginRunProgress(runId: unknown): void {
+  progressRun =
+    typeof runId === 'string' || typeof runId === 'number'
+      ? { runId, startedMs: Date.now(), throttle: createProgressThrottle(PROGRESS_MIN_INTERVAL_MS) }
+      : null;
+  runIoBytes = 0;
+  stderrTail = '';
+}
+
+function endRunProgress(): void {
+  progressRun = null;
+}
+
+function noteStderrLine(text: string): void {
+  stderrTail = stderrTail ? `${stderrTail}\n${text}` : text;
+  if (stderrTail.length > STDERR_TAIL_CHARS * 2) {
+    stderrTail = stderrTail.slice(-STDERR_TAIL_CHARS);
+  }
+}
+
+function emitRunProgress(): void {
+  const run = progressRun;
+  if (!run) return;
+  const now = Date.now();
+  run.throttle.maybeEmit(now, () => {
+    const elapsed = Math.round((now - run.startedMs) / 1000);
+    let message = `${elapsed}s, ${(runIoBytes / (1024 * 1024)).toFixed(1)} MB read`;
+    if (stderrTail) message += ` | stderr: ${stderrTail.slice(-STDERR_TAIL_CHARS)}`;
+    post({ type: PROGRESS_MSG_TYPE, runId: run.runId, value: runIoBytes, message });
+  });
+}
+
 function ioBump(hostPath: string, bytes: number): void {
   const cur = ioStats.get(hostPath) ?? { bytes: 0, reads: 0 };
   cur.bytes += bytes;
   cur.reads += 1;
   ioStats.set(hostPath, cur);
+  runIoBytes += bytes;
+  emitRunProgress();
 }
 
 // ---------------------------------------------------------------------------
@@ -795,8 +848,16 @@ async function loadTool(name: string): Promise<void> {
   const imported = (await import(jsUrl.href)) as { default?: ModuleFactory } & ModuleFactory;
   const factory = imported.default ?? imported;
   const Module = await factory({
-    print: (text: unknown) => currentOutSink?.line(String(text ?? '')),
-    printErr: (text: unknown) => currentErrSink?.line(String(text ?? '')),
+    print: (text: unknown) => {
+      currentOutSink?.line(String(text ?? ''));
+      emitRunProgress();
+    },
+    printErr: (text: unknown) => {
+      const line = String(text ?? '');
+      currentErrSink?.line(line);
+      noteStderrLine(line);
+      emitRunProgress();
+    },
     wasmBinary: readFileSync(join(assetsDir, `${name}.wasm`)),
     noExitRuntime: true,
   });
@@ -853,6 +914,7 @@ function sanitizeInputName(name: string): string {
 }
 
 async function handleRun(msg: {
+  runId?: string | number;
   tool: string;
   args: string[];
   inputs?: BiowasmWorkerInput[];
@@ -982,11 +1044,14 @@ port!.on('message', (raw: unknown) => {
   }
   if (msg.cmd === 'run') {
     (async () => {
+      beginRunProgress((msg as { runId?: string | number }).runId);
       try {
         const response = await handleRun(msg as unknown as Parameters<typeof handleRun>[0]);
         post({ id: msg.id, ok: true, ...response });
       } catch (err) {
         post({ id: msg.id, ok: false, error: String((err as Error)?.message ?? err) });
+      } finally {
+        endRunProgress();
       }
     })();
     return;

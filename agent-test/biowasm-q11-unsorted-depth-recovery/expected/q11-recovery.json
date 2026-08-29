@@ -1,0 +1,22 @@
+{
+  "region": "chr1:90-310",
+  "positions": 221,
+  "nonzero_runs": [
+    {
+      "start": 100,
+      "end": 107,
+      "depth": 1
+    },
+    {
+      "start": 200,
+      "end": 209,
+      "depth": 1
+    },
+    {
+      "start": 300,
+      "end": 309,
+      "depth": 1
+    }
+  ],
+  "reads_in_region": 3
+}

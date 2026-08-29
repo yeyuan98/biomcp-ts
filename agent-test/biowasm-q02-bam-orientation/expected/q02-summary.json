@@ -1,0 +1,26 @@
+{
+  "tool_call": "biomcp_analysis_bam_summary (format=json)",
+  "sample": "NA12878",
+  "read_groups": 1,
+  "total_reads": 3245545,
+  "mapped_reads": 3227627,
+  "mapped_pct": 99.45,
+  "flagstat": {
+    "in total": "3245545 + 0",
+    "primary": "3245545 + 0",
+    "secondary": "0 + 0",
+    "supplementary": "0 + 0",
+    "duplicates": "203740 + 0",
+    "primary duplicates": "203740 + 0",
+    "mapped": "3227627 + 0",
+    "primary mapped": "3227627 + 0",
+    "paired in sequencing": "3228205 + 0",
+    "read1": "1614196 + 0"
+  },
+  "contig_20": {
+    "chrom": "20",
+    "length": 63025520,
+    "mapped": 3227627,
+    "unmapped": 17918
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "tool_call": "samtools depth -a -r 20:10000000-10000000 (engine, indexed)",
+  "region": "20:10000000-10000000",
+  "rows": [
+    {
+      "chrom": "20",
+      "position": 10000000,
+      "depth": 5
+    }
+  ],
+  "depth": 5
+}

@@ -138,7 +138,7 @@ jest.unstable_mockModule('../../biowasm/registry.js', () => ({
   BiowasmAssetError: class BiowasmAssetError extends Error {},
 }));
 
-const ENV_KEYS = ['ANALYSIS_BIOWASM_TIMEOUT_MS', 'ANALYSIS_BIOWASM_MEM_LIMIT_MB', 'ANALYSIS_BIOWASM_WORKER_PATH', 'BIOMCP_CACHE_DIR'] as const;
+const ENV_KEYS = ['ANALYSIS_BIOWASM_TIMEOUT_MS', 'ANALYSIS_BIOWASM_MAX_RUN_MS', 'ANALYSIS_BIOWASM_MEM_LIMIT_MB', 'ANALYSIS_BIOWASM_WORKER_PATH', 'ANALYSIS_BIOWASM_WORKERS', 'BIOMCP_CACHE_DIR'] as const;
 const SAVED_ENV: Record<string, string | undefined> = {};
 
 const OK_RUN = {
@@ -358,5 +358,442 @@ describe('biowasm engine (worker boundary mocked)', () => {
     const result = await biowasmEngine.run({ tool: 'samtools', args: ['view'] });
     expect(result.exitCode).toBe(0);
     expect(WorkerHostMock).toHaveBeenCalledTimes(2);
+  });
+
+  // -------------------------------------------------------------------------
+  // Cancellation (Fix B) + progress routing (Fix A), worker boundary mocked.
+  // -------------------------------------------------------------------------
+
+  it('rejects a queued run whose signal aborted before dequeue, without spawning it', async () => {
+    const { biowasmEngine, BiowasmCancelledError } = await importEngine();
+    await biowasmEngine.ensureReady();
+    const host = currentHost();
+    host.setDefault(() => new Promise((resolve) => setTimeout(() => resolve({ ...OK_RUN }), 80)));
+    const controller = new AbortController();
+    const first = biowasmEngine.run({ tool: 'samtools', args: ['a'] });
+    const second = biowasmEngine.run({ tool: 'samtools', args: ['b'], signal: controller.signal });
+    setTimeout(() => controller.abort(), 20); // abort while `second` is still queued
+    await expect(first).resolves.toMatchObject({ exitCode: 0 });
+    await expect(second).rejects.toBeInstanceOf(BiowasmCancelledError);
+    await expect(second).rejects.toThrow('cancelled before start');
+    const runCmds = host.requests.filter((r) => r.cmd === 'run');
+    expect(runCmds).toHaveLength(1);
+    expect(runCmds[0]).toMatchObject({ args: ['a'] });
+  });
+
+  it('aborts a running run: host.kill called, kill rejection reclassified as BiowasmCancelledError', async () => {
+    const { biowasmEngine, BiowasmCancelledError, BiowasmRuntimeUnresponsiveError } = await importEngine();
+    await biowasmEngine.ensureReady();
+    const host = currentHost();
+    host.setDefault(null); // hang; kill() rejects the pending RPC with the generic message
+    const controller = new AbortController();
+    const pending = biowasmEngine.run({ tool: 'samtools', args: ['view'], signal: controller.signal });
+    setTimeout(() => controller.abort(), 25);
+    const err = (await pending.catch((e: unknown) => e)) as Error;
+    expect(err).toBeInstanceOf(BiowasmCancelledError);
+    expect(err).not.toBeInstanceOf(BiowasmRuntimeUnresponsiveError);
+    expect(err.message).toBe('cancelled by client');
+    expect(host.killCalls).toBeGreaterThanOrEqual(1);
+  });
+
+  it('routes worker progress messages to the current run and ignores unknown runIds', async () => {
+    const { biowasmEngine } = await importEngine();
+    await biowasmEngine.ensureReady();
+    const host = currentHost();
+    const events: Array<{ bytes: number; elapsedMs: number; message?: string }> = [];
+    host.setDefault(
+      () =>
+        new Promise((resolve) => {
+          const opts = host.options as { onNotification?: (m: unknown) => void };
+          const runId = host.requests[host.requests.length - 1]!.runId;
+          opts.onNotification?.({ type: 'progress', runId: 999_999, value: 7 }); // unknown → ignored
+          opts.onNotification?.({ type: 'progress', runId, value: 42, message: 'streaming' });
+          opts.onNotification?.({ type: 'progress', runId, value: 50 });
+          resolve({ ...OK_RUN });
+        }),
+    );
+    const result = await biowasmEngine.run({
+      tool: 'samtools',
+      args: ['view'],
+      stdout: 'capture',
+      onProgress: (p) => events.push(p),
+    });
+    expect(result.exitCode).toBe(0);
+    expect(events.map((e) => e.bytes)).toEqual([42, 50]);
+    expect(events[0]!.message).toBe('streaming');
+    expect(events[0]!.elapsedMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('ignores stale progress messages emitted after the run was killed', async () => {
+    const { biowasmEngine, BiowasmCancelledError } = await importEngine();
+    await biowasmEngine.ensureReady();
+    const host = currentHost();
+    host.setDefault(null);
+    const events: unknown[] = [];
+    const controller = new AbortController();
+    const pending = biowasmEngine.run({
+      tool: 'samtools',
+      args: ['view'],
+      signal: controller.signal,
+      onProgress: () => events.push('late'),
+    });
+    setTimeout(() => controller.abort(), 25);
+    await expect(pending).rejects.toBeInstanceOf(BiowasmCancelledError);
+    const opts = host.options as { onNotification?: (m: unknown) => void };
+    expect(() => opts.onNotification?.({ type: 'progress', runId: 1, value: 99, message: 'from the killed worker' })).not.toThrow();
+    expect(events).toHaveLength(0);
+  });
+
+  it('progress activity resets the inactivity deadline but not the max-run ceiling', async () => {
+    process.env.ANALYSIS_BIOWASM_TIMEOUT_MS = '120';
+    process.env.ANALYSIS_BIOWASM_MAX_RUN_MS = '420';
+    const { biowasmEngine, BiowasmTimeoutError } = await importEngine();
+    await biowasmEngine.ensureReady();
+    const host = currentHost();
+    let bytes = 0;
+    host.setDefault(
+      () =>
+        new Promise((resolve) => {
+          const opts = host.options as { onNotification?: (m: unknown) => void };
+          const runId = host.requests[host.requests.length - 1]!.runId;
+          const iv = setInterval(() => {
+            bytes += 10;
+            opts.onNotification?.({ type: 'progress', runId, value: bytes });
+          }, 50);
+          setTimeout(() => {
+            clearInterval(iv);
+            resolve({ ...OK_RUN }); // would finish at 600 ms — beyond the 420 ms ceiling
+          }, 600);
+        }),
+    );
+    const started = Date.now();
+    await expect(biowasmEngine.run({ tool: 'samtools', args: ['view'] })).rejects.toBeInstanceOf(BiowasmTimeoutError);
+    const elapsed = Date.now() - started;
+    // Steady progress kept the run alive past the 120 ms inactivity deadline…
+    expect(elapsed).toBeGreaterThanOrEqual(380);
+    // …but the 420 ms absolute ceiling still fired.
+    expect(elapsed).toBeLessThan(2_000);
+    expect(host.killCalls).toBeGreaterThanOrEqual(1);
+  });
+
+  it('a run with steady progress outlives the inactivity deadline when under the ceiling', async () => {
+    process.env.ANALYSIS_BIOWASM_TIMEOUT_MS = '120';
+    process.env.ANALYSIS_BIOWASM_MAX_RUN_MS = '5000';
+    const { biowasmEngine } = await importEngine();
+    await biowasmEngine.ensureReady();
+    const host = currentHost();
+    host.setDefault(
+      () =>
+        new Promise((resolve) => {
+          const opts = host.options as { onNotification?: (m: unknown) => void };
+          const runId = host.requests[host.requests.length - 1]!.runId;
+          const iv = setInterval(() => opts.onNotification?.({ type: 'progress', runId, value: 1 }), 50);
+          setTimeout(() => {
+            clearInterval(iv);
+            resolve({ ...OK_RUN }); // 350 ms > the 120 ms inactivity deadline
+          }, 350);
+        }),
+    );
+    const result = await biowasmEngine.run({ tool: 'samtools', args: ['view'] });
+    expect(result.exitCode).toBe(0);
+    expect(host.killCalls).toBe(0);
+  });
+
+
+  // -------------------------------------------------------------------------
+  // Worker pool (ANALYSIS_BIOWASM_WORKERS > 1).
+  // -----------------------------------------------------------------
+
+  /** Per-instance default-impl override with restore; index = spawn order. */
+  function installImpl(
+    implFor: (host: FakeWorkerHost, index: number) => () => Promise<Record<string, unknown>>,
+    opts: { failInitFor?: (index: number) => boolean } = {},
+  ): () => void {
+    const orig = WorkerHostMock.getMockImplementation();
+    WorkerHostMock.mockImplementation((path: string, options: unknown) => {
+      const host = new FakeWorkerHost(path, options);
+      const index = FakeWorkerHost.instances.length - 1;
+      // init must always answer (even when the default impl blocks) unless
+      // the test deliberately fails a slot's bootstrap.
+      host.onCmd('init', async () =>
+        opts.failInitFor?.(index) ? ({ ok: false, error: 'second worker cannot start' } as Record<string, unknown>) : { ok: true },
+      );
+      host.setDefault(implFor(host, index));
+      return host;
+    });
+    return () => WorkerHostMock.mockImplementation(orig!);
+  }
+
+  function gate(): { promise: Promise<void>; resolve: () => void } {
+    let resolve!: () => void;
+    const promise = new Promise<void>((res) => (resolve = res));
+    return { promise, resolve };
+  }
+
+  it('pool=2: two concurrent runs execute on two workers concurrently', async () => {
+    process.env.ANALYSIS_BIOWASM_WORKERS = '2';
+    const { biowasmEngine } = await importEngine();
+    const release = gate();
+    const restore = installImpl((_host, index) =>
+      index === 0 ? () => release.promise.then(() => ({ ...OK_RUN })) : async () => ({ ...OK_RUN }),
+    );
+    try {
+      await biowasmEngine.ensureReady();
+      const host0 = FakeWorkerHost.instances[0]!;
+      const first = biowasmEngine.run({ tool: 'samtools', args: ['a'] });
+      await new Promise((resolve) => setTimeout(resolve, 20)); // first is in flight
+      const second = biowasmEngine.run({ tool: 'samtools', args: ['b'] });
+      await new Promise((resolve) => setTimeout(resolve, 60)); // contention spawns slot 1
+      expect(FakeWorkerHost.instances).toHaveLength(2);
+      const host1 = FakeWorkerHost.instances[1]!;
+      expect(host1.requests.some((r) => r.cmd === 'run' && (r.args as string[])?.[0] === 'b')).toBe(true);
+      expect(host0.requests.some((r) => r.cmd === 'run' && (r.args as string[])?.[0] === 'a')).toBe(true);
+      release.resolve();
+      await expect(first).resolves.toMatchObject({ exitCode: 0 });
+      await expect(second).resolves.toMatchObject({ exitCode: 0 });
+      expect(biowasmEngine.poolStatus()).toMatchObject({ configured: 2, alive: 2 });
+    } finally {
+      restore();
+    }
+  });
+
+  it('pool default 1: sequential calls never spawn a second worker', async () => {
+    const { biowasmEngine } = await importEngine();
+    expect(biowasmEngine.workerSlots()).toBe(1);
+    await biowasmEngine.ensureReady();
+    await biowasmEngine.run({ tool: 'samtools', args: ['a'] });
+    await biowasmEngine.run({ tool: 'samtools', args: ['b'] });
+    expect(FakeWorkerHost.instances).toHaveLength(1);
+  });
+
+  it('pool=2: cancelling one run kills only that slot; a concurrent run on the other slot survives', async () => {
+    process.env.ANALYSIS_BIOWASM_WORKERS = '2';
+    const { biowasmEngine, BiowasmCancelledError } = await importEngine();
+    const release = gate();
+    const restore = installImpl((_host, index) =>
+      index === 0 ? () => release.promise.then(() => ({ ...OK_RUN })) : async () => ({ ...OK_RUN }),
+    );
+    try {
+      await biowasmEngine.ensureReady();
+      const host0 = FakeWorkerHost.instances[0]!;
+      const controller = new AbortController();
+      const cancelled = biowasmEngine.run({ tool: 'samtools', args: ['a'], signal: controller.signal });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const survivor = biowasmEngine.run({ tool: 'samtools', args: ['b'] });
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      const host1 = FakeWorkerHost.instances[1]!;
+      controller.abort(); // kill slot 0's worker mid-run
+      await expect(cancelled).rejects.toBeInstanceOf(BiowasmCancelledError);
+      expect(host0.killCalls).toBeGreaterThanOrEqual(1);
+      expect(host1.killCalls).toBe(0);
+      await expect(survivor).resolves.toMatchObject({ exitCode: 0 });
+      expect(host1.requests.some((r) => r.cmd === 'run' && (r.args as string[])?.[0] === 'b')).toBe(true);
+      release.resolve();
+    } finally {
+      restore();
+    }
+  });
+
+  it('pool=1: a run queued behind a cancelled run survives via respawn instead of failing', async () => {
+    const { biowasmEngine, BiowasmCancelledError } = await importEngine();
+    await biowasmEngine.ensureReady();
+    const host0 = currentHost();
+    host0.setDefault(null); // hang every request on this worker
+    const controller = new AbortController();
+    const first = biowasmEngine.run({ tool: 'samtools', args: ['a'], signal: controller.signal });
+    const second = biowasmEngine.run({ tool: 'samtools', args: ['b'] }); // queued behind first
+    setTimeout(() => controller.abort(), 25);
+    await expect(first).rejects.toBeInstanceOf(BiowasmCancelledError);
+    // The queued run must NOT fail with BiowasmRuntimeUnresponsiveError: the
+    // slot respawns (a fresh worker) and the run completes.
+    await expect(second).resolves.toMatchObject({ exitCode: 0 });
+    expect(FakeWorkerHost.instances.length).toBeGreaterThanOrEqual(2);
+    const respawned = FakeWorkerHost.instances[FakeWorkerHost.instances.length - 1]!;
+    expect(respawned.requests.some((r) => r.cmd === 'run' && (r.args as string[])?.[0] === 'b')).toBe(true);
+  });
+
+  it('pool=2: concurrent same-vfsPath outputs get slot-scoped flush acks', async () => {
+    process.env.ANALYSIS_BIOWASM_WORKERS = '2';
+    const { biowasmEngine } = await importEngine();
+    const release = gate();
+    const flusher = (host: FakeWorkerHost) => () =>
+      new Promise<Record<string, unknown>>((resolve) => {
+        const opts = host.options as { onNotification?: (m: unknown) => void };
+        opts.onNotification?.({ cmd: 'flush', vfsPath: '/shared/out/same.txt', chunk: new Uint8Array(7) });
+        resolve({ ...OK_RUN, outputs: [{ vfsPath: '/shared/out/same.txt', size: 7 }] });
+      });
+    const restore = installImpl((host, _index) => () => release.promise.then(flusher(host)));
+    try {
+      await biowasmEngine.ensureReady();
+      const first = biowasmEngine.run({ tool: 'samtools', args: ['a'], outputs: [{ vfsPath: '/shared/out/same.txt' }] });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const second = biowasmEngine.run({ tool: 'samtools', args: ['b'], outputs: [{ vfsPath: '/shared/out/same.txt' }] });
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      const host0 = FakeWorkerHost.instances[0]!;
+      const host1 = FakeWorkerHost.instances[1]!;
+      release.resolve();
+      const [r1, r2] = await Promise.all([first, second]);
+      // Each run got its own artifact file (slot-scoped state)…
+      expect(r1.outputs[0]!.hostPath).not.toBe(r2.outputs[0]!.hostPath);
+      // …and each ack landed on the worker that flushed.
+      const ack0 = host0.notifications.find((n) => (n as { cmd?: string }).cmd === 'flush-ack');
+      const ack1 = host1.notifications.find((n) => (n as { cmd?: string }).cmd === 'flush-ack');
+      expect(ack0).toMatchObject({ vfsPath: '/shared/out/same.txt', ackedBytes: 7, hostPath: r1.outputs[0]!.hostPath });
+      expect(ack1).toMatchObject({ vfsPath: '/shared/out/same.txt', ackedBytes: 7, hostPath: r2.outputs[0]!.hostPath });
+    } finally {
+      restore();
+    }
+  });
+
+  it('pool=2: runId reuse across slots — progress stays slot-local', async () => {
+    process.env.ANALYSIS_BIOWASM_WORKERS = '2';
+    const { biowasmEngine } = await importEngine();
+    const release = gate();
+    const restore = installImpl((host, index) =>
+      index === 0
+        ? () =>
+            release.promise.then(() => {
+              const opts = host.options as { onNotification?: (m: unknown) => void };
+              opts.onNotification?.({ type: 'progress', runId: 1, value: 111 });
+              return { ...OK_RUN };
+            })
+        : () =>
+            new Promise((resolve) => {
+              // Slot 1 mints its own runId 1 with a DIFFERENT value: slot 0's
+              // run (also runId 1) must not receive it.
+              const opts = host.options as { onNotification?: (m: unknown) => void };
+              opts.onNotification?.({ type: 'progress', runId: 1, value: 222 });
+              resolve({ ...OK_RUN });
+            }),
+    );
+    try {
+      await biowasmEngine.ensureReady();
+      const eventsA: number[] = [];
+      const eventsB: number[] = [];
+      const first = biowasmEngine.run({ tool: 'samtools', args: ['a'], onProgress: (p) => eventsA.push(p.bytes) });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const second = biowasmEngine.run({ tool: 'samtools', args: ['b'], onProgress: (p) => eventsB.push(p.bytes) });
+      await new Promise((resolve) => setTimeout(resolve, 60)); // second ran on slot 1
+      release.resolve(); // slot 0's run reports and settles
+      await Promise.all([first, second]);
+      expect(eventsA).toEqual([111]);
+      expect(eventsB).toEqual([222]);
+    } finally {
+      restore();
+    }
+  });
+
+  it('pool=2: a failed lazy spawn degrades to queueing and is memoized (no retry storm)', async () => {
+    process.env.ANALYSIS_BIOWASM_WORKERS = '2';
+    const { biowasmEngine } = await importEngine();
+    const release = gate();
+    // The second spawn's init RPC fails permanently; slot 0's runs block on
+    // the gate so the second call contends.
+    const restore = installImpl(
+      (_host, index) => (index === 0 ? () => release.promise.then(() => ({ ...OK_RUN })) : async () => ({ ...OK_RUN })),
+      { failInitFor: (index) => index > 0 },
+    );
+    try {
+      await biowasmEngine.ensureReady();
+      const first = biowasmEngine.run({ tool: 'samtools', args: ['a'] });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const second = biowasmEngine.run({ tool: 'samtools', args: ['b'] });
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      release.resolve();
+      await expect(first).resolves.toMatchObject({ exitCode: 0 });
+      await expect(second).resolves.toMatchObject({ exitCode: 0 }); // degraded: queued on slot 0
+      // Further runs must not retry the failed capacity.
+      await biowasmEngine.run({ tool: 'samtools', args: ['c'] });
+      expect(FakeWorkerHost.instances).toHaveLength(2);
+    } finally {
+      restore();
+    }
+  });
+
+  it('clamps invalid ANALYSIS_BIOWASM_WORKERS values to the default 1', async () => {
+    process.env.ANALYSIS_BIOWASM_WORKERS = '0';
+    const { biowasmEngine } = await importEngine();
+    expect(biowasmEngine.workerSlots()).toBe(1);
+  });
+
+  it('pool=3 with systemic spawn failures: callers degrade without unhandled rejections', async () => {
+    process.env.ANALYSIS_BIOWASM_WORKERS = '3';
+    const { biowasmEngine } = await importEngine();
+    const release = gate();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (err: unknown) => unhandled.push(err);
+    process.on('unhandledRejection', onUnhandled);
+    const restore = installImpl(
+      (_host, index) => (index === 0 ? () => release.promise.then(() => ({ ...OK_RUN })) : async () => ({ ...OK_RUN })),
+      { failInitFor: (index) => index > 0 },
+    );
+    try {
+      await biowasmEngine.ensureReady();
+      const first = biowasmEngine.run({ tool: 'samtools', args: ['a'] });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const second = biowasmEngine.run({ tool: 'samtools', args: ['b'] });
+      const third = biowasmEngine.run({ tool: 'samtools', args: ['c'] });
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      // All three spawn capacities were attempted exactly once (slot 0 + two
+      // failed lazies), and every caller survived via the fallback routing.
+      expect(FakeWorkerHost.instances).toHaveLength(3);
+      release.resolve();
+      await expect(first).resolves.toMatchObject({ exitCode: 0 });
+      await expect(second).resolves.toMatchObject({ exitCode: 0 });
+      await expect(third).resolves.toMatchObject({ exitCode: 0 });
+      expect(unhandled).toHaveLength(0);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+      restore();
+    }
+  });
+
+  it('poolStatus counts only booted slots as alive', async () => {
+    process.env.ANALYSIS_BIOWASM_WORKERS = '2';
+    const { biowasmEngine } = await importEngine();
+    // Nothing booted yet: configured reflects the env, alive is zero.
+    expect(biowasmEngine.poolStatus()).toMatchObject({ configured: 2, alive: 0, busy: 0 });
+    await biowasmEngine.ensureReady();
+    expect(biowasmEngine.poolStatus()).toMatchObject({ configured: 2, alive: 1 });
+    // A lazily spawned slot that fails init is removed and not counted.
+    const restore = installImpl((_host, index) => async () => ({ ...OK_RUN }), { failInitFor: (index) => index > 0 });
+    try {
+      const release = gate();
+      FakeWorkerHost.instances[0]!.setDefault(() => release.promise.then(() => ({ ...OK_RUN })));
+      const first = biowasmEngine.run({ tool: 'samtools', args: ['a'] });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const second = biowasmEngine.run({ tool: 'samtools', args: ['b'] });
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      release.resolve();
+      await Promise.all([first, second]);
+      expect(biowasmEngine.poolStatus().alive).toBe(1);
+    } finally {
+      restore();
+    }
+  });
+
+  it('shutdown with a live pool terminates every worker', async () => {
+    process.env.ANALYSIS_BIOWASM_WORKERS = '2';
+    const { biowasmEngine } = await importEngine();
+    const release = gate();
+    const restore = installImpl((_host, index) =>
+      index === 0 ? () => release.promise.then(() => ({ ...OK_RUN })) : async () => ({ ...OK_RUN }),
+    );
+    try {
+      await biowasmEngine.ensureReady();
+      const run = biowasmEngine.run({ tool: 'samtools', args: ['a'] });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      void biowasmEngine.run({ tool: 'samtools', args: ['b'] });
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(FakeWorkerHost.instances).toHaveLength(2);
+      release.resolve();
+      await run;
+      await biowasmEngine.shutdown();
+      for (const host of FakeWorkerHost.instances.slice(0, 2)) {
+        expect(host.terminateCalls).toBe(1);
+      }
+    } finally {
+      restore();
+    }
   });
 });

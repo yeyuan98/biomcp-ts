@@ -1,0 +1,44 @@
+{
+  "id": "biowasm-q09-slice-artifact",
+  "name": "VCF slice artifact chain",
+  "level": "L2",
+  "purpose": "L2 artifact chain: slice a region into a reusable VCF artifact, then count it (269 variants).",
+  "prompt": "Slice 22:17000000-17010000 out of {DATA_DIR}/1kg.chr22.vcf.gz into a reusable file, then tell me how many variants are in the slice.",
+  "externalData": [
+    {
+      "path": "1kg.chr22.vcf.gz",
+      "sha256": "a90c16c4ff2b3196476d506ae13cb3047fae8670163c7c932c4b0239aef3daf5",
+      "bytes": 205612353
+    },
+    {
+      "path": "1kg.chr22.vcf.gz.tbi",
+      "sha256": "27de6b77af65d300bb968e8e372439deb949389e4395eb0dd251f9ba7d73bbed",
+      "bytes": 36251
+    }
+  ],
+  "inlineResources": [],
+  "timeoutMs": 480000,
+  "checks": [
+    {
+      "type": "status",
+      "tool": "biomcp_analysis_bcf_view_region",
+      "status": "completed",
+      "occurrence": 1
+    },
+    {
+      "type": "number_near",
+      "expect": 269,
+      "tolerance": 2,
+      "context": "variant"
+    },
+    {
+      "type": "rubric",
+      "flag": "artifact-reuse",
+      "manual": true,
+      "desc": "Did any later call consume the produced artifact_id (source.artifact_id) instead of re-reading the 205 MB original?"
+    }
+  ],
+  "expectedOutputs": [
+    "expected/q09-count.json"
+  ]
+}

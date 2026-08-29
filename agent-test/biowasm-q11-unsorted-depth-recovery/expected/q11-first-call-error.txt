@@ -1,0 +1,1 @@
+depth of "in-band content (in-a934c1b57d56.sam)" at chr1:90-310 failed: the source is not coordinate-sorted (position chr1:90 was emitted twice — samtools depth silently double-reports order-violating input). Provide an indexed source (a sibling .bai), re-sort it via analysis_biowasm_cli (samtools sort) and retry, or use mode="count"/"reads", which tolerate any order.

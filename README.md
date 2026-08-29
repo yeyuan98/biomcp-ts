@@ -151,7 +151,7 @@ First use starts a ~1 GB WebAssembly R worker and downloads the wasm package bun
 | Tool | Description |
 |------|-------------|
 | `analysis_bam_summary` | Inspect an alignment (SAM/BAM/CRAM): header contigs, sample/read groups, flagstat mapping metrics, per-contig counts via idxstats when indexed — "what's in this BAM?" before region work |
-| `analysis_bam_view_region` | Reads, depth, pileup, or read extraction in a genomic region (samtools view/depth/mpileup); index-driven, returns counts, coverage tables, SAM rows, or a BAM artifact |
+| `analysis_bam_view_region` | Reads, depth, pileup, or read extraction in a genomic region (samtools view/depth/mpileup); indexed sources use fast positional retrieval, indexless sources stream a BED filter (depth requires coordinate-sorted input and detects order violations), returning counts, coverage tables, SAM rows, or a BAM artifact |
 | `analysis_bcf_summary` | Inspect a VCF/BCF: contigs, sample count and names, INFO/FORMAT field inventory from the header |
 | `analysis_bcf_view_region` | Variants in a region as a narrow field projection (bcftools query): chosen columns, sample subsets, expression filters, variant types — or a sliced VCF.gz artifact |
 | `analysis_bed_op` | Interval algebra on BED tracks (bedtools intersect/merge/subtract/coverage/jaccard/sort) with the streaming `-sorted` algorithm for sorted inputs |
@@ -159,7 +159,7 @@ First use starts a ~1 GB WebAssembly R worker and downloads the wasm package bun
 | `analysis_biowasm_session_info` | Biowasm runtime report: pinned tool versions, asset cache state, engine status, retained artifacts, memory |
 | `analysis_biowasm_cli` | Constrained escape hatch: an allowlisted samtools/bedtools/bcftools subcommand with schema-validated args (no shell, paths under /shared only) |
 
-First use downloads checksum-verified wasm assets (~4.5 MB, cached); no extra npm packages. Region queries on real human-scale files are index-driven (~0.2 % of file read). Guide: [docs/BIOWASM-ANALYSIS.md](docs/BIOWASM-ANALYSIS.md).
+First use downloads checksum-verified wasm assets (~4.5 MB, cached); no extra npm packages. Indexed sources answer region queries with fast positional retrieval (~0.2 % of file read); indexless sources fall back to streaming BED filters. Guide: [docs/BIOWASM-ANALYSIS.md](docs/BIOWASM-ANALYSIS.md).
 
 ### Citation Module
 
@@ -187,6 +187,7 @@ Capabilities that ship with the package but stay inactive until enabled. Each li
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Build, test, publish workflow |
 | [docs/development/CI.md](docs/development/CI.md) | CI pipeline, Dependabot automation, auto-merge safety model |
 | [src/server/README.md](src/server/README.md) | Full tool schemas (params, enums, defaults) |
+| [agent-test/README.md](agent-test/README.md) | User-agent E2E tests for the analysis tools |
 
 ## License
 

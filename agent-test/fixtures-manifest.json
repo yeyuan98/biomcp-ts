@@ -1,0 +1,37 @@
+{
+  "record_id": 22156404,
+  "doi": "10.5281/zenodo.22156404",
+  "concept_doi": "10.5281/zenodo.22156403",
+  "published_at": "2026-08-29T06:27:58.799Z",
+  "license": "cc-zero",
+  "files": [
+    {
+      "name": "1kg.chr22.vcf.gz",
+      "bytes": 205612353,
+      "sha256": "a90c16c4ff2b3196476d506ae13cb3047fae8670163c7c932c4b0239aef3daf5",
+      "md5": "afdf383a32fcef939ca8a468bef23759",
+      "url": "https://zenodo.org/records/22156404/files/1kg.chr22.vcf.gz?download=1"
+    },
+    {
+      "name": "1kg.chr22.vcf.gz.tbi",
+      "bytes": 36251,
+      "sha256": "27de6b77af65d300bb968e8e372439deb949389e4395eb0dd251f9ba7d73bbed",
+      "md5": "cc3050934aa50a2f03bf3c25c12152ec",
+      "url": "https://zenodo.org/records/22156404/files/1kg.chr22.vcf.gz.tbi?download=1"
+    },
+    {
+      "name": "na12878.chr20.bam",
+      "bytes": 311550121,
+      "sha256": "dfc164c34dd94e1c46ea94cad915489171ae8913da200ca4e5cae03a554f1996",
+      "md5": "13fcfe8c703fde43d578f02d97157ca7",
+      "url": "https://zenodo.org/records/22156404/files/na12878.chr20.bam?download=1"
+    },
+    {
+      "name": "na12878.chr20.bam.bai",
+      "bytes": 179968,
+      "sha256": "525860a53fa5e8264258006cff2f1f5f275c4014726192989d1dae26dd4810cf",
+      "md5": "4953004ecfd7517a4b62c373c72f2c8a",
+      "url": "https://zenodo.org/records/22156404/files/na12878.chr20.bam.bai?download=1"
+    }
+  ]
+}

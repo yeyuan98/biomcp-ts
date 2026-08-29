@@ -1,0 +1,55 @@
+{
+  "id": "biowasm-q01-vcf-orientation",
+  "name": "Big-VCF orientation via summary (large-input gate + recovery)",
+  "level": "L0",
+  "purpose": "Orientation on a large sample-dense VCF whose sidecar carries no record counts: the estimate gate must fire with actionable guidance; the agent recovers either by re-running with proceed_on_large_input=true (streamed count under progress, ~4 min) or by slicing to an artifact; no MCP-timeout cascade (F1 regression).",
+  "prompt": "I have a big variant file at {DATA_DIR}/1kg.chr22.vcf.gz. Before doing anything with it, what's in it? Is it worth querying further?",
+  "externalData": [
+    { "path": "1kg.chr22.vcf.gz", "sha256": "a90c16c4ff2b3196476d506ae13cb3047fae8670163c7c932c4b0239aef3daf5", "bytes": 205612353 },
+    { "path": "1kg.chr22.vcf.gz.tbi", "sha256": "27de6b77af65d300bb968e8e372439deb949389e4395eb0dd251f9ba7d73bbed", "bytes": 36251 }
+  ],
+  "inlineResources": [],
+  "timeoutMs": 600000,
+  "checks": [
+    {
+      "type": "tool_seq",
+      "seq": [
+        ["biomcp_analysis_bcf_summary", "error"]
+      ]
+    },
+    {
+      "type": "text",
+      "op": "contains",
+      "expect": "proceed_on_large_input",
+      "source": "tool:biomcp_analysis_bcf_summary"
+    },
+    {
+      "type": "group",
+      "anyOf": [
+        {
+          "type": "group",
+          "allOf": [
+            { "type": "status", "tool": "biomcp_analysis_bcf_summary", "status": "completed", "occurrence": 2 },
+            { "type": "args", "tool": "biomcp_analysis_bcf_summary", "path": "proceed_on_large_input", "op": "equals", "expect": true, "occurrence": 2 },
+            { "type": "json_path", "tool": "biomcp_analysis_bcf_summary", "path": "variant_count", "op": "near", "expect": 1103547, "tolerance": 0, "occurrence": 2 }
+          ]
+        },
+        {
+          "type": "tool_seq",
+          "seq": [
+            ["biomcp_analysis_bcf_view_region", "completed"]
+          ]
+        }
+      ]
+    },
+    {
+      "type": "rubric",
+      "flag": "honest-guidance",
+      "manual": true,
+      "desc": "Orientation achieved honestly: proceed path → variant count 1,103,547 + 2,504 samples reported exactly; slice path → sample count 2,504 and contig facts from the header + a defensible variant story (slice counts or estimate, labeled as such). No fabricated totals; the gate error was surfaced or acted on, not ignored."
+    }
+  ],
+  "expectedOutputs": [
+    "expected/q01-summary.json"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "region": "22:16400000-16500000",
+  "filter_mode": "-i TYPE=\"snp\"",
+  "format": "%CHROM %POS %REF %ALT %INFO/AF",
+  "count": 1713,
+  "attempts": [
+    {
+      "region": "22:16000000-16010000",
+      "mode": "-i TYPE=\"snp\"",
+      "count": 0
+    },
+    {
+      "region": "22:16000000-16050000",
+      "mode": "-i TYPE=\"snp\"",
+      "count": 0
+    },
+    {
+      "region": "22:16400000-16500000",
+      "mode": "-i TYPE=\"snp\"",
+      "count": 1713
+    }
+  ],
+  "region_shifted": true
+}

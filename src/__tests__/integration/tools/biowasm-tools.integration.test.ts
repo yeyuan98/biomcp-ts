@@ -102,6 +102,23 @@ function regionSam(): string {
   ].join('\n') + '\n';
 }
 
+/**
+ * Cross-reference order regression: read3 (chr2) precedes read4 (chr1:300),
+ * violating coordinate order across references (within chr1 the order is
+ * ascending, so the native "Data is not position sorted" guard never fires).
+ */
+function crossRefUnsortedSam(): string {
+  return [
+    '@HD\tVN:1.6\tSO:coordinate',
+    '@SQ\tSN:chr1\tLN:1000',
+    '@SQ\tSN:chr2\tLN:900',
+    'read1\t0\tchr1\t100\t60\t4M2I4M\t=\t500\t404\tAAAAAAAAAA\t!!!!!!!!!!',
+    'read2\t0\tchr1\t200\t60\t10M\t=\t600\t500\tCCCCCCCCCC\t!!!!!!!!!!',
+    'read3\t16\tchr2\t150\t60\t10M\t=\t650\t600\tGGGGGGGGGG\t!!!!!!!!!!',
+    'read4\t0\tchr1\t300\t60\t10M\t=\t700\t600\tTTTTTTTTTT\t!!!!!!!!!!',
+  ].join('\n') + '\n';
+}
+
 const BED_A = ['chr1\t10\t20', 'chr1\t18\t30', 'chr1\t100\t150', 'chr2\t5\t15'].join('\n') + '\n';
 const BED_B = ['chr1\t15\t25', 'chr2\t10\t12'].join('\n') + '\n';
 
@@ -315,5 +332,17 @@ maybe('analysis_biowasm_* tools (integration, real wasm tools)', () => {
       output,
     );
     expect(pileup.text).toContain('Pileup — chr1:95-105');
+  }, 300_000);
+
+  it('depth on a cross-reference order regression fails with the coordinate-sorted error (was doubled rows)', async () => {
+    const res = await callTool('analysis_bam_view_region', {
+      source: { content: crossRefUnsortedSam() },
+      region: { chrom: 'chr1', start: 90, end: 310 },
+      mode: 'depth',
+    });
+    expect(res.isError).toBe(true);
+    const text = res.content[0].text;
+    expect(text).toMatch(/coordinate-sorted/);
+    expect(text).toContain('double-reports');
   }, 300_000);
 });

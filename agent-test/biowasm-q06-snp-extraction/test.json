@@ -1,0 +1,59 @@
+{
+  "id": "biowasm-q06-snp-extraction",
+  "name": "SNP extraction with AF projection",
+  "level": "L1",
+  "purpose": "L1 extraction: narrow SNP projection (CHROM/POS/REF/ALT/AF) in a 100 kb chr22 region. Region shifted from the spec's 16.0 Mb (empty N-gap) to 16.4 Mb.",
+  "prompt": "From {DATA_DIR}/1kg.chr22.vcf.gz, list the SNPs (no indels) in 22:16400000-16500000 showing chromosome, position, ref, alt and allele frequency.",
+  "externalData": [
+    {
+      "path": "1kg.chr22.vcf.gz",
+      "sha256": "a90c16c4ff2b3196476d506ae13cb3047fae8670163c7c932c4b0239aef3daf5",
+      "bytes": 205612353
+    },
+    {
+      "path": "1kg.chr22.vcf.gz.tbi",
+      "sha256": "27de6b77af65d300bb968e8e372439deb949389e4395eb0dd251f9ba7d73bbed",
+      "bytes": 36251
+    }
+  ],
+  "inlineResources": [],
+  "timeoutMs": 480000,
+  "checks": [
+    {
+      "type": "args",
+      "tool": "biomcp_analysis_bcf_view_region",
+      "path": "variant_types.0",
+      "op": "equals",
+      "expect": "snps"
+    },
+    {
+      "type": "group",
+      "anyOf": [
+        {
+          "type": "json_path",
+          "tool": "biomcp_analysis_bcf_view_region",
+          "path": "variants.length",
+          "op": "near",
+          "expect": 1713,
+          "tolerance": 0
+        },
+        {
+          "type": "number_near",
+          "context": "SNP|variant",
+          "expect": 1713,
+          "tolerance": 5
+        }
+      ]
+    },
+    {
+      "type": "rubric",
+      "flag": "row-spot-check",
+      "manual": true,
+      "desc": "Spot-check reported rows against expected/q06-rows.tsv (chrom/pos/ref/alt/AF)."
+    }
+  ],
+  "expectedOutputs": [
+    "expected/q06-rows.tsv",
+    "expected/q06-meta.json"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "tools": {
+    "samtools": "1.21",
+    "bedtools": "2.31.0",
+    "bcftools": "1.10"
+  },
+  "expected_in_output": "1.21"
+}

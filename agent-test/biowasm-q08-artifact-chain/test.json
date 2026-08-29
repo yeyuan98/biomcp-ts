@@ -1,0 +1,107 @@
+{
+  "id": "biowasm-q08-artifact-chain",
+  "name": "BAM artifact extraction chain",
+  "level": "L2",
+  "purpose": "L2 artifact chain: BAM region artifact, then overlap count against a narrower interval (N_bed=15 of N_region=45).",
+  "prompt": "Extract the reads in 20:10000000-10000500 from {DATA_DIR}/na12878.chr20.bam into a BAM artifact, then tell me how many of those reads overlap the interval 20:10000000-10000100.",
+  "externalData": [
+    {
+      "path": "na12878.chr20.bam",
+      "sha256": "dfc164c34dd94e1c46ea94cad915489171ae8913da200ca4e5cae03a554f1996",
+      "bytes": 311550121
+    },
+    {
+      "path": "na12878.chr20.bam.bai",
+      "sha256": "525860a53fa5e8264258006cff2f1f5f275c4014726192989d1dae26dd4810cf",
+      "bytes": 179968
+    }
+  ],
+  "inlineResources": [],
+  "timeoutMs": 480000,
+  "checks": [
+    {
+      "type": "tool_seq",
+      "seq": [
+        [
+          "biomcp_analysis_bam_view_region",
+          "completed"
+        ]
+      ]
+    },
+    {
+      "type": "group",
+      "anyOf": [
+        {
+          "type": "group",
+          "allOf": [
+            {
+              "type": "tool_seq",
+              "seq": [
+                [
+                  "biomcp_analysis_bed_op",
+                  "completed"
+                ]
+              ]
+            },
+            {
+              "type": "args",
+              "tool": "biomcp_analysis_bed_op",
+              "path": "b_source.artifact_id",
+              "op": "exists"
+            }
+          ]
+        },
+        {
+          "type": "group",
+          "allOf": [
+            {
+              "type": "args",
+              "tool": "biomcp_analysis_bam_view_region",
+              "path": "source.artifact_id",
+              "op": "exists",
+              "occurrence": 2
+            },
+            {
+              "type": "args",
+              "tool": "biomcp_analysis_bam_view_region",
+              "path": "mode",
+              "op": "equals",
+              "expect": "count",
+              "occurrence": 2
+            }
+          ]
+        },
+        {
+          "type": "group",
+          "allOf": [
+            {
+              "type": "tool_seq",
+              "seq": [
+                [
+                  "biomcp_analysis_biowasm_cli",
+                  "completed"
+                ]
+              ]
+            },
+            {
+              "type": "args",
+              "tool": "biomcp_analysis_biowasm_cli",
+              "path": "args",
+              "op": "contains",
+              "expect": "view"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "number_near",
+      "expect": 15,
+      "tolerance": 0,
+      "context": "overlap|read"
+    }
+  ],
+  "expectedOutputs": [
+    "expected/q08-counts.json"
+  ]
+}

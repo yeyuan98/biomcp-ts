@@ -1,0 +1,78 @@
+{
+  "id": "biowasm-q11-unsorted-depth-recovery",
+  "name": "Unsorted SAM depth recovery",
+  "level": "L3",
+  "purpose": "L3 recovery: indexless unsorted-SAM depth fails (coordinate-sorted guard); agent must sort and retry (221 positions, 3 reads).",
+  "prompt": "What's the read depth across chr1:90-310 in this SAM file?\n@HD\tVN:1.6\tSO:coordinate\n@SQ\tSN:chr1\tLN:1000\n@SQ\tSN:chr2\tLN:900\nread1\t0\tchr1\t100\t60\t4M2I4M\t=\t500\t404\tAAAAAAAAAA\t!!!!!!!!!!\nread2\t0\tchr1\t200\t60\t10M\t=\t600\t500\tCCCCCCCCCC\t!!!!!!!!!!\nread3\t16\tchr2\t150\t60\t10M\t=\t650\t600\tGGGGGGGGGG\t!!!!!!!!!!\nread4\t0\tchr1\t300\t60\t10M\t=\t700\t600\tTTTTTTTTTT\t!!!!!!!!!!\n",
+  "externalData": [],
+  "inlineResources": [
+    "fixtures/sam-unsorted.sam"
+  ],
+  "timeoutMs": 480000,
+  "checks": [
+    {
+      "type": "tool_seq",
+      "seq": [
+        [
+          "biomcp_analysis_bam_view_region",
+          "error"
+        ]
+      ]
+    },
+    {
+      "type": "text",
+      "op": "contains",
+      "expect": "coordinate-sorted",
+      "source": "assistant"
+    },
+    {
+      "type": "group",
+      "anyOf": [
+        {
+          "type": "tool_seq",
+          "seq": [
+            [
+              "biomcp_analysis_bam_view_region",
+              "error"
+            ],
+            [
+              "biomcp_analysis_bam_view_region",
+              "completed"
+            ]
+          ]
+        },
+        {
+          "type": "group",
+          "allOf": [
+            {
+              "type": "tool_seq",
+              "seq": [
+                [
+                  "biomcp_analysis_biowasm_cli",
+                  "completed"
+                ]
+              ]
+            },
+            {
+              "type": "args",
+              "tool": "biomcp_analysis_biowasm_cli",
+              "path": "args.0",
+              "op": "contains",
+              "expect": "sort"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "rubric",
+      "flag": "no-fabrication",
+      "manual": true,
+      "desc": "Honest error report (verbatim tool error surfaced), no invented depth numbers; post-recovery answers must match expected/q11-recovery.json (221 positions; depth 1 at 100-107, 200-209, 300-309; 3 reads)."
+    }
+  ],
+  "expectedOutputs": [
+    "expected/q11-first-call-error.txt",
+    "expected/q11-recovery.json"
+  ]
+}

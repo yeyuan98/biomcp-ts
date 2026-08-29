@@ -59,8 +59,10 @@ Activates the `analysis_bam_summary` / `analysis_bam_view_region` / `analysis_bc
 | Variable | Required | Purpose |
 |----------|----------|---------|
 | `ANALYSIS_BIOWASM` | yes (`1`/`true`) | Activates the biowasm analysis tools |
-| `ANALYSIS_BIOWASM_TIMEOUT_MS` | no | Per-run timeout, default `600000` (10 min); exceeded runs terminate and respawn the worker |
-| `ANALYSIS_BIOWASM_MEM_LIMIT_MB` | no | RSS watermark above which new runs are refused, default `2048` |
+| `ANALYSIS_BIOWASM_TIMEOUT_MS` | no | Per-run **inactivity** timeout, default `600000` (10 min): every worker progress message (advancing bytes) resets it, so long full-stream jobs with live progress survive; exceeded runs terminate and respawn the worker. See also the absolute ceiling `ANALYSIS_BIOWASM_MAX_RUN_MS` |
+| `ANALYSIS_BIOWASM_MAX_RUN_MS` | no | Absolute per-run ceiling, default `3600000` (1 h) — no progress can extend it (backstop against runaway runs); pairs with the `ANALYSIS_BIOWASM_TIMEOUT_MS` inactivity deadline above |
+| `ANALYSIS_BIOWASM_MEM_LIMIT_MB` | no | RSS watermark above which new runs are refused, default `2048` — **whole-process** (covers every worker in the `ANALYSIS_BIOWASM_WORKERS` pool, since worker_threads share the process) |
+| `ANALYSIS_BIOWASM_WORKERS` | no | Worker-pool size, default `1` (= strictly serial, the pre-pool behavior). Values ≥ 1; concurrent tool calls then execute in parallel on N single-threaded wasm workers (slots spawn lazily under contention). Not to be confused with the singular `ANALYSIS_BIOWASM_WORKER_PATH` (the worker bundle location). Budget memory before raising: each worker carries its own V8 heap + wasm linear memory (worst case ≈ 2 GB per worker on top of the host process); keep `pool × ~2 GB` comfortably under `ANALYSIS_BIOWASM_MEM_LIMIT_MB` and the machine's RAM |
 | `ANALYSIS_BIOWASM_DATA_DIR` | no | Allowlist root for `host_path` sources (unset = host files denied); every path is resolved and prefix-checked after normalization |
 | `ANALYSIS_BIOWASM_MIRROR_URL` | no | Override the wasm asset source: a `.tar.gz` archive (path, `file://`, or http(s) URL) is extracted and pin-verified; an extracted **directory** is trusted as-is. Default: the biowasm CDN, cached in `~/.cache/biomcp/` |
 | `ANALYSIS_BIOWASM_WORKER_PATH` | no | Explicit path to the biowasm worker bundle (`dist/biowasm-worker.js`); dev mode running from `src/` needs this or a prior `npm run build` |

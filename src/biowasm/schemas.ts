@@ -153,3 +153,15 @@ export const OUTPUT_INPUT = {
   top_n: SHARED_INPUT.top_n,
   include_content: SHARED_INPUT.include_content,
 } as const;
+
+// analysis_bam_summary / analysis_bcf_summary only: bypasses the
+// estimate-based large-input gate so the caller can opt into a long
+// full-stream pass (progress will be reported while it runs).
+export const PROCEED_INPUT = {
+  proceed_on_large_input: z
+    .boolean()
+    .optional()
+    .describe(
+      'Stream the full host file even when the estimated runtime exceeds the large-input threshold (~45 s); progress will be reported while streaming.',
+    ),
+} as const;
