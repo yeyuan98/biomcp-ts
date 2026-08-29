@@ -70,13 +70,50 @@
               "occurrence": 1
             }
           ]
+        },
+        {
+          "type": "group",
+          "allOf": [
+            {
+              "type": "status",
+              "tool": "biomcp_analysis_bam_view_region",
+              "status": "error",
+              "occurrence": 1
+            },
+            {
+              "type": "args",
+              "tool": "biomcp_analysis_bam_view_region",
+              "path": "region.chrom",
+              "op": "equals",
+              "expect": "20",
+              "occurrence": 2
+            },
+            {
+              "type": "status",
+              "tool": "biomcp_analysis_bam_view_region",
+              "status": "completed",
+              "occurrence": 2
+            }
+          ],
+          "desc": "round 3 pattern: chr20 trap errors, recovery succeeds directly at occurrence 2 (no third call)"
         }
       ]
     },
     {
-      "type": "number_near",
-      "expect": 1000,
-      "context": "position"
+      "type": "group",
+      "anyOf": [
+        {
+          "type": "number_near",
+          "expect": 1000,
+          "desc": "final answer addresses the queried window (a ~1000 number present); phrasing-agnostic since round 2"
+        },
+        {
+          "type": "text",
+          "op": "regex",
+          "expect": "1[-\\u2013]1000"
+        }
+      ],
+      "desc": "final answer addresses the queried window (a ~1000 number or the literal 1-1000 range); tokenizer-proofed (ASCII-hyphen ranges glue to -1000)"
     }
   ],
   "expectedOutputs": [

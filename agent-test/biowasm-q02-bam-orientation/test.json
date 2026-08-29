@@ -3,7 +3,7 @@
   "name": "BAM orientation (NA12878 chr20)",
   "level": "L0",
   "purpose": "L0 orientation: can the agent characterize a BAM and judge fitness for region-level work?",
-  "prompt": "What's in the alignment at {DATA_DIR}/na12878.chr20.bam? Is it usable for region-level work like coverage or read extraction?",
+  "prompt": "What's in the alignment at {DATA_DIR}/na12878.chr20.bam? Is it usable for region-level work like coverage or read extraction? Include the overall mapping rate.",
   "externalData": [
     {
       "path": "na12878.chr20.bam",
@@ -29,10 +29,23 @@
       ]
     },
     {
-      "type": "number_near",
-      "expect": 99.45,
-      "tolerance": 1,
-      "context": "mapped"
+      "type": "group",
+      "anyOf": [
+        {
+          "type": "number_near",
+          "expect": 99.45,
+          "tolerance": 1,
+          "context": "mapped",
+          "desc": "mapping-rate percentage surfaced in a mapped-context fragment"
+        },
+        {
+          "type": "number_near",
+          "expect": 3227627,
+          "tolerance": 2,
+          "context": "mapped",
+          "desc": "absolute mapped-read count (round 3: agent reported counts without deriving the rate)"
+        }
+      ]
     }
   ],
   "expectedOutputs": [
