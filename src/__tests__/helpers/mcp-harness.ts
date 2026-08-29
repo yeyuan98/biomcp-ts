@@ -16,6 +16,7 @@ import { registerSraTools } from '../../server/tools/sra.js';
 import { registerGenbankTools } from '../../server/tools/genbank.js';
 import { registerGtexTools } from '../../server/tools/gtex.js';
 import { registerEnsemblTools } from '../../server/tools/ensembl.js';
+import { registerConfigureTool } from '../../server/tools/configure.js';
 import { connectionManager } from '../../connections/manager.js';
 
 /** A captured server→client JSON-RPC message (requests/responses included). */
@@ -141,6 +142,7 @@ export async function createMcpTestHarness(): Promise<McpTestHarness> {
   registerGenbankTools(server);
   registerGtexTools(server);
   registerEnsemblTools(server);
+  registerConfigureTool(server);
 
   const toolClient = await connectToolClient(server);
 

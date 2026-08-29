@@ -160,6 +160,8 @@ Place chosen variables into the client entry's env block:
 - Codex: `[mcp_servers.biomcp.env]` table
 - OpenCode: `"environment": { "NCBI_API_KEY": "…" }`
 
+> **Agent shortcut for the optional features:** once biomcp is connected, the `biomcp_configure` tool can do steps 2-4 for you — call it with `{}` for a status overview, then `{"action":"set","values":{"features.<group>.enabled":true,…}}`. It writes the `.biomcp.json` project config file (needs a project cwd — cwd-less clients like Claude Desktop should keep using the env block, which the tool's error response translates for you), validates everything, checks the mysql2/webr prerequisites, and lists the restart/verify steps. Env-only parameters (API keys, proxy, security boundaries) remain query-only there. See [ENV-VARS.md → Project config file](ENV-VARS.md#project-config-file-biomcpjson-alternative-to-env-blocks).
+
 ## 4. Verify
 
 > **A restart is required to load (or reload) the biomcp tools.** MCP servers are launched when the client starts, so config edits made while a client is running do not take effect until it restarts. After any change to the server entry — adding biomcp, changing env vars, enabling the database feature — restart:

@@ -190,8 +190,12 @@ Configure via environment variables: DB_TYPE (mysql|sqlite) plus connection sett
   );
 }
 
+export function isDbConfigured(): boolean {
+  return !!process.env.DB_TYPE?.trim();
+}
+
 export function registerDbToolsIfConfigured(server: McpServer): boolean {
-  if (!process.env.DB_TYPE?.trim()) {
+  if (!isDbConfigured()) {
     return false;
   }
   registerDbTools(server);

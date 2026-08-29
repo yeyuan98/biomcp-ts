@@ -95,7 +95,9 @@ class REngine {
       this.webrMod = await import('webr');
     } catch {
       throw new RNotAvailableError(
-        'The webr package is not installed. Install it next to biomcp (npm install webr) and set ANALYSIS_R=1 to enable R analysis tools.'
+        'The webr package is not installed in this server\'s module tree. Install it next to biomcp in a local tree ' +
+          '(mkdir biomcp-r && cd biomcp-r && npm install biomcp webr; or one-shot: npx -p biomcp -p webr biomcp) and point ' +
+          'the client at that tree — see the biomcp_configure tool (action "status") for prerequisites.'
       );
     }
     try {

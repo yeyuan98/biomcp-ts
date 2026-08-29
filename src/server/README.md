@@ -15,7 +15,7 @@ const transport = new StdioServerTransport();
 await server.connect(transport);
 ```
 
-Entry point: `src/server/index.ts`. Calls fourteen registration functions in order: `registerGeneTools`, `registerVariantTools`, `registerDrugTools`, `registerDiseaseTools`, `registerArticleTools`, `registerTrialTools`, `registerUtilityTools`, `registerPdbTools`, `registerPatentTools`, `registerGeoTools`, `registerSraTools`, `registerGenbankTools`, `registerGtexTools`, `registerEnsemblTools`.
+Entry point: `src/server/index.ts`. Before any registration it loads the optional `.biomcp.json` project config (fill-if-unset into env; see `src/config/`). Then it calls fifteen registration functions in order: `registerGeneTools`, `registerVariantTools`, `registerDrugTools`, `registerDiseaseTools`, `registerArticleTools`, `registerTrialTools`, `registerUtilityTools`, `registerPdbTools`, `registerPatentTools`, `registerGeoTools`, `registerSraTools`, `registerGenbankTools`, `registerGtexTools`, `registerEnsemblTools`, `registerConfigureTool` (the `biomcp_configure` meta tool — deliberate `biomcp_` prefix exception so it is self-identifying in flat multi-server tool listings). The three optional-feature registrars (`registerDbToolsIfConfigured`, `registerAnalysisRToolsIfConfigured`, `registerBiowasmToolsIfConfigured`) run after those, gated on env/config.
 
 ## Tool Handler Pattern
 
@@ -83,6 +83,12 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 |------|-------------|-------------|-------------|
 | `trial_search` | `query: string`, `status?: string`, `phase?: string`, `intervention_type?: string`, `limit?: number (1-50, default 10)`, `page_token?: string` (cursor from previous response) | Search clinical trials by condition, intervention, or keyword | readOnly, openWorld |
 | `trial_get` | `nct_id: string`, `sections?: ("core" \| "eligibility" \| "locations" \| "outcomes" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed trial information by NCT ID | readOnly, openWorld |
+
+### Configuration Tool (`tools/configure.ts`) — 1 tool
+
+| Tool | Input Schema | Description | Annotations |
+|------|-------------|-------------|-------------|
+| `biomcp_configure` | `action?: "status" \| "set" \| "reset" (default "status")`, `values?: record<string, unknown>`, `target?: string \| string[]`, `filter?: string`, `dry_run?: boolean`, `confirm_sensitive?: boolean` | Unified configuration surface over the `.biomcp.json` project config file + env vars: status (per-feature running state, provenance, conflicts, prerequisites, parameter catalog), set/reset with closed-set dotted-id validation (atomic batches, sensitive-key confirm gate, secret redaction). Env-only parameters are query-only and value-masked (presence + fingerprint) | write, destructive (reset), idempotent |
 
 ### Utility Tools (`tools/utility.ts`) — 2 tools
 
