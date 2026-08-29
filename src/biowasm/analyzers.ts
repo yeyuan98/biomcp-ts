@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
+import { runShards } from '../wasmcore/shards.js';
 import type {
   BiowasmArtifact,
   BiowasmInputFile,
@@ -797,19 +798,96 @@ export async function runBcfSummary(source: ResolvedSource, output: CanonicalOut
     // large-input gate applies ONLY to this path. The sample-count sniff
     // reuses the header run above (#CHROM columns) — no extra engine pass.
     gateVcfSummaryStream(source, captured(header), exec);
-    const count = await runEngine(
-      results,
-      'bcftools view -H',
-      {
-        tool: 'bcftools',
-        args: ['view', '-H', source.vfsPath],
-        inputs: source.inputs,
-        mounts: source.mounts,
-        stdout: 'count',
-      },
-      { exec },
-    );
-    variantCount = count.stdout.mode === 'count' ? count.stdout.lines : -1;
+    // Sharded parallel count (wasmcore runShards): with an index mounted but
+    // `index -s` unparseable, per-contig `view -H -r` queries answer through
+    // the index and can fan out across the worker pool. Only on the explicit
+    // proceed path (the gate has already spoken for this input) and only with
+    // >1 slots and >=2 usable contigs; anything else streams as before.
+    let sharded: string[][] | null = null;
+    if (source.hasIndex && exec?.proceedOnLargeInput && info.contigs.length >= 2) {
+      const { biowasmEngine } = await engineModule();
+      const poolSize = biowasmEngine.workerSlots();
+      const contigs = info.contigs
+        .map(([id]) => id)
+        .filter((id) => id !== '' && id !== '*' && !/[,:;]/.test(id));
+      if (poolSize > 1 && contigs.length >= 2) {
+        const batchStartedMs = Date.now();
+        const baseBytes = results.reduce((acc, r) => acc + bytesReadOf(r), 0);
+        const onProgress = exec.onProgress;
+        try {
+          const shardResults = await runShards(
+            contigs,
+            (contig, _index, ctx) =>
+              biowasmEngine
+                .run({
+                  tool: 'bcftools',
+                  args: ['view', '-H', '-r', contig, source.vfsPath],
+                  inputs: source.inputs,
+                  mounts: source.mounts,
+                  stdout: 'count',
+                  signal: ctx.signal,
+                  onProgress: (p) => ctx.onShardProgress(p.bytes),
+                })
+                .then((r) => {
+                  if (looksFailed(r)) {
+                    // Shard-level failure: wrapped by runShards → fallback.
+                    throw new Error(`shard ${contig} failed (exit code ${exitCodeLabel(r.exitCode)}).${r.stderr.trim() ? ` ${stderrNote(r)}` : ''}`);
+                  }
+                  return r;
+                }),
+            {
+              concurrency: poolSize,
+              ...(exec.signal ? { signal: exec.signal } : {}),
+              ...(onProgress
+                ? {
+                    onProgress: (value) => {
+                      onProgress({
+                        bytes: baseBytes + value,
+                        elapsedMs: Date.now() - batchStartedMs,
+                        message: `parallel per-contig count (${contigs.length} shards over ${poolSize} workers)`,
+                      });
+                    },
+                  }
+                : {}),
+              isFatal: (err) =>
+                err instanceof Error && (err.name === 'BiowasmCancelledError' || err.name === 'BiowasmTimeoutError'),
+            },
+          );
+          for (const r of shardResults) results.push(r);
+          sharded = contigs.map((contig, i) => {
+            const headerLength = info.contigs.find(([id]) => id === contig)?.[1] ?? '?';
+            const count = shardResults[i]!.stdout.mode === 'count' ? shardResults[i]!.stdout.lines : 0;
+            return [contig, /^\d+$/.test(headerLength) ? headerLength : '0', String(count)];
+          });
+        } catch (err) {
+          if (err instanceof Error && (err.name === 'BiowasmCancelledError' || err.name === 'BiowasmTimeoutError')) {
+            throw err;
+          }
+          // Non-fatal batch failure (or ShardBatchError): fall through to the
+          // single-stream pass below — correctness over speed.
+        }
+      }
+    }
+    if (sharded !== null) {
+      indexRows = sharded;
+      variantCount = sharded.reduce((acc, row) => acc + Number(row[2]), 0);
+      indexNote =
+        'Index record counts unavailable (`bcftools index -s` produced no parseable rows); variant count came from a parallel per-contig `view -H -r` pass over the index.';
+    } else {
+      const count = await runEngine(
+        results,
+        'bcftools view -H',
+        {
+          tool: 'bcftools',
+          args: ['view', '-H', source.vfsPath],
+          inputs: source.inputs,
+          mounts: source.mounts,
+          stdout: 'count',
+        },
+        { exec },
+      );
+      variantCount = count.stdout.mode === 'count' ? count.stdout.lines : -1;
+    }
   }
   const io = aggregate(results);
 

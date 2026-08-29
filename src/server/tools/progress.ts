@@ -23,15 +23,22 @@ export function progressForwarder(extra: ProgressCapableExtra | undefined): Prog
   const progressToken = extra?._meta?.progressToken;
   if (extra === undefined || progressToken === undefined || progressToken === null) return null;
   const sender = extra;
+  // MCP progress must be monotonic (it reads as a fraction of the total).
+  // Analyzers occasionally recompute a base across phases (e.g. a sharded
+  // count falling back to a single stream) — clamp so the client never sees
+  // the value move backwards.
+  let lastProgress = Number.NEGATIVE_INFINITY;
   return {
     onProgress: (p) => {
+      const progress = Math.max(lastProgress, p.bytes);
+      lastProgress = progress;
       try {
         void sender
           .sendNotification({
             method: 'notifications/progress',
             params: {
               progressToken,
-              progress: p.bytes,
+              progress,
               ...(p.message ? { message: p.message } : {}),
             },
           })

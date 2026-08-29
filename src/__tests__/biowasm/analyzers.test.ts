@@ -12,6 +12,7 @@ import { canonicalizeSource, type ResolvedSource } from '../../biowasm/validate.
 
 type RunRequest = Parameters<typeof import('../../biowasm/engine.js')['biowasmEngine']['run']>[0];
 const runMock = jest.fn<(request: RunRequest) => Promise<BiowasmRunResult>>();
+const workerSlotsMock = jest.fn<() => number>().mockReturnValue(1);
 
 jest.unstable_mockModule('../../biowasm/engine.js', () => ({
   biowasmEngine: {
@@ -19,8 +20,8 @@ jest.unstable_mockModule('../../biowasm/engine.js', () => ({
     assetsDirectory: () => null,
     ensureReady: async () => undefined,
     shutdown: async () => undefined,
-    workerSlots: () => 1,
-    poolStatus: () => ({ configured: 1, alive: 0, busy: 0 }),
+    workerSlots: () => workerSlotsMock(),
+    poolStatus: () => ({ configured: workerSlotsMock(), alive: 0, busy: 0 }),
   },
   shutdownBiowasmEngine: async () => undefined,
 }));
@@ -67,6 +68,7 @@ describe('biowasm analyzers failure semantics (engine mocked)', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     jest.resetModules();
+    workerSlotsMock.mockReturnValue(1);
     analyzers = await import('../../biowasm/analyzers.js');
     validate = await import('../../biowasm/validate.js');
   });
@@ -311,6 +313,129 @@ describe('biowasm analyzers failure semantics (engine mocked)', () => {
       expect(table.text).toContain('| variants | 7 |');
     });
 
+  });
+
+  describe('sharded parallel count (wasmcore runShards consumer)', () => {
+    const twoContigHeader =
+      '##fileformat=VCFv4.2\n##contig=<ID=chr1,length=1000>\n##contig=<ID=chr2,length=900>\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n';
+    const indexFail = runResult({ exitCode: 1, stderr: 'Error: the index carries no record counts' });
+
+    /** runMock impl for shard fan-out: per-contig counts keyed by -r value. */
+    function shardCounts(byContig: Record<string, number>) {
+      return (request: RunRequest) => {
+        const args = request.args;
+        if (args[0] === 'index') return Promise.resolve(indexFail);
+        if (args[0] === 'view' && args[1] === '-h') {
+          return Promise.resolve(runResult({ stdout: { mode: 'capture', text: twoContigHeader, truncated: false } }));
+        }
+        if (args[0] === 'view' && args[1] === '-H' && args[2] === '-r') {
+          const contig = args[3]!;
+          return Promise.resolve(countResult(byContig[contig] ?? 0));
+        }
+        // full-stream
+        return Promise.resolve(countResult(Object.values(byContig).reduce((a, b) => a + b, 0)));
+      };
+    }
+
+    it('index -s unparseable + proceed + pool>1: per-contig shards supply variant_count and records_per_contig', async () => {
+      workerSlotsMock.mockReturnValue(2);
+      runMock.mockImplementation(shardCounts({ chr1: 3, chr2: 2 }));
+      const source = hostSource({ hasIndex: true });
+      const progress: Array<{ bytes: number; message?: string }> = [];
+      const json = await analyzers.runBcfSummary(
+        source,
+        { format: 'json', topN: 50, includeContent: false },
+        { proceedOnLargeInput: true, onProgress: (p) => progress.push(p) },
+      );
+      const shardCalls = runMock.mock.calls.filter((c) => c[0].args[2] === '-r');
+      expect(shardCalls.map((c) => c[0].args[3])).toEqual(['chr1', 'chr2']);
+      expect(runMock.mock.calls.some((c) => c[0].args[0] === 'view' && c[0].args[1] === '-H' && c[0].args[2] !== '-r')).toBe(false);
+      const parsed = JSON.parse(json.text) as {
+        variant_count: number;
+        records_per_contig: Array<{ contig: string; length: number; records: number }>;
+      };
+      expect(parsed.variant_count).toBe(5);
+      expect(parsed.records_per_contig).toEqual([
+        { contig: 'chr1', length: 1000, records: 3 },
+        { contig: 'chr2', length: 900, records: 2 },
+      ]);
+      // Sharded progress was forwarded (monotonic aggregate + shard message).
+      expect(progress.some((p) => p.message?.includes('parallel per-contig'))).toBe(true);
+
+      // Table render carries the parallel-count note.
+      runMock.mockClear();
+      runMock.mockImplementation(shardCounts({ chr1: 3, chr2: 2 }));
+      const table = await analyzers.runBcfSummary(
+        source,
+        { format: 'table', topN: 50, includeContent: false },
+        { proceedOnLargeInput: true },
+      );
+      expect(table.text).toContain('parallel per-contig');
+      expect(table.text).toContain('| variants | 5 |');
+    });
+
+    it('a non-fatal shard failure falls back to the gated single-stream pass', async () => {
+      workerSlotsMock.mockReturnValue(2);
+      runMock.mockImplementation((request: RunRequest) => {
+        const args = request.args;
+        if (args[0] === 'index') return Promise.resolve(indexFail);
+        if (args[0] === 'view' && args[1] === '-h') {
+          return Promise.resolve(runResult({ stdout: { mode: 'capture', text: twoContigHeader, truncated: false } }));
+        }
+        if (args[0] === 'view' && args[1] === '-H' && args[2] === '-r') {
+          return args[3] === 'chr1'
+            ? Promise.reject(new Error('shard chr1 failed'))
+            : Promise.resolve(countResult(2));
+        }
+        return Promise.resolve(countResult(9));
+      });
+      const source = hostSource({ hasIndex: true });
+      const json = await analyzers.runBcfSummary(
+        source,
+        { format: 'json', topN: 50, includeContent: false },
+        { proceedOnLargeInput: true },
+      );
+      expect(runMock.mock.calls.some((c) => c[0].args[0] === 'view' && c[0].args[1] === '-H' && c[0].args[2] !== '-r')).toBe(true);
+      const parsed = JSON.parse(json.text) as { variant_count: number };
+      expect(parsed.variant_count).toBe(9);
+    });
+
+    it('cancellation-class shard failures rethrow instead of re-streaming', async () => {
+      workerSlotsMock.mockReturnValue(2);
+      const cancelled = Object.assign(new Error('cancelled by client'), { name: 'BiowasmCancelledError' });
+      runMock.mockImplementation((request: RunRequest) => {
+        const args = request.args;
+        if (args[0] === 'index') return Promise.resolve(indexFail);
+        if (args[0] === 'view' && args[1] === '-h') {
+          return Promise.resolve(runResult({ stdout: { mode: 'capture', text: twoContigHeader, truncated: false } }));
+        }
+        return Promise.reject(cancelled);
+      });
+      const source = hostSource({ hasIndex: true });
+      const err = await analyzers
+        .runBcfSummary(source, { format: 'json', topN: 50, includeContent: false }, { proceedOnLargeInput: true })
+        .catch((e: unknown) => e);
+      expect(err).toBe(cancelled);
+      // No single-stream fallback run happened after the batch abort.
+      expect(runMock.mock.calls.some((c) => c[0].args[0] === 'view' && c[0].args[1] === '-H' && c[0].args[2] !== '-r')).toBe(false);
+    });
+
+    it('pool=1 or no proceed flag: sharding is skipped, the stream runs as before', async () => {
+      runMock.mockImplementation(shardCounts({ chr1: 3, chr2: 2 }));
+      const source = hostSource({ hasIndex: true });
+      // pool=1 with proceed → straight streaming
+      const a = await analyzers.runBcfSummary(source, { format: 'json', topN: 50, includeContent: false }, { proceedOnLargeInput: true });
+      expect(JSON.parse(a.text).variant_count).toBe(5);
+      expect(runMock.mock.calls.some((c) => c[0].args[2] === '-r')).toBe(false);
+      expect(runMock.mock.calls.some((c) => c[0].args[0] === 'view' && c[0].args[1] === '-H' && c[0].args[2] !== '-r')).toBe(true);
+      // pool=2 without proceed → sharding also skipped
+      runMock.mockClear();
+      workerSlotsMock.mockReturnValue(2);
+      runMock.mockImplementation(shardCounts({ chr1: 3, chr2: 2 }));
+      const b = await analyzers.runBcfSummary(source, { format: 'json', topN: 50, includeContent: false });
+      expect(JSON.parse(b.text).variant_count).toBe(5);
+      expect(runMock.mock.calls.some((c) => c[0].args[2] === '-r')).toBe(false);
+    });
   });
 
   describe('depth doubling detection (indexless bed fallback)', () => {

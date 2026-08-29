@@ -276,6 +276,21 @@ with contig count, not file size. The fast path is non-fatal: when `index
 `records_per_contig` is omitted, a note explains that the count came from
 the streaming pass, and the gated streaming count supplies `variant_count`.
 
+### Sharded parallel count (`bcf_summary` fallback)
+
+The residual slow case — an index is mounted (so `view -H -r <contig>`
+queries work) but `index -s` yields no usable counts — has a parallel path:
+when you re-run with `proceed_on_large_input=true` and
+`ANALYSIS_BIOWASM_WORKERS > 1`, the count fans out as one `view -H -r` shard
+per contig across the worker pool (the generic `runShards` scheduler in
+wasmcore; progress stays the cumulative-bytes contract, aggregated across
+live shards). Any shard-level failure falls back to the single-stream pass;
+cancellation and timeouts rethrow immediately instead of re-streaming.
+Residual limitation: the shard set comes from the header's contig list, so
+contigs absent from the header (and unplaced records) are not counted by
+the parallel path — the single-stream fallback remains the authority when
+that matters.
+
 ### Run timeouts
 
 - `ANALYSIS_BIOWASM_TIMEOUT_MS` (default 600000 / 10 min) is an
