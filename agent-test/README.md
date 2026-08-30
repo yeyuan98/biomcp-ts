@@ -138,8 +138,8 @@ it into the run dir before spawning and exports `AGENT_TEST_BUNDLE` /
   while global extras (mem0, web-search, other MCP servers) remain active.
   Grading is unaffected — it asserts biomcp behavior.
 - Bypass caveat: opencode's own bash/file tools are enabled by default, so a
-  capable agent can route around the MCP server entirely (the evaluation
-  report documents mamba-installed bcftools/samtools side quests). The
+  capable agent can route around the MCP server entirely via host-installed
+  bio tools. The
   harness therefore probes the host for bio tools (`samtools`, `bcftools`,
   `bedtools`, `pysam`) and records the findings in `.runs/provenance.json`
   to keep conclusions scoped.
@@ -210,13 +210,13 @@ requests (undici sends none by default); the publisher always sends one.
 Statuses below are from the latest full round (2026-08-30, "round 4": all 18
 tests PASS/PASS* after two check-hardening rounds driven by LLM-variance
 findings — case-insensitive `context` regexes, occurrence-hedged recovery
-arms, aggregate-summary alternatives, and a widened flail bound; first-round
-root-cause findings F1–F6 remain documented in the 2026-08-29 report,
-host-local, outside the repo):
+arms, aggregate-summary alternatives, and a widened flail bound; the
+first-round root-cause findings F1–F6 are historical context, superseded
+by the round-4 all-green state):
 
 | ID | Level | Purpose | Data | Status |
 |----|-------|---------|------|--------|
-| `biowasm-q01-vcf-orientation` | L0 | Characterize a 206 MB cohort VCF before querying it | vcf | PASS (post-F1-fix) — the large-input gate fires with actionable guidance; agent recovers via proceed_on_large_input streaming (progress keeps the client alive) or slice-to-artifact; no timeout cascade |
+| `biowasm-q01-vcf-orientation` | L0 | Characterize a 206 MB cohort VCF before querying it | vcf | PASS (recovered) — the large-input gate fires with actionable guidance; agent recovers via proceed_on_large_input streaming (progress keeps the client alive) or slice-to-artifact; no timeout cascade |
 | `biowasm-q02-bam-orientation` | L0 | Characterize a BAM; judge fitness for region-level work | bam | PASS (mapping rate or mapped-count accepted) |
 | `biowasm-q03-point-depth` | L0 | Exact depth at a single locus (20:10,000,000) | bam | PASS |
 | `biowasm-q04-contig-trap` | L1 | `chr20` fails (contig is `20`); error -> orient -> retry | bam | PASS (recovery accepted at occurrence 1-3; window assertion tokenizer-proofed) |
