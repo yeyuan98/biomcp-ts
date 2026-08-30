@@ -88,7 +88,7 @@ describe('config store', () => {
 
     writeConfigFile(dir, { features: { analysis_r: { enabled: true } } });
     const after = readFileSync(exclude, 'utf8');
-    expect(after.match(new RegExp(CONFIG_FILE_NAME.replace(/\./g, '\\.'), 'g'))?.length).toBe(1);
+    expect(after.split(CONFIG_FILE_NAME).length - 1).toBe(1);
   });
 
   it('does not create git artifacts outside a git repo', () => {
