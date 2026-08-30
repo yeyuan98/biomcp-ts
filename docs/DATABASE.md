@@ -1,6 +1,6 @@
 # Database Access
 
-Optional read-only SQL access to your own databases through three MCP tools (`db_query`, `db_list_tables`, `db_describe_table`). The tools ship inside the standard `biomcp` package but stay **dormant until configured** — without a `DB_TYPE` environment variable the tool list is unchanged.
+Optional read-only SQL access to your own databases through three MCP tools (`db_query`, `db_list_tables`, `db_describe_table`). The tools ship inside the standard `biomcp` package but stay **dormant until configured** — without a `DB_TYPE` (set via env, or filled from `.biomcp.json` by the `biomcp_configure` tool at startup) the tool list is unchanged.
 
 ## Backends
 
@@ -18,7 +18,7 @@ There is one package; the backend you get depends on what is installed next to i
 | Core only / SQLite | nothing extra — `npx biomcp` anywhere (Node >= 22.13) | any directory |
 | MySQL | local tree containing both packages: `npm install biomcp mysql2`, then run `npx biomcp` from that directory | that directory |
 
-Why the difference: `mysql2` is a peer dependency, and Node resolves peers relative to the running script's install tree. A bare `npx biomcp` executes from the npx cache, which cannot see a separately installed `mysql2` — global installs do not help either. If the driver is missing when `DB_TYPE=mysql` is set, startup still succeeds and the first db tool call returns an actionable error: *"Install it to enable MySQL tools: npm install mysql2"*.
+Why the difference: `mysql2` is a peer dependency, and Node resolves peers relative to the running script's install tree. A bare `npx biomcp` executes from the npx cache, which cannot see a separately installed `mysql2` — global installs do not help either. If the driver is missing when `DB_TYPE=mysql` is set, startup still succeeds and the first db tool call returns an actionable error pointing at a local install tree (`mkdir biomcp-mysql && cd biomcp-mysql && npm install biomcp mysql2`) and at the `biomcp_configure` tool for prerequisites.
 
 ## Enabling
 
@@ -34,6 +34,8 @@ DB_TYPE=sqlite DB_SQLITE_PATH=/data/bio.db
 # SQLite (multiple files: first = main, rest attached read-only)
 DB_TYPE=sqlite DB_SQLITE_PATH=/data/bio.db,/data/depmap-26Q1.db
 ```
+
+Agents can also enable this feature via the always-available `biomcp_configure` tool (`{"action":"set","values":{"features.database.enabled":true,"features.database.type":"sqlite","features.database.sqlite_path":["data/bio.db"]}}`, persisted to the `.biomcp.json` project file) — sensitive keys like `sqlite_path` require `confirm_sensitive: true`, and the MySQL driver tree below is still something the tool can only guide you through, not perform.
 
 ### Example (Claude Desktop)
 

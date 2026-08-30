@@ -15,7 +15,7 @@ const transport = new StdioServerTransport();
 await server.connect(transport);
 ```
 
-Entry point: `src/server/index.ts`. Calls fourteen registration functions in order: `registerGeneTools`, `registerVariantTools`, `registerDrugTools`, `registerDiseaseTools`, `registerArticleTools`, `registerTrialTools`, `registerUtilityTools`, `registerPdbTools`, `registerPatentTools`, `registerGeoTools`, `registerSraTools`, `registerGenbankTools`, `registerGtexTools`, `registerEnsemblTools`.
+Entry point: `src/server/index.ts`. Before any registration it loads the optional `.biomcp.json` project config (fill-if-unset into env; see `src/config/`). Then it calls fifteen registration functions in order: `registerGeneTools`, `registerVariantTools`, `registerDrugTools`, `registerDiseaseTools`, `registerArticleTools`, `registerTrialTools`, `registerUtilityTools`, `registerPdbTools`, `registerPatentTools`, `registerGeoTools`, `registerSraTools`, `registerGenbankTools`, `registerGtexTools`, `registerEnsemblTools`, `registerConfigureTool` (the `biomcp_configure` meta tool — deliberate `biomcp_` prefix exception so it is self-identifying in flat multi-server tool listings). The three optional-feature registrars (`registerDbToolsIfConfigured`, `registerAnalysisRToolsIfConfigured`, `registerBiowasmToolsIfConfigured`) run after those, gated on env/config.
 
 ## Tool Handler Pattern
 
@@ -83,6 +83,12 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 |------|-------------|-------------|-------------|
 | `trial_search` | `query: string`, `status?: string`, `phase?: string`, `intervention_type?: string`, `limit?: number (1-50, default 10)`, `page_token?: string` (cursor from previous response) | Search clinical trials by condition, intervention, or keyword | readOnly, openWorld |
 | `trial_get` | `nct_id: string`, `sections?: ("core" \| "eligibility" \| "locations" \| "outcomes" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed trial information by NCT ID | readOnly, openWorld |
+
+### Configuration Tool (`tools/configure.ts`) — 1 tool
+
+| Tool | Input Schema | Description | Annotations |
+|------|-------------|-------------|-------------|
+| `biomcp_configure` | `action?: "status" \| "set" \| "reset" (default "status")`, `values?: record<string, unknown>`, `target?: string \| string[]`, `filter?: string`, `dry_run?: boolean`, `confirm_sensitive?: boolean` | Unified configuration surface over the `.biomcp.json` project config file + env vars: status (per-feature running state, provenance, conflicts, prerequisites, parameter catalog), set/reset with closed-set dotted-id validation (atomic batches, sensitive-key confirm gate, secret redaction). Env-only parameters are query-only and value-masked (presence + fingerprint) | write, destructive (reset), idempotent |
 
 ### Utility Tools (`tools/utility.ts`) — 2 tools
 
@@ -184,7 +190,7 @@ Registered only when `ANALYSIS_BIOWASM` is set — see [docs/BIOWASM-ANALYSIS.md
 
 Shared source inputs: `source` (strict union — exactly one of `{content}` ≤ 20 MiB with format sniffing, `{artifact_id}` from a prior response, or `{host_path}` under `ANALYSIS_BIOWASM_DATA_DIR`), `index?` (`"auto"` default with sibling `.bai/.csi/.tbi/.crai` detection, or `{content}`/`{host_path}`). Output shaping: `format?` `"table"` (markdown, default) \| `"json"` \| `"artifact"` (where supported), `top_n?` (1–200, default 50), `include_content?` (inline artifacts ≤ 2 MB as base64(gzip)). Every response embeds io_stats (bytes read, elapsed).
 
-**Total: 40 core tools** across 14 registration modules (+3 optional database tools, +4 optional R analysis tools, +8 optional biowasm analysis tools).
+**Total: 41 core tools** across 15 registration modules (40 biomedical + the `biomcp_configure` meta tool; +3 optional database tools, +4 optional R analysis tools, +8 optional biowasm analysis tools).
 
 ## Error Handling (`errors.ts`)
 
@@ -306,6 +312,7 @@ src/server/
     genbank.ts        3 GenBank tools (search, get, genes)
     gtex.ts            2 GTEx tools (expression, eqtl)
     ensembl.ts         4 Ensembl tools (lookup, homology, consequence, region)
+    configure.ts       1 config meta tool (biomcp_configure — always registered; .biomcp.json + env observability)
     db.ts              3 database tools (optional, DB_TYPE)
     ranalysis.ts       4 R analysis tools (optional, ANALYSIS_R)
     biowasm.ts         8 biowasm analysis tools (optional, ANALYSIS_BIOWASM)

@@ -14,6 +14,7 @@ This is an **optional feature**, enabled like database access.
 ANALYSIS_R=1
 ```
 
+Agents can also enable this feature themselves via the always-available `biomcp_configure` tool (`{"action":"set","values":{"features.analysis_r.enabled":true}}`, or the `.biomcp.json` file it writes) — but the `webr` install tree below is still required and is something the tool can only guide you through, not perform.
 `webr` is an optional peer dependency (like `mysql2` for the database feature):
 
 ```

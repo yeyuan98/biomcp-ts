@@ -18,12 +18,19 @@ import { registerEnsemblTools } from './tools/ensembl.js';
 import { registerDbToolsIfConfigured, shutdownDbBackend } from './tools/db.js';
 import { registerAnalysisRToolsIfConfigured, shutdownREngine } from './tools/ranalysis.js';
 import { registerBiowasmToolsIfConfigured, shutdownBiowasmEngine } from './tools/biowasm.js';
+import { registerConfigureTool } from './tools/configure.js';
+import { loadAndApplyToEnv } from '../config/handler.js';
 import { VERSION } from '../version.js';
 
 const server = new McpServer({
   name: 'biomcp',
   version: VERSION,
 });
+
+// Project config (.biomcp.json in the server cwd) fills unset env vars before
+// any registration: env vars always take precedence. Synchronous by design —
+// registration happens at module top level.
+loadAndApplyToEnv();
 
 registerGeneTools(server);
 registerVariantTools(server);
@@ -39,6 +46,7 @@ registerSraTools(server);
 registerGenbankTools(server);
 registerGtexTools(server);
 registerEnsemblTools(server);
+registerConfigureTool(server);
 const dbEnabled = registerDbToolsIfConfigured(server);
 if (dbEnabled) {
   console.error(`[biomcp] database tools enabled via DB_TYPE=${process.env.DB_TYPE}`);

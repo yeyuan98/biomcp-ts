@@ -4,14 +4,14 @@ A high-performance MCP server that gives LLMs access to 40 biomedical tools fede
 
 ## Highlights
 
-- **40 tools** across 14 domains — search, retrieve, and cross-reference biomedical entities (+3 optional database tools, +4 optional R analysis tools, +8 optional biowasm analysis tools)
+- **41 tools** across 15 registration modules — search, retrieve, and cross-reference biomedical entities, plus the `biomcp_configure` meta tool for configuration observability (+3 optional database tools, +4 optional R analysis tools, +8 optional biowasm analysis tools)
 - **50+ upstream sources** — MyGene, MyVariant, MyChem, MyDisease, ClinVar, gnomAD, UniProt, Reactome, OpenTargets, CIViC, OncoKB, DisGeNET, GTEx, STRING, DGIdb, ClinicalTrials.gov, PubMed, EuropePMC, Semantic Scholar, PubTator, LitSense, Monarch Initiative, OpenFDA, NIH Reporter, NCBI GEO, SRA, GenBank, Ensembl, and more
 - **Functional genomics & sequences** — GEO series/sample search with SOFT detail parsing, SRA experiment/run metadata, GenBank/RefSeq records with region slices, and GTEx v10 median expression + cis-eQTLs
 - **Section-based fetching** — `entityGet(id, sections)` fans out to multiple sources with per-section timeouts and graceful degradation (failed sections return `{ _error }` instead of crashing)
 - **Federated article search** — queries 5 literature backends simultaneously with PMID/PMCID/DOI deduplication
 - **Patent access** — worldwide patent search and detail via keyed EPO OPS / USPTO ODP; keyless USPTO Public Search and Google Patents (+Wayback archive) fallbacks
 - **Zero-config startup** — works out of the box; optional API keys unlock higher rate limits and premium data
-- **~953 unit tests** (mocked) + **135 integration tests** (live APIs via in-process MCP client, gated skips)
+- **1234 unit tests** (mocked, 74 suites) + **integration tests** across 19 files (live APIs via in-process MCP client, gated skips)
 
 ## Install
 
@@ -174,6 +174,8 @@ Capabilities that ship with the package but stay inactive until enabled. Each li
 | **Database access** — read-only SQL tools (`db_query`, `db_list_tables`, `db_describe_table`) for MySQL and local-file SQLite | Set `DB_TYPE` (+ connection env vars); MySQL also needs `npm install biomcp mysql2` in a local tree | [docs/DATABASE.md](docs/DATABASE.md) |
 | **R analysis** — Bioconductor differential expression (`analysis_r_deseq2`, `analysis_r_edger`, `analysis_r_limma`, `analysis_r_session_info`) running DESeq2/edgeR/limma in sandboxed WebAssembly R; wasm packages download from GitHub releases at first use (~62 MB, cached) | Set `ANALYSIS_R=1`; needs `npm install biomcp webr` in a local tree; expect ~1 GB RSS | [docs/R-ANALYSIS.md](docs/R-ANALYSIS.md) |
 | **Biowasm analysis** — samtools/bedtools/bcftools (BAM/BED/VCF) in sandboxed WebAssembly; streams/indexes real human-scale datasets (~300 MB BAM scans, region queries touch ~0.2 % of the file); assets ~4.5 MB cached at first use; no extra npm packages | Set `ANALYSIS_BIOWASM=1` | [docs/BIOWASM-ANALYSIS.md](docs/BIOWASM-ANALYSIS.md) |
+
+Instead of hand-editing env blocks, agents (and users) can self-serve through the always-available **`biomcp_configure`** tool: it reports every parameter's status/provenance, writes the `.biomcp.json` project config file for the optional features above (env vars keep precedence; env-only parameters are query-only and value-masked), validates changes, detects conflicts, checks peer-dependency prerequisites, and spells out the restart/verify steps. Details: [docs/ENV-VARS.md → Project config file](docs/ENV-VARS.md#project-config-file-biomcpjson-alternative-to-env-blocks).
 
 ## Documentation
 

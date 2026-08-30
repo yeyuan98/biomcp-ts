@@ -2,6 +2,30 @@
 
 Single source of truth for every environment variable BioMCP reads. BioMCP works with **zero configuration** — everything below is optional except where noted. Set variables in your MCP client's server entry (`env` / `environment` / `[mcp_servers.*.env]` blocks) or in the shell that launches the server; see [AGENT-INSTALL.md](AGENT-INSTALL.md).
 
+## Project config file `.biomcp.json` (alternative to env blocks)
+
+The optional-feature variables in the three feature sections below (and only those — API keys, proxy, cache location, and security boundaries stay env-only) can instead live in a `.biomcp.json` file in the **server's working directory** (the project root for project-scoped clients like Claude Code or OpenCode). The file is loaded once at server startup:
+
+```json
+{
+  "features": {
+    "analysis_biowasm": { "enabled": true, "workers": 2 },
+    "database": { "enabled": true, "type": "sqlite", "sqlite_path": ["data/geo.db"] }
+  }
+}
+```
+
+- **Precedence:** environment variables always win; the file fills unset variables only.
+- **Tooling:** the always-available `biomcp_configure` MCP tool queries and edits this file (status / set / reset with validation, conflict detection, and dependency prerequisites) — agents can self-serve configuration through it. Env-only parameters are query-only there, and env values are never displayed (presence + fingerprint only).
+- **Kill switch:** `BIOMCP_PROJECT_CONFIG=0` disables file loading entirely. A `.biomcp.json` committed in a cloned repository takes effect on startup like any local file — audit a cloned one like any project configuration, or disable file loading with the kill switch.
+- Relative paths (`sqlite_path`, plain-path `mirror_url`) resolve against the config file's directory, not the process cwd.
+- The file applies to the MCP server entry (`biomcp` / `dist/bundle.js`) only, not the library exports (`biomcp/db`, `biomcp/biowasm`).
+- Security boundaries (`ANALYSIS_BIOWASM_DATA_DIR`, `ANALYSIS_BIOWASM_WORKER_PATH`) are deliberately **not** file-settable.
+
+| Variable | Used by | Effect |
+|----------|---------|--------|
+| `BIOMCP_PROJECT_CONFIG` | config file loader | `0`/`false` disables `.biomcp.json` loading entirely (kill switch) |
+
 ## API keys and identifiers
 
 Optional. Without them the affected tools still work using keyless fallbacks or lower rate limits.

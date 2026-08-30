@@ -20,10 +20,22 @@
       ]
     },
     {
-      "type": "text",
-      "op": "contains",
-      "expect": "coordinate-sorted",
-      "source": "assistant"
+      "type": "group",
+      "anyOf": [
+        {
+          "type": "text",
+          "op": "contains",
+          "expect": "coordinate-sorted",
+          "source": "assistant"
+        },
+        {
+          "type": "text",
+          "op": "regex",
+          "expect": "(coordinate|position|order)[- ]sort|[Ss]ortedness|[Nn]ot.{0,30}sorted",
+          "source": "assistant"
+        }
+      ],
+      "desc": "recovery narrative acknowledges the sortedness problem (round 2: agents paraphrase, e.g. 'sortedness-detection false positive')"
     },
     {
       "type": "group",

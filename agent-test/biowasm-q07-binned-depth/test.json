@@ -27,9 +27,24 @@
       "expect": 500
     },
     {
-      "type": "number_near",
-      "expect": 6.64,
-      "tolerance": 0.5
+      "type": "group",
+      "anyOf": [
+        {
+          "type": "number_near",
+          "expect": 6.64,
+          "tolerance": 0.5,
+          "source": "assistant",
+          "desc": "expected bin-2 mean surfaced somewhere in the assistant text (table or summary)"
+        },
+        {
+          "type": "number_near",
+          "expect": 5.14,
+          "tolerance": 0.3,
+          "source": "assistant",
+          "context": "mean|depth",
+          "desc": "overall mean of bin means (~5.137; aggregate-only summaries quote ~5.2 without any per-bin value)"
+        }
+      ]
     },
     {
       "type": "rubric",

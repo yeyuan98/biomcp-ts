@@ -30,8 +30,9 @@ export async function loadMysqlDriver(): Promise<typeof mysql> {
       .catch((error) => {
         driverPromise = null;
         throw new Error(
-          'The "mysql2" package is required for the MySQL backend but is not installed.\n' +
-          'Install it to enable MySQL tools: npm install mysql2',
+          'The "mysql2" package is required for the MySQL backend but is not installed in this server\'s module tree.\n' +
+            'Install it next to biomcp in a local tree (mkdir biomcp-mysql && cd biomcp-mysql && npm install biomcp mysql2) and point the client at that tree —\n' +
+            'see the biomcp_configure tool (action "status") for prerequisites. SQLite needs no driver.',
           { cause: error }
         );
       });

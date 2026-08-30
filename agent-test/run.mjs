@@ -595,7 +595,10 @@ function compileContext(context) {
   if (context === undefined || context === null) return null;
   if (typeof context !== "string" || context.length === 0) return { error: "context must be a non-empty regex string" };
   try {
-    return { re: new RegExp(context) };
+    /* Case-insensitive by default: context regexes gate number matching inside
+     * sentence-like fragments, and LLM capitalization at fragment start
+     * ("Variants in slice: 269" vs "269 variants") must not decide the grade. */
+    return { re: new RegExp(context, "i") };
   } catch (e) {
     return { error: `invalid context regex ${JSON.stringify(context)}: ${e.message}` };
   }

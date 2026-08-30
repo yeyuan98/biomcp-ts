@@ -93,6 +93,7 @@ Version lives in `package.json`; notable changes go to [CHANGELOG.md](../CHANGEL
 | `src/entities/` | Domain logic: search/get/cross-entity fan-out per entity |
 | `src/connections/` | HTTP layer: source registry, REST/GraphQL clients, rate limiting, retries, circuit breakers, proxy-aware fetch |
 | `src/db/` | Optional SQL variant (see [DATABASE.md](DATABASE.md)) |
+| `src/config/` | Configuration core: parameter registry, `.biomcp.json` loader/store, and the brain behind the `biomcp_configure` tool |
 | `src/transform/` | Upstream payload → normalized schema mappers |
 | `scripts/` | Self-contained ETL scripts for API-less external databases (not part of the npm package); orchestrated via Makefile targets, e.g. `make depmap-build` — see [scripts/external-databases/](../scripts/external-databases/README.md) |
 | `docs/` | Feature guides (`DATABASE.md`, `ENV-VARS.md`, `AGENT-INSTALL.md`) |

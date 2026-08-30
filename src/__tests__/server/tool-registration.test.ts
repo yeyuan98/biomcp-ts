@@ -142,6 +142,7 @@ import { registerSraTools } from '../../server/tools/sra.js';
 import { registerGenbankTools } from '../../server/tools/genbank.js';
 import { registerGtexTools } from '../../server/tools/gtex.js';
 import { registerEnsemblTools } from '../../server/tools/ensembl.js';
+import { registerConfigureTool } from '../../server/tools/configure.js';
 
 beforeEach(() => {
   mockRegisterTool.mockClear();
@@ -213,7 +214,13 @@ describe('Tool registration', () => {
     expect(mockRegisterTool).toHaveBeenCalledTimes(4);
   });
 
-  it('total registerTool calls across all registrations = 40', () => {
+  it('registerConfigureTool calls registerTool 1 time', () => {
+    registerConfigureTool(mockServer);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(1);
+    expect(mockRegisterTool.mock.calls[0][0]).toBe('biomcp_configure');
+  });
+
+  it('total registerTool calls across all registrations = 41', () => {
     registerGeneTools(mockServer);
     registerDrugTools(mockServer);
     registerVariantTools(mockServer);
@@ -228,7 +235,8 @@ describe('Tool registration', () => {
     registerGenbankTools(mockServer);
     registerGtexTools(mockServer);
     registerEnsemblTools(mockServer);
-    expect(mockRegisterTool).toHaveBeenCalledTimes(40);
+    registerConfigureTool(mockServer);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(41);
   });
 
   it('no duplicate tool names across all registrations', () => {
@@ -246,6 +254,7 @@ describe('Tool registration', () => {
     registerGenbankTools(mockServer);
     registerGtexTools(mockServer);
     registerEnsemblTools(mockServer);
+    registerConfigureTool(mockServer);
 
     const names = mockRegisterTool.mock.calls.map((call: any[]) => call[0]);
     const uniqueNames = new Set(names);
@@ -267,6 +276,7 @@ describe('Tool registration', () => {
     registerGenbankTools(mockServer);
     registerGtexTools(mockServer);
     registerEnsemblTools(mockServer);
+    registerConfigureTool(mockServer);
 
     const names = mockRegisterTool.mock.calls.map((call: any[]) => call[0]);
     const expected = [
@@ -284,6 +294,7 @@ describe('Tool registration', () => {
       'genbank_search', 'genbank_get', 'genbank_genes',
       'gtex_expression', 'gtex_eqtl',
       'ensembl_lookup', 'ensembl_homology', 'ensembl_consequence', 'ensembl_region',
+      'biomcp_configure',
     ];
     expect(names.sort()).toEqual(expected.sort());
   });
