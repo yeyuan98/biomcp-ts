@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-08-31
+
+Follow-ups to a 14-step agent-driven install/configuration e2e (web-docs-only agent, published artifacts, real workloads): every fix below was observed live in that run.
+
+### Fixed
+
+- **`biomcp doctor` client snippets: always pinned, feature-union, R-aware timeout** — the `--client` paste-ready snippets previously recommended the bare `["npx","-y","biomcp"]` command (the exact form AGENT-INSTALL §2 forbids because the npx cache cannot see peer dependencies) and rendered at most ONE peer flag, silently dropping `mysql2` when both R analysis and MySQL were enabled. The snippet command is now rendered from the same version-pinned one-shot logic as the docs (`oneShotArgv` gained peer-union support) and derives desired peers from the merged file+env startup truth (`features[].running_after_restart`), never raw env; even the nothing-enabled case emits the pinned minimal form. The OpenCode snippet's `timeout` renders 120000 when `webr` is in the union (cold R bootstrap cannot fit 30 s) instead of the hardcoded 30000.
+- **Leading `~` accepted in R design formulas** — R users reflexively type the full formula form (`~condition`); the validator now strips one leading tilde at parse time (`normalizeDesign`, single normalization point feeding validation, storage, and the generated R scripts), so `~condition` ≡ `condition`. Double tildes and everything else are still rejected by the unchanged character whitelist. Found live by the e2e agent (one retry wasted).
+- **Server exits when the client closes stdin** — the MCP SDK's stdio transport has no exit path (data/error listeners only), so an abruptly killed client (SIGKILL of the parent) left an orphaned node server plus its ~1 GB webR worker holding pipes open for minutes. `src/server/index.ts` now installs an end/close guard on stdin with a 2 s unref'd grace exit and the existing shutdown hooks.
+
+### Added
+
+- **`features.analysis_r.asset_timeout_ms` / `ANALYSIS_R_ASSET_TIMEOUT_MS`** — configurable download timeout for the ~62 MB wasm package bundle (default 600000 ms, bounded 30000–3600000; file key clamped by the registry schema, env read NaN-guarded). Previously the fetch had a hard-coded 10-min abort with no knob, and `ANALYSIS_R_TIMEOUT_MS` never governed it (R evaluation only). Timeout errors now carry remediation: the knob plus the self-fetch + `mirror_url` recipe (rendered for both the GitHub path and http(s) mirror URLs; `fetchJson` timeouts get the same treatment). The R asset store reads the env lazily (memoized, reset with the test resetter) because the server fills env from `.biomcp.json` after module load — an eager read would silently ignore file-set values.
+
+### Changed
+
+- **Setup docs hardened from the e2e** — `docs/AGENT-INSTALL.md`: §2 rewritten as a command ladder leading with the all-features union form `["npx","-y","-p","biomcp@0.9","-p","webr@0.6","-p","mysql2@3","biomcp"]` (all client examples updated; minimal form now pinned), a two-value OpenCode `timeout` story (30000 / 120000 with R), §4B "Cold-start expectations" with the self-fetch recipe (including the `confirm_sensitive: true` the `mirror_url` set requires), a `confirm_sensitive` note in §4, doctor's snippet-trustworthiness callout, five new failure-table rows (slow-link download abort, missing-peer command, sensitive-set refusal, cold-R client timeout, orphaned-server cleanup), and §5 now blesses restart-free checking via doctor's `running_after_restart` + `startup.applied_keys`. `docs/R-ANALYSIS.md`: cold-start budgeting, asset-timeout documentation, tilde acceptance (tool contract + security model). `docs/ENV-VARS.md`: the new knob row plus an accurate sensitive/secret key classification. `README.md` feature table points at the all-features variant. New drift test pins the docs' all-features string to the rendered union command.
+
 ## [0.9.0] - 2026-08-31
 
 ### Added
