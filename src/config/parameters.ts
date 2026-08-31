@@ -168,14 +168,15 @@ export const PEER_NPM_PINS: Readonly<Record<'webr' | 'mysql2', string>> = { webr
 export type PeerPackageName = 'webr' | 'mysql2';
 
 /** Shell form of the recommended zero-install client command. */
-export function oneShotCommand(peer?: PeerPackageName): string {
-  return oneShotArgv(peer).join(' ');
+export function oneShotCommand(peers?: PeerPackageName | PeerPackageName[]): string {
+  return oneShotArgv(peers).join(' ');
 }
 
 /** Client command-array form (plain argv, no shell) of the same command. */
-export function oneShotArgv(peer?: PeerPackageName): string[] {
+export function oneShotArgv(peers?: PeerPackageName | PeerPackageName[]): string[] {
   const argv = ['npx', '-y', '-p', BIOMCP_NPM_PIN];
-  if (peer) argv.push('-p', PEER_NPM_PINS[peer]);
+  const list = peers == null ? [] : Array.isArray(peers) ? peers : [peers];
+  for (const p of list) argv.push('-p', PEER_NPM_PINS[p]);
   argv.push('biomcp');
   return argv;
 }

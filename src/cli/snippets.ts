@@ -18,7 +18,8 @@ const SERVER_NAME = 'biomcp';
 export function clientSnippets(
   command: readonly string[],
   environment: Readonly<Record<string, string>>,
-  client?: ClientId
+  client?: ClientId,
+  timeoutMs: number = 30_000
 ): ClientSnippet[] {
   const cmd = [...command];
   const envEntries = Object.entries(environment);
@@ -35,7 +36,7 @@ export function clientSnippets(
               command: cmd,
               environment: Object.fromEntries(envEntries.map(([k]) => [k, '<set-in-your-client>'])),
               enabled: true,
-              timeout: 30000,
+              timeout: timeoutMs,
             },
           },
         },

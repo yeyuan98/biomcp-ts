@@ -1,6 +1,6 @@
 import { totalmem } from 'node:os';
 import { loadAndApplyToEnv, getStatus, serverContext } from '../config/handler.js';
-import { ENV_PARAM_ROWS, oneShotArgv, oneShotCommand } from '../config/parameters.js';
+import { ENV_PARAM_ROWS, oneShotArgv, oneShotCommand, type PeerPackageName } from '../config/parameters.js';
 import { clientSnippets, type ClientId } from './snippets.js';
 import type { DoctorBlocker, DoctorReport, DoctorWarning } from './types.js';
 
@@ -101,7 +101,15 @@ export function buildDoctorReport(dir: string = process.cwd(), client?: ClientId
     prerequisites: f.prerequisites,
   }));
 
-  const snippetCommand = analysisRDesired() ? oneShotArgv('webr') : dbType === 'mysql' ? oneShotArgv('mysql2') : ['npx', '-y', 'biomcp'];
+  // Snippet command = pinned one-shot with EVERY peer whose feature will be ON
+  // after restart (merged file+env truth from getStatus — never raw env, never
+  // bare ["npx","-y","biomcp"], never one peer at the expense of the other).
+  const desiredPeers: PeerPackageName[] = [];
+  if (featureRows.some((f) => f.id === 'analysis_r' && f.running_after_restart)) desiredPeers.push('webr');
+  if (dbType === 'mysql') desiredPeers.push('mysql2');
+  const snippetCommand = oneShotArgv(desiredPeers);
+  // Cold R bootstrap (62 MB bundle + ~1 GB worker) cannot fit a 30 s client timeout.
+  const snippetTimeoutMs = desiredPeers.includes('webr') ? 120_000 : 30_000;
   const snippetEnv = Object.fromEntries(ENV_PARAM_ROWS.filter((r) => env[r.id]).map((r) => [r.id, '<set-in-your-client>']));
 
   const nextSteps: string[] = [];
@@ -113,7 +121,7 @@ export function buildDoctorReport(dir: string = process.cwd(), client?: ClientId
     nextSteps.push('Restart the MCP client (or start a new session) so configuration changes load at server startup.');
     nextSteps.push('In the client, call biomcp_configure with {} and confirm features.<id>.running_now === true.');
   }
-  for (const s of clientSnippets(snippetCommand, snippetEnv, client)) {
+  for (const s of clientSnippets(snippetCommand, snippetEnv, client, snippetTimeoutMs)) {
     nextSteps.push(`${s.label}:\n${s.snippet}`);
   }
 
@@ -140,10 +148,6 @@ export function buildDoctorReport(dir: string = process.cwd(), client?: ClientId
     warnings,
     next_steps: nextSteps,
   };
-}
-
-function analysisRDesired(): boolean {
-  return Boolean(process.env['ANALYSIS_R']?.trim());
 }
 
 function modeAdvice(mode: string): string | null {
