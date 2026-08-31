@@ -24,7 +24,7 @@ const DESCRIPTION = `Inspect and configure biomcp — unified observability and 
 **What it covers:** three optional feature groups (database, analysis_r, analysis_biowasm) whose knobs live in the .biomcp.json project config file (written by this tool, loaded at server startup — a restart applies changes), plus every environment-only parameter (API keys, proxy, security boundaries), which is query-only.
 
 **Actions:**
-- status (default; call with {}): per-feature running state, config file health, conflicts (e.g. an env var vetoing the file), pending-restart flags, dependency prerequisites, and a catalog of all parameters (id / effective value / provenance). Use filter for detailed rows: 'file', 'env', a feature id ('analysis_r'), or a dotted-id prefix ('features.database').
+- status (default; call with {}): per-feature running state (with each feature's settable_keys), config file health, conflicts (e.g. an env var vetoing the file), pending-restart flags, dependency prerequisites, and parameter counts. The full parameter catalog is NOT inlined — use filter for detailed rows: 'file', 'env', a feature id ('analysis_r'), or a dotted-id prefix ('features.database').
 - set: create/modify file parameters in one atomic batch. Enable/disable is just features.<group>.enabled. null removes a key (restores default). Sensitive keys (connection targets, mirrors) require confirm_sensitive=true. Nothing is written when any key is invalid (dry_run=true validates and diffs without writing).
 - reset: remove a feature section (target: feature id) or specific keys (target: [dotted ids]).
 

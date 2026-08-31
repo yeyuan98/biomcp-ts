@@ -1,0 +1,71 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.yeyuan98/biomcp-ts",
+  "title": "BioMCP-TS",
+  "description": "Biomedical MCP server: genes, variants, trials, literature, patents, optional SQL/R/biowasm tools.",
+  "repository": {
+    "url": "https://github.com/yeyuan98/biomcp-ts",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/yeyuan98/biomcp-ts/blob/main/docs/AGENT-INSTALL.md",
+  "version": "0.9.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "biomcp",
+      "version": "0.9.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "ANALYSIS_BIOWASM",
+          "description": "Set to 1 to enable the samtools/bedtools/bcftools biowasm analysis tools",
+          "isRequired": false
+        },
+        {
+          "name": "ANALYSIS_R",
+          "description": "Set to 1 to enable the R/Bioconductor analysis tools (requires the webr peer dependency; use the pinned one-shot client command)",
+          "isRequired": false
+        },
+        {
+          "name": "DB_TYPE",
+          "description": "Set to mysql or sqlite to enable the read-only SQL database tools",
+          "isRequired": false
+        },
+        {
+          "name": "NCBI_API_KEY",
+          "description": "Higher NCBI E-utilities rate limits (3 -> 10 req/s)",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "S2_API_KEY",
+          "description": "Higher Semantic Scholar rate limits",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "OPENFDA_API_KEY",
+          "description": "Higher OpenFDA rate limits",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "ONCOKB_TOKEN",
+          "description": "Required by the variant_oncokb tool (OncoKB annotations)",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "DISGENET_API_KEY",
+          "description": "Required for DisGeNET disease-gene associations",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

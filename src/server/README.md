@@ -88,7 +88,7 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
-| `biomcp_configure` | `action?: "status" \| "set" \| "reset" (default "status")`, `values?: record<string, unknown>`, `target?: string \| string[]`, `filter?: string`, `dry_run?: boolean`, `confirm_sensitive?: boolean` | Unified configuration surface over the `.biomcp.json` project config file + env vars: status (per-feature running state, provenance, conflicts, prerequisites, parameter catalog), set/reset with closed-set dotted-id validation (atomic batches, sensitive-key confirm gate, secret redaction). Env-only parameters are query-only and value-masked (presence + fingerprint) | write, destructive (reset), idempotent |
+| `biomcp_configure` | `action?: "status" \| "set" \| "reset" (default "status")`, `values?: record<string, unknown>`, `target?: string \| string[]`, `filter?: string`, `dry_run?: boolean`, `confirm_sensitive?: boolean` | Unified configuration surface over the `.biomcp.json` project config file + env vars: status (per-feature running state + settable_keys, provenance, conflicts, prerequisites, parameter counts; detailed rows via filter), set/reset with closed-set dotted-id validation (atomic batches, sensitive-key confirm gate, secret redaction). Env-only parameters are query-only and value-masked (presence + fingerprint) | write, destructive (reset), idempotent |
 
 ### Utility Tools (`tools/utility.ts`) — 2 tools
 

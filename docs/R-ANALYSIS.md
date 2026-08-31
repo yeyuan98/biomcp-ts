@@ -14,13 +14,22 @@ This is an **optional feature**, enabled like database access.
 ANALYSIS_R=1
 ```
 
-Agents can also enable this feature themselves via the always-available `biomcp_configure` tool (`{"action":"set","values":{"features.analysis_r.enabled":true}}`, or the `.biomcp.json` file it writes) — but the `webr` install tree below is still required and is something the tool can only guide you through, not perform.
-`webr` is an optional peer dependency (like `mysql2` for the database feature):
+Agents can also enable this feature themselves via the always-available `biomcp_configure` tool (`{"action":"set","values":{"features.analysis_r.enabled":true}}`, or the `.biomcp.json` file it writes) — but the `webr` peer dependency below must be resolvable from the server's own install tree, which only the invocation form can provide.
+`webr` is an optional peer dependency (like `mysql2` for the database feature). The recommended form is the pinned one-shot, used **as the client's command array** — no install step:
 
 ```
-npm install biomcp webr        # npm-installed servers
-npx -p biomcp -p webr biomcp   # npx one-shot
+npx -y -p biomcp@0.9 -p webr@0.6 biomcp   # client command array (plain argv, no shell)
 ```
+
+Why not `npm install biomcp webr` in a subdirectory + bare `npx biomcp`? Node resolves peer dependencies relative to the running script's tree, and MCP clients control the server's working directory (OpenCode = its launch directory, Claude Desktop = `/`) — a tree in a subfolder is invisible. If you need a local tree (air-gapped, exact pinning), invoke it by **absolute path**:
+
+```
+mkdir biomcp-r && cd biomcp-r && npm install biomcp webr
+# client command array:
+["node", "<ABSOLUTE_PATH>/biomcp-r/node_modules/biomcp/dist/bundle.js"]
+```
+
+`biomcp doctor` reports your current install mode and whether `webr` resolves (see docs/AGENT-INSTALL.md §3).
 
 ### Example (Claude Desktop)
 
@@ -29,7 +38,7 @@ npx -p biomcp -p webr biomcp   # npx one-shot
   "mcpServers": {
     "biomcp": {
       "command": "npx",
-      "args": ["-p", "biomcp", "-p", "webr", "biomcp"],
+      "args": ["-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "biomcp"],
       "env": {
         "ANALYSIS_R": "1"
       }

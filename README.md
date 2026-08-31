@@ -2,6 +2,8 @@
 
 A high-performance MCP server that gives LLMs access to 40 biomedical tools federated across 50+ upstream APIs — genes, variants, drugs, diseases, literature, clinical trials, structural biology, and functional genomics in a single integration.
 
+> **Note:** this is BioMCP-**TS**, the TypeScript server published as npm package **`biomcp`**. It is distinct from the Python/Rust BioMCP by genomoncology — CLI flags like `biomcp run` / `--biowasm` do not exist here; optional features are enabled with environment variables or the `.biomcp.json` config file.
+
 ## Highlights
 
 - **41 tools** across 15 registration modules — search, retrieve, and cross-reference biomedical entities, plus the `biomcp_configure` meta tool for configuration observability (+3 optional database tools, +4 optional R analysis tools, +8 optional biowasm analysis tools)
@@ -16,10 +18,11 @@ A high-performance MCP server that gives LLMs access to 40 biomedical tools fede
 ## Install
 
 ```bash
-npx biomcp        # zero-config stdio MCP server; Node >= 22.13
+npx -y biomcp doctor   # diagnose a machine: Node gate, config health, feature gates, peer deps
+npx biomcp             # zero-config stdio MCP server (this is what MCP clients run); Node >= 22.13
 ```
 
-**Setup is guided in [docs/AGENT-INSTALL.md](docs/AGENT-INSTALL.md)** — copy-paste config snippets for Claude Desktop, Claude Code, Codex, and OpenCode, plus an agent-friendly checklist for API keys and optional features.
+**Setup is guided in [docs/AGENT-INSTALL.md](docs/AGENT-INSTALL.md)** — a one-minute start, copy-paste config entries for Claude Desktop, Claude Code, Codex, and OpenCode (one canonical pinned command covering every feature), `biomcp doctor` as the single troubleshooting entry point, and agent-friendly paths for API keys and optional features.
 
 ## Available Tools
 
@@ -171,8 +174,8 @@ Capabilities that ship with the package but stay inactive until enabled. Each li
 
 | Feature | Enable | Guide |
 |---------|--------|-------|
-| **Database access** — read-only SQL tools (`db_query`, `db_list_tables`, `db_describe_table`) for MySQL and local-file SQLite | Set `DB_TYPE` (+ connection env vars); MySQL also needs `npm install biomcp mysql2` in a local tree | [docs/DATABASE.md](docs/DATABASE.md) |
-| **R analysis** — Bioconductor differential expression (`analysis_r_deseq2`, `analysis_r_edger`, `analysis_r_limma`, `analysis_r_session_info`) running DESeq2/edgeR/limma in sandboxed WebAssembly R; wasm packages download from GitHub releases at first use (~62 MB, cached) | Set `ANALYSIS_R=1`; needs `npm install biomcp webr` in a local tree; expect ~1 GB RSS | [docs/R-ANALYSIS.md](docs/R-ANALYSIS.md) |
+| **Database access** — read-only SQL tools (`db_query`, `db_list_tables`, `db_describe_table`) for MySQL and local-file SQLite | Set `DB_TYPE` (+ connection env vars); MySQL needs the `mysql2` peer dep — use the pinned one-shot client command (see [docs/DATABASE.md](docs/DATABASE.md)) | [docs/DATABASE.md](docs/DATABASE.md) |
+| **R analysis** — Bioconductor differential expression (`analysis_r_deseq2`, `analysis_r_edger`, `analysis_r_limma`, `analysis_r_session_info`) running DESeq2/edgeR/limma in sandboxed WebAssembly R; wasm packages download from GitHub releases at first use (~62 MB, cached) | Set `ANALYSIS_R=1`; needs the `webr` peer dep — use the pinned one-shot client command `["npx","-y","-p","biomcp@0.9","-p","webr@0.6","biomcp"]`; expect ~1 GB RSS | [docs/R-ANALYSIS.md](docs/R-ANALYSIS.md) |
 | **Biowasm analysis** — samtools/bedtools/bcftools (BAM/BED/VCF) in sandboxed WebAssembly; streams/indexes real human-scale datasets (~300 MB BAM scans, region queries touch ~0.2 % of the file); assets ~4.5 MB cached at first use; no extra npm packages | Set `ANALYSIS_BIOWASM=1` | [docs/BIOWASM-ANALYSIS.md](docs/BIOWASM-ANALYSIS.md) |
 
 Instead of hand-editing env blocks, agents (and users) can self-serve through the always-available **`biomcp_configure`** tool: it reports every parameter's status/provenance, writes the `.biomcp.json` project config file for the optional features above (env vars keep precedence; env-only parameters are query-only and value-masked), validates changes, detects conflicts, checks peer-dependency prerequisites, and spells out the restart/verify steps. Details: [docs/ENV-VARS.md → Project config file](docs/ENV-VARS.md#project-config-file-biomcpjson-alternative-to-env-blocks).

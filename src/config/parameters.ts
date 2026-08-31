@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { VERSION } from '../version.js';
 
 /**
  * Single source of truth for every biomcp configuration parameter.
@@ -153,7 +154,31 @@ const biowasmSection = z.strictObject({
 });
 
 const LOCAL_TREE_NOTE =
-  'Peer deps resolve only from a local install tree — a bare npx biomcp cannot see them (https://github.com/yeyuan98/biomcp-ts AGENT-INSTALL.md §1).';
+  'MCP clients control the server working directory (OpenCode = its launch directory, Claude Desktop = "/"), so "run npx biomcp from the tree" never reaches the server; peer deps resolve only from the bundle\'s own node_modules tree (https://github.com/yeyuan98/biomcp-ts AGENT-INSTALL.md §1).';
+
+/**
+ * Version pins for the recommended one-shot npx client command, rendered from
+ * version.ts (NOT hardcoded) so they can never drift from the release. Peer
+ * pins mirror package.json peerDependencies ranges (drift-guarded by
+ * src/__tests__/config/parameters.test.ts).
+ */
+export const BIOMCP_NPM_PIN = `biomcp@${VERSION.split('.').slice(0, 2).join('.')}`;
+export const PEER_NPM_PINS: Readonly<Record<'webr' | 'mysql2', string>> = { webr: 'webr@0.6', mysql2: 'mysql2@3' };
+
+export type PeerPackageName = 'webr' | 'mysql2';
+
+/** Shell form of the recommended zero-install client command. */
+export function oneShotCommand(peer?: PeerPackageName): string {
+  return oneShotArgv(peer).join(' ');
+}
+
+/** Client command-array form (plain argv, no shell) of the same command. */
+export function oneShotArgv(peer?: PeerPackageName): string[] {
+  const argv = ['npx', '-y', '-p', BIOMCP_NPM_PIN];
+  if (peer) argv.push('-p', PEER_NPM_PINS[peer]);
+  argv.push('biomcp');
+  return argv;
+}
 
 export const FEATURE_GROUPS: readonly FeatureGroup[] = [
   {
@@ -167,10 +192,13 @@ export const FEATURE_GROUPS: readonly FeatureGroup[] = [
       {
         package: 'mysql2',
         commands: [
+          oneShotCommand('mysql2'),
           'mkdir biomcp-mysql && cd biomcp-mysql && npm install biomcp mysql2',
-          '# then point the client command at this tree (see user steps)',
+          'node <ABS_PATH>/biomcp-mysql/node_modules/biomcp/dist/bundle.js',
         ],
-        note: 'Only for type="mysql" — SQLite uses the built-in node:sqlite. ' + LOCAL_TREE_NOTE,
+        note:
+          'Only for type="mysql" — SQLite uses the built-in node:sqlite. Command 1 is the recommended client command array (zero-install; peer pins are rendered from the release). Commands 2-3 build a local tree; command 3 is its client invocation and must use an ABSOLUTE path. ' +
+          LOCAL_TREE_NOTE,
       },
     ],
     sectionSchema: databaseSection,
@@ -197,11 +225,13 @@ export const FEATURE_GROUPS: readonly FeatureGroup[] = [
       {
         package: 'webr',
         commands: [
+          oneShotCommand('webr'),
           'mkdir biomcp-r && cd biomcp-r && npm install biomcp webr',
-          '# one-shot alternative: npx -p biomcp -p webr biomcp',
-          '# then point the client command at this tree (see user steps)',
+          'node <ABS_PATH>/biomcp-r/node_modules/biomcp/dist/bundle.js',
         ],
-        note: LOCAL_TREE_NOTE,
+        note:
+          'Command 1 is the recommended client command array (zero-install; peer pins are rendered from the release). Commands 2-3 build a local tree; command 3 is its client invocation and must use an ABSOLUTE path. ' +
+          LOCAL_TREE_NOTE,
       },
     ],
     sectionSchema: analysisRSection,

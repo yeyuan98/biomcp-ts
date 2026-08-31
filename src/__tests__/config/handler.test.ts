@@ -340,16 +340,28 @@ describe('getStatus', () => {
     writeConfig({ features: { analysis_r: { enabled: true } } });
     process.env.ANALYSIS_R = '0';
     const status = getStatus({ dir, env: process.env });
-    const features = status['features'] as { id: string; running_now: boolean; pending_restart: boolean }[];
+    const features = status['features'] as { id: string; running_now: boolean; pending_restart: boolean; source: string }[];
     const r = features.find((f) => f.id === 'analysis_r')!;
     expect(r.running_now).toBe(false);
     expect(r.pending_restart).toBe(true);
+    expect(r.source).toBe('disabled by env veto');
     const conflicts = status['conflicts'] as { type: string }[];
     expect(conflicts.some((c) => c.type === 'env-veto')).toBe(true);
   });
 
+  it('file-enabled feature with NO disabling env var is "file (pending restart)", never a false veto label', () => {
+    writeConfig({ features: { analysis_biowasm: { enabled: true } } });
+    const status = getStatus({ dir, env: process.env });
+    const features = status['features'] as { id: string; source: string; running_now: boolean }[];
+    const r = features.find((f) => f.id === 'analysis_biowasm')!;
+    expect(r.running_now).toBe(false);
+    expect(r.source).toBe('file (pending restart)');
+    const conflicts = status['conflicts'] as { type: string }[];
+    expect(conflicts.some((c) => c.type === 'env-veto')).toBe(false);
+  });
+
   it('masks env-kind values: presence + fingerprint only, never the value', () => {
-    const status = getStatus({ dir, env: { ONCOKB_TOKEN: 'super-secret-token-value' } });
+    const status = getStatus({ dir, env: { ONCOKB_TOKEN: 'super-secret-token-value' }, filter: 'env' });
     const serialized = JSON.stringify(status);
     expect(serialized).not.toContain('super-secret-token-value');
     const catalog = status['catalog'] as Record<string, unknown>[];

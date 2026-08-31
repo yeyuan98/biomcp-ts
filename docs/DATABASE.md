@@ -15,10 +15,10 @@ There is one package; the backend you get depends on what is installed next to i
 
 | Mode | Setup | Works from |
 |------|-------|-----------|
-| Core only / SQLite | nothing extra — `npx biomcp` anywhere (Node >= 22.13) | any directory |
-| MySQL | local tree containing both packages: `npm install biomcp mysql2`, then run `npx biomcp` from that directory | that directory |
+| Core only / SQLite | nothing extra — `npx -y biomcp` anywhere (Node >= 22.13) | any directory |
+| MySQL | pinned one-shot **as the client command array** (zero-install): `["npx","-y","-p","biomcp@0.9","-p","mysql2@3","biomcp"]` — or a local tree invoked by absolute path: `npm install biomcp mysql2`, then client command `["node","<ABSOLUTE_PATH>/biomcp-mysql/node_modules/biomcp/dist/bundle.js"]` | any directory (the client spawns the server) |
 
-Why the difference: `mysql2` is a peer dependency, and Node resolves peers relative to the running script's install tree. A bare `npx biomcp` executes from the npx cache, which cannot see a separately installed `mysql2` — global installs do not help either. If the driver is missing when `DB_TYPE=mysql` is set, startup still succeeds and the first db tool call returns an actionable error pointing at a local install tree (`mkdir biomcp-mysql && cd biomcp-mysql && npm install biomcp mysql2`) and at the `biomcp_configure` tool for prerequisites.
+Why the difference: `mysql2` is a peer dependency, and Node resolves peers relative to the running script's install tree. A bare `npx biomcp` executes from the npx cache, which cannot see a separately installed `mysql2` — global installs do not help either, and MCP clients control the server's working directory, so "run `npx biomcp` from the tree's directory" never reaches the server (the absolute `node` path is what makes a local tree work). If the driver is missing when `DB_TYPE=mysql` is set, startup still succeeds and the first db tool call returns an actionable error pointing at the one-shot command / local tree, and at the `biomcp_configure` tool for prerequisites. `biomcp doctor` reports your install mode and driver resolvability (docs/AGENT-INSTALL.md §3).
 
 ## Enabling
 
@@ -54,7 +54,7 @@ Agents can also enable this feature via the always-available `biomcp_configure` 
 }
 ```
 
-The db tools are registered at server startup, so **restart your MCP client** after adding or changing these variables — see [AGENT-INSTALL.md → Verify](AGENT-INSTALL.md#4-verify) for per-client restart specifics.
+The db tools are registered at server startup, so **restart your MCP client** after adding or changing these variables — see [AGENT-INSTALL.md → Verify & troubleshoot](AGENT-INSTALL.md#5-verify--troubleshoot) for per-client restart specifics.
 
 ## Multiple SQLite databases
 
