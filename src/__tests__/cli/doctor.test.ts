@@ -105,6 +105,50 @@ describe('buildDoctorReport', () => {
     expect(joined).not.toContain('opencode.json');
   });
 
+  it('nothing desired: snippet command is the pinned minimal one-shot, never bare npx', () => {
+    const report = buildDoctorReport(dir, 'opencode');
+    const joined = report.next_steps.join('\n');
+    expect(joined).toContain('"command": [\n        "npx",\n        "-y",\n        "-p",\n        "biomcp@');
+    expect(joined).not.toContain('"-p",\n        "webr@');
+    expect(joined).not.toContain('"-p",\n        "mysql2@');
+    expect(joined).toContain('"timeout": 30000');
+  });
+
+  it('R desired via env: snippet includes webr pin and raised timeout 120000', () => {
+    process.env['ANALYSIS_R'] = '1';
+    const report = buildDoctorReport(dir, 'opencode');
+    const joined = report.next_steps.join('\n');
+    expect(joined).toContain('-p');
+    expect(joined).toContain('webr@');
+    expect(joined).toContain('"timeout": 120000');
+    expect(joined).not.toContain('mysql2@');
+  });
+
+  it('mysql desired via env: snippet includes mysql2 pin, default timeout', () => {
+    process.env['DB_TYPE'] = 'mysql';
+    process.env['DB_USER'] = 'u';
+    process.env['DB_DATABASE'] = 'd';
+    const report = buildDoctorReport(dir, 'opencode');
+    const joined = report.next_steps.join('\n');
+    expect(joined).toContain('mysql2@');
+    expect(joined).not.toContain('webr@');
+    expect(joined).toContain('"timeout": 30000');
+  });
+
+  it('R + mysql desired via FILE (env empty): snippet is the pinned union command with both peers', () => {
+    writeFileSync(
+      configFilePath(dir),
+      JSON.stringify({ features: { analysis_r: { enabled: true }, database: { enabled: true, type: 'mysql', user: 'u', database: 'd' } } })
+    );
+    const report = buildDoctorReport(dir, 'opencode');
+    const joined = report.next_steps.join('\n');
+    const webrAt = joined.indexOf('webr@');
+    const mysqlAt = joined.indexOf('mysql2@');
+    expect(webrAt).toBeGreaterThanOrEqual(0);
+    expect(mysqlAt).toBeGreaterThan(webrAt); // frozen canonical order: webr before mysql2
+    expect(joined).toContain('"timeout": 120000');
+  });
+
   it('text format renders blockers and fix commands readably', () => {
     writeFileSync(configFilePath(dir), '{ broken');
     const text = formatDoctorText(buildDoctorReport(dir));

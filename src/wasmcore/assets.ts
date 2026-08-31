@@ -36,6 +36,10 @@ export interface AssetStoreConfig {
   userAgent: string;
   downloadTimeoutMs?: number;
   assetTimeoutMs?: number;
+  /** Remediation text appended to ASSET download-timeout errors (the knob-governed path). */
+  timeoutRemediation?: (timeoutMs: number) => string;
+  /** Remediation text appended to API-metadata timeout errors (separate 30 s budget — must NOT advertise the asset knob). */
+  apiTimeoutRemediation?: (timeoutMs: number) => string;
 }
 
 interface AssetState {
@@ -120,23 +124,54 @@ export class VerifiedAssetStore {
     extractTarGzArchive(tarPath, destDir, (message) => this.fail(message), this.cfg.label);
   }
 
+  private isOwnError(err: unknown): boolean {
+    return err instanceof Error && err.constructor === this.cfg.errorCtor;
+  }
+
+  private timeoutMessage(url: string, timeoutMs: number): string {
+    const base = `${this.cfg.label} download timed out after ${Math.round(timeoutMs / 1000)}s: ${url}.`;
+    const rem = this.cfg.timeoutRemediation?.(timeoutMs) ?? `Increase the download timeout or set ${this.cfg.envVar} to a local mirror.`;
+    return `${base} ${rem}`;
+  }
+
   private async fetchJson(url: string): Promise<any> {
-    const res = await fetch(url, {
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': this.cfg.userAgent },
-      signal: AbortSignal.timeout(this.cfg.downloadTimeoutMs ?? DEFAULT_DOWNLOAD_TIMEOUT_MS),
-    });
-    if (!res.ok) throw this.fail(`GitHub API request failed (${res.status}) for ${url}.`);
-    return res.json();
+    const timeoutMs = this.cfg.downloadTimeoutMs ?? DEFAULT_DOWNLOAD_TIMEOUT_MS;
+    try {
+      const res = await fetch(url, {
+        headers: { Accept: 'application/vnd.github+json', 'User-Agent': this.cfg.userAgent },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!res.ok) throw this.fail(`GitHub API request failed (${res.status}) for ${url}.`);
+      return await res.json();
+    } catch (err) {
+      if (this.isOwnError(err) || !(err instanceof Error)) throw err;
+      if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+        const rem =
+          this.cfg.apiTimeoutRemediation?.(timeoutMs) ??
+          `This was a GitHub API metadata call, not the bundle download — check network/proxy access to api.github.com, or set ${this.cfg.envVar} to a mirror.`;
+        throw this.fail(`${this.cfg.label} GitHub API request timed out after ${Math.round(timeoutMs / 1000)}s: ${url}. ${rem}`);
+      }
+      throw err;
+    }
   }
 
   private async downloadTo(url: string, destPath: string): Promise<void> {
-    const res = await fetch(url, {
-      headers: { 'User-Agent': this.cfg.userAgent },
-      signal: AbortSignal.timeout(this.cfg.assetTimeoutMs ?? DEFAULT_ASSET_TIMEOUT_MS),
-    });
-    if (!res.ok || !res.body) throw this.fail(`${this.cfg.label} download failed (${res.status}) for ${url}.`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    writeFileSync(destPath, buf);
+    const timeoutMs = this.cfg.assetTimeoutMs ?? DEFAULT_ASSET_TIMEOUT_MS;
+    try {
+      const res = await fetch(url, {
+        headers: { 'User-Agent': this.cfg.userAgent },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!res.ok || !res.body) throw this.fail(`${this.cfg.label} download failed (${res.status}) for ${url}.`);
+      // undici applies the abort signal to body consumption too — on slow links
+      // (headers fast, body trickling) the reject fires HERE, not at fetch().
+      const buf = Buffer.from(await res.arrayBuffer());
+      writeFileSync(destPath, buf);
+    } catch (err) {
+      if (this.isOwnError(err) || !(err instanceof Error)) throw err;
+      if (err.name === 'TimeoutError' || err.name === 'AbortError') throw this.fail(this.timeoutMessage(url, timeoutMs));
+      throw err;
+    }
   }
 
   private verifyManifest(dir: string): AssetManifest {

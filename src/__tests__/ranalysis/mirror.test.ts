@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const SAVED_ENV: Record<string, string | undefined> = {};
-const ENV_KEYS = ['ANALYSIS_R_MIRROR_URL', 'ANALYSIS_R_GITHUB_REPO', 'BIOMPC_CACHE_DIR'] as const;
+const ENV_KEYS = ['ANALYSIS_R_MIRROR_URL', 'ANALYSIS_R_GITHUB_REPO', 'ANALYSIS_R_ASSET_TIMEOUT_MS', 'BIOMCP_CACHE_DIR'] as const;
 
 function sha256(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -110,7 +110,7 @@ describe('wasm mirror resolution', () => {
     tmpRoot = mkdtempSync(join(tmpdir(), 'biomcp-mirror-test-'));
     cacheDir = join(tmpRoot, 'cache');
     mkdirSync(cacheDir, { recursive: true });
-    process.env.BIOMPC_CACHE_DIR = cacheDir;
+    process.env.BIOMCP_CACHE_DIR = cacheDir;
     fetchMock = jest.fn();
     global.fetch = fetchMock as unknown as typeof fetch;
   });
@@ -194,5 +194,61 @@ describe('wasm mirror resolution', () => {
     process.env.ANALYSIS_R_MIRROR_URL = 'ftp://example.test/mirror.tar.gz';
     const { resolveMirror } = await importMirror();
     await expect(resolveMirror()).rejects.toThrow(/ANALYSIS_R_MIRROR_URL must be/);
+  });
+
+  it('download timeout surfaces as MirrorError with remediation naming the knob and the mirror recipe', async () => {
+    process.env.ANALYSIS_R_ASSET_TIMEOUT_MS = '45000';
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ assets: [{ name: 'r-wasm-mirror-test.tar.gz', browser_download_url: 'http://mirror.test/asset.tar.gz', id: 7, updated_at: 't' }] }), { status: 200 })
+    );
+    fetchMock.mockImplementationOnce(async () => {
+      // undici rejects body consumption with a DOMException named TimeoutError
+      // when the abort signal fires mid-stream — simulate that surface.
+      const e = new Error('The operation was aborted due to timeout');
+      e.name = 'TimeoutError';
+      throw e;
+    });
+    const { resolveMirror } = await importMirror();
+    await expect(resolveMirror()).rejects.toThrow(/timed out after 45s.*asset_timeout_ms.*ANALYSIS_R_ASSET_TIMEOUT_MS.*mirror_url/s);
+  });
+
+  it('lazy store memo: resetMirrorForTests re-reads the timeout env on the next resolve', async () => {
+    const respondReleaseThenTimeout = () => {
+      fetchMock.mockClear();
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ assets: [{ name: 'r-wasm-mirror-test.tar.gz', browser_download_url: 'http://mirror.test/asset.tar.gz', id: 7, updated_at: 't' }] }), { status: 200 })
+      );
+      fetchMock.mockImplementationOnce(async () => {
+        const e = new Error('aborted');
+        e.name = 'TimeoutError';
+        throw e;
+      });
+    };
+    process.env.ANALYSIS_R_ASSET_TIMEOUT_MS = '30000';
+    respondReleaseThenTimeout();
+    const mod = await importMirror();
+    await expect(mod.resolveMirror()).rejects.toThrow(/timed out after 30s/);
+    // change the knob WITHOUT reset: memoized store keeps the old timeout…
+    process.env.ANALYSIS_R_ASSET_TIMEOUT_MS = '90000';
+    respondReleaseThenTimeout();
+    await expect(mod.resolveMirror()).rejects.toThrow(/timed out after 30s/);
+    // …and reset picks up the new value (file-set knob lands after env fill)
+    const mod2 = await importMirror(); // importMirror() resets the memo
+    respondReleaseThenTimeout();
+    await expect(mod2.resolveMirror()).rejects.toThrow(/timed out after 90s/);
+  });
+
+  it('out-of-range or NaN timeout env falls back to the 600s default', async () => {
+    process.env.ANALYSIS_R_ASSET_TIMEOUT_MS = 'not-a-number';
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ assets: [{ name: 'r-wasm-mirror-test.tar.gz', browser_download_url: 'http://mirror.test/asset.tar.gz', id: 7, updated_at: 't' }] }), { status: 200 })
+    );
+    fetchMock.mockImplementationOnce(async () => {
+      const e = new Error('aborted');
+      e.name = 'TimeoutError';
+      throw e;
+    });
+    const { resolveMirror } = await importMirror();
+    await expect(resolveMirror()).rejects.toThrow(/timed out after 600s/);
   });
 });
