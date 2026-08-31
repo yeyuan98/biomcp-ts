@@ -68,6 +68,27 @@ async function main() {
     void shutdownREngine();
     void shutdownBiowasmEngine();
   });
+  installStdinCloseExitGuard();
+}
+
+/**
+ * The SDK's stdio transport never exits the process: it listens for
+ * `data`/`error` only, and `close()` merely pauses stdin. If the parent
+ * (MCP client / npm exec) dies, the webR worker and other handles keep the
+ * event loop alive — an orphaned ~1 GB server. When the client goes away the
+ * write end of our stdin closes; exit then, so nothing lingers.
+ */
+function installStdinCloseExitGuard(): void {
+  let exiting = false;
+  const exit = () => {
+    if (exiting) return;
+    exiting = true;
+    // Unref'd grace period lets in-flight responses flush and the 'exit'
+    // shutdown hooks run; if the loop is otherwise empty it ends sooner.
+    setTimeout(() => process.exit(0), 2_000).unref();
+  };
+  process.stdin.on('end', exit);
+  process.stdin.on('close', exit);
 }
 
 main().catch(error => {
