@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const SAVED_ENV: Record<string, string | undefined> = {};
-const ENV_KEYS = ['ANALYSIS_R_MIRROR_URL', 'ANALYSIS_R_GITHUB_REPO', 'ANALYSIS_R_ASSET_TIMEOUT_MS', 'BIOMPC_CACHE_DIR'] as const;
+const ENV_KEYS = ['ANALYSIS_R_MIRROR_URL', 'ANALYSIS_R_GITHUB_REPO', 'ANALYSIS_R_ASSET_TIMEOUT_MS', 'BIOMCP_CACHE_DIR'] as const;
 
 function sha256(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -110,7 +110,7 @@ describe('wasm mirror resolution', () => {
     tmpRoot = mkdtempSync(join(tmpdir(), 'biomcp-mirror-test-'));
     cacheDir = join(tmpRoot, 'cache');
     mkdirSync(cacheDir, { recursive: true });
-    process.env.BIOMPC_CACHE_DIR = cacheDir;
+    process.env.BIOMCP_CACHE_DIR = cacheDir;
     fetchMock = jest.fn();
     global.fetch = fetchMock as unknown as typeof fetch;
   });

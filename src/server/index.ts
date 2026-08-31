@@ -61,6 +61,10 @@ if (biowasmEnabled) {
 }
 
 async function main() {
+  // Attach BEFORE connect(): if the client dies while the handshake is still
+  // resolving, 'end'/'close' may already have fired and a later listener
+  // would miss the only notification — the exact orphan this guard prevents.
+  installStdinCloseExitGuard();
   const transport = new StdioServerTransport();
   await server.connect(transport);
   process.on('exit', () => {
@@ -68,7 +72,6 @@ async function main() {
     void shutdownREngine();
     void shutdownBiowasmEngine();
   });
-  installStdinCloseExitGuard();
 }
 
 /**

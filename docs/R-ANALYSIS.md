@@ -68,11 +68,12 @@ the above — minutes, not seconds. Raise the client-side tool timeout (OpenCode
 spawn of the client command) before relying on in-client first use.
 
 Offline/air-gapped use (also the slow-link escape hatch): fetch the release
-asset yourself (`gh release download v0.9.0 -R yeyuan98/biomcp-ts -p
-'r-wasm-mirror-*.tar.gz'` or curl), then point `ANALYSIS_R_MIRROR_URL` / the
-sensitive file key `features.analysis_r.mirror_url` (set it with
-`confirm_sensitive: true`) at a bundle directory, `.tar.gz` archive, or
-self-hosted URL (see [ENV-VARS.md](ENV-VARS.md)).
+asset yourself (`gh release download -R yeyuan98/biomcp-ts -p
+'r-wasm-mirror-*.tar.gz'` — latest release — or curl), then point
+`ANALYSIS_R_MIRROR_URL` / the sensitive file key
+`features.analysis_r.mirror_url` (set it with `confirm_sensitive: true`, and
+give an absolute path — no `~` expansion) at a bundle directory, `.tar.gz`
+archive, or self-hosted URL (see [ENV-VARS.md](ENV-VARS.md)).
 
 ## Tools
 

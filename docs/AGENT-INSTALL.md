@@ -86,13 +86,13 @@ Edit `opencode.json` (project root or `~/.config/opencode/opencode.json`); `open
       "command": ["npx", "-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "-p", "mysql2@3", "biomcp"],
       "environment": {},
       "enabled": true,
-      "timeout": 30000
+      "timeout": 120000
     }
   }
 }
 ```
 
-> OpenCode specifics: `command` must be an **array**, env vars go under **`environment`** (not `env`), and `timeout` needs two values: `30000` covers the first `npx` download; **raise to `120000` when R analysis is enabled** (the first cold analysis runs minutes, not seconds). Verify with `opencode mcp list`.
+> OpenCode specifics: `command` must be an **array**, env vars go under **`environment`** (not `env`), and `timeout` needs two values: `120000` as shown (required once R analysis is enabled — the first cold analysis runs minutes); `30000` suffices if you never enable it. Verify with `opencode mcp list`.
 
 ### Codex CLI
 
@@ -172,7 +172,7 @@ Agents: add `--client opencode|claude-code|claude-desktop|codex` to get that cli
 
 Work through this checklist with the user before filling in env blocks. Once biomcp is connected, the `biomcp_configure` tool can do most of this for you (it writes `.biomcp.json` in the project directory and validates): call it with `{}` for a status overview, then `{"action":"set","values":{"features.<group>.<key>":…}}`. Env-only parameters (API keys, proxy, security boundaries) remain query-only there — see [ENV-VARS.md](ENV-VARS.md).
 
-> **Sensitive keys:** the first `set` of a sensitive/secret key (`mirror_url`, `sqlite_path`, `host`, `user`, `database`, `password` — full list in [ENV-VARS.md](ENV-VARS.md#project-config-file-biomcpjson-alternative-to-env-blocks)) is refused by design; re-send the identical call with `"confirm_sensitive": true` added. The refusal message says so too.
+> **Sensitive keys:** the first `set` of a sensitive/secret key (`mirror_url`, `github_repo`, `sqlite_path`, `host`, `user`, `database`, `password` — full list in [ENV-VARS.md](ENV-VARS.md#project-config-file-biomcpjson-alternative-to-env-blocks)) is refused by design; re-send the identical call with `"confirm_sensitive": true` added. The refusal message says so too.
 
 ### A. Biowasm analysis (samtools/bedtools/bcftools over BAM/BED/VCF)
 
@@ -195,15 +195,15 @@ Full guide: [BIOWASM-ANALYSIS.md](BIOWASM-ANALYSIS.md).
 If the ~62 MB download aborts on a slow link, two documented ways out:
 
 - Raise the limit: `{"action":"set","values":{"features.analysis_r.asset_timeout_ms":1800000}}` (default 600000 ms, max 3600000), restart, retry; or
-- Self-fetch the bundle and serve it locally — three copy-paste lines:
+- Self-fetch the bundle and serve it locally:
 
 ```bash
-gh release download v0.9.0 -R yeyuan98/biomcp-ts -p 'r-wasm-mirror-*.tar.gz' -O ~/biomcp-r-bundle.tar.gz
+gh release download -R yeyuan98/biomcp-ts -p 'r-wasm-mirror-*.tar.gz' -O ~/biomcp-r-bundle.tar.gz   # latest release
 ```
 ```json
-{"action":"set","values":{"features.analysis_r.mirror_url":"/home/you/biomcp-r-bundle.tar.gz"},"confirm_sensitive":true}
+{"action":"set","values":{"features.analysis_r.mirror_url":"/absolute/path/to/biomcp-r-bundle.tar.gz"},"confirm_sensitive":true}
 ```
-Then restart the client. (Equivalent env var: `ANALYSIS_R_MIRROR_URL`.)
+(Use the archive's absolute path — file keys do no `~` expansion.) Then restart the client. Equivalent env var: `ANALYSIS_R_MIRROR_URL`.
 
 Alternative (air-gapped / version-pinned trees): build a local tree, then point the client at the **absolute** bundle path — clients control the server's working directory, so "run from the tree" never reaches the server:
 

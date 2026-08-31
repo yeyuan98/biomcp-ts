@@ -14,8 +14,9 @@ export const ASSET_TIMEOUT_BOUNDS = { min: MIN_ASSET_TIMEOUT_MS, max: MAX_ASSET_
  * Env read is intentionally lazy (getStore), NOT at module evaluation: the
  * server fills env from .biomcp.json AFTER this module loads, so an eager
  * read would silently ignore file-set `features.analysis_r.asset_timeout_ms`.
- * NaN/out-of-range values fall back to the default (raw env bypasses registry
- * validation; the registry row clamps file-set values).
+ * Out-of-range raw env values are CLAMPED to the bounds here (env bypasses
+ * registry validation); file-set values outside the bounds are REJECTED by
+ * the registry schema (the whole file is refused, not clamped).
  */
 function assetTimeoutMsFromEnv(): number {
   const raw = process.env['ANALYSIS_R_ASSET_TIMEOUT_MS'];
@@ -30,6 +31,13 @@ export function assetTimeoutRemediation(timeoutMs: number): string {
     `Raise the limit via features.analysis_r.asset_timeout_ms (or ANALYSIS_R_ASSET_TIMEOUT_MS; currently ${Math.round(
       timeoutMs / 1000
     )}s, max 3600s), or fetch the release asset yourself (gh release download / curl) and set features.analysis_r.mirror_url to the local file (confirm_sensitive: true).`
+  );
+}
+
+function apiTimeoutRemediation(timeoutMs: number): string {
+  return (
+    `This was the GitHub API metadata call (${Math.round(timeoutMs / 1000)}s budget, not the bundle download — asset_timeout_ms does not govern it). ` +
+      `Check network/proxy access to api.github.com, or fetch the release asset yourself and set features.analysis_r.mirror_url to skip the API entirely.`
   );
 }
 
@@ -57,6 +65,7 @@ function getStore(): VerifiedAssetStore {
     userAgent: 'biomcp-ranalysis',
     assetTimeoutMs: assetTimeoutMsFromEnv(),
     timeoutRemediation: assetTimeoutRemediation,
+    apiTimeoutRemediation,
   });
   return store;
 }

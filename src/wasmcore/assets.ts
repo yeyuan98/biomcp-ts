@@ -36,8 +36,10 @@ export interface AssetStoreConfig {
   userAgent: string;
   downloadTimeoutMs?: number;
   assetTimeoutMs?: number;
-  /** Store-specific remediation text appended to download-timeout errors. */
+  /** Remediation text appended to ASSET download-timeout errors (the knob-governed path). */
   timeoutRemediation?: (timeoutMs: number) => string;
+  /** Remediation text appended to API-metadata timeout errors (separate 30 s budget — must NOT advertise the asset knob). */
+  apiTimeoutRemediation?: (timeoutMs: number) => string;
 }
 
 interface AssetState {
@@ -143,7 +145,12 @@ export class VerifiedAssetStore {
       return await res.json();
     } catch (err) {
       if (this.isOwnError(err) || !(err instanceof Error)) throw err;
-      if (err.name === 'TimeoutError' || err.name === 'AbortError') throw this.fail(this.timeoutMessage(url, timeoutMs));
+      if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+        const rem =
+          this.cfg.apiTimeoutRemediation?.(timeoutMs) ??
+          `This was a GitHub API metadata call, not the bundle download — check network/proxy access to api.github.com, or set ${this.cfg.envVar} to a mirror.`;
+        throw this.fail(`${this.cfg.label} GitHub API request timed out after ${Math.round(timeoutMs / 1000)}s: ${url}. ${rem}`);
+      }
       throw err;
     }
   }
