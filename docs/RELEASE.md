@@ -25,10 +25,20 @@ this document encodes *order*.
    `npm pack --dry-run` (expect dist/bundle.js + dist/cli.js, no extras) →
    `npm publish` (`--otp=<code>` if 2FA-forced). Never re-publish a version
    already on npm — duplicate versions are rejected permanently.
-10. MCP Registry: `mcp-publisher publish` at repo root (login first with
-    `mcp-publisher login github` if the token expired). If publish fails after
-    step 9, fix `server.json` on main and re-run **`mcp-publisher publish`
-    only** — never npm.
+10. MCP Registry — from repo root, with `mcp-publisher` **≥ 1.1.0** (v1.0.0
+    mangles the publish payload → 422 `registryType`/`registry_type`,
+    modelcontextprotocol/registry#525/#560). Check `mcp-publisher --version`;
+    update via `brew upgrade mcp-publisher` or the quickstart curl (installs
+    to `/usr/local/bin`; run it from outside the repo), then `hash -r`.
+    After any upgrade **re-login**: `mcp-publisher login github` — 1.x reads
+    only `~/.config/mcp-publisher/token.json`; v1.0.0-era tokens
+    (`~/.mcp_publisher_token`, `.mcpregistry_*` in the cwd) are invisible to
+    it — purge them (`rm -f .mcpregistry_* ~/.mcp_publisher_token`). Always
+    `mcp-publisher validate` before `publish` (networked, auth-free; expect
+    "✅ server.json is valid"). Never run `mcp-publisher init` in the repo —
+    the committed `server.json` is the source of truth. If publish fails
+    after step 9, fix `server.json` on main and re-run
+    **`mcp-publisher publish` only** — never npm.
 11. Context7 refreshes from GitHub `main` automatically after the first
     submission (context7.com/add-library); submit or refresh only after the
     release commit is merged, so indexed doc pins are current.
