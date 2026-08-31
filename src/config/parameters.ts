@@ -140,6 +140,7 @@ const analysisRSection = z.strictObject({
   enabled: z.boolean().optional(),
   timeout_ms: positiveIntMs.optional(),
   mem_limit_mb: memLimitMb.optional(),
+  asset_timeout_ms: z.number().int().min(30_000).max(3_600_000).optional(),
   mirror_url: z.string().optional(),
   github_repo: z.string().optional(),
 });
@@ -240,6 +241,7 @@ export const FEATURE_GROUPS: readonly FeatureGroup[] = [
       { kind: 'file', id: 'features.analysis_r.enabled', group: 'analysis_r', key: 'enabled', envVar: 'ANALYSIS_R', schema: boolish, classification: null, effect: 'Master switch for the R analysis tools.' },
       { kind: 'file', id: 'features.analysis_r.timeout_ms', group: 'analysis_r', key: 'timeout_ms', envVar: 'ANALYSIS_R_TIMEOUT_MS', schema: positiveIntMs, defaultValue: 600000, classification: null, fromEnv: num, effect: 'Per-analysis timeout in ms.' },
       { kind: 'file', id: 'features.analysis_r.mem_limit_mb', group: 'analysis_r', key: 'mem_limit_mb', envVar: 'ANALYSIS_R_MEM_LIMIT_MB', schema: memLimitMb, defaultValue: 2048, classification: null, fromEnv: num, effect: 'RSS watermark in MB above which new analyses are refused.' },
+      { kind: 'file', id: 'features.analysis_r.asset_timeout_ms', group: 'analysis_r', key: 'asset_timeout_ms', envVar: 'ANALYSIS_R_ASSET_TIMEOUT_MS', schema: z.number().int().min(30_000).max(3_600_000), defaultValue: 600000, classification: null, fromEnv: num, effect: 'Download timeout in ms for the ~62 MB wasm package bundle on slow links (raise it, or self-fetch the asset and point mirror_url at the local file).' },
       { kind: 'file', id: 'features.analysis_r.mirror_url', group: 'analysis_r', key: 'mirror_url', envVar: 'ANALYSIS_R_MIRROR_URL', classification: 'sensitive', schema: z.string(), effect: 'Override for the wasm package bundle source (.tar.gz path/file://URL/http(s) URL, or a trusted extracted directory).', isPath: true },
       { kind: 'file', id: 'features.analysis_r.github_repo', group: 'analysis_r', key: 'github_repo', envVar: 'ANALYSIS_R_GITHUB_REPO', classification: 'sensitive', schema: z.string(), effect: 'owner/repo to fetch release assets from.' },
     ],

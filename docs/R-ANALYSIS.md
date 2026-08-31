@@ -55,12 +55,24 @@ mkdir biomcp-r && cd biomcp-r && npm install biomcp webr
    plus a self-built `locfit`) is downloaded **once** from this project's GitHub
    releases into `~/.cache/biomcp/` and checksum-verified (`manifest.json`).
    At process start the GitHub-reported asset digest is compared against the
-   cache, so unchanged releases never re-download.
+   cache, so unchanged releases never re-download. The download must finish
+   within `ANALYSIS_R_ASSET_TIMEOUT_MS` (default 600000 ms / 10 min; slow
+   links can raise it up to 3600000) — on timeout the error message spells
+   out the knob and the self-fetch alternative below.
 3. Packages install into the in-memory R library (~5 s), then the engine is
    reused for every tool call.
 
-Offline/air-gapped use: point `ANALYSIS_R_MIRROR_URL` at a bundle directory,
-`.tar.gz` archive, or self-hosted URL (see [ENV-VARS.md](ENV-VARS.md)).
+**Cold-start budgeting for MCP clients:** the first R tool call does all of
+the above — minutes, not seconds. Raise the client-side tool timeout (OpenCode:
+`120000`) or pre-warm once outside the client (any R tool call, or a bash
+spawn of the client command) before relying on in-client first use.
+
+Offline/air-gapped use (also the slow-link escape hatch): fetch the release
+asset yourself (`gh release download v0.9.0 -R yeyuan98/biomcp-ts -p
+'r-wasm-mirror-*.tar.gz'` or curl), then point `ANALYSIS_R_MIRROR_URL` / the
+sensitive file key `features.analysis_r.mirror_url` (set it with
+`confirm_sensitive: true`) at a bundle directory, `.tar.gz` archive, or
+self-hosted URL (see [ENV-VARS.md](ENV-VARS.md)).
 
 ## Tools
 
@@ -102,8 +114,10 @@ Runtime report: R/webR versions, package versions, memory, mirror endpoint.
 
 Limits: ≤ 50,000 genes x ≤ 64 samples; per-call timeout
 (`ANALYSIS_R_TIMEOUT_MS`, default 10 min); memory watermark
-(`ANALYSIS_R_MEM_LIMIT_MB`, default 2048). Analyses run serialized on one R
-instance.
+(`ANALYSIS_R_MEM_LIMIT_MB`, default 2048); bundle-download timeout
+(`ANALYSIS_R_ASSET_TIMEOUT_MS`, default 600000 ms, range 30000–3600000 —
+see [What happens on first use](#what-happens-on-first-use)). Analyses run
+serialized on one R instance.
 
 ## Version pinning
 
