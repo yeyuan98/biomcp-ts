@@ -346,7 +346,7 @@ export function cwdRefusal(values: Record<string, unknown>, cwd: string = proces
         'Claude Desktop / Claude Code .mcp.json: add the pairs in env_block to the "env" object of the biomcp server entry',
         'Codex: [mcp_servers.biomcp.env] table in ~/.codex/config.toml',
         'OpenCode: "environment" object in opencode.json',
-        'Full guide: docs/AGENT-INSTALL.md sections 2-3',
+        'Full guide: docs/AGENT-INSTALL.md sections 2 and 4',
       ],
     };
   }
@@ -402,7 +402,8 @@ export function getStatus(options: StatusOptions = {}): Record<string, unknown> 
         running &&
         appliedFeatures !== null &&
         JSON.stringify(appliedFeatures[group.id] ?? {}) !== JSON.stringify(fileFeatures[group.id] ?? {}));
-    if (fileEnabled && !running && envSet(env, group.triggerVar)) {
+    const vetoed = fileEnabled && !running && envSet(env, group.triggerVar);
+    if (vetoed) {
       conflicts.push({
         type: 'env-veto',
         feature: group.id,
@@ -415,10 +416,19 @@ export function getStatus(options: StatusOptions = {}): Record<string, unknown> 
       label: group.label,
       running_now: running,
       file_enabled: fileEnabled,
-      source: running ? (appliedByLoader ? 'config-file (applied at startup)' : `env (${group.triggerVar})`) : fileEnabled ? 'disabled by env veto' : 'default (off)',
+      source: running
+        ? appliedByLoader
+          ? 'config-file (applied at startup)'
+          : `env (${group.triggerVar})`
+        : fileEnabled
+          ? vetoed
+            ? 'disabled by env veto'
+            : 'file (pending restart)'
+          : 'default (off)',
       pending_restart: pending,
       trigger_var: group.triggerVar,
       tools: group.tools,
+      settable_keys: group.rows.map((r) => r.key),
       prerequisites: prerequisitesFor(group),
     };
   });
@@ -452,7 +462,6 @@ export function getStatus(options: StatusOptions = {}): Record<string, unknown> 
   }
 
   const filter = options.filter;
-  const catalog = buildCatalog(filter, env, fileFeatures);
   const filtered = filter !== undefined && filter !== 'all';
 
   const health: Record<string, unknown> = {
@@ -474,8 +483,13 @@ export function getStatus(options: StatusOptions = {}): Record<string, unknown> 
     features,
     conflicts,
     counts: { file_params: FILE_PARAM_ROWS.length, env_params: ENV_PARAM_ROWS.length },
-    catalog_hint: filtered ? null : "use filter='file' | 'env' | <feature id> | <dotted id prefix> for detailed rows (effects, how-to-set)",
-    catalog,
+    catalog_hint: filtered
+      ? null
+      : 'call {"action":"status","filter":"<feature id | file | env | dotted id prefix>"} for that scope\'s detailed rows (effects, defaults, how-to-set) before setting keys',
+    // Default (unfiltered) status omits the full parameter catalog — it is ~60%
+    // of the payload and never needed to construct a valid `set` call
+    // (features[].settable_keys covers that). Detailed rows are one filter away.
+    ...(filtered ? { catalog: buildCatalog(filter, env, fileFeatures) } : {}),
   };
 }
 
@@ -565,7 +579,7 @@ function prerequisitesFor(group: FeatureGroup): Record<string, unknown>[] {
         status === 'met'
           ? null
           : context.install_mode === 'npx-cache'
-            ? `This server currently runs from the npx cache (${context.bundle_path}). After installing, repoint the client at the local tree — e.g. command "node", args ["<tree>/node_modules/biomcp/dist/bundle.js"] — then restart.`
+            ? `This server runs from the npx cache (${context.bundle_path}) — bare ["npx","biomcp"] can never see peer deps. Use the pinned one-shot command from "commands" as your client command array (zero install), or a local tree invoked by absolute path: command "node", args ["<tree>/node_modules/biomcp/dist/bundle.js"] — then restart.`
             : 'Probe reflects this process only; a dependency installed elsewhere is invisible until the client repoints and the server restarts.',
       relevant: group.id === 'database' ? 'mysql2 is needed only for type="mysql" (SQLite is built-in)' : null,
     };

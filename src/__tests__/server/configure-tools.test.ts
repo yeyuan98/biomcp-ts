@@ -49,16 +49,16 @@ async function callConfigure(args: Record<string, unknown>): Promise<{ parsed: a
 }
 
 describe('biomcp_configure tool', () => {
-  it('status with no arguments returns the overview: features, health, catalog, server context', async () => {
+  it('status with no arguments returns the overview: features (with settable_keys), health, server context — catalog omitted', async () => {
     const { parsed, raw } = await callConfigure({});
     expect(raw.isError).toBeFalsy();
     expect(parsed.server_context.install_mode).toBeDefined();
     expect(parsed.config_health.config_path).toBe(configFilePath(dir));
     expect(parsed.features.map((f: any) => f.id).sort()).toEqual(['analysis_biowasm', 'analysis_r', 'database']);
+    for (const f of parsed.features as any[]) expect(f.settable_keys).toContain('enabled');
     expect(parsed.counts).toEqual({ file_params: expect.any(Number), env_params: expect.any(Number) });
-    const catalog = parsed.catalog as any[];
-    expect(catalog.some((r) => r.id === 'features.analysis_r.enabled')).toBe(true);
-    expect(catalog.some((r) => r.id === 'ONCOKB_TOKEN')).toBe(true);
+    expect(parsed.catalog).toBeUndefined();
+    expect(String(parsed.catalog_hint)).toContain('filter');
   });
 
   it('set enables a feature, writes the file, and returns agent/user steps', async () => {

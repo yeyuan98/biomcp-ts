@@ -1,12 +1,24 @@
 {
   "name": "biomcp",
   "version": "0.8.0",
-  "description": "BioMCP - Biomedical MCP Server in TypeScript",
+  "description": "BioMCP-TS — TypeScript biomedical MCP server (genes, variants, trials, literature, patents, R analysis). npm package `biomcp`; distinct from the Python/Rust BioMCP by genomoncology",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "bioinformatics",
+    "biomedical",
+    "typescript",
+    "pubmed",
+    "clinical-trials",
+    "biomcp-ts"
+  ],
   "type": "module",
   "main": "dist/bundle.js",
   "bin": {
-    "biomcp": "dist/bundle.js"
+    "biomcp": "dist/cli.js"
   },
+  "homepage": "https://github.com/yeyuan98/biomcp-ts#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/yeyuan98/biomcp-ts.git"
@@ -19,6 +31,7 @@
   },
   "files": [
     "dist/bundle.js",
+    "dist/cli.js",
     "dist/db.js",
     "dist/biowasm.js",
     "dist/biowasm-worker.js",
@@ -27,7 +40,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc && esbuild dist/server/index.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --external:webr --outfile=dist/bundle.js && esbuild dist/db/index.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --external:webr --outfile=dist/db.js && esbuild dist/biowasm/index.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --external:webr --outfile=dist/biowasm.js && esbuild dist/biowasm/worker.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --external:webr --outfile=dist/biowasm-worker.js",
+    "build": "tsc && esbuild dist/server/index.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --external:webr --outfile=dist/bundle.js && esbuild dist/cli/main.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --external:webr --outfile=dist/cli.js && esbuild dist/db/index.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --external:webr --outfile=dist/db.js && esbuild dist/biowasm/index.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --external:webr --outfile=dist/biowasm.js && esbuild dist/biowasm/worker.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --external:webr --outfile=dist/biowasm-worker.js",
     "build:bundle": "npm run build",
     "prepack": "npm run build",
     "start": "node dist/bundle.js",
