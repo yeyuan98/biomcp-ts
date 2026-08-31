@@ -3,5 +3,10 @@ dist
 scripts/external-databases/*/raw/
 opencode.jsonc
 
+# mcp-publisher local auth artifacts (never commit — live tokens)
+.mcpregistry_github_token
+.mcpregistry_registry_token
+.mcp_publisher_token
+
 # local-only development plan docs (never committed/pushed)
 docs/development/*-PLAN.md
