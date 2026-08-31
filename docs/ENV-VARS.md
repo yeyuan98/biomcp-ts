@@ -17,6 +17,7 @@ The optional-feature variables in the three feature sections below (and only tho
 
 - **Precedence:** environment variables always win; the file fills unset variables only.
 - **Tooling:** the always-available `biomcp_configure` MCP tool queries and edits this file (status / set / reset with validation, conflict detection, and dependency prerequisites) — agents can self-serve configuration through it. Env-only parameters are query-only there, and env values are never displayed (presence + fingerprint only).
+- **Sensitive/secret file keys:** `analysis_r.mirror_url`, `analysis_r.github_repo`, `analysis_biowasm.mirror_url`, `database.sqlite_path`, `database.host`, `database.user`, `database.database` are classified **sensitive**, and `database.password` **secret** — the first `set` of any of them via `biomcp_configure` is refused by design; re-send the same call with `confirm_sensitive: true`. Secrets are redacted in every tool response.
 - **Kill switch:** `BIOMCP_PROJECT_CONFIG=0` disables file loading entirely. A `.biomcp.json` committed in a cloned repository takes effect on startup like any local file — audit a cloned one like any project configuration, or disable file loading with the kill switch.
 - Relative paths (`sqlite_path`, plain-path `mirror_url`) resolve against the config file's directory, not the process cwd.
 - The file applies to the MCP server entry (`biomcp` / `dist/bundle.js`) only, not the library exports (`biomcp/db`, `biomcp/biowasm`).

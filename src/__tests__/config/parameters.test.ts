@@ -43,6 +43,16 @@ describe('npm pin rendering (single source of truth)', () => {
     expect(oneShotCommand('mysql2')).toBe(oneShotArgv('mysql2').join(' '));
   });
 
+  it('oneShotArgv accepts peer unions in the given order (empty union stays pinned, never bare)', () => {
+    expect(oneShotArgv([])).toEqual(['npx', '-y', '-p', BIOMCP_NPM_PIN, 'biomcp']);
+    expect(oneShotArgv(['webr', 'mysql2'])).toEqual([
+      'npx', '-y', '-p', BIOMCP_NPM_PIN, '-p', PEER_NPM_PINS.webr, '-p', PEER_NPM_PINS.mysql2, 'biomcp',
+    ]);
+    expect(oneShotCommand(['webr', 'mysql2'])).toBe(oneShotArgv(['webr', 'mysql2']).join(' '));
+    // the rendered command is never the bare form the npx-cache mode forbids
+    expect(oneShotArgv(['mysql2']).slice(0, 3)).not.toEqual(['npx', '-y', 'biomcp']);
+  });
+
   it('peerDeps commands lead with the one-shot and contain no #-prefixed entries (configure.ts filters those out of agent_steps)', () => {
     for (const group of FEATURE_GROUPS) {
       for (const dep of group.peerDeps) {
@@ -84,5 +94,10 @@ describe('release drift guards (version-bearing files must move together)', () =
       // a 3-segment pin (biomcp@0.9.0) would silently freeze patches — forbid it
       expect(text.match(/biomcp@\d+\.\d+\.\d+/)).toBeNull();
     }
+  });
+
+  it('AGENT-INSTALL all-features command string equals the rendered union one-shot', () => {
+    const doc = readFileSync(join(process.cwd(), 'docs/AGENT-INSTALL.md'), 'utf8');
+    expect(doc).toContain(`["npx", "-y", "-p", "biomcp@${minorPin}", "-p", "${PEER_NPM_PINS.webr}", "-p", "${PEER_NPM_PINS.mysql2}", "biomcp"]`);
   });
 });

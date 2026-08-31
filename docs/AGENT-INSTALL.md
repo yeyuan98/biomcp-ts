@@ -26,22 +26,34 @@ BioMCP is a standard MCP **stdio** server — any MCP-compatible client can run 
 
 ## 2. Add biomcp to your client
 
-**One canonical form covers every feature** (core tools + R analysis):
+Three forms, one rule: **the npx cache cannot see peer dependencies, so every feature you enable must be carried as a `-p` flag in the client command.**
+
+**All-features (recommended default)** — core tools + R analysis + MySQL, inert extras if you never use them:
+
+```json
+["npx", "-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "-p", "mysql2@3", "biomcp"]
+```
+
+**Core + R** (no MySQL):
 
 ```json
 ["npx", "-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "biomcp"]
 ```
 
-If you do **not** need R analysis, drop `-p webr@0.6` (saves a ~20 MB install): `["npx", "-y", "biomcp"]`. Never use bare `["npx", "biomcp"]` if you plan to enable **R analysis or MySQL** — see the failure table in §5 (the npx cache cannot see peer dependencies).
+**Minimal (core tools only)** — pinned, still patch-updated:
 
-The pin (`biomcp@0.9`) gets patch updates automatically; bump the minor number to upgrade (§5).
+```json
+["npx", "-y", "-p", "biomcp@0.9", "biomcp"]
+```
+
+Never use bare `["npx", "biomcp"]` (no pin, no peers) — see the failure table in §5. The pins get patch updates automatically; bump the minor number to upgrade (§5).
 
 ### Claude Code
 
 CLI (recommended):
 
 ```bash
-claude mcp add --scope user --transport stdio biomcp -- npx -y -p biomcp@0.9 -p webr@0.6 biomcp
+claude mcp add --scope user --transport stdio biomcp -- npx -y -p biomcp@0.9 -p webr@0.6 -p mysql2@3 biomcp
 ```
 
 Add keys later with `--env KEY=value …`, or edit `.mcp.json` at the project root:
@@ -52,7 +64,7 @@ Add keys later with `--env KEY=value …`, or edit `.mcp.json` at the project ro
     "biomcp": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "biomcp"],
+      "args": ["-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "-p", "mysql2@3", "biomcp"],
       "env": {}
     }
   }
@@ -71,7 +83,7 @@ Edit `opencode.json` (project root or `~/.config/opencode/opencode.json`); `open
   "mcp": {
     "biomcp": {
       "type": "local",
-      "command": ["npx", "-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "biomcp"],
+      "command": ["npx", "-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "-p", "mysql2@3", "biomcp"],
       "environment": {},
       "enabled": true,
       "timeout": 30000
@@ -80,12 +92,12 @@ Edit `opencode.json` (project root or `~/.config/opencode/opencode.json`); `open
 }
 ```
 
-> OpenCode specifics: `command` must be an **array**, env vars go under **`environment`** (not `env`), and the raised `timeout` covers the first `npx` download. Verify with `opencode mcp list`.
+> OpenCode specifics: `command` must be an **array**, env vars go under **`environment`** (not `env`), and `timeout` needs two values: `30000` covers the first `npx` download; **raise to `120000` when R analysis is enabled** (the first cold analysis runs minutes, not seconds). Verify with `opencode mcp list`.
 
 ### Codex CLI
 
 ```bash
-codex mcp add biomcp -- npx -y -p biomcp@0.9 -p webr@0.6 biomcp
+codex mcp add biomcp -- npx -y -p biomcp@0.9 -p webr@0.6 -p mysql2@3 biomcp
 ```
 
 Or edit `~/.codex/config.toml`:
@@ -93,7 +105,7 @@ Or edit `~/.codex/config.toml`:
 ```toml
 [mcp_servers.biomcp]
 command = "npx"
-args = ["-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "biomcp"]
+args = ["-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "-p", "mysql2@3", "biomcp"]
 
 [mcp_servers.biomcp.env]
 # NCBI_API_KEY = "…"
@@ -108,7 +120,7 @@ Edit `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/
   "mcpServers": {
     "biomcp": {
       "command": "npx",
-      "args": ["-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "biomcp"],
+      "args": ["-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "-p", "mysql2@3", "biomcp"],
       "env": {}
     }
   }
@@ -122,7 +134,7 @@ MCP clients spawn `command` **without a shell**, and on Windows `npx` is a `.cmd
 ```json
 {
   "command": "cmd",
-  "args": ["/c", "npx", "-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "biomcp"]
+  "args": ["/c", "npx", "-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "-p", "mysql2@3", "biomcp"]
 }
 ```
 
@@ -146,7 +158,7 @@ npx -y biomcp@0.9 doctor            # human-readable, exit 1 on blockers
 npx -y biomcp@0.9 doctor --json     # machine-readable (schema_version: 1)
 ```
 
-Doctor reports: Node version vs the engines gate, install mode (`npx-cache` / `local-tree` / `from-source`) with mode-specific advice, `.biomcp.json` health (parse/schema/security refusals), which features would be ON after a restart, peer-dependency resolvability (`webr`, `mysql2`), env-var presence (masked), RAM warning, and structured blockers `{code, message, fix_command}`.
+Doctor reports: Node version vs the engines gate, install mode (`npx-cache` / `local-tree` / `from-source`) with mode-specific advice, `.biomcp.json` health (parse/schema/security refusals), which features would be ON after a restart, peer-dependency resolvability (`webr`, `mysql2`), env-var presence (masked), RAM warning, and structured blockers `{code, message, fix_command}`. Its paste-ready client snippets are always version-pinned and include the `-p` flag for **every** feature that will be ON after restart (file- or env-enabled alike) — trust them over hand-written commands.
 
 **Doctor diagnoses THIS invocation, not your client's.** To reproduce what the client runs, launch doctor exactly like the client does — same command array, same env block:
 
@@ -160,6 +172,8 @@ Agents: add `--client opencode|claude-code|claude-desktop|codex` to get that cli
 
 Work through this checklist with the user before filling in env blocks. Once biomcp is connected, the `biomcp_configure` tool can do most of this for you (it writes `.biomcp.json` in the project directory and validates): call it with `{}` for a status overview, then `{"action":"set","values":{"features.<group>.<key>":…}}`. Env-only parameters (API keys, proxy, security boundaries) remain query-only there — see [ENV-VARS.md](ENV-VARS.md).
 
+> **Sensitive keys:** the first `set` of a sensitive/secret key (`mirror_url`, `sqlite_path`, `host`, `user`, `database`, `password` — full list in [ENV-VARS.md](ENV-VARS.md#project-config-file-biomcpjson-alternative-to-env-blocks)) is refused by design; re-send the identical call with `"confirm_sensitive": true` added. The refusal message says so too.
+
 ### A. Biowasm analysis (samtools/bedtools/bcftools over BAM/BED/VCF)
 
 The simplest feature — **npx-only, nothing to install**:
@@ -172,10 +186,24 @@ Full guide: [BIOWASM-ANALYSIS.md](BIOWASM-ANALYSIS.md).
 
 ### B. R/Bioconductor analysis (DESeq2, edgeR, limma)
 
-1. Use the canonical command from §2 (the `-p webr@0.6` one-shot) — this is the whole install; there is no separate step.
+1. Use a §2 command that carries `-p webr@0.6` (the all-features or core+R form) — this is the whole install; there is no separate step.
 2. Set `ANALYSIS_R=1` in the client env block (or enable via `biomcp_configure`, which writes the config file).
-3. Restart. First analysis starts a ~1 GB WebAssembly R worker and downloads the wasm package bundle (~62 MB) from GitHub releases into `~/.cache/biomcp/` (offline override: `ANALYSIS_R_MIRROR_URL`).
-4. Verify with the `analysis_r_session_info` tool.
+3. Restart; verify with the `analysis_r_session_info` tool.
+
+**Cold-start expectations (read before the first analysis):** the first R tool call starts a ~1 GB WebAssembly R worker and downloads the wasm package bundle (~62 MB) from GitHub releases into `~/.cache/biomcp/` — **minutes, not seconds**. Raise the client `timeout` (OpenCode: `120000`) or pre-warm once from bash before asking the client. Later calls reuse the warm worker (seconds).
+
+If the ~62 MB download aborts on a slow link, two documented ways out:
+
+- Raise the limit: `{"action":"set","values":{"features.analysis_r.asset_timeout_ms":1800000}}` (default 600000 ms, max 3600000), restart, retry; or
+- Self-fetch the bundle and serve it locally — three copy-paste lines:
+
+```bash
+gh release download v0.9.0 -R yeyuan98/biomcp-ts -p 'r-wasm-mirror-*.tar.gz' -O ~/biomcp-r-bundle.tar.gz
+```
+```json
+{"action":"set","values":{"features.analysis_r.mirror_url":"/home/you/biomcp-r-bundle.tar.gz"},"confirm_sensitive":true}
+```
+Then restart the client. (Equivalent env var: `ANALYSIS_R_MIRROR_URL`.)
 
 Alternative (air-gapped / version-pinned trees): build a local tree, then point the client at the **absolute** bundle path — clients control the server's working directory, so "run from the tree" never reaches the server:
 
@@ -195,7 +223,7 @@ Zero dependencies (built-in `node:sqlite`). Either set `DB_TYPE=sqlite` + `DB_SQ
 
 Same pattern as R analysis: the `mysql2` driver is a peer dependency.
 
-1. Canonical command with the driver: `["npx", "-y", "-p", "biomcp@0.9", "-p", "mysql2@3", "biomcp"]` — or the local-tree + absolute-path alternative shown in §B with `npm install biomcp mysql2`.
+1. Use a §2 command that carries `-p mysql2@3` — the all-features form already does; the MySQL-only variant is `["npx", "-y", "-p", "biomcp@0.9", "-p", "mysql2@3", "biomcp"]` — or the local-tree + absolute-path alternative shown in §B with `npm install biomcp mysql2`.
 2. Set `DB_TYPE=mysql` + `DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_DATABASE` in the env block (or via `biomcp_configure`).
 3. Restart; verify with `db_list_tables`.
 
@@ -207,7 +235,7 @@ Optional keys raise rate limits or unlock premium sources (`NCBI_API_KEY`, `S2_A
 
 1. Restart per the §2 table.
 2. Client listing: Claude Code `/mcp` or `claude mcp list` · OpenCode `opencode mcp list` · Codex `/mcp` in-session.
-3. `npx -y biomcp@0.9 doctor` — exit 0 = healthy; read blockers otherwise.
+3. `npx -y biomcp@0.9 doctor` — exit 0 = healthy; read blockers otherwise. **Doctor already proves the post-restart state** — `features[].running_after_restart` and `startup.applied_keys` are computed by replaying the exact startup in a fresh process — so you can *check* without restarting; restart only to *use* the tools in the client.
 4. In the client: `biomcp_configure` with `{}` — confirm `features.<id>.running_now === true` for what you enabled.
 
 **Failure table**
@@ -216,7 +244,12 @@ Optional keys raise rate limits or unlock premium sources (`NCBI_API_KEY`, `S2_A
 |---------|-------|-----|
 | `npx biomcp --help` idles silently | pre-0.9 versions start the stdio server on any argv | use `biomcp doctor` / `--version`; upgrade |
 | Feature tools missing after enabling | server loaded config at startup | restart the client (§2 table) |
-| `webr`/`mysql2` missing while `install_mode` is `npx-cache` | peer deps invisible to the npx cache | use the `-p` one-shot command from §2, or local tree + absolute `node …/dist/bundle.js` path |
+| `webr`/`mysql2` missing while `install_mode` is `npx-cache` | peer deps invisible to the npx cache | use a §2 command that carries the matching `-p` flag (doctor's snippet always includes every enabled feature's peer), or local tree + absolute `node …/dist/bundle.js` path |
+| Command missing a peer after enabling more features | the client command was written for fewer features | copy doctor's paste-ready snippet — it unions every enabled feature's `-p` flags |
+| `biomcp_configure` set refused: sensitive | sensitive/secret keys need explicit confirmation | re-send the identical call with `"confirm_sensitive": true` (§4 note) |
+| R bundle download times out (`Mirror download timed out …`) | slow link vs the 10-min default | raise `features.analysis_r.asset_timeout_ms`, or self-fetch + `mirror_url` (recipe in §4B) |
+| First R tool call fails client-side but machine is fine | cold bootstrap runs minutes; client `timeout` too low (e.g. OpenCode 30000) | raise the client `timeout` to 120000, or pre-warm from bash (§4B) |
+| Client killed, but a node process + ~1 GB RSS lingers | the orphaned server/worker outlived an abrupt client kill | `pkill -f 'biomcp.*bundle.js'`; (fixed for new clients in 0.9.1 — the server now exits when stdin closes) |
 | `cwd_refused` from `biomcp_configure` set | server cwd is `/` or `$HOME` (cwd-less client, e.g. Claude Desktop) | use the env block instead — the tool's error response carries a paste-ready translation |
 | "Ok to proceed?" or timeout on first run | npx first-download under a slow network / interactive stdin | keep the raised `timeout` (OpenCode) and `-y` in the command; retry |
 | Expected features absent, config looks right | stale npx cache holding an old biomcp | clear it: `rm -rf ~/.npm/_npx` (Windows: `%LocalAppData%\npm-cache\_npx`), restart |
