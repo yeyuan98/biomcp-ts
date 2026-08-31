@@ -66,7 +66,7 @@ export const analysisInputSchema = z.object({
     .min(1)
     .max(200)
     .describe(
-      'RHS design formula, e.g. "condition" or "batch + condition". Variables must be coldata columns. Supports +, *, :, ( ), and 0/1 intercept terms.'
+      'RHS design formula, e.g. "condition" or "batch + condition". Variables must be coldata columns. Supports +, *, :, ( ), and 0/1 intercept terms. A leading "~" is accepted and stripped.'
     ),
   contrast: contrastSchema
     .optional()
@@ -286,8 +286,17 @@ const FORMULA_DENYLIST = new Set([
   'attach', 'detach', 'rm', 'unlink', 'read', 'readRDS', 'save', 'saveRDS',
 ]);
 
+/**
+ * Leading `~` is accepted and stripped: R users reflexively type the full
+ * formula form (`~condition`); the engine wants the RHS only. A second tilde
+ * survives the strip and is rejected by the character whitelist below.
+ */
+export function normalizeDesign(design: string): string {
+  return design.trim().replace(/^~\s*/, '');
+}
+
 function validateDesign(design: string, coldata: CanonicalColdata): void {
-  const trimmed = design.trim();
+  const trimmed = normalizeDesign(design);
   if (!/^[A-Za-z0-9_ +*():.]+$/.test(trimmed)) {
     throw new ValidationError(
       `Design formula contains disallowed characters (allowed: letters, digits, underscore, space, + * : ( ) .): "${trimmed}".`
@@ -397,7 +406,7 @@ export function canonicalizeAnalysisInput(input: AnalysisToolInput): CanonicalAn
   return {
     counts,
     coldata,
-    design: input.design.trim(),
+    design: normalizeDesign(input.design),
     contrast: input.contrast,
     coef: input.coef,
     topN: input.top_n ?? DEFAULT_TOP_N,

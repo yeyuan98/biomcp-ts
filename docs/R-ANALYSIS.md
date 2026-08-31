@@ -103,6 +103,7 @@ Runtime report: R/webR versions, package versions, memory, mirror endpoint.
 - `coldata`: per-sample metadata — `{samples, columns}` or CSV. String columns
   become factors.
 - `design`: RHS formula over coldata columns (`condition`, `batch + condition`).
+  A leading `~` is accepted and stripped (`~condition` ≡ `condition`).
 - `contrast` `{variable, numerator, denominator}` **or** `coef` — a model-matrix
   column name for edgeR/limma (`conditiontreated`) or a DESeq2 results name
   (`condition_treated_vs_control`; model-matrix names are auto-translated).
@@ -132,8 +133,9 @@ over cutting edge.
 
 - R code executed is generated exclusively from validated inputs; no
   user-supplied R is evaluated.
-- Design formulas are whitelisted (`^[A-Za-z0-9_ +*():.]+$` + token denylist)
-  and only ever feed `model.matrix()`.
+- Design formulas are whitelisted (`^[A-Za-z0-9_ +*():.]+$` after stripping
+  an optional leading `~`, + token denylist) and only ever feed
+  `model.matrix()`.
 - The wasm sandbox has no shell and no host filesystem access. Note that R
   **does** have HTTP fetch capability inside the sandbox (that is how package
   installation works); it cannot reach host files.

@@ -89,6 +89,17 @@ describe('analysis input canonicalization', () => {
     expect(req.design).toBe('batch + condition');
   });
 
+  it('accepts and strips a leading tilde from the design formula (R full-form habit)', () => {
+    expect(canonicalizeAnalysisInput(makeInput({ design: '~condition' }) as never).design).toBe('condition');
+    expect(canonicalizeAnalysisInput(makeInput({ design: '~ condition' }) as never).design).toBe('condition');
+    expect(canonicalizeAnalysisInput(makeInput({ design: '~ batch + condition', coldata: { samples: ['s1', 's2', 's3', 's4'], columns: { condition: ['a', 'a', 'b', 'b'], batch: [1, 2, 1, 2] } } }) as never).design).toBe('batch + condition');
+  });
+
+  it('still rejects double tildes and a bare tilde', () => {
+    expect(() => canonicalizeAnalysisInput(makeInput({ design: '~~condition' }) as never)).toThrow(/disallowed characters/);
+    expect(() => canonicalizeAnalysisInput(makeInput({ design: '~' }) as never)).toThrow();
+  });
+
   it('validates contrast variable and levels', () => {
     expect(() =>
       canonicalizeAnalysisInput(
