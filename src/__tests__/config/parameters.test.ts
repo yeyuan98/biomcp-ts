@@ -6,6 +6,14 @@ import { BIOMCP_NPM_PIN, PEER_NPM_PINS, oneShotArgv, oneShotCommand, FEATURE_GRO
 const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as {
   version: string;
   peerDependencies: Record<string, string>;
+  mcpName?: string;
+};
+
+const serverJson = JSON.parse(readFileSync(join(process.cwd(), 'server.json'), 'utf8')) as {
+  name: string;
+  description: string;
+  version: string;
+  packages: { version: string }[];
 };
 
 function expectedPin(range: string, pkgName: string): string {
@@ -42,6 +50,39 @@ describe('npm pin rendering (single source of truth)', () => {
         expect(dep.commands[0]).toBe(oneShotCommand(dep.package as 'webr' | 'mysql2'));
         for (const c of dep.commands) expect(c.startsWith('#')).toBe(false);
       }
+    }
+  });
+});
+
+describe('release drift guards (version-bearing files must move together)', () => {
+  const [major, minor] = pkg.version.split('.');
+  const minorPin = `${major}.${minor}`;
+
+  it('server.json versions match package.json (both fields)', () => {
+    expect(serverJson.version).toBe(pkg.version);
+    expect(serverJson.packages[0].version).toBe(pkg.version);
+  });
+
+  it('package.json mcpName matches server.json name (MCP Registry package validation)', () => {
+    expect(pkg.mcpName).toBe(serverJson.name);
+    expect(pkg.mcpName).toMatch(/^io\.github\.[^/]+\//);
+  });
+
+  it('server.json description stays within the registry schema cap (maxLength 100)', () => {
+    expect(serverJson.description.length).toBeLessThanOrEqual(100);
+  });
+
+  it('doc pins biomcp@<major.minor> match the package version (and no 3-segment pins exist)', () => {
+    // scoped to exactly the four docs carrying client snippets; CHANGELOG.md and
+    // src/ are intentionally excluded (historical versions / runtime rendering)
+    const docs = ['README.md', 'docs/AGENT-INSTALL.md', 'docs/R-ANALYSIS.md', 'docs/DATABASE.md'];
+    for (const doc of docs) {
+      const text = readFileSync(join(process.cwd(), doc), 'utf8');
+      const pins = [...text.matchAll(/biomcp@\d+\.\d+/g)].map((m) => m[0]);
+      expect(pins.length).toBeGreaterThan(0);
+      for (const pin of pins) expect(pin).toBe(`biomcp@${minorPin}`);
+      // a 3-segment pin (biomcp@0.9.0) would silently freeze patches — forbid it
+      expect(text.match(/biomcp@\d+\.\d+\.\d+/)).toBeNull();
     }
   });
 });

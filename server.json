@@ -2,19 +2,19 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.yeyuan98/biomcp-ts",
   "title": "BioMCP-TS",
-  "description": "TypeScript biomedical MCP server (npm package `biomcp`): genes, variants, drugs, diseases, literature, clinical trials, patents, GEO/SRA/GenBank/GTEx, plus optional read-only SQL, sandboxed WebAssembly R/Bioconductor analysis (DESeq2/edgeR/limma), and samtools/bedtools/bcftools analysis. Distinct from the Python/Rust BioMCP by genomoncology.",
+  "description": "Biomedical MCP server: genes, variants, trials, literature, patents, optional SQL/R/biowasm tools.",
   "repository": {
     "url": "https://github.com/yeyuan98/biomcp-ts",
     "source": "github"
   },
   "websiteUrl": "https://github.com/yeyuan98/biomcp-ts/blob/main/docs/AGENT-INSTALL.md",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "biomcp",
-      "version": "0.8.0",
+      "version": "0.9.0",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"

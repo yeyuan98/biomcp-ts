@@ -16,7 +16,7 @@ There is one package; the backend you get depends on what is installed next to i
 | Mode | Setup | Works from |
 |------|-------|-----------|
 | Core only / SQLite | nothing extra — `npx -y biomcp` anywhere (Node >= 22.13) | any directory |
-| MySQL | pinned one-shot **as the client command array** (zero-install): `["npx","-y","-p","biomcp@0.8","-p","mysql2@3","biomcp"]` — or a local tree invoked by absolute path: `npm install biomcp mysql2`, then client command `["node","<ABSOLUTE_PATH>/biomcp-mysql/node_modules/biomcp/dist/bundle.js"]` | any directory (the client spawns the server) |
+| MySQL | pinned one-shot **as the client command array** (zero-install): `["npx","-y","-p","biomcp@0.9","-p","mysql2@3","biomcp"]` — or a local tree invoked by absolute path: `npm install biomcp mysql2`, then client command `["node","<ABSOLUTE_PATH>/biomcp-mysql/node_modules/biomcp/dist/bundle.js"]` | any directory (the client spawns the server) |
 
 Why the difference: `mysql2` is a peer dependency, and Node resolves peers relative to the running script's install tree. A bare `npx biomcp` executes from the npx cache, which cannot see a separately installed `mysql2` — global installs do not help either, and MCP clients control the server's working directory, so "run `npx biomcp` from the tree's directory" never reaches the server (the absolute `node` path is what makes a local tree work). If the driver is missing when `DB_TYPE=mysql` is set, startup still succeeds and the first db tool call returns an actionable error pointing at the one-shot command / local tree, and at the `biomcp_configure` tool for prerequisites. `biomcp doctor` reports your install mode and driver resolvability (docs/AGENT-INSTALL.md §3).
 

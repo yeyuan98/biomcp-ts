@@ -19,7 +19,7 @@ BioMCP is a standard MCP **stdio** server — any MCP-compatible client can run 
 
 1. Pick the client entry for your MCP client from §2 and paste it.
 2. Restart the client (table in §2).
-3. Verify with `npx -y biomcp@0.8 doctor` — **exit 0 means you are clear**; exit 1 means read the blockers (each has a `fix_command`).
+3. Verify with `npx -y biomcp@0.9 doctor` — **exit 0 means you are clear**; exit 1 means read the blockers (each has a `fix_command`).
 4. In the client, ask something like *"search genes for BRAF"* — `gene_search` should return results.
 
 > Why doctor first: `npx biomcp` with no arguments starts the MCP stdio server and idles silently — in a terminal this looks like a hang. Only MCP clients should launch the bare command; humans and agents should use `--help`, `--version`, or `doctor`.
@@ -29,19 +29,19 @@ BioMCP is a standard MCP **stdio** server — any MCP-compatible client can run 
 **One canonical form covers every feature** (core tools + R analysis):
 
 ```json
-["npx", "-y", "-p", "biomcp@0.8", "-p", "webr@0.6", "biomcp"]
+["npx", "-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "biomcp"]
 ```
 
 If you do **not** need R analysis, drop `-p webr@0.6` (saves a ~20 MB install): `["npx", "-y", "biomcp"]`. Never use bare `["npx", "biomcp"]` if you plan to enable **R analysis or MySQL** — see the failure table in §5 (the npx cache cannot see peer dependencies).
 
-The pin (`biomcp@0.8`) gets patch updates automatically; bump the minor number to upgrade (§5).
+The pin (`biomcp@0.9`) gets patch updates automatically; bump the minor number to upgrade (§5).
 
 ### Claude Code
 
 CLI (recommended):
 
 ```bash
-claude mcp add --scope user --transport stdio biomcp -- npx -y -p biomcp@0.8 -p webr@0.6 biomcp
+claude mcp add --scope user --transport stdio biomcp -- npx -y -p biomcp@0.9 -p webr@0.6 biomcp
 ```
 
 Add keys later with `--env KEY=value …`, or edit `.mcp.json` at the project root:
@@ -52,7 +52,7 @@ Add keys later with `--env KEY=value …`, or edit `.mcp.json` at the project ro
     "biomcp": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "-p", "biomcp@0.8", "-p", "webr@0.6", "biomcp"],
+      "args": ["-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "biomcp"],
       "env": {}
     }
   }
@@ -71,7 +71,7 @@ Edit `opencode.json` (project root or `~/.config/opencode/opencode.json`); `open
   "mcp": {
     "biomcp": {
       "type": "local",
-      "command": ["npx", "-y", "-p", "biomcp@0.8", "-p", "webr@0.6", "biomcp"],
+      "command": ["npx", "-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "biomcp"],
       "environment": {},
       "enabled": true,
       "timeout": 30000
@@ -85,7 +85,7 @@ Edit `opencode.json` (project root or `~/.config/opencode/opencode.json`); `open
 ### Codex CLI
 
 ```bash
-codex mcp add biomcp -- npx -y -p biomcp@0.8 -p webr@0.6 biomcp
+codex mcp add biomcp -- npx -y -p biomcp@0.9 -p webr@0.6 biomcp
 ```
 
 Or edit `~/.codex/config.toml`:
@@ -93,7 +93,7 @@ Or edit `~/.codex/config.toml`:
 ```toml
 [mcp_servers.biomcp]
 command = "npx"
-args = ["-y", "-p", "biomcp@0.8", "-p", "webr@0.6", "biomcp"]
+args = ["-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "biomcp"]
 
 [mcp_servers.biomcp.env]
 # NCBI_API_KEY = "…"
@@ -108,7 +108,7 @@ Edit `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/
   "mcpServers": {
     "biomcp": {
       "command": "npx",
-      "args": ["-y", "-p", "biomcp@0.8", "-p", "webr@0.6", "biomcp"],
+      "args": ["-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "biomcp"],
       "env": {}
     }
   }
@@ -122,7 +122,7 @@ MCP clients spawn `command` **without a shell**, and on Windows `npx` is a `.cmd
 ```json
 {
   "command": "cmd",
-  "args": ["/c", "npx", "-y", "-p", "biomcp@0.8", "-p", "webr@0.6", "biomcp"]
+  "args": ["/c", "npx", "-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "biomcp"]
 }
 ```
 
@@ -142,8 +142,8 @@ MCP servers launch when the client starts, so any config edit needs:
 ## 3. Diagnose anything: `biomcp doctor`
 
 ```bash
-npx -y biomcp@0.8 doctor            # human-readable, exit 1 on blockers
-npx -y biomcp@0.8 doctor --json     # machine-readable (schema_version: 1)
+npx -y biomcp@0.9 doctor            # human-readable, exit 1 on blockers
+npx -y biomcp@0.9 doctor --json     # machine-readable (schema_version: 1)
 ```
 
 Doctor reports: Node version vs the engines gate, install mode (`npx-cache` / `local-tree` / `from-source`) with mode-specific advice, `.biomcp.json` health (parse/schema/security refusals), which features would be ON after a restart, peer-dependency resolvability (`webr`, `mysql2`), env-var presence (masked), RAM warning, and structured blockers `{code, message, fix_command}`.
@@ -151,7 +151,7 @@ Doctor reports: Node version vs the engines gate, install mode (`npx-cache` / `l
 **Doctor diagnoses THIS invocation, not your client's.** To reproduce what the client runs, launch doctor exactly like the client does — same command array, same env block:
 
 ```bash
-ANALYSIS_R=1 npx -y -p biomcp@0.8 -p webr@0.6 biomcp doctor
+ANALYSIS_R=1 npx -y -p biomcp@0.9 -p webr@0.6 biomcp doctor
 ```
 
 Agents: add `--client opencode|claude-code|claude-desktop|codex` to get that client's paste-ready entry in `next_steps`.
@@ -195,7 +195,7 @@ Zero dependencies (built-in `node:sqlite`). Either set `DB_TYPE=sqlite` + `DB_SQ
 
 Same pattern as R analysis: the `mysql2` driver is a peer dependency.
 
-1. Canonical command with the driver: `["npx", "-y", "-p", "biomcp@0.8", "-p", "mysql2@3", "biomcp"]` — or the local-tree + absolute-path alternative shown in §B with `npm install biomcp mysql2`.
+1. Canonical command with the driver: `["npx", "-y", "-p", "biomcp@0.9", "-p", "mysql2@3", "biomcp"]` — or the local-tree + absolute-path alternative shown in §B with `npm install biomcp mysql2`.
 2. Set `DB_TYPE=mysql` + `DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_DATABASE` in the env block (or via `biomcp_configure`).
 3. Restart; verify with `db_list_tables`.
 
@@ -207,7 +207,7 @@ Optional keys raise rate limits or unlock premium sources (`NCBI_API_KEY`, `S2_A
 
 1. Restart per the §2 table.
 2. Client listing: Claude Code `/mcp` or `claude mcp list` · OpenCode `opencode mcp list` · Codex `/mcp` in-session.
-3. `npx -y biomcp@0.8 doctor` — exit 0 = healthy; read blockers otherwise.
+3. `npx -y biomcp@0.9 doctor` — exit 0 = healthy; read blockers otherwise.
 4. In the client: `biomcp_configure` with `{}` — confirm `features.<id>.running_now === true` for what you enabled.
 
 **Failure table**
@@ -220,4 +220,4 @@ Optional keys raise rate limits or unlock premium sources (`NCBI_API_KEY`, `S2_A
 | `cwd_refused` from `biomcp_configure` set | server cwd is `/` or `$HOME` (cwd-less client, e.g. Claude Desktop) | use the env block instead — the tool's error response carries a paste-ready translation |
 | "Ok to proceed?" or timeout on first run | npx first-download under a slow network / interactive stdin | keep the raised `timeout` (OpenCode) and `-y` in the command; retry |
 | Expected features absent, config looks right | stale npx cache holding an old biomcp | clear it: `rm -rf ~/.npm/_npx` (Windows: `%LocalAppData%\npm-cache\_npx`), restart |
-| Upgrade | — | bump the pin in the client config (`biomcp@0.8` → new minor), restart; check `biomcp --version` |
+| Upgrade | — | bump the pin in the client config (`biomcp@0.9` → new minor), restart; check `biomcp --version` |

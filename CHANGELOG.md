@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-08-31
+
+### Added
+
+- **`biomcp` CLI front door (`src/cli/`)** — the bin is now `dist/cli.js`, a standalone CLI module (`main`/`args`/`help`/`doctor`/`snippets`/`types`) that keeps `--help`, `--version`, and a new `biomcp doctor [--json] [--client opencode|claude-code|claude-desktop|codex]` from ever starting the stdio server; any unrecognized argv (and bare invocation) hands off via a computed-specifier dynamic import to the unchanged `dist/bundle.js`, so every existing client config behaves identically. `doctor` reproduces the server's startup (`loadAndApplyToEnv` → `getStatus`) and reports: Node engines gate, install-mode-specific advice (npx-cache/local-tree/from-source), `.biomcp.json` health, feature gates with peer-dependency resolvability, masked env presence, a LOW_RAM warning, structured `blockers[{code,message,fix_command}]` (`NODE_TOO_OLD`, `CONFIG_FILE_IGNORED`, `PEER_DEP_MISSING`, `DB_CONFIG_INCOMPLETE`, `CONFIG_CONFLICT`), and paste-ready client snippets (`--client` scopes to one client); exit 1 on blockers; an invocation-replication note tells agents to diagnose the client by launching doctor exactly as the client does.
+- **Pinned one-shot client commands, rendered from source** — `npx -y -p biomcp@0.9 -p webr@0.6 biomcp` (and the `mysql2@3` variant) is now the recommended zero-install client command array; the pins are rendered from `src/version.ts` and the `package.json` peerDependencies ranges (`BIOMCP_NPM_PIN`/`PEER_NPM_PINS`/`oneShotCommand`/`oneShotArgv`), so they can never drift from the release, and drift-guard tests enforce docs/server.json/package.json version sync (including the MCP Registry `mcpName` and a ≤100-char `server.json` description).
+- **`server.json` (MCP Registry format)** — `io.github.yeyuan98/biomcp-ts` registration metadata with the npm package mapping and optional env-var documentation (names only, secrets flagged `isSecret`), disambiguating the TypeScript `biomcp` from the Python/Rust genomoncology BioMCP at name-resolution time; `package.json` gains `mcpName` + `homepage` + disambiguating `description`/`keywords`.
+
+### Changed
+
+- **Killed the local-tree setup trap** — peer-dependency guidance now leads with the pinned one-shot client command (bare elements only: the configure tool's `agent_steps` filter strips `#`-prefixed entries) and, for local trees, prescribes the ABSOLUTE `node <tree>/node_modules/biomcp/dist/bundle.js` invocation, explaining that MCP clients control the server cwd so "run npx biomcp from the tree" never reaches the server; the npx-cache caveat in `biomcp_configure` prerequisites leads with the zero-install fix.
+- **Default `biomcp_configure` status is ~60 % smaller** — the full 37-row parameter catalog moved behind `filter` (any filter returns detailed rows as before); features now carry `settable_keys` so a cold agent can construct a valid `set` from `{}` alone, and the `catalog_hint` is imperative. Tool DESCRIPTION and `src/server/README.md` updated to match.
+- **`docs/AGENT-INSTALL.md` fully reworked** — one canonical pinned command with variants as deltas, per-client CLI one-liners, a Windows `cmd /c npx` section, doctor-first verification, an upgrade + stale-npx-cache story, and a failure-mode table; README.md, `docs/R-ANALYSIS.md`, and `docs/DATABASE.md` aligned (cwd-trap explanation, absolute-path local-tree recipe).
+
+### Fixed
+
+- **False "disabled by env veto" status label** — a feature enabled in `.biomcp.json` but pending restart with NO env var present was reported as env-vetoed; the label is now `file (pending restart)` (with the pending-restart flag), reserving "disabled by env veto" for actual disabling-env conflicts, exactly matching conflict emission. Found by an agent replay during acceptance testing.
+
 ## [0.8.0] - 2026-08-30
 
 ### Added
