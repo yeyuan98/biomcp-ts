@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-09-01
+
+First stable release: the CLI surface (`biomcp`, `biomcp doctor`, `--help`, `--version`), the tool registry (41 core + 15 optional tools), and the configuration contract (`.biomcp.json` schema, `biomcp_configure` semantics) are now covered by drift-guarded tests and are committed to stay compatible within the 1.x line. No functional changes vs 0.9.2.
+
+### Added
+
+- **Architecture figure in the README** — `docs/assets/fig1-architecture.png` (from the paper's deterministic matplotlib schematic, regenerated for v1.0.0 with the `biomcp` CLI front door and the install-time distribution lane: npm one-shot pin + MCP Registry `server.json`). Embedded via a tag-pinned raw URL so it renders on both GitHub and the npm package page.
+
+### Changed
+
+- **Doc pins swept to `biomcp@1.0`** — README.md, docs/AGENT-INSTALL.md, docs/R-ANALYSIS.md, docs/DATABASE.md now render the pinned one-shot client command against the 1.0 line (pins are source-rendered; the drift tests enforce the sync).
+- **README test counts refreshed** — 1290 unit tests across 78 suites (was 1234/74; the 0.9.x CLI and doctor work added suites), plus the 41-tools bullet now states the 40-biomedical + 1-meta split explicitly.
+
+
 ## [0.9.2] - 2026-09-01
 
 ### Added

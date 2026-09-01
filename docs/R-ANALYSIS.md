@@ -18,7 +18,7 @@ Agents can also enable this feature themselves via the always-available `biomcp_
 `webr` is an optional peer dependency (like `mysql2` for the database feature). The recommended form is the pinned one-shot, used **as the client's command array** — no install step:
 
 ```
-npx -y -p biomcp@0.9 -p webr@0.6 biomcp   # client command array (plain argv, no shell)
+npx -y -p biomcp@1.0 -p webr@0.6 biomcp   # client command array (plain argv, no shell)
 ```
 
 Why not `npm install biomcp webr` in a subdirectory + bare `npx biomcp`? Node resolves peer dependencies relative to the running script's tree, and MCP clients control the server's working directory (OpenCode = its launch directory, Claude Desktop = `/`) — a tree in a subfolder is invisible. If you need a local tree (air-gapped, exact pinning), invoke it by **absolute path**:
@@ -38,7 +38,7 @@ mkdir biomcp-r && cd biomcp-r && npm install biomcp webr
   "mcpServers": {
     "biomcp": {
       "command": "npx",
-      "args": ["-y", "-p", "biomcp@0.9", "-p", "webr@0.6", "biomcp"],
+      "args": ["-y", "-p", "biomcp@1.0", "-p", "webr@0.6", "biomcp"],
       "env": {
         "ANALYSIS_R": "1"
       }
