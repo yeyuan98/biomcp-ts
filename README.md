@@ -2,8 +2,6 @@
 
 A high-performance MCP server that gives LLMs access to 40 biomedical tools federated across 50+ upstream APIs — genes, variants, drugs, diseases, literature, clinical trials, structural biology, and functional genomics in a single integration.
 
-> **Note:** this is BioMCP-**TS**, the TypeScript server published as npm package **`biomcp`**. It is distinct from the Python/Rust BioMCP by genomoncology — CLI flags like `biomcp run` / `--biowasm` do not exist here; optional features are enabled with environment variables or the `.biomcp.json` config file.
-
 ## Highlights
 
 - **41 tools** across 15 registration modules — search, retrieve, and cross-reference biomedical entities, plus the `biomcp_configure` meta tool for configuration observability (+3 optional database tools, +4 optional R analysis tools, +8 optional biowasm analysis tools)
