@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { parseCliArgs } from './args.js';
+import { parseCliArgs, serverModeNotice } from './args.js';
 import { helpText } from './help.js';
 import { buildDoctorReport, exitCodeFor, formatDoctorText } from './doctor.js';
 import { CLIENT_IDS } from './snippets.js';
@@ -14,7 +14,8 @@ import { VERSION } from '../version.js';
  */
 
 async function main(): Promise<void> {
-  const parsed = parseCliArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const parsed = parseCliArgs(argv);
   if (parsed.command === 'help') {
     process.stdout.write(helpText());
     return;
@@ -31,6 +32,8 @@ async function main(): Promise<void> {
     return;
   }
   // server mode (bare invocation or unrecognized args — back-compat)
+  const notice = serverModeNotice(argv);
+  if (notice) process.stderr.write(notice + '\n');
   const serverEntry = new URL('./bundle.js', import.meta.url).href;
   try {
     await import(serverEntry);
