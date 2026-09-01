@@ -2,7 +2,7 @@
 
 This document is written so a human **or an AI agent** can install and configure BioMCP end-to-end: add it to an MCP client, pick the right invocation form, decide on API keys and optional features, then verify — with `biomcp doctor` as the one diagnostic for everything.
 
-> **What is this?** BioMCP-TS is a TypeScript biomedical MCP server (npm package **`biomcp`**: genes, variants, trials, literature, patents, optional R analysis). CLI flags from the similarly-named Python/Rust BioMCP (`biomcp run`, `--biowasm`) do not exist here; features are enabled with environment variables or a config file.
+> **What is this?** BioMCP-TS is a TypeScript biomedical MCP server (npm package **`biomcp`**: genes, variants, trials, literature, patents, optional R analysis). CLI subcommands from the similarly-named Python/Rust BioMCP (`biomcp serve`, `biomcp search …`) do not exist here — bare `biomcp` starts the MCP stdio server; the only CLI surface is `--help` / `--version` / `doctor`, and features are enabled with environment variables or a config file.
 
 BioMCP is a standard MCP **stdio** server — any MCP-compatible client can run it.
 
@@ -243,6 +243,7 @@ Optional keys raise rate limits or unlock premium sources (`NCBI_API_KEY`, `S2_A
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `npx biomcp --help` idles silently | pre-0.9 versions start the stdio server on any argv | use `biomcp doctor` / `--version`; upgrade |
+| `biomcp run` prints a note, then seems to hang | retired Python-BioMCP usage; unrecognized argv still starts the stdio server (stderr note since 0.9.2) | MCP clients: spawn bare `biomcp`; humans/agents: `biomcp doctor` |
 | Feature tools missing after enabling | server loaded config at startup | restart the client (§2 table) |
 | `webr`/`mysql2` missing while `install_mode` is `npx-cache` | peer deps invisible to the npx cache | use a §2 command that carries the matching `-p` flag (doctor's snippet always includes every enabled feature's peer), or local tree + absolute `node …/dist/bundle.js` path |
 | Command missing a peer after enabling more features | the client command was written for fewer features | copy doctor's paste-ready snippet — it unions every enabled feature's `-p` flags |
