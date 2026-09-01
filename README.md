@@ -1,19 +1,14 @@
 # BioMCP
 
-A high-performance MCP server that gives LLMs access to 40 biomedical tools federated across 50+ upstream APIs — genes, variants, drugs, diseases, literature, clinical trials, structural biology, and functional genomics in a single integration.
-
 ![BioMCP-TS architecture](https://raw.githubusercontent.com/yeyuan98/biomcp-ts/v1.0.0/docs/assets/fig1-architecture.png)
 
 ## Highlights
 
-- **41 tools** across 15 registration modules — 40 biomedical tools plus the `biomcp_configure` meta tool for configuration observability (+3 optional database tools, +4 optional R analysis tools, +8 optional biowasm analysis tools)
-- **50+ upstream sources** — MyGene, MyVariant, MyChem, MyDisease, ClinVar, gnomAD, UniProt, Reactome, OpenTargets, CIViC, OncoKB, DisGeNET, GTEx, STRING, DGIdb, ClinicalTrials.gov, PubMed, EuropePMC, Semantic Scholar, PubTator, LitSense, Monarch Initiative, OpenFDA, NIH Reporter, NCBI GEO, SRA, GenBank, Ensembl, and more
-- **Functional genomics & sequences** — GEO series/sample search with SOFT detail parsing, SRA experiment/run metadata, GenBank/RefSeq records with region slices, and GTEx v10 median expression + cis-eQTLs
-- **Section-based fetching** — `entityGet(id, sections)` fans out to multiple sources with per-section timeouts and graceful degradation (failed sections return `{ _error }` instead of crashing)
-- **Federated article search** — queries 5 literature backends simultaneously with PMID/PMCID/DOI deduplication
-- **Patent access** — worldwide patent search and detail via keyed EPO OPS / USPTO ODP; keyless USPTO Public Search and Google Patents (+Wayback archive) fallbacks
-- **Zero-config startup** — works out of the box; optional API keys unlock higher rate limits and premium data
-- **1290 unit tests** (mocked, 78 suites) + **integration tests** across 19 files (live APIs via in-process MCP client, gated skips)
+**Democratizing agentic access to bioinformatics and biopharmaceutical databases and analyses.**
+
+- Section-based federated access to 50+ bioinformatics, pharmaceutical, and patent databases
+- Optional toolboxes for local database curation and dependency-free analysis with Bioconductor and SAM/BED/BCFtools — no R installation, C toolchain, or containers
+- Concrete example vignettes, developed fully in the open
 
 ## Install
 

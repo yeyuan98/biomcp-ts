@@ -16,7 +16,7 @@ First stable release: the CLI surface (`biomcp`, `biomcp doctor`, `--help`, `--v
 ### Changed
 
 - **Doc pins swept to `biomcp@1.0`** — README.md, docs/AGENT-INSTALL.md, docs/R-ANALYSIS.md, docs/DATABASE.md now render the pinned one-shot client command against the 1.0 line (pins are source-rendered; the drift tests enforce the sync).
-- **README test counts refreshed** — 1290 unit tests across 78 suites (was 1234/74; the 0.9.x CLI and doctor work added suites), plus the 41-tools bullet now states the 40-biomedical + 1-meta split explicitly.
+- **README highlights trimmed to a vision statement + three bullets** — the architecture diagram now carries the detail (tool inventory, source landscape, plugin structure); the previous eight dense bullets (tool counts, source name list, fetch mechanics, test counts) were removed from the highlights.
 
 
 ## [0.9.2] - 2026-09-01
