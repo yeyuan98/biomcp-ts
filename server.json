@@ -8,13 +8,13 @@
     "source": "github"
   },
   "websiteUrl": "https://github.com/yeyuan98/biomcp-ts/blob/main/docs/AGENT-INSTALL.md",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "biomcp",
-      "version": "0.9.1",
+      "version": "0.9.2",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
