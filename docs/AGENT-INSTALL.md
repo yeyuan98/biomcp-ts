@@ -2,7 +2,7 @@
 
 This document is written so a human **or an AI agent** can install and configure BioMCP end-to-end: add it to an MCP client, pick the right invocation form, decide on API keys and optional features, then verify — with `biomcp doctor` as the one diagnostic for everything.
 
-> **What is this?** BioMCP-TS is a TypeScript biomedical MCP server (npm package **`biomcp`**: genes, variants, trials, literature, patents, optional R analysis). It is **not** the Python/Rust BioMCP by genomoncology — their CLI flags (`biomcp run`, `--biowasm`) do not exist here; features are enabled with environment variables or a config file.
+> **What is this?** BioMCP-TS is a TypeScript biomedical MCP server (npm package **`biomcp`**: genes, variants, trials, literature, patents, optional R analysis). CLI flags from the similarly-named Python/Rust BioMCP (`biomcp run`, `--biowasm`) do not exist here; features are enabled with environment variables or a config file.
 
 BioMCP is a standard MCP **stdio** server — any MCP-compatible client can run it.
 

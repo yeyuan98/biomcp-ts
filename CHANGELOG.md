@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **README top banner removed** — the "not the Python/Rust BioMCP" disambiguation blockquote no longer leads the page; package-name disambiguation lives in `docs/AGENT-INSTALL.md` (the agent-facing guide every install path routes through, and the MCP Registry `websiteUrl` target), and the upstream BioMCP Rust credit remains under License. npm-search identification is unchanged (package `description`/keywords still carry "distinct from the Python/Rust BioMCP"). This release refreshes the npm package-page README.
+- **README top banner removed** — the "not the Python/Rust BioMCP" disambiguation blockquote no longer leads the page; package-name disambiguation lives in `docs/AGENT-INSTALL.md` (the agent-facing guide every install path routes through, and the MCP Registry `websiteUrl` target), and the upstream BioMCP Rust credit remains under License. This release refreshes the npm package-page README.
+- **npm package description de-stressed** — the `package.json` description drops the "; distinct from the Python/Rust BioMCP by genomoncology" clause (now: "BioMCP-TS — TypeScript biomedical MCP server (genes, variants, trials, literature, patents, R analysis)"); `docs/AGENT-INSTALL.md` keeps only the minimal functional note for agents arriving with Python/Rust-BioMCP habits (the `biomcp run` / `--biowasm` flags warning, without vendor call-out). Legal attribution in `NOTICE` and the License-section credit are unchanged.
 
 ## [0.9.1] - 2026-08-31
 
