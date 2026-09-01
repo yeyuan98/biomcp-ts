@@ -40,3 +40,13 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
   }
   return { command: 'server', json: false, unknown: [] };
 }
+
+/**
+ * stderr-only notice when argv looks like the retired Python-BioMCP server
+ * invocation; never changes behavior (server mode proceeds regardless).
+ * MCP clients spawn bare `biomcp` (no argv) and never see it.
+ */
+export function serverModeNotice(argv: string[]): string | null {
+  if (argv[0] !== 'run') return null;
+  return '[biomcp] note: "run" is the invocation of the old Python BioMCP - this TypeScript package starts its MCP stdio server directly with no arguments (humans/agents: use `doctor`; see docs/AGENT-INSTALL.md).';
+}
