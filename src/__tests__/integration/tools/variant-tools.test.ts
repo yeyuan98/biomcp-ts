@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { createMcpTestHarness } from '../../helpers/mcp-harness.js';
-import { expectVariantSearchResult, expectVariantGetResult } from '../../helpers/assertions.js';
+import { expectVariantSearchResult, expectVariantGetResult, expectCrossEntityTrialRows } from '../../helpers/assertions.js';
 import { retryOnRateLimit } from '../../helpers/retry.js';
 
 let harness: Awaited<ReturnType<typeof createMcpTestHarness>>;
@@ -69,6 +69,8 @@ describe('variant_oncokb', () => {
 describe('variant_trials', () => {
   it('returns trials for a variant', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('variant_trials', { variant: 'rs113488022' }));
-    expect(result).toBeDefined();
+    expectCrossEntityTrialRows(result);
+    const realRows = (result as Array<Record<string, any>>).filter((r) => !r._error);
+    expect(realRows.length).toBeGreaterThan(0);
   }, 60000);
 });
