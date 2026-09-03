@@ -20,6 +20,9 @@ concurrency:
 
 jobs:
   update:
+    # workflow_dispatch can target any ref; only ever act on main so a
+    # branch-selected dispatch can never push that branch's commits to main
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
