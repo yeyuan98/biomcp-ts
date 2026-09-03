@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { drugSearch, drugGet } from '../../entities/drug.js';
+import { drugSearch, drugGet, DRUG_ENTITY_ALL_SECTIONS } from '../../entities/drug.js';
 import { drugToTrials } from '../../entities/cross-entity.js';
 import { sliceArraysRecursive } from './utils.js';
 
@@ -8,7 +8,8 @@ const DRUG_SECTIONS = [
   'core', 'us_regulatory', 'eu_regulatory', 'who_regulatory', 'safety', 'targets', 'indications', 'adverse_events', 'all'
 ] as const;
 
-const DRUG_ALL_SECTIONS = ['us_regulatory', 'eu_regulatory', 'who_regulatory', 'safety', 'targets', 'indications', 'adverse_events'];
+// Keep limit slicing in lockstep with the entity-side 'all' expansion.
+const DRUG_ALL_SECTIONS: readonly string[] = DRUG_ENTITY_ALL_SECTIONS;
 const DRUG_STORAGE_KEYS: Record<string, string> = {};
 const DRUG_ARRAY_KEYS: Record<string, string[]> = {
   targets: [],

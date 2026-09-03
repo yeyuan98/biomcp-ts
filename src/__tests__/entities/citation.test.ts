@@ -497,36 +497,64 @@ describe('citation module', () => {
         const workResponse = {
           message: {
             'is-referenced-by-count': 43,
-            reference: [{ author: { unexpected: 'object shape' } }, { DOI: '10.1/ok', author: 'AD Lemly' }],
+            // null entry forces the transform to throw mid-map; the catch
+            // must degrade references to [] while keeping the count.
+            reference: [null, { DOI: '10.1/ok', author: 'AD Lemly' }],
           },
         };
         global.fetch = jest.fn().mockResolvedValue(mockJson(workResponse)) as any;
 
+        const refs = await crossrefProvider.getBackwardReferences({ doi: '10.1/malformed' }, 10);
         const count = await crossrefProvider.getCitationCount({ doi: '10.1/malformed' });
 
+        expect(refs).toEqual([]);
         expect(count?.total).toBe(43);
+        expect(errorSpy).toHaveBeenCalled();
       } finally {
         errorSpy.mockRestore();
       }
     });
 
-    test('failed work fetch is not memoized: next call retries', async () => {
-      global.fetch = jest.fn()
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 404,
-          statusText: 'Not Found',
-          headers: new Headers({ 'content-type': 'text/html' }),
-          text: () => Promise.resolve('err'),
-        })
-        .mockResolvedValueOnce(mockJson({ message: { 'is-referenced-by-count': 9, reference: [] } })) as any;
+    test('stable 404 (DOI unknown to Crossref) is memoized for the TTL', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        headers: new Headers({ 'content-type': 'text/html' }),
+        text: () => Promise.resolve('not found'),
+      }) as any;
 
-      const count1 = await crossrefProvider.getCitationCount({ doi: '10.1/negcache' });
+      const count1 = await crossrefProvider.getCitationCount({ doi: '10.1/stable-miss' });
+      const count2 = await crossrefProvider.getCitationCount({ doi: '10.1/stable-miss' });
+
       expect(count1).toBeNull();
+      expect(count2).toBeNull();
       expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
 
-      const count2 = await crossrefProvider.getCitationCount({ doi: '10.1/negcache' });
-      expect(global.fetch).toHaveBeenCalledTimes(2);
+    test('transient failure is not memoized: next call retries', async () => {
+      let call = 0;
+      global.fetch = jest.fn().mockImplementation(async () => {
+        call++;
+        if (call <= 3) {
+          // 503 + registry retry (attempts: 3) exhausts, resolves null, evicts.
+          return {
+            ok: false,
+            status: 503,
+            statusText: 'Service Unavailable',
+            headers: new Headers({ 'content-type': 'text/html' }),
+            text: () => Promise.resolve('down'),
+          };
+        }
+        return mockJson({ message: { 'is-referenced-by-count': 9, reference: [] } });
+      }) as any;
+
+      const count1 = await crossrefProvider.getCitationCount({ doi: '10.1/transient' });
+      expect(count1).toBeNull();
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+
+      const count2 = await crossrefProvider.getCitationCount({ doi: '10.1/transient' });
+      expect(global.fetch).toHaveBeenCalledTimes(4);
       expect(count2?.total).toBe(9);
     });
 

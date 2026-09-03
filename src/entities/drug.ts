@@ -4,6 +4,14 @@ import { HttpConnectionError } from '../connections/errors.js';
 
 const SECTION_TIMEOUT_MS = 8000;
 
+/**
+ * Sections fetched for `drug_get sections:['all']`. Single source of truth —
+ * the tool layer's limit-slicing list must stay identical to this.
+ */
+export const DRUG_ENTITY_ALL_SECTIONS = [
+  'us_regulatory', 'eu_regulatory', 'who_regulatory', 'safety', 'targets', 'indications', 'adverse_events',
+] as const;
+
 export interface DrugSearchOptions {
   limit?: number;
   offset?: number;
@@ -173,7 +181,7 @@ export async function drugGet(
   }
 
   const sectionsToFetch = sectionConfig.includes('all')
-    ? ['us_regulatory', 'eu_regulatory', 'who_regulatory', 'safety', 'targets', 'indications', 'adverse_events']
+    ? [...DRUG_ENTITY_ALL_SECTIONS]
     : sectionConfig.filter(s => s !== 'core');
 
   // Use the original user input for external API calls (OpenFDA, OpenTargets)
@@ -270,10 +278,10 @@ const FAERS_SEARCH_FIELDS = [
  * advances the field fallback chain instead of failing the lookup.
  */
 export async function fetchAdverseEvents(drugName: string, limit = 20): Promise<AdverseEventsResult | Array<{ _error: string }>> {
-  const clamped = Math.min(Math.max(Math.floor(limit), 1), 1000);
+  const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.floor(limit), 1), 1000) : 20;
   try {
     const conn = connectionManager.getConnection('openfda');
-    const phrase = (field: string) => `${field}:"${drugName}"`;
+    const phrase = (field: string) => `${field}:"${drugName.replace(/"/g, '\\"')}"`;
 
     for (const field of FAERS_SEARCH_FIELDS) {
       let total: number;
@@ -289,7 +297,7 @@ export async function fetchAdverseEvents(drugName: string, limit = 20): Promise<
       }
 
       const counts = await conn.request(
-        `/drug/event.json?search=${encodeURIComponent(phrase(field))}&count=${encodeURIComponent('patient.reaction.reactionmeddrapt.exact')}&limit=${clamped}`
+        `/drug/event.json?search=${encodeURIComponent(phrase(field))}&count=${encodeURIComponent('patient.reaction.reactionmeddrapt.exact')}&limit=${safeLimit}`
       ) as { results?: Array<{ term?: string; count?: number }> };
 
       const reactions = (counts?.results ?? [])

@@ -1,4 +1,5 @@
 import { connectionManager } from '../../../connections/manager.js';
+import { HttpConnectionError } from '../../../connections/errors.js';
 import type { ArticleId, CitationRecord, CitationCount } from './types.js';
 import { withTimeout, DEFAULT_PROVIDER_TIMEOUT_MS } from '../../../connections/fetch-utils.js';
 
@@ -59,6 +60,10 @@ async function getCachedWorkData(id: ArticleId): Promise<CachedWork | null> {
   if (!key) return null;
 
   if (!workCache.has(key)) {
+    // Stable failures (HTTP 404 = DOI unknown to Crossref) are memoized for
+    // the TTL; transient ones (5xx, timeouts, network) are evicted on
+    // resolution so the next caller retries.
+    let stableNull = false;
     const promise = (async () => {
       try {
         const conn = connectionManager.getConnection('crossref');
@@ -86,6 +91,9 @@ async function getCachedWorkData(id: ArticleId): Promise<CachedWork | null> {
 
         return { references, count };
       } catch (error) {
+        if (error instanceof HttpConnectionError && error.status === 404) {
+          stableNull = true;
+        }
         console.error('[crossref/getCachedWorkData] Error:', error);
         return null;
       }
@@ -96,16 +104,20 @@ async function getCachedWorkData(id: ArticleId): Promise<CachedWork | null> {
     const entry = { promise, cleanup };
     workCache.set(key, entry);
     // Transient failures must not be memoized for the cache TTL — evict
-    // immediately when the single-flight result is null, while keeping
-    // concurrent callers on the in-flight promise.
+    // immediately when the single-flight result is a transient null, while
+    // keeping concurrent callers on the in-flight promise. The identity
+    // check guards against a stale promise deleting a newer entry for the
+    // same key after clearWorkCache().
     void promise.then((value) => {
-      if (value === null) {
+      if (value === null && !stableNull && workCache.get(key) === entry) {
         clearTimeout(cleanup);
         workCache.delete(key);
       }
     }).catch(() => {
-      clearTimeout(cleanup);
-      workCache.delete(key);
+      if (workCache.get(key) === entry) {
+        clearTimeout(cleanup);
+        workCache.delete(key);
+      }
     });
   }
 
