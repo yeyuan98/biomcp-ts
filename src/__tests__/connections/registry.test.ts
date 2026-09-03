@@ -1,6 +1,8 @@
 import { SOURCE_REGISTRY, getSourceConfig, getSourcesByProtocol, getSourcesRequiringAuth, getSourcesWithOptionalAuth } from '../../connections/registry.js';
 
 describe('SOURCE_REGISTRY', () => {
+  // Intentional drift guard: smoke-checks that documented sources exist in
+  // the registry literal; behavioral coverage lives in the suites below.
   it('has expected keys', () => {
     const expectedKeys = ['mygene', 'myvariant', 'mychem', 'eutils', 'geo_soft', 'gtex', 'clinicaltrials', 'opentargets'];
     for (const key of expectedKeys) {

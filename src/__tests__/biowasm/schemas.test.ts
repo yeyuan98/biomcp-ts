@@ -15,6 +15,8 @@ import {
 } from '../../biowasm/schemas.js';
 
 describe('biowasm shared schemas', () => {
+  // Intentional drift guard: pins documented limits so deliberate changes
+  // must touch this test; not a behavioral test.
   it('pins the exact limits', () => {
     expect(LIMITS.MAX_CONTENT_CHARS).toBe(20 * 1024 * 1024);
     expect(LIMITS.MAX_ARTIFACT_ID).toBe(128);

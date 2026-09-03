@@ -84,11 +84,15 @@ class FakeWorkerHost {
   async terminate(): Promise<void> {
     this.terminateCalls++;
     const death = new Error('Worker was terminated by the host.');
-    setTimeout(() => {
+    // unref: the grace timer still fires during a live run, but must not hold
+    // the jest worker event loop open after the suite finishes (previously
+    // leaked up to 5s per instance and forced jest to forceExit).
+    const timer = setTimeout(() => {
       this.terminated = true;
       for (const [, p] of this.pending) p.reject(death);
       this.pending.clear();
     }, FakeWorkerHost.GRACE_MS);
+    timer.unref?.();
   }
 
   kill(): void {

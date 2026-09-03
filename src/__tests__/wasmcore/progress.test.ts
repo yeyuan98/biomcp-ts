@@ -36,6 +36,8 @@ describe('createProgressThrottle', () => {
     expect(emit).toHaveBeenCalledTimes(2);
   });
 
+  // Intentional drift guard: pins the wire discriminant contract between the
+  // worker and host; not a behavioral test.
   it('worker progress convention carries the documented discriminant', () => {
     const msg: WorkerProgressMessage = { type: PROGRESS_MSG_TYPE, runId: 3, value: 128, message: '1s, 0.1 MB read' };
     expect(msg.type).toBe('progress');
