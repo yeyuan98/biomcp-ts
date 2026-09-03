@@ -1,6 +1,6 @@
 # BioMCP
 
-![BioMCP-TS architecture](https://raw.githubusercontent.com/yeyuan98/biomcp-ts/v1.0.0/docs/assets/fig1-architecture.png)
+![BioMCP-TS architecture](https://raw.githubusercontent.com/yeyuan98/biomcp-ts/main/docs/assets/fig1-architecture.png)
 
 ## Highlights
 
