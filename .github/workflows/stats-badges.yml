@@ -1,0 +1,72 @@
+# Daily maintenance stats for README badges (.github/badges/stats.json), consumed via
+# shields.io dynamic/json badges. Runs on schedule/dispatch only (never push) and commits
+# with [skip ci], so it cannot loop through ci.yml or trigger dependabot-automerge.
+# commits30d excludes this workflow's own bot commits (they would otherwise inflate the
+# rolling-30d count by ~30/month).
+
+name: stats-badges
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: stats-badges
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute stats
+        run: |
+          set -euo pipefail
+          ytd_start=$(date -u +%Y-01-01)
+          ytd_end=$(date -u -d "yesterday" +%F)
+          if [[ "$ytd_start" > "$ytd_end" ]]; then ytd_end=$ytd_start; fi
+          ytd=$(curl -fsSL --retry 3 --retry-delay 2 --max-time 30 \
+            "https://api.npmjs.org/downloads/range/${ytd_start}:${ytd_end}/biomcp" \
+            | jq '[.downloads[].downloads] | add // 0')
+          since=$(date -u -d "30 days ago" +%Y-%m-%dT%H:%M:%SZ)
+          total=$(git rev-list --count --since="$since" HEAD)
+          bot=$(git rev-list --count --since="$since" --author='github-actions' HEAD)
+          commits30d=$((total - bot))
+          comma() { sed -e ':a' -e 's/\B[0-9]\{3\}\>/,&/' -e 'ta' <<< "$1"; }
+          jq -n --arg ytd "$(comma "$ytd")" --arg commits30d "$(comma "$commits30d")" \
+            '{ytd: $ytd, commits30d: $commits30d}' > .github/badges/stats.json
+          cat .github/badges/stats.json
+
+      - name: Commit and push (retry on race)
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          ytd=$(jq -r .ytd .github/badges/stats.json)
+          commits30d=$(jq -r .commits30d .github/badges/stats.json)
+          for attempt in 1 2 3; do
+            git pull --rebase origin main
+            if git diff --quiet HEAD -- .github/badges/stats.json; then
+              echo "stats unchanged; nothing to commit"
+              exit 0
+            fi
+            git add .github/badges/stats.json
+            git commit -m "chore(badges): refresh stats [skip ci]" \
+              -m "- npm downloads YTD: $ytd
+          - commits (rolling 30d, bot-excluded): $commits30d"
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "push attempt $attempt failed (race); retrying"
+            sleep 5
+          done
+          echo "push failed after 3 attempts"
+          exit 1
