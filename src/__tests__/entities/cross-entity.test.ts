@@ -801,6 +801,27 @@ describe('drugToAdverseEvents', () => {
     expect(result).toEqual({ total_reports: 0, reactions: [] });
   });
 
+  test('drug names with quotes and backslashes are Lucene-escaped in the search phrase', async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ meta: { results: { total: 3 } }, results: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ results: [{ term: 'RASH', count: 1 }] }),
+      }) as any;
+
+    await drugToAdverseEvents('we"ird\\name');
+
+    const probeUrl = decodeURIComponent((global.fetch as any).mock.calls[0][0] as string);
+    // Backslashes doubled first, then quotes escaped — a trailing backslash
+    // must not consume the closing quote of the phrase.
+    expect(probeUrl).toContain('patient.drug.openfda.substance_name:"we\\"ird\\\\name"');
+  });
+
   test('returns error row on hard API failure', async () => {
     global.fetch = jest.fn().mockRejectedValue(new Error('Service unavailable')) as any;
 

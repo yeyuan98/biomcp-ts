@@ -242,7 +242,7 @@ async function fetchOpenFDALabel(drugName: string): Promise<OpenFDAResponse['res
   try {
     const conn = connectionManager.getConnection('openfda');
     const response = await conn.request(
-      `/drug/label.json?search=openfda.generic_name:"${encodeURIComponent(drugName)}"&limit=1`
+      `/drug/label.json?search=openfda.generic_name:"${encodeURIComponent(escapeLucenePhrase(drugName))}"&limit=1`
     ) as OpenFDAResponse;
     return response.results || null;
   } catch {
@@ -270,6 +270,15 @@ const FAERS_SEARCH_FIELDS = [
 ] as const;
 
 /**
+ * Escape a value for a Lucene phrase query. Backslash first, then quotes:
+ * escaping quotes before backslashes would let a pre-existing backslash
+ * escape the closing quote.
+ */
+function escapeLucenePhrase(name: string): string {
+  return name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/**
  * FDA FAERS adverse reactions for a drug, ranked by report count.
  *
  * Uses the aggregated `count=patient.reaction.reactionmeddrapt.exact`
@@ -281,7 +290,7 @@ export async function fetchAdverseEvents(drugName: string, limit = 20): Promise<
   const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.floor(limit), 1), 1000) : 20;
   try {
     const conn = connectionManager.getConnection('openfda');
-    const phrase = (field: string) => `${field}:"${drugName.replace(/"/g, '\\"')}"`;
+    const phrase = (field: string) => `${field}:"${escapeLucenePhrase(drugName)}"`;
 
     for (const field of FAERS_SEARCH_FIELDS) {
       let total: number;
