@@ -660,7 +660,12 @@ describe('geneGet abort/timeout handling', () => {
     const abortError = new DOMException('The operation was aborted', 'AbortError');
     global.fetch = jest.fn().mockRejectedValue(abortError) as any;
 
-    await expect(geneGet('BRCA1')).rejects.toThrow();
+    // The abort must propagate as the original DOMException (name + message),
+    // not a generic opaque failure.
+    await expect(geneGet('BRCA1')).rejects.toMatchObject({
+      name: 'AbortError',
+      message: 'The operation was aborted',
+    });
   });
 });
 

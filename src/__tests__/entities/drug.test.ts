@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { drugSearch, drugGet, transformMyChemResponse, resolveBestMatch } from '../../entities/drug.js';
+import { drugSearch, drugGet, fetchAdverseEvents, transformMyChemResponse, resolveBestMatch } from '../../entities/drug.js';
 import { connectionManager } from '../../connections/manager.js';
 
 describe('drug', () => {
@@ -20,7 +20,7 @@ describe('drug', () => {
   test('drugSearch() calls connection with correct mychem search endpoint', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ hits: [{ name: 'Aspirin', uichem: 'CHEMBL25' }] }),
+      json: () => Promise.resolve({ hits: [{ name: 'Aspirin', unichem: { chembl: 'CHEMBL25' } }] }),
     }) as any;
 
     await drugSearch('aspirin');
@@ -149,6 +149,27 @@ describe('drug', () => {
     const section = result.sections?.adverse_events as { total_reports: number; reactions: Array<{ reaction: string; count: number }> };
     expect(section.total_reports).toBe(500);
     expect(section.reactions).toEqual([{ reaction: 'NAUSEA', count: 12, source: 'openfda' }]);
+  });
+
+  // Regression for the Lucene phrase-escaping fix (escapeLucenePhrase, drug.ts):
+  // backslashes must be doubled BEFORE quotes are escaped, so a trailing
+  // backslash cannot consume the closing quote of the phrase.
+  test('fetchAdverseEvents() Lucene-escapes quotes and backslashes in the search phrase', async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ meta: { results: { total: 3 } }, results: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ results: [{ term: 'RASH', count: 1 }] }),
+      }) as any;
+
+    await fetchAdverseEvents('we"ird\\name');
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    const probeUrl = decodeURIComponent((global.fetch as any).mock.calls[0][0] as string);
+    expect(probeUrl).toContain('patient.drug.openfda.substance_name:"we\\"ird\\\\name"');
   });
 
   test('drugGet() sections=["all"] includes adverse_events alongside the six legacy sections', async () => {
