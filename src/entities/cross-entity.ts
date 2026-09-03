@@ -3,7 +3,7 @@ import { RestConnection } from '../connections/rest.js';
 import { fetchWithTimeout } from '../connections/fetch-utils.js';
 import { geneSearch, GeneSearchResult } from './gene.js';
 import { variantSearch, VariantSearchResult } from './variant.js';
-import { drugSearch, DrugSearchResult } from './drug.js';
+import { drugSearch, DrugSearchResult, fetchAdverseEvents, AdverseEventsResult } from './drug.js';
 import { diseaseSearch, DiseaseSearchResult } from './disease.js';
 import { trialSearch } from './trial.js';
 import { articleSearch, Article } from './article/index.js';
@@ -235,24 +235,8 @@ export async function drugToTrials(drugName: string): Promise<Array<{ nct_id: st
   }));
 }
 
-export async function drugToAdverseEvents(drugName: string): Promise<Array<{ reaction?: string; frequency?: string; source?: string }>> {
-  try {
-    const conn = connectionManager.getConnection('openfda');
-    
-    const response = await conn.request(
-      `/drug/event.json?search=openfda.substance_name:${encodeURIComponent(drugName)}&limit=20`
-    ) as OpenFDAEventResponse;
-    
-    return (response.results || []).slice(0, 20).map(r => ({
-      reaction: r.reactions?.[0]?.reactionmeddrapt,
-      frequency: undefined,
-      source: 'openfda',
-    }));
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error('[drugToAdverseEvents] Error:', error);
-    return [{ _error: `Adverse event lookup for drug failed (source: openfda): ${msg}. The data source may be temporarily unavailable or the drug name may not match.` } as any];
-  }
+export async function drugToAdverseEvents(drugName: string, limit = 20): Promise<AdverseEventsResult | Array<{ _error: string }>> {
+  return fetchAdverseEvents(drugName, limit);
 }
 
 export async function diseaseToDrugs(diseaseQuery: string): Promise<Array<{ drug_name: string; source: string; phase?: string }>> {
@@ -644,12 +628,6 @@ interface ChemblMechanismResponse {
     molecule_name?: string;
     disease_name?: string;
     trial_phase?: string;
-  }>;
-}
-
-interface OpenFDAEventResponse {
-  results?: Array<{
-    reactions?: Array<{ reactionmeddrapt?: string }>;
   }>;
 }
 

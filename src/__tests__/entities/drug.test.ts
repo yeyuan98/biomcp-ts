@@ -122,6 +122,69 @@ describe('drug', () => {
     );
   });
 
+  test('drugGet() adverse_events section fetches ranked FAERS reactions', async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          hits: [{ chebi: { name: 'Aspirin' }, unichem: { chembl: 'CHEMBL25' } }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ meta: { results: { total: 500 } }, results: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ results: [{ term: 'NAUSEA', count: 12 }] }),
+      }) as any;
+
+    const result = await drugGet('aspirin', ['adverse_events']);
+
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    const adverseUrls = (global.fetch as any).mock.calls.slice(1).map((c: unknown[]) => c[0] as string);
+    expect(adverseUrls[0]).toContain('patient.drug.openfda.substance_name');
+    expect(adverseUrls[1]).toContain('count=patient.reaction.reactionmeddrapt.exact');
+
+    const section = result.sections?.adverse_events as { total_reports: number; reactions: Array<{ reaction: string; count: number }> };
+    expect(section.total_reports).toBe(500);
+    expect(section.reactions).toEqual([{ reaction: 'NAUSEA', count: 12, source: 'openfda' }]);
+  });
+
+  test('drugGet() sections=["all"] includes adverse_events alongside the six legacy sections', async () => {
+    global.fetch = jest.fn().mockImplementation(async (input: any) => {
+      const url = typeof input === 'string' ? input : input?.url ?? String(input);
+      if (url.includes('mychem.info')) {
+        return {
+          ok: true,
+          json: () => Promise.resolve({ hits: [{ chebi: { name: 'Aspirin' }, unichem: { chembl: 'CHEMBL25' } }] }),
+        };
+      }
+      if (url.includes('api.fda.gov')) {
+        return {
+          ok: true,
+          json: () => Promise.resolve(
+            url.includes('count=')
+              ? { results: [{ term: 'FATIGUE', count: 5 }] }
+              : { meta: { results: { total: 10 } }, results: [] }
+          ),
+        };
+      }
+      // OpenTargets (targets/indications) — minimal GraphQL-ish bodies.
+      return {
+        ok: true,
+        json: () => Promise.resolve({ data: {} }),
+      };
+    }) as any;
+
+    const result = await drugGet('aspirin', ['all']);
+
+    expect(Object.keys(result.sections ?? {}).sort()).toEqual(
+      ['adverse_events', 'eu_regulatory', 'indications', 'safety', 'targets', 'us_regulatory', 'who_regulatory'].sort()
+    );
+    expect((result.sections?.adverse_events as any).total_reports).toBe(10);
+  });
+
   test('transformMyChemResponse() maps fields correctly', () => {
     const input = {
       chebi: {
