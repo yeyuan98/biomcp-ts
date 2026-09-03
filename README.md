@@ -1,5 +1,11 @@
 # BioMCP
 
+[![npm version](https://img.shields.io/npm/v/biomcp)](https://www.npmjs.com/package/biomcp)
+[![downloads/mo](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.npmjs.org%2Fdownloads%2Fpoint%2Flast-month%2Fbiomcp&query=%24.downloads&label=downloads%2Fmo&cacheSeconds=3600)](https://www.npmjs.com/package/biomcp)
+[![downloads YTD](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fyeyuan98%2Fbiomcp-ts%2Fmain%2F.github%2Fbadges%2Fstats.json&query=%24.ytd&label=downloads%20YTD&cacheSeconds=3600)](https://www.npmjs.com/package/biomcp)
+[![commits/30d](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fyeyuan98%2Fbiomcp-ts%2Fmain%2F.github%2Fbadges%2Fstats.json&query=%24.commits30d&label=commits%2F30d&cacheSeconds=3600)](https://github.com/yeyuan98/biomcp-ts/commits/main)
+[![software DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.22178957-blue?label=software)](https://doi.org/10.5281/zenodo.22178957)
+
 ![BioMCP-TS architecture](https://raw.githubusercontent.com/yeyuan98/biomcp-ts/main/docs/assets/fig1-architecture.png)
 
 ## Highlights
