@@ -58,7 +58,7 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
 | `drug_search` | `query: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for drugs by name, mechanism, or keyword | readOnly, openWorld |
-| `drug_get` | `name: string`, `sections?: ("core" \| "us_regulatory" \| "eu_regulatory" \| "who_regulatory" \| "safety" \| "targets" \| "indications" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed drug information by name | readOnly, openWorld |
+| `drug_get` | `name: string`, `sections?: ("core" \| "us_regulatory" \| "eu_regulatory" \| "who_regulatory" \| "safety" \| "targets" \| "indications" \| "adverse_events" \| "all")[]` (`adverse_events` = FDA FAERS adverse reactions ranked by report count; `limit` applies to reaction rows), `limit?: number (1-100, default 20)` | Get detailed drug information by name | readOnly, openWorld |
 | `drug_trials` | `drug: string` | Find clinical trials for a drug | readOnly |
 
 ### Disease Tools (`tools/disease.ts`) — 4 tools

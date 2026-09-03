@@ -1,7 +1,16 @@
 import { connectionManager } from '../connections/manager.js';
 import { fetchWithTimeout } from '../connections/fetch-utils.js';
+import { HttpConnectionError } from '../connections/errors.js';
 
 const SECTION_TIMEOUT_MS = 8000;
+
+/**
+ * Sections fetched for `drug_get sections:['all']`. Single source of truth —
+ * the tool layer's limit-slicing list must stay identical to this.
+ */
+export const DRUG_ENTITY_ALL_SECTIONS = [
+  'us_regulatory', 'eu_regulatory', 'who_regulatory', 'safety', 'targets', 'indications', 'adverse_events',
+] as const;
 
 export interface DrugSearchOptions {
   limit?: number;
@@ -122,7 +131,8 @@ const DRUG_GET_FIELDS =
 
 export async function drugGet(
   name: string,
-  sections?: string[]
+  sections?: string[],
+  limit = 20
 ): Promise<DrugResult> {
   const sectionConfig = sections || ['core'];
 
@@ -171,7 +181,7 @@ export async function drugGet(
   }
 
   const sectionsToFetch = sectionConfig.includes('all')
-    ? ['us_regulatory', 'eu_regulatory', 'who_regulatory', 'safety', 'targets', 'indications']
+    ? [...DRUG_ENTITY_ALL_SECTIONS]
     : sectionConfig.filter(s => s !== 'core');
 
   // Use the original user input for external API calls (OpenFDA, OpenTargets)
@@ -197,6 +207,7 @@ export async function drugGet(
           case 'who_regulatory': return { section: 'who_regulatory', data: await fetchWHORegulatory(lookupName) };
           case 'targets': return { section: 'targets', data: await fetchTargets(chemblId ?? null) };
           case 'indications': return { section: 'indications', data: await fetchIndications(chemblId ?? null) };
+          case 'adverse_events': return { section: 'adverse_events', data: await fetchAdverseEvents(lookupName, limit) };
           default: return { section, data: null };
         }
       }, SECTION_TIMEOUT_MS);
@@ -231,11 +242,85 @@ async function fetchOpenFDALabel(drugName: string): Promise<OpenFDAResponse['res
   try {
     const conn = connectionManager.getConnection('openfda');
     const response = await conn.request(
-      `/drug/label.json?search=openfda.generic_name:"${encodeURIComponent(drugName)}"&limit=1`
+      `/drug/label.json?search=openfda.generic_name:"${encodeURIComponent(escapeLucenePhrase(drugName))}"&limit=1`
     ) as OpenFDAResponse;
     return response.results || null;
   } catch {
     return null;
+  }
+}
+
+export interface AdverseEventReaction {
+  reaction: string;
+  count: number;
+  source: 'openfda';
+}
+
+export interface AdverseEventsResult {
+  total_reports: number;
+  reactions: AdverseEventReaction[];
+}
+
+// openFDA's event endpoint searches fully-qualified field paths — the
+// `openfda.*` shorthand only works on label.json. Ordered by specificity.
+const FAERS_SEARCH_FIELDS = [
+  'patient.drug.openfda.substance_name',
+  'patient.drug.openfda.generic_name',
+  'patient.drug.medicinalproduct',
+] as const;
+
+/**
+ * Escape a value for a Lucene phrase query. Backslash first, then quotes:
+ * escaping quotes before backslashes would let a pre-existing backslash
+ * escape the closing quote.
+ */
+function escapeLucenePhrase(name: string): string {
+  return name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/**
+ * FDA FAERS adverse reactions for a drug, ranked by report count.
+ *
+ * Uses the aggregated `count=patient.reaction.reactionmeddrapt.exact`
+ * endpoint rather than raw event reports, so the result is a compact
+ * ranked list. openFDA answers zero-match searches with HTTP 404, which
+ * advances the field fallback chain instead of failing the lookup.
+ */
+export async function fetchAdverseEvents(drugName: string, limit = 20): Promise<AdverseEventsResult | Array<{ _error: string }>> {
+  const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.floor(limit), 1), 1000) : 20;
+  try {
+    const conn = connectionManager.getConnection('openfda');
+    const phrase = (field: string) => `${field}:"${escapeLucenePhrase(drugName)}"`;
+
+    for (const field of FAERS_SEARCH_FIELDS) {
+      let total: number;
+      try {
+        const probe = await conn.request(
+          `/drug/event.json?search=${encodeURIComponent(phrase(field))}&limit=1`
+        ) as { meta?: { results?: { total?: number } } };
+        total = probe?.meta?.results?.total ?? 0;
+        if (!total) continue;
+      } catch (error) {
+        if (error instanceof HttpConnectionError && error.status === 404) continue;
+        throw error;
+      }
+
+      const counts = await conn.request(
+        `/drug/event.json?search=${encodeURIComponent(phrase(field))}&count=${encodeURIComponent('patient.reaction.reactionmeddrapt.exact')}&limit=${safeLimit}`
+      ) as { results?: Array<{ term?: string; count?: number }> };
+
+      const reactions = (counts?.results ?? [])
+        .filter((r): r is { term: string; count: number } => typeof r.term === 'string' && typeof r.count === 'number')
+        .map(r => ({ reaction: r.term, count: r.count, source: 'openfda' as const }));
+
+      return { total_reports: total, reactions };
+    }
+
+    return { total_reports: 0, reactions: [] };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[fetchAdverseEvents] Error:', error);
+    return [{ _error: `Adverse event lookup for drug failed (source: openfda): ${msg}. The data source may be temporarily unavailable or the drug name may not match.` }];
   }
 }
 

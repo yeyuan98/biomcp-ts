@@ -107,3 +107,61 @@ export function expectPatentGetResult(data: unknown): asserts data is Record<str
   expect(data).toHaveProperty('publication_number');
   expect(typeof (data as Record<string, unknown>).publication_number).toBe('string');
 }
+
+/**
+ * article_get `oa` section: must be a non-error result carrying OA metadata
+ * from either source (pmc_oa primary, europepmc fallback) — a `_error` here
+ * means both OA lookup legs failed.
+ */
+export function expectArticleOaSection(data: unknown): void {
+  const section = (data as any)?.sections?.open_access;
+  expect(section).toBeDefined();
+  expect(section._error).toBeUndefined();
+  expect(['pmc_oa', 'europepmc']).toContain(section.source);
+  expect(typeof section.pmcid).toBe('string');
+  const hasOaSignal = section.license !== undefined || section.pdf_url !== undefined;
+  expect(hasOaSignal).toBe(true);
+}
+
+/**
+ * article_get `citation` section with the crossref invariant: a provider row
+ * must never be silently empty — either data arrived or an explicit error is
+ * recorded. Guards the bug where a transform TypeError zeroed crossref's
+ * count and backward references without any error signal.
+ */
+export function expectCitationSection(data: unknown): void {
+  const section = (data as any)?.sections?.citation;
+  expect(section).toBeDefined();
+  expect(Array.isArray(section.citation_counts)).toBe(true);
+  expect(Array.isArray(section.source_results)).toBe(true);
+  expect(section.citation_counts.length).toBeGreaterThan(0);
+
+  const crossref = section.source_results.find((s: any) => s.source_id === 'crossref');
+  expect(crossref).toBeDefined();
+  const hasData = (crossref.citation_count?.total ?? 0) > 0 || (crossref.backward_references?.length ?? 0) > 0;
+  const hasError = typeof crossref.error === 'string' && crossref.error.length > 0;
+  expect(hasData || hasError).toBe(true);
+}
+
+/**
+ * drug_get `adverse_events` section: FDA FAERS aggregate — total report
+ * count plus reactions ranked by count. Exact counts fluctuate daily, so
+ * only shape and positivity are asserted.
+ */
+export function expectDrugAdverseEventsSection(data: unknown): void {
+  const section = (data as any)?.sections?.adverse_events;
+  expect(section).toBeDefined();
+  expect(section._error).toBeUndefined();
+  expect(typeof section.total_reports).toBe('number');
+  expect(section.total_reports).toBeGreaterThan(0);
+  expect(Array.isArray(section.reactions)).toBe(true);
+  expect(section.reactions.length).toBeGreaterThan(0);
+  for (const r of section.reactions) {
+    expect(typeof r.reaction).toBe('string');
+    expect(r.count).toBeGreaterThan(0);
+    expect(r.source).toBe('openfda');
+  }
+  for (let i = 1; i < section.reactions.length; i++) {
+    expect(section.reactions[i - 1].count).toBeGreaterThanOrEqual(section.reactions[i].count);
+  }
+}

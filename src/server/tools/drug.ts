@@ -1,18 +1,20 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { drugSearch, drugGet } from '../../entities/drug.js';
+import { drugSearch, drugGet, DRUG_ENTITY_ALL_SECTIONS } from '../../entities/drug.js';
 import { drugToTrials } from '../../entities/cross-entity.js';
 import { sliceArraysRecursive } from './utils.js';
 
 const DRUG_SECTIONS = [
-  'core', 'us_regulatory', 'eu_regulatory', 'who_regulatory', 'safety', 'targets', 'indications', 'all'
+  'core', 'us_regulatory', 'eu_regulatory', 'who_regulatory', 'safety', 'targets', 'indications', 'adverse_events', 'all'
 ] as const;
 
-const DRUG_ALL_SECTIONS = ['us_regulatory', 'eu_regulatory', 'who_regulatory', 'safety', 'targets', 'indications'];
+// Keep limit slicing in lockstep with the entity-side 'all' expansion.
+const DRUG_ALL_SECTIONS: readonly string[] = DRUG_ENTITY_ALL_SECTIONS;
 const DRUG_STORAGE_KEYS: Record<string, string> = {};
 const DRUG_ARRAY_KEYS: Record<string, string[]> = {
   targets: [],
   indications: [],
+  adverse_events: ['reactions'],
 };
 
 export function registerDrugTools(server: McpServer): void {
@@ -46,14 +48,14 @@ export function registerDrugTools(server: McpServer): void {
       description: 'Get detailed drug information by name',
       inputSchema: {
         name: z.string().describe('Drug name (e.g., "imatinib", "aspirin")'),
-        sections: z.array(z.enum(DRUG_SECTIONS)).optional().describe('Sections to include'),
+        sections: z.array(z.enum(DRUG_SECTIONS)).optional().describe('Sections to include (adverse_events = FDA FAERS adverse reactions ranked by report count; limit applies to reaction rows)'),
         limit: z.number().int().min(1).max(100).default(20),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
     async ({ name, sections, limit }) => {
       try {
-        const result = await drugGet(name, sections);
+        const result = await drugGet(name, sections, limit);
         const requestedSections = (sections ?? []).includes('all')
           ? DRUG_ALL_SECTIONS
           : (sections ?? []);

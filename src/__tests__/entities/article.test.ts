@@ -3,6 +3,7 @@ import { articleSearch, articleGet, transformPubTator, transformLitSense, transf
 import { clearCitationCache } from '../../entities/article/citation/index.js';
 import { clearWorkCache } from '../../entities/article/citation/crossref.js';
 import { clearCitedInCache } from '../../entities/article/citation/pubmed.js';
+import { fetchOpenAccess } from '../../entities/article/detail/open-access.js';
 import { connectionManager } from '../../connections/manager.js';
 
 const SINGLE_ARTICLE_XML = `<?xml version="1.0"?>
@@ -794,8 +795,9 @@ describe('article', () => {
       const oaUrl = (global.fetch as any).mock.calls[2][0] as string;
       expect(oaUrl).toContain('oa.fcgi');
       expect(oaUrl).toContain('PMC9999999');
+      expect(oaUrl).not.toContain('.fcgi/?');
 
-      expect(result.sections?.open_access).toEqual({ pmcid: 'PMC9999999', pdf_url: 'https://example.com/paper.pdf' });
+      expect(result.sections?.open_access).toEqual({ pmcid: 'PMC9999999', pdf_url: 'https://example.com/paper.pdf', source: 'pmc_oa' });
     });
 
     test('articleGet() with PMID and oa section uses IDConv to get PMCID', async () => {
@@ -826,7 +828,76 @@ describe('article', () => {
       expect(idConvUrl).toContain('ids=12345');
       expect(idConvUrl).toContain('idconv');
 
-      expect(result.sections?.open_access).toEqual({ pmcid: 'PMC9999999', pdf_url: 'https://example.com/paper.pdf' });
+      expect(result.sections?.open_access).toEqual({ pmcid: 'PMC9999999', pdf_url: 'https://example.com/paper.pdf', source: 'pmc_oa' });
+    });
+
+    test('fetchOpenAccess falls back to Europe PMC when pmc_oa is unavailable', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 404,
+          statusText: 'Not Found',
+          headers: new Headers({ 'content-type': 'text/html' }),
+          text: () => Promise.resolve('blocked'),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({
+            resultList: {
+              result: [{
+                license: 'cc by',
+                isOpenAccess: 'Y',
+                fullTextUrlList: {
+                  fullTextUrlList: [
+                    { documentStyle: 'pdf', availability: 'Open access', url: 'https://europepmc.org/backend/ptpmcrender.fcgi?accid=PMC9999999' },
+                    { documentStyle: 'html', availability: 'Open access', url: 'https://europepmc.org/articles/PMC9999999' },
+                  ],
+                },
+              }],
+            },
+          }),
+        }) as any;
+
+      const result = await fetchOpenAccess('12345', 'PMC9999999');
+
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      const pmcOaUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(pmcOaUrl).toBe('https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi?id=PMC9999999');
+      const epmcUrl = (global.fetch as any).mock.calls[1][0] as string;
+      expect(epmcUrl).toContain('europepmc');
+      expect(epmcUrl).toContain('PMCID%3APMC9999999');
+
+      expect(result).toEqual({
+        pmcid: 'PMC9999999',
+        pdf_url: 'https://europepmc.org/backend/ptpmcrender.fcgi?accid=PMC9999999',
+        license: 'cc by',
+        license_url: 'https://creativecommons.org/licenses/by/4.0/',
+        source: 'europepmc',
+      });
+    });
+
+    test('fetchOpenAccess surfaces _error when both pmc_oa and Europe PMC fail', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 404,
+          statusText: 'Not Found',
+          headers: new Headers({ 'content-type': 'text/html' }),
+          text: () => Promise.resolve('blocked'),
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          statusText: 'Service Unavailable',
+          headers: new Headers({ 'content-type': 'text/html' }),
+          text: () => Promise.resolve('down'),
+        }) as any;
+
+      const result = await fetchOpenAccess('12345', 'PMC9999999');
+
+      expect((result as any)._error).toContain('Open access lookup failed');
+      expect((result as any)._error).toContain('404');
     });
 
     test('fetchOpenAccess returns empty when no PMCID found', async () => {
@@ -1070,6 +1141,7 @@ describe('article', () => {
         pdf_url: 'ftp://ftp.ncbi.nlm.nih.gov/pub/pmc/oa_pdf/8e/71/WJR-9-27.PMC5334499.pdf',
         license: 'CC BY-NC',
         license_url: 'https://creativecommons.org/licenses/by-nc/4.0/',
+        source: 'pmc_oa',
       });
     });
   });

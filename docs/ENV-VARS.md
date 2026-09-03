@@ -36,7 +36,7 @@ Optional. Without them the affected tools still work using keyless fallbacks or 
 | `NCBI_API_KEY` | PubMed, GEO, SRA, GenBank, PMC OA, NCBI ID conversion, PubTator | Higher NCBI E-utilities rate limits (from 3 to 10 req/s) |
 | `NCBI_EMAIL` | PubMed, PubTator | Polite-contact `tool`/`email` parameters on NCBI E-utilities requests |
 | `S2_API_KEY` | Semantic Scholar | Higher rate limits on Semantic Scholar article search/citations |
-| `OPENFDA_API_KEY` | OpenFDA | Higher rate limits for drug regulatory data |
+| `OPENFDA_API_KEY` | OpenFDA | Higher rate limits for drug regulatory and adverse event (FAERS) data |
 | `ONCOKB_TOKEN` | `variant_oncokb` | **Required for this tool** — OncoKB precision-oncology annotations ([request access](https://www.oncokb.org/account/register)) |
 | `DISGENET_API_KEY` | DisGeNET sources | **Required for DisGeNET associations** — disease-gene association data |
 | `CROSSREF_EMAIL` | Crossref | Puts requests in the Crossref polite pool (faster, more reliable metadata) |

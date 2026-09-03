@@ -298,4 +298,17 @@ describe('Tool registration', () => {
     ];
     expect(names.sort()).toEqual(expected.sort());
   });
+
+  it('drug_get sections enum includes adverse_events', () => {
+    registerDrugTools(mockServer);
+    const drugGetCall = mockRegisterTool.mock.calls.find((call: any[]) => call[0] === 'drug_get');
+    expect(drugGetCall).toBeDefined();
+    const sections = (drugGetCall![1] as any).inputSchema.sections;
+    expect(sections).toBeDefined();
+    // Implementation-agnostic enum assertions: the schema must accept the
+    // new section (plus 'all') and reject unknown section names.
+    expect(sections.safeParse(['adverse_events']).success).toBe(true);
+    expect(sections.safeParse(['all']).success).toBe(true);
+    expect(sections.safeParse(['not_a_section']).success).toBe(false);
+  });
 });

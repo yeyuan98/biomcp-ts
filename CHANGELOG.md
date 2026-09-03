@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-09-03
+
+### Fixed
+
+- **`article_get` `oa` section: pmc_oa URL construction + Europe PMC fallback** — `RestConnection.buildUrl` inserted a path separator before query-string-only paths, producing `oa.fcgi/?id=…` which NCBI answers with 404 for every article. Query-only paths (`?id=…`, `#…`) now attach directly to the endpoint URL (`oa.fcgi?id=…`; the only other `?`-path caller, NCBI IDConv, now emits its documented canonical URL with the trailing base slash stripped — `articles?ids=…` — and remains fully functional). Because the OA service is additionally unreachable from some networks (datacenter-IP 404s even for the corrected URL) and returns empty records for non-OA PMCIDs, the `oa` section now falls back to Europe PMC (`PMCID:` core search) for license/PDF metadata whenever pmc_oa throws or yields no metadata, tags results with `source: 'pmc_oa' | 'europepmc'`, preserves the declared license version in CC license URLs, and reports `_error` only when both legs fail. A metadata-less PMCID still resolves to a clean pmcid-only result (legitimate non-OA).
+- **Crossref contributed nothing to citation federation** — Crossref's `reference[].author` is delivered as a plain string ("AD Lemly"), and the transform called `.map` on it; the resulting TypeError was swallowed and memoized, silently zeroing both the citation count and backward references. The transform now handles string (`;`-separated) and structured array author shapes, extracts `is-referenced-by-count` independently of reference transformation, logs failures instead of swallowing them, memoizes stable 404 misses for the work-cache TTL while evicting transient failures (5xx/timeouts) immediately for retry. New live integration test guards the provider row against silent zeros.
+
+### Added
+
+- **`drug_get` `adverse_events` section (FDA FAERS)** — adverse reactions ranked by report count (`{ total_reports, reactions: [{ reaction, count, source }] }`), aggregated via openFDA's `count=patient.reaction.reactionmeddrapt.exact` endpoint. The query uses the fully-qualified `patient.drug.openfda.*` field paths (the `openfda.*` shorthand is unsearchable on `/drug/event.json`) with a substance_name → generic_name → medicinalproduct fallback chain; HTTP 404 (openFDA zero-match) maps to an empty result, not an error. Exposed through `drug_get` (incl. `all` and `batch_get`); honors the tool `limit`.
+- **Section-aware integration tests for `article_get` (`oa`, `annotations`, `graph`, `citation`) and `drug_get` (`adverse_events`, `all`, `safety`)** plus new assertion helpers (`expectArticleOaSection`, `expectCitationSection`, `expectDrugAdverseEventsSection`); the previously shape-only `drug_trials` assertion now validates NCT IDs. Exact-URL `buildUrl` unit tests cover the query-path behavior.
+
 ## [1.0.0] - 2026-09-01
 
 First stable release: the CLI surface (`biomcp`, `biomcp doctor`, `--help`, `--version`), the tool registry (41 core + 15 optional tools), and the configuration contract (`.biomcp.json` schema, `biomcp_configure` semantics) are now covered by drift-guarded tests and are committed to stay compatible within the 1.x line. No functional changes vs 0.9.2.

@@ -702,7 +702,7 @@ describe('drugToTrials', () => {
 });
 
 // ============================================================
-// drugToAdverseEvents
+// drugToAdverseEvents (FDA FAERS via openFDA, aggregated counts)
 // ============================================================
 describe('drugToAdverseEvents', () => {
   let originalFetch: typeof global.fetch;
@@ -717,33 +717,119 @@ describe('drugToAdverseEvents', () => {
     global.fetch = originalFetch;
   });
 
-  test('returns adverse events from OpenFDA', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({
-        results: [
-          { reactions: [{ reactionmeddrapt: 'Nausea' }] },
-          { reactions: [{ reactionmeddrapt: 'Headache' }] },
-        ],
-      }),
-    }) as any;
+  test('returns ranked FAERS reactions via fully-qualified substance_name search', async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({
+          meta: { results: { total: 561125 } },
+          results: [{ safetyreportid: '1' }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({
+          results: [
+            { term: 'FATIGUE', count: 38660 },
+            { term: 'NAUSEA', count: 21000 },
+          ],
+        }),
+      }) as any;
 
-    const results = await drugToAdverseEvents('Aspirin');
+    const result = await drugToAdverseEvents('aspirin');
 
-    expect(results).toHaveLength(2);
-    expect(results[0].reaction).toBe('Nausea');
-    expect(results[0].source).toBe('openfda');
-    expect(results[1].reaction).toBe('Headache');
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    const probeUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(probeUrl).toContain('patient.drug.openfda.substance_name');
+    expect(probeUrl).toContain('%22aspirin%22');
+    const countUrl = (global.fetch as any).mock.calls[1][0] as string;
+    expect(countUrl).toContain('count=patient.reaction.reactionmeddrapt.exact');
+
+    expect((result as any).total_reports).toBe(561125);
+    expect((result as any).reactions).toEqual([
+      { reaction: 'FATIGUE', count: 38660, source: 'openfda' },
+      { reaction: 'NAUSEA', count: 21000, source: 'openfda' },
+    ]);
   });
 
-  test('returns error on API failure', async () => {
+  test('404 zero-match on substance_name falls back to generic_name, then medicinalproduct', async () => {
+    const notFound = {
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+      headers: new Headers({ 'content-type': 'application/json' }),
+      text: () => Promise.resolve('{"error":{"code":"NOT_FOUND"}}'),
+    };
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce(notFound)
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ meta: { results: { total: 42 } }, results: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ results: [{ term: 'DIZZINESS', count: 3 }] }),
+      }) as any;
+
+    const result = await drugToAdverseEvents('fancybrand');
+
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    const urls = (global.fetch as any).mock.calls.map((c: unknown[]) => c[0] as string);
+    expect(urls[0]).toContain('patient.drug.openfda.substance_name');
+    expect(urls[1]).toContain('patient.drug.openfda.generic_name');
+    expect((result as any).total_reports).toBe(42);
+    expect((result as any).reactions).toEqual([{ reaction: 'DIZZINESS', count: 3, source: 'openfda' }]);
+  });
+
+  test('zero-match on every field returns an empty result, not an error', async () => {
+    const notFound = {
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+      headers: new Headers({ 'content-type': 'application/json' }),
+      text: () => Promise.resolve('{"error":{"code":"NOT_FOUND"}}'),
+    };
+    global.fetch = jest.fn().mockResolvedValue(notFound) as any;
+
+    const result = await drugToAdverseEvents('zzznotadrug999');
+
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(result).toEqual({ total_reports: 0, reactions: [] });
+  });
+
+  test('drug names with quotes and backslashes are Lucene-escaped in the search phrase', async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ meta: { results: { total: 3 } }, results: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ results: [{ term: 'RASH', count: 1 }] }),
+      }) as any;
+
+    await drugToAdverseEvents('we"ird\\name');
+
+    const probeUrl = decodeURIComponent((global.fetch as any).mock.calls[0][0] as string);
+    // Backslashes doubled first, then quotes escaped — a trailing backslash
+    // must not consume the closing quote of the phrase.
+    expect(probeUrl).toContain('patient.drug.openfda.substance_name:"we\\"ird\\\\name"');
+  });
+
+  test('returns error row on hard API failure', async () => {
     global.fetch = jest.fn().mockRejectedValue(new Error('Service unavailable')) as any;
 
-    const results = await drugToAdverseEvents('Aspirin');
+    const results = await drugToAdverseEvents('aspirin');
 
     expect(results).toHaveLength(1);
-    expect((results[0] as any)._error).toContain('Adverse event lookup for drug failed');
-    expect((results[0] as any)._error).toContain('Service unavailable');
+    expect((results as any)[0]._error).toContain('Adverse event lookup for drug failed');
+    expect((results as any)[0]._error).toContain('Service unavailable');
   });
 });
 

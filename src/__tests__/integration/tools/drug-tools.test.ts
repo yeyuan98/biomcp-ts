@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { createMcpTestHarness } from '../../helpers/mcp-harness.js';
-import { expectDrugSearchResult, expectDrugGetResult } from '../../helpers/assertions.js';
+import { expectDrugSearchResult, expectDrugGetResult, expectDrugAdverseEventsSection } from '../../helpers/assertions.js';
 import { retryOnRateLimit } from '../../helpers/retry.js';
 
 let harness: Awaited<ReturnType<typeof createMcpTestHarness>>;
@@ -65,9 +65,36 @@ describe('drug_get', () => {
   }, 30000);
 });
 
+describe('drug_get sections', () => {
+  it('adverse_events returns ranked FDA FAERS reactions', async () => {
+    const result = await retryOnRateLimit(() => harness.callTool('drug_get', { name: 'aspirin', sections: ['adverse_events'] }));
+    expectDrugAdverseEventsSection(result);
+  }, 90000);
+
+  it('sections=["all"] includes all seven sections incl. adverse_events', async () => {
+    const result = await retryOnRateLimit(() => harness.callTool('drug_get', { name: 'aspirin', sections: ['all'], limit: 5 }));
+    expect(result.sections).toBeDefined();
+    expect(Object.keys(result.sections).sort()).toEqual(
+      ['adverse_events', 'eu_regulatory', 'indications', 'safety', 'targets', 'us_regulatory', 'who_regulatory'].sort()
+    );
+    expectDrugAdverseEventsSection(result);
+  }, 90000);
+
+  it('safety section returns FDA label safety data (section plumbing baseline)', async () => {
+    const result = await retryOnRateLimit(() => harness.callTool('drug_get', { name: 'aspirin', sections: ['safety'] }));
+    const safety = (result as any)?.sections?.safety;
+    expect(safety).toBeDefined();
+  }, 60000);
+});
+
 describe('drug_trials', () => {
   it('returns trials for imatinib', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('drug_trials', { drug: 'imatinib' }));
-    expect(result).toBeDefined();
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBeGreaterThan(0);
+    for (const t of result) {
+      expect(t.nct_id).toMatch(/^NCT\d{8}$/);
+      expect(typeof t.title).toBe('string');
+    }
   }, 60000);
 });
