@@ -52,6 +52,67 @@ describe('RestConnection', () => {
     expect(callUrl).toContain('/query?q=brca1');
   });
 
+  test('request() builds exact URL for normal paths (no double slash)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({}),
+    }) as any;
+
+    const conn = new RestConnection(baseOptions);
+    await conn.request('/query?q=brca1');
+
+    expect((global.fetch as any).mock.calls[0][0]).toBe('https://mygene.info/v3/query?q=brca1');
+  });
+
+  test('request() attaches query-only paths directly (pmc_oa: no separator before ?id=)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'text/xml' }),
+      text: () => Promise.resolve('<OA/>'),
+    }) as any;
+
+    const conn = new RestConnection({
+      ...baseOptions,
+      sourceId: 'pmc_oa',
+      baseUrl: 'https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi',
+    });
+    await conn.request('?id=PMC1234567');
+
+    expect((global.fetch as any).mock.calls[0][0]).toBe('https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi?id=PMC1234567');
+  });
+
+  test('request() strips trailing baseUrl slash for query-only paths (idconv)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({}),
+    }) as any;
+
+    const conn = new RestConnection({
+      ...baseOptions,
+      sourceId: 'ncbi_idconv_slashed',
+      baseUrl: 'https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles/',
+    });
+    await conn.request('?ids=12345&format=json');
+
+    expect((global.fetch as any).mock.calls[0][0]).toBe('https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles?ids=12345&format=json');
+  });
+
+  test('request() attaches fragment-only paths directly', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({}),
+    }) as any;
+
+    const conn = new RestConnection({
+      ...baseOptions,
+      sourceId: 'fragment_probe',
+      baseUrl: 'https://example.org/api/endpoint',
+    });
+    await conn.request('#frag');
+
+    expect((global.fetch as any).mock.calls[0][0]).toBe('https://example.org/api/endpoint#frag');
+  });
+
   test('request() includes auth header from env var', async () => {
     process.env.TEST_API_KEY = 'secret123';
     const optionsWithAuth: ConnectionOptions = {
