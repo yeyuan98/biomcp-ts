@@ -1,6 +1,24 @@
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
+// Loud module mock: proxies the factory spec so any access to an export the
+// factory did not define throws immediately (instead of silently yielding
+// undefined, which armed traps like z.enum(undefined) in the past).
+// Interop probes jest may perform are passed through.
+function mockLoudModule(moduleName: string, spec: Record<string, unknown>) {
+  return new Proxy(spec, {
+    get(target, prop, receiver) {
+      if (typeof prop === 'symbol') return Reflect.get(target, prop, receiver);
+      if (Object.prototype.hasOwnProperty.call(target, prop)) return Reflect.get(target, prop, receiver);
+      if (prop === '__esModule' || prop === 'default' || prop === 'then') return undefined;
+      throw new Error(
+        `[tool-registration.test] entity mock for '${moduleName}' was accessed on unknown export '${String(prop)}'. ` +
+        `If the source module now exports it, add it to the jest.mock factory for '${moduleName}'.`
+      );
+    },
+  });
+}
+
 const mockRegisterTool = jest.fn();
 const mockServer = { registerTool: mockRegisterTool } as unknown as McpServer;
 
@@ -8,21 +26,25 @@ jest.mock('@modelcontextprotocol/sdk/server/mcp.js', () => ({
   McpServer: jest.fn(),
 }));
 
-jest.mock('../../entities/gene.js', () => ({
+jest.mock('../../entities/gene.js', () => mockLoudModule('entities/gene', {
   geneSearch: jest.fn(),
   geneGet: jest.fn(),
   GeneSearchResult: undefined,
   GeneResult: undefined,
 }));
 
-jest.mock('../../entities/drug.js', () => ({
+jest.mock('../../entities/drug.js', () => mockLoudModule('entities/drug', {
   drugSearch: jest.fn(),
   drugGet: jest.fn(),
+  // Mirrors DRUG_ENTITY_ALL_SECTIONS from src/entities/drug.ts (schema constant).
+  DRUG_ENTITY_ALL_SECTIONS: [
+    'us_regulatory', 'eu_regulatory', 'who_regulatory', 'safety', 'targets', 'indications', 'adverse_events',
+  ],
   DrugSearchResult: undefined,
   DrugResult: undefined,
 }));
 
-jest.mock('../../entities/variant.js', () => ({
+jest.mock('../../entities/variant.js', () => mockLoudModule('entities/variant', {
   variantSearch: jest.fn(),
   variantGet: jest.fn(),
   fetchOncoKbAnnotation: jest.fn(),
@@ -31,64 +53,68 @@ jest.mock('../../entities/variant.js', () => ({
   VariantResult: undefined,
 }));
 
-jest.mock('../../entities/disease.js', () => ({
+jest.mock('../../entities/disease.js', () => mockLoudModule('entities/disease', {
   diseaseSearch: jest.fn(),
   diseaseGet: jest.fn(),
   DiseaseSearchResult: undefined,
   DiseaseResult: undefined,
 }));
 
-jest.mock('../../entities/trial.js', () => ({
+jest.mock('../../entities/trial.js', () => mockLoudModule('entities/trial', {
   trialSearch: jest.fn(),
   trialGet: jest.fn(),
   TrialSearchResult: undefined,
   TrialResult: undefined,
 }));
 
-jest.mock('../../entities/article.js', () => ({
+jest.mock('../../entities/article/index.js', () => mockLoudModule('entities/article', {
   articleSearch: jest.fn(),
   articleGet: jest.fn(),
   Article: undefined,
 }));
 
-jest.mock('../../entities/patent.js', () => ({
+jest.mock('../../entities/patent/index.js', () => mockLoudModule('entities/patent', {
   patentSearch: jest.fn(),
   patentGet: jest.fn(),
+  // Mirrors PATENT_GET_SECTIONS from src/entities/patent/detail/index.ts (schema constant).
+  PATENT_GET_SECTIONS: ['core', 'abstract', 'claims', 'citations', 'family', 'classifications', 'all'],
+  // Mirrors PATENT_SEARCH_TOOL_BUDGET_MS from src/entities/patent/search/index.ts.
+  PATENT_SEARCH_TOOL_BUDGET_MS: 60_000,
   PatentSearchResult: undefined,
   PatentResult: undefined,
 }));
 
-jest.mock('../../entities/geo.js', () => ({
+jest.mock('../../entities/geo.js', () => mockLoudModule('entities/geo', {
   geoSearch: jest.fn(),
   geoGet: jest.fn(),
   geoToSraAccessions: jest.fn(),
 }));
 
-jest.mock('../../entities/sra/index.js', () => ({
+jest.mock('../../entities/sra/index.js', () => mockLoudModule('entities/sra', {
   sraSearch: jest.fn(),
   sraGet: jest.fn(),
 }));
 
-jest.mock('../../entities/genbank.js', () => ({
+jest.mock('../../entities/genbank.js', () => mockLoudModule('entities/genbank', {
   genbankSearch: jest.fn(),
   genbankGet: jest.fn(),
   genbankToGeneIds: jest.fn(),
 }));
 
-jest.mock('../../entities/gtex.js', () => ({
+jest.mock('../../entities/gtex.js', () => mockLoudModule('entities/gtex', {
   gtexMedianExpression: jest.fn(),
   gtexEqtl: jest.fn(),
   getGtexTissues: jest.fn(),
 }));
 
-jest.mock('../../entities/ensembl.js', () => ({
+jest.mock('../../entities/ensembl.js', () => mockLoudModule('entities/ensembl', {
   ensemblLookup: jest.fn(),
   ensemblHomology: jest.fn(),
   ensemblConsequence: jest.fn(),
   ensemblRegion: jest.fn(),
 }));
 
-jest.mock('../../entities/cross-entity.js', () => ({
+jest.mock('../../entities/cross-entity.js', () => mockLoudModule('entities/cross-entity', {
   geneToDrugs: jest.fn(),
   geneToTrials: jest.fn(),
   geneToPathways: jest.fn(),
@@ -106,7 +132,7 @@ jest.mock('../../entities/cross-entity.js', () => ({
   batchGet: jest.fn(),
 }));
 
-jest.mock('../../connections/manager.js', () => ({
+jest.mock('../../connections/manager.js', () => mockLoudModule('connections/manager', {
   connectionManager: {
     getConnection: jest.fn().mockReturnValue({
       request: jest.fn(),
@@ -116,15 +142,15 @@ jest.mock('../../connections/manager.js', () => ({
   },
 }));
 
-jest.mock('../../connections/fetch-utils.js', () => ({
+jest.mock('../../connections/fetch-utils.js', () => mockLoudModule('connections/fetch-utils', {
   fetchWithTimeout: jest.fn(),
 }));
 
-jest.mock('../../transform/gene.js', () => ({
+jest.mock('../../transform/gene.js', () => mockLoudModule('transform/gene', {
   transformMyGeneHit: jest.fn(),
 }));
 
-jest.mock('../../transform/pdb.js', () => ({
+jest.mock('../../transform/pdb.js', () => mockLoudModule('transform/pdb', {
   transformPdbEntry: jest.fn(),
 }));
 
@@ -310,5 +336,22 @@ describe('Tool registration', () => {
     expect(sections.safeParse(['adverse_events']).success).toBe(true);
     expect(sections.safeParse(['all']).success).toBe(true);
     expect(sections.safeParse(['not_a_section']).success).toBe(false);
+  });
+
+  it('patent_get sections schema is usable (entity mock provides real constants)', () => {
+    registerPatentTools(mockServer);
+    const patentGetCall = mockRegisterTool.mock.calls.find((call: any[]) => call[0] === 'patent_get');
+    expect(patentGetCall).toBeDefined();
+    const sections = (patentGetCall![1] as any).inputSchema.sections;
+    // Guards against the z.enum(undefined) booby trap: the schema must build AND parse.
+    expect(sections.safeParse(['claims']).success).toBe(true);
+    expect(sections.safeParse(['not_a_section']).success).toBe(false);
+  });
+
+  it('loud module mocks fail loudly on unknown export access', () => {
+    const mod = mockLoudModule('entities/test', { knownExport: 42 });
+    expect((mod as any).knownExport).toBe(42);
+    expect((mod as any).__esModule).toBeUndefined();
+    expect(() => (mod as any).notExportedBySource).toThrow(/unknown export 'notExportedBySource'/);
   });
 });
