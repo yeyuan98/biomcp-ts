@@ -69,7 +69,7 @@ entityGet(id, sections?)      → { ...core, sections: Record<string, unknown> }
 |--------|----------|-----------------|
 | `gene.ts` | 14 (pathways, protein, ontology, go, interactions, clinical_evidence, expression, protein_atlas, druggability, dosage_sensitivity, constraint, disease_associations, diseases, funding) | MyGene.info, Reactome, UniProt, STRING-db, CIViC, GTEx, HPA, DGIdb, OpenTargets, gnomAD, DisGeNET, NIH Reporter |
 | `variant.ts` | 4 + stub (core, frequency, predictions, clinical; `alphagenome_scores` currently returns an error stub pending reimplementation) | MyVariant.info, CIViC, OncoKB |
-| `drug.ts` | 6 (us_regulatory, eu_regulatory, who_regulatory, safety, targets, indications) | MyChem.info, OpenFDA, OpenTargets |
+| `drug.ts` | 7 (us_regulatory, eu_regulatory, who_regulatory, safety, targets, indications, adverse_events) | MyChem.info, OpenFDA, OpenTargets |
 | `disease.ts` | 3 (gene_associations, phenotypes, pathways) | MyDisease.info, DisGeNET, Monarch, Reactome |
 | `article/` | 4 (open_access, annotations, citation_graph, citation) | PubMed, Europe PMC, Semantic Scholar, PubTator, LitSense, NCBI ID Converter, PMC OA, Crossref, OpenCitations |
 | `trial.ts` | 3 (eligibility, locations, outcomes) | ClinicalTrials.gov |
@@ -91,7 +91,7 @@ Cross-entity pivot functions and multi-entity operations:
 - **Batch**: `batchGet(inputs: BatchGetInput[])` — parallel entity resolution
 - **Universal**: `searchAll(query, options?)` — fans out to the supported entity search functions (gene, variant, drug, disease, article, trial)
 
-Functions not exposed as MCP tools: `geneToPathways`, `drugToGenes`, `drugToAdverseEvents`, `diseaseToGenes`, `diseaseToTrials`, `searchAll`.
+Functions not exposed as MCP tools: `geneToPathways`, `drugToGenes`, `diseaseToGenes`, `diseaseToTrials`, `searchAll`.
 
 ### `entities/article/` — Federated Search
 

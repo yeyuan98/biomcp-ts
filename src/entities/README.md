@@ -125,6 +125,7 @@ transformMyChemResponse(data: Record<string, unknown>): DrugResult
 | `safety` | OpenFDA | None | Box warnings, warnings, adverse reactions from drug label |
 | `targets` | OpenTargets (GraphQL) | None | Resolves ChEMBL ID via OpenTargets search, then fetches mechanisms of action with gene targets |
 | `indications` | OpenTargets (GraphQL) | None | Drug indications with max clinical stage, resolved via ChEMBL ID |
+| `adverse_events` | OpenFDA (`/drug/event.json`, FAERS) | None | Adverse reactions aggregated via `count=patient.reaction.reactionmeddrapt.exact`, ranked by report count, with `total_reports`; searches `patient.drug.openfda.substance_name` → `generic_name` → `medicinalproduct` (HTTP 404 zero-match advances the chain) |
 
 ---
 
@@ -516,7 +517,7 @@ geneToArticles(geneSymbol: string): Promise<Article[]>
 variantToTrials(variantId: string): Promise<Array<{ nct_id: string; title?: string; status?: string }>>
 drugToGenes(drugName: string): Promise<Array<{ gene_symbol: string; name: string; source: string; action_type?: string }>>
 drugToTrials(drugName: string): Promise<Array<{ nct_id: string; title?: string; status?: string }>>
-drugToAdverseEvents(drugName: string): Promise<Array<{ reaction?: string; frequency?: string; source?: string }>>
+drugToAdverseEvents(drugName: string, limit?: number): Promise<{ total_reports: number; reactions: Array<{ reaction: string; count: number; source: 'openfda' }> } | Array<{ _error: string }>>
 diseaseToDrugs(diseaseQuery: string): Promise<Array<{ drug_name: string; source: string; phase?: string }>>
 diseaseToGenes(diseaseId: string): Promise<Array<{ gene_symbol: string; name: string; source: string; score?: number }>>
 diseaseToTrials(diseaseQuery: string): Promise<Array<{ nct_id: string; title?: string; status?: string }>>
@@ -533,7 +534,7 @@ diseaseToTrials(diseaseQuery: string): Promise<Array<{ nct_id: string; title?: s
 | `variantToTrials` | ClinicalTrials.gov (via `trialSearch`) | None |
 | `drugToGenes` | OpenTargets (GraphQL) | None |
 | `drugToTrials` | ClinicalTrials.gov (via `trialSearch`, `searchType: 'intervention'`) | None |
-| `drugToAdverseEvents` | OpenFDA (`/drug/event.json`) | None |
+| `drugToAdverseEvents` | OpenFDA (`/drug/event.json` FAERS, fully-qualified `patient.drug.*` field search) | None |
 | `diseaseToDrugs` | MyDisease (ID resolution) + OpenTargets (GraphQL) | None |
 | `diseaseToGenes` | DisGeNET via shared `entities/disgenet.ts` (`/gda/summary`) | `DISGENET_API_KEY` |
 | `diseaseToTrials` | ClinicalTrials.gov (via `trialSearch`) | None |
