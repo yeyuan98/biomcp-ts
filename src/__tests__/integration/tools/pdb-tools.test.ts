@@ -210,7 +210,7 @@ describe('pdb download mode', () => {
     expect(result.file.file_size_human).toMatch(/\d+(\.\d+)?\s*(B|KB|MB|GB)/);
     unlinkSync(result.file.file_path);
     const parentDir = result.file.file_path.substring(0, result.file.file_path.lastIndexOf('/'));
-    try { require('node:fs').rmSync(parentDir, { recursive: true }); } catch {}
+    try { rmSync(parentDir, { recursive: true }); } catch {}
   }, 60000);
 
   it('returns metadata and file when downloading with sections', async () => {
@@ -238,6 +238,7 @@ describe('pdb pagination', () => {
     // Deterministic ordering for the same query: page 2 (offset 1) must start
     // with page 1's second row — proves offset actually shifts the window.
     expect(ids1.length).toBe(2);
+    expect(ids2.length).toBe(2);
     expect(ids2[0]).toBe(ids1[1]);
     expect(ids2[1]).not.toBe(ids1[1]);
   }, 60000);
