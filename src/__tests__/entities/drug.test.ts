@@ -154,17 +154,20 @@ describe('drug', () => {
   test('drugGet() sections=["all"] includes adverse_events alongside the six legacy sections', async () => {
     global.fetch = jest.fn().mockImplementation(async (input: any) => {
       const url = typeof input === 'string' ? input : input?.url ?? String(input);
-      if (url.includes('mychem.info')) {
+      // Route on the parsed hostname (never substring matching — the query
+      // carries user input and could contain any host string).
+      const u = new URL(url);
+      if (u.hostname === 'mychem.info') {
         return {
           ok: true,
           json: () => Promise.resolve({ hits: [{ chebi: { name: 'Aspirin' }, unichem: { chembl: 'CHEMBL25' } }] }),
         };
       }
-      if (url.includes('api.fda.gov')) {
+      if (u.hostname === 'api.fda.gov') {
         return {
           ok: true,
           json: () => Promise.resolve(
-            url.includes('count=')
+            u.searchParams.has('count')
               ? { results: [{ term: 'FATIGUE', count: 5 }] }
               : { meta: { results: { total: 10 } }, results: [] }
           ),
