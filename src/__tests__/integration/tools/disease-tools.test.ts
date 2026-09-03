@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { createMcpTestHarness } from '../../helpers/mcp-harness.js';
-import { expectDiseaseSearchResult, expectDiseaseGetResult } from '../../helpers/assertions.js';
+import { expectDiseaseSearchResult, expectDiseaseGetResult, expectCrossEntityDrugRows, expectCrossEntityTrialRows } from '../../helpers/assertions.js';
 import { retryOnRateLimit } from '../../helpers/retry.js';
 
 let harness: Awaited<ReturnType<typeof createMcpTestHarness>>;
@@ -57,14 +57,18 @@ describe('disease_get', () => {
 describe('disease_drugs', () => {
   it('returns drugs for breast cancer via OpenTargets', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('disease_drugs', { disease_id: 'MONDO:0007254' }));
-    expect(result).toBeDefined();
-    expect(Array.isArray(result)).toBe(true);
+    expectCrossEntityDrugRows(result);
+    // Breast cancer is a heavily drugged indication — real rows must exist.
+    const realRows = (result as Array<Record<string, any>>).filter((r) => !r._error);
+    expect(realRows.length).toBeGreaterThan(0);
   }, 60000);
 });
 
 describe('disease_trials', () => {
   it('returns trials for breast cancer', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('disease_trials', { disease_id: 'MONDO:0007254' }));
-    expect(result).toBeDefined();
+    expectCrossEntityTrialRows(result);
+    const realRows = (result as Array<Record<string, any>>).filter((r) => !r._error);
+    expect(realRows.length).toBeGreaterThan(0);
   }, 60000);
 });

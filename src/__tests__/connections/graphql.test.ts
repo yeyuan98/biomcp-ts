@@ -107,6 +107,28 @@ describe('GraphQLConnection', () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
+  test('healthCheck() returns true on HTTP 200 and on 400 (GraphQL endpoints reject bare POSTs with 400)', async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+      .mockResolvedValueOnce({ ok: false, status: 400 }) as any;
+
+    const conn = new GraphQLConnection(baseOptions);
+    expect(await conn.healthCheck()).toBe(true);
+    expect(await conn.healthCheck()).toBe(true);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test('healthCheck() returns false on non-400 HTTP errors and network errors', async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({ ok: false, status: 500 })
+      .mockRejectedValueOnce(new Error('Network error')) as any;
+
+    const conn = new GraphQLConnection(baseOptions);
+    expect(await conn.healthCheck()).toBe(false);
+    expect(await conn.healthCheck()).toBe(false);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
   test('request() passes through partial data despite errors[]', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,

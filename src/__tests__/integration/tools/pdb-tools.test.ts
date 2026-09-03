@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { createMcpTestHarness } from '../../helpers/mcp-harness.js';
 import { retryOnRateLimit } from '../../helpers/retry.js';
-import { unlinkSync, existsSync, readFileSync } from 'node:fs';
+import { unlinkSync, existsSync, readFileSync, rmSync } from 'node:fs';
 
 let harness: Awaited<ReturnType<typeof createMcpTestHarness>>;
 
@@ -55,6 +55,8 @@ describe('pdb get mode', () => {
     expect(result.pdb_id).toBe('1CRN');
     expect(result.summary).toBeDefined();
     expect(result.summary.title).toBeTruthy();
+    // Stable identity: 1CRN is crambin (Teeter & Hendrickson).
+    expect(result.summary.title).toMatch(/crambin/i);
     expect(result.summary.experimental_method).toBeTruthy();
   }, 60000);
 
@@ -187,7 +189,7 @@ describe('pdb download mode', () => {
     expect(content).toContain('data_');
     unlinkSync(result.file.file_path);
     const parentDir = result.file.file_path.substring(0, result.file.file_path.lastIndexOf('/'));
-    try { require('node:fs').rmSync(parentDir, { recursive: true }); } catch {}
+    try { rmSync(parentDir, { recursive: true }); } catch {}
   }, 60000);
 
   it('downloads 1CRN in pdb format with valid content', async () => {
@@ -200,7 +202,7 @@ describe('pdb download mode', () => {
     expect(content).toContain('HEADER');
     unlinkSync(result.file.file_path);
     const parentDir = result.file.file_path.substring(0, result.file.file_path.lastIndexOf('/'));
-    try { require('node:fs').rmSync(parentDir, { recursive: true }); } catch {}
+    try { rmSync(parentDir, { recursive: true }); } catch {}
   }, 60000);
 
   it('includes file size in human-readable format', async () => {
@@ -208,7 +210,7 @@ describe('pdb download mode', () => {
     expect(result.file.file_size_human).toMatch(/\d+(\.\d+)?\s*(B|KB|MB|GB)/);
     unlinkSync(result.file.file_path);
     const parentDir = result.file.file_path.substring(0, result.file.file_path.lastIndexOf('/'));
-    try { require('node:fs').rmSync(parentDir, { recursive: true }); } catch {}
+    try { rmSync(parentDir, { recursive: true }); } catch {}
   }, 60000);
 
   it('returns metadata and file when downloading with sections', async () => {
@@ -221,7 +223,7 @@ describe('pdb download mode', () => {
     expect(result.sections.experiment).toBeDefined();
     unlinkSync(result.file.file_path);
     const parentDir = result.file.file_path.substring(0, result.file.file_path.lastIndexOf('/'));
-    try { require('node:fs').rmSync(parentDir, { recursive: true }); } catch {}
+    try { rmSync(parentDir, { recursive: true }); } catch {}
   }, 60000);
 });
 
@@ -233,7 +235,12 @@ describe('pdb pagination', () => {
     expect(page2.length).toBeGreaterThan(0);
     const ids1 = page1.map((r: any) => r.pdb_id);
     const ids2 = page2.map((r: any) => r.pdb_id);
-    expect(ids1).not.toEqual(ids2);
+    // Deterministic ordering for the same query: page 2 (offset 1) must start
+    // with page 1's second row — proves offset actually shifts the window.
+    expect(ids1.length).toBe(2);
+    expect(ids2.length).toBe(2);
+    expect(ids2[0]).toBe(ids1[1]);
+    expect(ids2[1]).not.toBe(ids1[1]);
   }, 60000);
 
   it('respects limit parameter across pages', async () => {

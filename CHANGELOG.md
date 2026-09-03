@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-09-03
+
+### Changed
+
+- **Test-suite revamp (audit-driven; no runtime behavior changes)** — all 97 test files were audited against current source for meaningfulness, API freshness, and hygiene. Unit suite: 78 suites / 1313 tests, exits cleanly without jest `forceExit`. Integration suite: 19 files / 182 declared tests with a documented gating table (exact env vars / cache-state conditions for every silently skipping suite) and honest timing notes (keyless API suites 1–2 min; gated wasm/R suites multi-minute when provisioned).
+  - `tool-registration` entity mocks repaired — the patent/drug mocks were missing `PATENT_GET_SECTIONS`, `PATENT_SEARCH_TOOL_BUDGET_MS`, and `DRUG_ENTITY_ALL_SECTIONS`, arming a `z.enum(undefined)` schema trap that threw only on `safeParse`; all entity/connections/transform mocks now go through a loud-mock Proxy factory that fails immediately when source imports an export the factory does not define, and mock specifiers are standardized on the exact `.../index.js` paths source imports.
+  - Weak integration assertions replaced with shared type-guards in `helpers/assertions.ts` (`expectCrossEntityDrugRows/TrialRows/ArticleRows`, `expectDiscoverRows`, `expectBatchGetRows`): gene/disease/variant cross-entity results, `discover`, and `batch_get` now validate row shape, NCT-id format, and explicit failure rows (`success:false` + reason) instead of `toBeDefined()`; pdb pagination proves the offset actually shifts the result window (`page2[0] === page1[1]`) and pins the 1CRN crambin identity.
+  - `gene_drugs` now documents that **zero drug rows is a valid live answer** for genes that are not direct OpenTargets drug targets (BRCA1: PARP inhibitors target PARP1/2, not BRCA1); the non-empty guarantee moved to an EGFR test.
+  - `graphql`/`rest` `healthCheck` return-value semantics pinned by tests: 200/400 → true for GraphQL endpoints; any resolved HTTP status (incl. 404/503) → true for REST — the latter is flagged in-test as a candidate bug, deliberately unchanged.
+  - The Lucene phrase-escaping regression (`escapeLucenePhrase`) is co-located in `drug.test.ts` beside the module it guards; the MyChem fixture uses the real `unichem.chembl` field shape; `geneGet` AbortError propagation asserts name+message.
+- **npm/doc pins swept to `biomcp@1.1`** — README.md, docs/AGENT-INSTALL.md, docs/R-ANALYSIS.md, docs/DATABASE.md (source-rendered; drift tests enforce the sync).
+
+### Fixed
+
+- **pdb integration temp-dir leak** — four `require('node:fs')` cleanups threw swallowed ReferenceErrors under native ESM, silently leaking download temp dirs on every run; replaced with the already-imported `rmSync`.
+- **"worker process has failed to exit gracefully" jest warning** — the biowasm engine test's FakeWorkerHost leaked 5s grace timers that held jest workers open; timers are now unref'd and `forceExit: true` removed from the unit jest config (the integration config keeps it deliberately for wasm/webR workers).
+
 ## [1.0.1] - 2026-09-03
 
 ### Fixed

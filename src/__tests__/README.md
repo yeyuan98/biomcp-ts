@@ -12,11 +12,19 @@
 ## Running Tests
 
 ```bash
-npm test                # Unit tests only (fast, mocked, parallel)
-npm run test:integration # Integration tests (real APIs, serial, ~60s)
+npm test                # Unit tests only (fast, mocked, parallel, ~15s)
+npm run test:integration # Integration tests (real APIs, serial; see timing note below)
 npm run test:all         # All tests combined
 npm run test:coverage    # Unit tests with coverage
 ```
+
+> **Integration timing:** the keyless API suites (trial, gtex, ensembl, sra,
+> genbank, gene, disease, drug, variant, utility, article, pdb) finish in
+> roughly 1–2 minutes total. The gated suites are slow when their environment
+> is present: `biowasm-engine`/`biowasm-tools` and `ranalysis` download and
+> boot real wasm/R runtimes (multi-minute, per-test caps of 120–300s) and
+> `patent` seminal mining is capped at 180s. In a bare environment these
+> suites **skip silently** (see gating table below).
 
 > **Always run tests via the npm scripts or `make` targets.** This is a native-ESM
 > project (`"type": "module"` + ts-jest ESM), so jest must be launched with
@@ -122,8 +130,22 @@ src/__tests__/
 
 Counts below are refresh-when-touched — update them when you add suites to the touched area.
 
-- **Unit:** 74 suites / 1234 tests (`npm test`)
-- **Integration:** 19 files / 173 declared tests (`npm run test:integration`), 5 keyed skips: 4 patent OPS/ODP tests (gated on `EPO_OPS_CONSUMER_KEY`/`EPO_OPS_CONSUMER_SECRET` and `USPTO_API_KEY` describes) + 1 OncoKB annotation test (`it.skip`, requires `ONCOKB_TOKEN`)
+- **Unit:** 78 suites / 1313 tests (`npm test`)
+- **Integration:** 19 files / 182 declared tests (`npm run test:integration`)
+
+## Integration Suite Gating
+
+Gated suites **skip silently** when their environment is absent — a green
+`test:integration` run in a bare environment does NOT exercise them.
+
+| Suite | Runs when | Gating |
+| --- | --- | --- |
+| biowasm-engine, biowasm-tools | wasm assets are provisioned | `ANALYSIS_BIOWASM_MIRROR_URL` env or existing biowasm cache state (`biowasmCacheStatePath()`) |
+| ranalysis-tools | R mirror is provisioned | `ANALYSIS_R_MIRROR_URL` env or existing `~/.cache/biomcp/r-wasm-mirror-state.json` |
+| patent OPS / ODP describes | credentials set | `EPO_OPS_CONSUMER_KEY`/`EPO_OPS_CONSUMER_SECRET`, `USPTO_API_KEY` |
+| db (MySQL / SQLite) | targets configured | `BIOMCP_DB_IT_HOST`…, `BIOMCP_DB_IT_SQLITE_PATH` (see Database Tests below) |
+| depmap manifest | opt-in flag set | `BIOMCP_DEPMAP_IT` |
+| variant OncoKB `it.skip` | token set | `ONCOKB_TOKEN` |
 
 ## Testing Approach
 
@@ -150,9 +172,9 @@ Integration tests use `InMemoryTransport` from the MCP SDK to connect a real `Cl
 - **No volatile assertions:** Counts, scores, and rankings are never asserted (data sources change)
 - **Error tolerance:** Transient API failures are retried via `retryOnRateLimit` (3 attempts, 3s apart — retries 429/rate-limit errors, transient network errors like `fetch failed`/ECONNRESET/ETIMEDOUT, and result arrays containing transient `_error` rows) or caught, and tests gracefully skip
 
-**Keyed skips:** OPS/ODP patent describes and the OncoKB variant test (above). Everything else runs keyless against live APIs.
+**Keyed skips:** OPS/ODP patent describes and the OncoKB variant test (see gating table above). Everything else runs keyless against live APIs.
 
-**CI strategy:** Integration tests should run as a separate workflow (nightly or on-demand), not as PR gate.
+**CI strategy:** Integration tests are **not** run in CI — `.github/workflows/ci.yml` gates on the unit suite only. Run integration locally (or on-demand) via `npm run test:integration`; remember that gated suites skip silently in a bare environment (see the gating table).
 
 ## Database Tests
 

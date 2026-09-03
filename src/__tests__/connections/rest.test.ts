@@ -218,6 +218,20 @@ describe('RestConnection', () => {
     expect(result).toBe(true);
   });
 
+  // Pins CURRENT semantics: healthCheck only fails on network errors — any
+  // resolved HTTP response (even 404/500) counts as "reachable". If this is
+  // deemed a bug, change the implementation deliberately and update this test.
+  test('healthCheck() returns true on any resolved HTTP response (pins 404/500 => true)', async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({ ok: false, status: 404 })
+      .mockResolvedValueOnce({ ok: false, status: 503 }) as any;
+
+    const conn = new RestConnection(baseOptions);
+    expect(await conn.healthCheck()).toBe(true);
+    expect(await conn.healthCheck()).toBe(true);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
   test('request() returns text for XML content-type', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,

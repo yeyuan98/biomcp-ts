@@ -132,6 +132,8 @@ describe('withTimeout', () => {
     expect(jest.getTimerCount()).toBe(0);
   });
 
+  // Intentional drift guard: pins the documented default timeout; not a
+  // behavioral test.
   it('DEFAULT_PROVIDER_TIMEOUT_MS is 10 seconds', () => {
     expect(DEFAULT_PROVIDER_TIMEOUT_MS).toBe(10000);
   });

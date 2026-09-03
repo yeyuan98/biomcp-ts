@@ -32,7 +32,7 @@ Driver packages are kept **external** (`undici`, optional peer `mysql2`, builtin
 
 ```bash
 make test              # Unit tests (fast, mocked)
-make test-integration  # Integration tests (live APIs, ~60s)
+make test-integration  # Integration tests (live APIs; keyless API suites ~1–2 min, gated wasm/R/patent suites slower and env-gated)
 make test-all          # Everything
 make test-coverage     # Unit tests with coverage report
 ```

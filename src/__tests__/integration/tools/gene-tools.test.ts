@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { createMcpTestHarness } from '../../helpers/mcp-harness.js';
-import { expectGeneSearchResult, expectGeneGetResult } from '../../helpers/assertions.js';
+import { expectGeneSearchResult, expectGeneGetResult, expectCrossEntityDrugRows, expectCrossEntityTrialRows, expectCrossEntityArticleRows } from '../../helpers/assertions.js';
 import { retryOnRateLimit } from '../../helpers/retry.js';
 
 let harness: Awaited<ReturnType<typeof createMcpTestHarness>>;
@@ -83,23 +83,36 @@ describe('gene_diseases', () => {
 });
 
 describe('gene_drugs', () => {
-  it('returns drugs for BRCA1', async () => {
+  it('returns drugs for EGFR with real OpenTargets rows', async () => {
+    const result = await retryOnRateLimit(() => harness.callTool('gene_drugs', { symbol: 'EGFR' }));
+    expectCrossEntityDrugRows(result);
+    // EGFR is a heavily drugged kinase target — real rows must exist.
+    const realRows = (result as Array<Record<string, any>>).filter((r) => !r._error);
+    expect(realRows.length).toBeGreaterThan(0);
+    expect(realRows[0].source).toBe('opentargets');
+  }, 60000);
+
+  it('returns shape-valid (possibly empty) drugs for BRCA1', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('gene_drugs', { symbol: 'BRCA1' }));
-    expect(result).toBeDefined();
+    expectCrossEntityDrugRows(result);
+    // Zero rows is a valid live answer: BRCA1 is not a direct drug target in
+    // OpenTargets (PARP inhibitors target PARP1/2, not BRCA1 itself).
   }, 60000);
 });
 
 describe('gene_trials', () => {
   it('returns trials for BRCA1', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('gene_trials', { symbol: 'BRCA1' }));
-    expect(result).toBeDefined();
+    expectCrossEntityTrialRows(result);
+    const realRows = (result as Array<Record<string, any>>).filter((r) => !r._error);
+    expect(realRows.length).toBeGreaterThan(0);
   }, 60000);
 });
 
 describe('gene_articles', () => {
   it('returns articles for BRCA1', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('gene_articles', { symbol: 'BRCA1' }));
-    expect(result).toBeDefined();
+    expectCrossEntityArticleRows(result);
   }, 60000);
 });
 

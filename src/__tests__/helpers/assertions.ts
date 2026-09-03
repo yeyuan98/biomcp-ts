@@ -109,6 +109,86 @@ export function expectPatentGetResult(data: unknown): asserts data is Record<str
 }
 
 /**
+ * Cross-entity drug rows (gene_drugs / disease_drugs): every row must be a
+ * real drug row (non-empty drug_name + source strings) or an explicit
+ * `_error` row — never a shapeless object. The array itself may legitimately
+ * be empty (e.g. a gene that is not a direct drug target in OpenTargets);
+ * callers assert non-emptiness only where real data is guaranteed.
+ */
+export function expectCrossEntityDrugRows(data: unknown): void {
+  expect(Array.isArray(data)).toBe(true);
+  for (const row of data as Array<Record<string, any>>) {
+    if (row._error) {
+      expect(typeof row._error).toBe('string');
+      continue;
+    }
+    expect(typeof row.drug_name).toBe('string');
+    expect(row.drug_name.length).toBeGreaterThan(0);
+    expect(typeof row.source).toBe('string');
+  }
+}
+
+/**
+ * Cross-entity trial rows (gene_trials / disease_trials / variant_trials):
+ * ClinicalTrials.gov NCT ids or an explicit `_error` row.
+ */
+export function expectCrossEntityTrialRows(data: unknown): void {
+  expect(Array.isArray(data)).toBe(true);
+  expect((data as unknown[]).length).toBeGreaterThan(0);
+  for (const row of data as Array<Record<string, any>>) {
+    if (row._error) {
+      expect(typeof row._error).toBe('string');
+      continue;
+    }
+    expect(row.nct_id).toMatch(/^NCT\d{8}$/);
+  }
+}
+
+/** gene_articles rows: PubMed articles with a pmid and a title. */
+export function expectCrossEntityArticleRows(data: unknown): void {
+  expect(Array.isArray(data)).toBe(true);
+  expect((data as unknown[]).length).toBeGreaterThan(0);
+  const first = (data as Array<Record<string, any>>)[0];
+  expect(first.pmid).toBeDefined();
+  expect(String(first.pmid)).toMatch(/^\d+$/);
+  expect(typeof first.title).toBe('string');
+  expect(first.title.length).toBeGreaterThan(0);
+}
+
+/** discover rows: typed entity rows with a known entity_type plus identifier and name. */
+export function expectDiscoverRows(data: unknown): void {
+  expect(Array.isArray(data)).toBe(true);
+  expect((data as unknown[]).length).toBeGreaterThan(0);
+  const knownTypes = ['gene', 'variant', 'drug', 'disease', 'trial', 'article', 'patent'];
+  for (const row of data as Array<Record<string, any>>) {
+    expect(knownTypes).toContain(row.entity_type);
+    expect(typeof row.identifier).toBe('string');
+    expect(row.identifier.length).toBeGreaterThan(0);
+    expect(typeof row.name).toBe('string');
+  }
+}
+
+/**
+ * batch_get rows: one result per input. Successful rows carry data and no
+ * error; failed rows carry a non-empty error string and success === false.
+ */
+export function expectBatchGetRows(data: unknown, expectedCount: number): void {
+  expect(Array.isArray(data)).toBe(true);
+  expect((data as unknown[]).length).toBe(expectedCount);
+  for (const row of data as Array<Record<string, any>>) {
+    expect(typeof row.entity).toBe('string');
+    expect(typeof row.success).toBe('boolean');
+    if (row.success) {
+      expect(row.data).toBeDefined();
+      expect(row.error).toBeUndefined();
+    } else {
+      expect(typeof row.error).toBe('string');
+      expect(row.error.length).toBeGreaterThan(0);
+    }
+  }
+}
+
+/**
  * article_get `oa` section: must be a non-error result carrying OA metadata
  * from either source (pmc_oa primary, europepmc fallback) — a `_error` here
  * means both OA lookup legs failed.
