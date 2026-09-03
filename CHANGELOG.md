@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-09-03
+
+### Changed
+
+- **README architecture figure synced to the paper's current Figure 8** — `docs/assets/fig1-architecture.png` replaced with the latest paper export (author-revision polish; same 2161×1830 @300 dpi canvas), embedded via a **main-branch raw URL** (absolute, renders on GitHub and the npm package page, self-heals future figure revisions) — superseding the v1.0.0-era tag-pinned embed. Docs-only release; no runtime code changes.
+
 ## [1.1.0] - 2026-09-03
 
 ### Changed
