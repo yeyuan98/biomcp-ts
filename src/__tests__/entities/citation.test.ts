@@ -445,6 +445,91 @@ describe('citation module', () => {
       expect(count?.total).toBe(42);
     });
 
+    test('reference[].author delivered as a plain string maps to authors (live Crossref shape)', async () => {
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const workResponse = {
+          message: {
+            'is-referenced-by-count': 43,
+            reference: [
+              { DOI: '10.1016/S0147-6513(03)00095-2', 'article-title': 'Aquatic selenium pollution', author: 'AD Lemly', year: 2002 },
+              { DOI: '10.1/two', author: 'A One; B Two' },
+            ],
+          },
+        };
+        global.fetch = jest.fn().mockResolvedValue(mockJson(workResponse)) as any;
+
+        const refs = await crossrefProvider.getBackwardReferences({ doi: '10.1371/journal.pone.0110904' }, 50);
+        const count = await crossrefProvider.getCitationCount({ doi: '10.1371/journal.pone.0110904' });
+
+        expect(refs).toHaveLength(2);
+        expect(refs[0].authors).toEqual(['AD Lemly']);
+        expect(refs[1].authors).toEqual(['A One', 'B Two']);
+        expect(count?.total).toBe(43);
+        // String authors are the documented live shape — not an error condition.
+        expect(errorSpy).not.toHaveBeenCalled();
+      } finally {
+        errorSpy.mockRestore();
+      }
+    });
+
+    test('structured author arrays keep working alongside string authors', async () => {
+      const workResponse = {
+        message: {
+          'is-referenced-by-count': 7,
+          reference: [
+            { DOI: '10.1/struct', author: [{ family: 'Lemly', given: 'A. D.' }] },
+            { DOI: '10.1/string', author: 'MC Thompson' },
+          ],
+        },
+      };
+      global.fetch = jest.fn().mockResolvedValue(mockJson(workResponse)) as any;
+
+      const refs = await crossrefProvider.getBackwardReferences({ doi: '10.1/works' }, 10);
+
+      expect(refs[0].authors).toEqual(['A. D. Lemly']);
+      expect(refs[1].authors).toEqual(['MC Thompson']);
+    });
+
+    test('count survives a malformed reference entry (never silently zeroed)', async () => {
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const workResponse = {
+          message: {
+            'is-referenced-by-count': 43,
+            reference: [{ author: { unexpected: 'object shape' } }, { DOI: '10.1/ok', author: 'AD Lemly' }],
+          },
+        };
+        global.fetch = jest.fn().mockResolvedValue(mockJson(workResponse)) as any;
+
+        const count = await crossrefProvider.getCitationCount({ doi: '10.1/malformed' });
+
+        expect(count?.total).toBe(43);
+      } finally {
+        errorSpy.mockRestore();
+      }
+    });
+
+    test('failed work fetch is not memoized: next call retries', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 404,
+          statusText: 'Not Found',
+          headers: new Headers({ 'content-type': 'text/html' }),
+          text: () => Promise.resolve('err'),
+        })
+        .mockResolvedValueOnce(mockJson({ message: { 'is-referenced-by-count': 9, reference: [] } })) as any;
+
+      const count1 = await crossrefProvider.getCitationCount({ doi: '10.1/negcache' });
+      expect(count1).toBeNull();
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      const count2 = await crossrefProvider.getCitationCount({ doi: '10.1/negcache' });
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(count2?.total).toBe(9);
+    });
+
     test('clearWorkCache resets cache so next call makes a new fetch', async () => {
       global.fetch = jest.fn()
         .mockResolvedValueOnce(mockJson({ message: { 'is-referenced-by-count': 5, reference: [] } }))

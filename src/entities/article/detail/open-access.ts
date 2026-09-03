@@ -2,7 +2,57 @@ import { connectionManager } from '../../../connections/manager.js';
 import { XMLParser } from 'fast-xml-parser';
 import type { IDConvResponse } from './id-resolution.js';
 
-export async function fetchOpenAccess(pmid: string, resolvedPmcid?: string): Promise<{ pmcid?: string; pdf_url?: string; license?: string; license_url?: string }> {
+export interface OpenAccessResult {
+  pmcid?: string;
+  pdf_url?: string;
+  license?: string;
+  license_url?: string;
+  source?: 'pmc_oa' | 'europepmc';
+}
+
+interface EuropePmcSearchResponse {
+  resultList?: {
+    result?: Array<{
+      license?: string;
+      isOpenAccess?: string;
+      fullTextUrlList?: {
+        fullTextUrlList?: Array<{ documentStyle?: string; availability?: string; url?: string }>;
+      };
+    }>;
+  };
+}
+
+/**
+ * Europe PMC fallback for OA metadata: NCBI's oa.fcgi is unreachable from
+ * some networks (datacenter-IP 404s), but Europe PMC carries the same
+ * license + full-text link information via its core search records.
+ */
+async function fetchOaFromEuropePmc(pmcid: string): Promise<OpenAccessResult | null> {
+  try {
+    const conn = connectionManager.getConnection('europepmc');
+    const response = await conn.request(
+      `/search?query=${encodeURIComponent(`PMCID:${pmcid}`)}&resultType=core&format=json&pageSize=1`
+    ) as EuropePmcSearchResponse;
+
+    const record = response?.resultList?.result?.[0];
+    if (!record) return null;
+
+    const result: OpenAccessResult = { pmcid, source: 'europepmc' };
+    const links = record.fullTextUrlList?.fullTextUrlList ?? [];
+    const pdf = links.find(l => l.documentStyle === 'pdf' && l.availability === 'Open access')
+      ?? links.find(l => l.documentStyle === 'pdf');
+    if (pdf?.url) result.pdf_url = pdf.url;
+    if (record.license) {
+      result.license = record.license;
+      result.license_url = licenseToUrl(record.license);
+    }
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchOpenAccess(pmid: string, resolvedPmcid?: string): Promise<OpenAccessResult> {
   try {
     let pmcid = resolvedPmcid;
 
@@ -21,18 +71,28 @@ export async function fetchOpenAccess(pmid: string, resolvedPmcid?: string): Pro
     }
 
     if (pmcid) {
-      const pmcConn = connectionManager.getConnection('pmc_oa');
-      const oaXml = await pmcConn.request(
-        `?id=${pmcid}`
-      ) as string;
+      try {
+        const pmcConn = connectionManager.getConnection('pmc_oa');
+        const oaXml = await pmcConn.request(
+          `?id=${pmcid}`
+        ) as string;
 
-      const links = parseOaXml(oaXml);
-      return {
-        pmcid,
-        pdf_url: links.pdf_url,
-        license: links.license,
-        license_url: links.license_url,
-      };
+        const links = parseOaXml(oaXml);
+        return {
+          pmcid,
+          pdf_url: links.pdf_url,
+          license: links.license,
+          license_url: links.license_url,
+          source: 'pmc_oa',
+        };
+      } catch (pmcError) {
+        const fallback = await fetchOaFromEuropePmc(pmcid);
+        if (fallback) {
+          return fallback;
+        }
+        const msg = pmcError instanceof Error ? pmcError.message : String(pmcError);
+        return { _error: `Open access lookup failed (source: ncbi_idconv/pmc_oa): ${msg}. The article may not have open access content, or the data source may be temporarily unavailable.` } as any;
+      }
     }
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
