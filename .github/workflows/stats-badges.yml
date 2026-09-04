@@ -1,8 +1,11 @@
-# Daily maintenance stats for README badges (.github/badges/stats.json), consumed via
-# shields.io dynamic/json badges. Runs on schedule/dispatch only (never push) and commits
-# with [skip ci], so it cannot loop through ci.yml or trigger dependabot-automerge.
-# commits30d excludes this workflow's own bot commits (they would otherwise inflate the
-# rolling-30d count by ~30/month).
+# Daily maintenance stats for README badges, served from the orphan single-commit
+# badge-stats branch (stats.json at its root) via shields.io dynamic/json badges.
+# The repository ruleset requires PR + ci status for main, which no bot push can
+# satisfy (GITHUB_TOKEN PRs do not trigger ci), so main is never touched: each run
+# force-replaces badge-stats with one fresh orphan commit — no history growth, no
+# rebase logic, and non-default branches are outside the ruleset's scope.
+# commits30d excludes this workflow's own bot commits (they would otherwise inflate
+# the rolling-30d count by ~30/month).
 
 name: stats-badges
 
@@ -21,7 +24,7 @@ concurrency:
 jobs:
   update:
     # workflow_dispatch can target any ref; only ever act on main so a
-    # branch-selected dispatch can never push that branch's commits to main
+    # branch-selected dispatch can never publish anything unexpected
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -45,30 +48,36 @@ jobs:
           commits30d=$((total - bot))
           comma() { sed -e ':a' -e 's/\B[0-9]\{3\}\>/,&/' -e 'ta' <<< "$1"; }
           jq -n --arg ytd "$(comma "$ytd")" --arg commits30d "$(comma "$commits30d")" \
-            '{ytd: $ytd, commits30d: $commits30d}' > .github/badges/stats.json
-          cat .github/badges/stats.json
+            '{ytd: $ytd, commits30d: $commits30d}' > "$RUNNER_TEMP/stats.json"
+          cat "$RUNNER_TEMP/stats.json"
 
-      - name: Commit and push (retry on race)
+      - name: Publish stats to badge-stats branch
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github/badges/stats.json
-          if git diff --cached --quiet -- .github/badges/stats.json; then
-            echo "stats unchanged; nothing to commit"
+          stats="$RUNNER_TEMP/stats.json"
+          git fetch --force origin refs/heads/badge-stats:refs/remotes/origin/badge-stats || true
+          if [ "$(git show refs/remotes/origin/badge-stats:stats.json 2>/dev/null || true)" = "$(cat "$stats")" ]; then
+            echo "stats unchanged; nothing to publish"
             exit 0
           fi
-          ytd=$(jq -r .ytd .github/badges/stats.json)
-          commits30d=$(jq -r .commits30d .github/badges/stats.json)
-          git commit -m "chore(badges): refresh stats [skip ci]" \
-            -m "- npm downloads YTD: $ytd
-          - commits (rolling 30d, bot-excluded): $commits30d"
+          blob=$(git hash-object -w "$stats")
+          export GIT_INDEX_FILE="$RUNNER_TEMP/stats-index"
+          git read-tree --empty
+          git update-index --add --cacheinfo 100644,"$blob",stats.json
+          tree=$(git write-tree)
+          unset GIT_INDEX_FILE
+          commit=$(GIT_AUTHOR_NAME=github-actions[bot] \
+                   GIT_AUTHOR_EMAIL=41898282+github-actions[bot]@users.noreply.github.com \
+                   GIT_COMMITTER_NAME=github-actions[bot] \
+                   GIT_COMMITTER_EMAIL=41898282+github-actions[bot]@users.noreply.github.com \
+                   git commit-tree "$tree" -m "chore(badges): refresh stats [skip ci]" \
+                     -m "- npm downloads YTD: $(jq -r .ytd "$stats")
+          - commits (rolling 30d, bot-excluded): $(jq -r .commits30d "$stats")")
           for attempt in 1 2 3; do
-            if git push origin HEAD:main; then
+            if git push --force origin "$commit:refs/heads/badge-stats"; then
               exit 0
             fi
-            echo "push attempt $attempt failed (race); rebasing and retrying"
-            git pull --rebase origin main
+            echo "push attempt $attempt failed; retrying"
             sleep 5
           done
           echo "push failed after 3 attempts"
