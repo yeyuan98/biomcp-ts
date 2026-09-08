@@ -34,7 +34,11 @@ const DESCRIPTION = `Inspect and configure biomcp — unified observability and 
 
 Changes apply at server startup: finish dependency prerequisites first (see prerequisites in the response), then restart the client/session once, then re-call this tool with {} to verify running_now.`;
 
-export function registerConfigureTool(server: McpServer): void {
+export interface RegisterConfigureToolOptions {
+  readOnlyConfig?: boolean;
+}
+
+export function registerConfigureTool(server: McpServer, options?: RegisterConfigureToolOptions): void {
   server.registerTool(
     'biomcp_configure',
     {
@@ -61,6 +65,27 @@ export function registerConfigureTool(server: McpServer): void {
     },
     async (raw) => {
       const action = raw.action ?? 'status';
+      if (options?.readOnlyConfig && (action === 'set' || action === 'reset')) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  ok: false,
+                  error: {
+                    code: 'remote_readonly',
+                    message: 'Configuration mutation is disabled in remote self-hosted mode.',
+                  },
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+          isError: true,
+        };
+      }
       try {
         if (action === 'status') {
           const result = getStatus({ filter: raw.filter });

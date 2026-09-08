@@ -1,0 +1,23 @@
+[Unit]
+Description=BioMCP Streamable HTTP MCP Server
+After=network.target
+
+[Service]
+Type=simple
+User=biomcp
+Group=biomcp
+WorkingDirectory=/opt/biomcp
+EnvironmentFile=-/etc/biomcp/biomcp.env
+ExecStart=/usr/bin/node /opt/biomcp/dist/cli.js serve --host 127.0.0.1 --port 3000
+Restart=always
+RestartSec=5s
+
+# Security Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=/var/log/biomcp /var/cache/biomcp
+
+[Install]
+WantedBy=multi-user.target

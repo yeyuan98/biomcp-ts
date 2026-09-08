@@ -1,0 +1,55 @@
+services:
+  biomcp:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    environment:
+      - BIOMCP_HOST=0.0.0.0
+      - BIOMCP_PORT=3000
+      - BIOMCP_AUTH_TOKENS=${BIOMCP_AUTH_TOKENS:-secret-token-change-me}
+      - BIOMCP_TRACE=${BIOMCP_TRACE:-true}
+      - BIOMCP_TRACE_FILE=/data/traces/biomcp.jsonl
+      # Upstream API keys configured centrally for all users
+      - NCBI_API_KEY=${NCBI_API_KEY:-}
+      - NCBI_EMAIL=${NCBI_EMAIL:-}
+      - S2_API_KEY=${S2_API_KEY:-}
+      - OPENFDA_API_KEY=${OPENFDA_API_KEY:-}
+      - ONCOKB_TOKEN=${ONCOKB_TOKEN:-}
+      - DISGENET_API_KEY=${DISGENET_API_KEY:-}
+      - CROSSREF_EMAIL=${CROSSREF_EMAIL:-}
+      - EPO_OPS_CONSUMER_KEY=${EPO_OPS_CONSUMER_KEY:-}
+      - EPO_OPS_CONSUMER_SECRET=${EPO_OPS_CONSUMER_SECRET:-}
+      - USPTO_API_KEY=${USPTO_API_KEY:-}
+    volumes:
+      - biomcp_data:/data
+    networks:
+      - biomcp_net
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - BIOMCP_DOMAIN=${BIOMCP_DOMAIN:-mcp.example.com}
+      - BIOMCP_UPSTREAM=biomcp
+      - BIOMCP_PORT=3000
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - biomcp
+    networks:
+      - biomcp_net
+
+volumes:
+  biomcp_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  biomcp_net:
+    driver: bridge
