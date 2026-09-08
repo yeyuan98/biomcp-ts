@@ -1,7 +1,6 @@
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { SessionManager } from './session.js';
-import { BoundedInMemoryEventStore } from './event-store.js';
 import { Tracer } from './tracer.js';
 import { handleCorsPreflight, parseAuthTokens, setCorsHeaders, verifyBearerToken } from './auth.js';
 import { artifactCount, purgeArtifactsOlderThan } from '../biowasm/artifacts.js';
@@ -77,7 +76,6 @@ export async function startRemoteServer(options?: RemoteServerOptions): Promise<
     filePath: options?.traceFile ?? process.env.BIOMCP_TRACE_FILE,
   });
 
-  const eventStore = new BoundedInMemoryEventStore();
   const sessionManager = new SessionManager(options?.idleTimeoutMs, options?.maxSessions);
   sessionManager.startIdleSweeper();
 
@@ -212,7 +210,6 @@ export async function startRemoteServer(options?: RemoteServerOptions): Promise<
           const session = await sessionManager.createSession({
             clientLabel,
             enableJsonResponse,
-            eventStore,
             readOnlyConfig: options?.readOnlyConfig ?? true,
           });
 

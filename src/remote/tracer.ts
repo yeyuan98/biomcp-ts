@@ -1,4 +1,4 @@
-import { appendFile, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 export interface HttpTraceRecord {
@@ -86,11 +86,11 @@ export class Tracer {
       // If serialization fails (e.g. unexpected circular reference), drop trace safely
       return;
     }
-    appendFile(this.filePath, line, (err) => {
-      if (err) {
-        // Silently drop trace write error to never impact service availability
-      }
-    });
+    try {
+      appendFileSync(this.filePath, line);
+    } catch {
+      // Silently drop trace write error to never impact service availability
+    }
   }
 
   recordHttp(

@@ -52,6 +52,7 @@
     "test:integration": "node --experimental-vm-modules node_modules/.bin/jest --config jest.integration.config.ts --runInBand",
     "test:all": "npm run test && npm run test:integration",
     "test:coverage-all": "npm run test:coverage && npm run test:integration -- --coverage",
+    "test:deploy": "bash deploy/tests/smoke-test.sh",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

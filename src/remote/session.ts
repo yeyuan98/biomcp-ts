@@ -1,13 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createBioMcpServer } from '../server/factory.js';
-import type { EventStore } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { RemoteSession } from './types.js';
 
 export interface CreateSessionOptions {
   clientLabel?: string;
   enableJsonResponse?: boolean;
-  eventStore?: EventStore;
   readOnlyConfig?: boolean;
 }
 
@@ -41,7 +39,6 @@ export class SessionManager {
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => sessionId,
       enableJsonResponse: options?.enableJsonResponse ?? false,
-      eventStore: options?.eventStore,
       keepAliveMs: 15_000,
       onsessioninitialized: async (_sid: string) => {
         resolveInit?.();

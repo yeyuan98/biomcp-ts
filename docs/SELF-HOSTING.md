@@ -89,6 +89,16 @@ cp .env.example .env
 docker compose up -d
 ```
 
+### Automated Deployment Verification
+
+Run the end-to-end deployment smoke test to verify Docker build, Caddy reverse proxy routing, Bearer authentication, tool execution, unbuffered streaming, and trace logging:
+
+```bash
+npm run test:deploy
+# or
+bash deploy/tests/smoke-test.sh
+```
+
 ---
 
 ## Authentication & Authorization
