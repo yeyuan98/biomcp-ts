@@ -205,13 +205,31 @@ class REngine {
     }
   }
 
+  private async cleanInputsLocked(inputs: InputFile[]): Promise<void> {
+    const w = this.webR;
+    if (!w) return;
+    for (const f of inputs) {
+      try {
+        if ((await w.FS.analyzePath(`/input/${f.name}`)).exists) {
+          await w.FS.unlink(`/input/${f.name}`);
+        }
+      } catch {
+        // Ignore unlink errors
+      }
+    }
+  }
+
   async runScript(code: string, inputs: InputFile[] = []): Promise<EngineRunResult> {
     await this.ensureReady();
     await this.checkMemory();
     return this.queue.enqueue(async () => {
-      await this.writeInputsLocked(inputs);
-      const payload = await this.capture(code, timeoutMs());
-      return { payload, rVersion: this.rVersion };
+      try {
+        await this.writeInputsLocked(inputs);
+        const payload = await this.capture(code, timeoutMs());
+        return { payload, rVersion: this.rVersion };
+      } finally {
+        await this.cleanInputsLocked(inputs);
+      }
     });
   }
 

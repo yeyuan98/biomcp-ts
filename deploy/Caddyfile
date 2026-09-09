@@ -1,0 +1,20 @@
+# Caddy reverse proxy configuration for biomcp Streamable HTTP
+# Replace {$BIOMCP_DOMAIN:mcp.example.com} with your actual domain
+
+{$BIOMCP_DOMAIN:mcp.example.com} {
+    # Reverse proxy to biomcp Node runtime
+    # flush_interval -1 disables response buffering, ensuring immediate SSE streaming delivery
+    reverse_proxy {$BIOMCP_UPSTREAM:127.0.0.1}:{$BIOMCP_PORT:3000} {
+        flush_interval -1
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-Host {host}
+    }
+
+    # Compress standard JSON responses
+    encode gzip zstd
+
+    log {
+        output stdout
+        format console
+    }
+}

@@ -5,6 +5,52 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-09-09
+
+Note: the in-repo `1.2.0` release commit was never published to npm (last published release: 1.1.1); this release supersedes it on the npm registry.
+
+### Added
+
+- **SQLite-backed audit & traffic tracing** — the self-hosted server's tracer now records `http_traces` and `tool_traces` into an embedded SQLite database via the built-in `node:sqlite` engine (zero new dependencies; same engine as the read-only db tools, here with full CRUD). WAL journal mode + `synchronous=NORMAL` + `busy_timeout`; writes are micro-batched (500 ms / 50 records) inside `BEGIN IMMEDIATE` transactions with atomic buffer swap, rollback re-queue, and a 10,000-record load-shedding ceiling (`src/remote/tracer.ts`).
+- **X-day database rotation with coincidence-write safety** — the active database (always `--trace-file`, default `biomcp-traces.db`) rotates on a period boundary (`--trace-period-days` / `BIOMCP_TRACE_PERIOD_DAYS`, default 7) through a 6-step atomic protocol (drain → `wal_checkpoint(TRUNCATE)` → `journal_mode=DELETE` → close → rename → reopen) into collision-free archives named `biomcp-traces-archive_<START_UTC>_<END_UTC>.db`. Records arriving mid-rotation buffer in memory and flush into the fresh database; period boundaries persist in `trace_meta` so restarts resume seamlessly (or rotate immediately if elapsed). Retention of archives is intentionally left to operator tooling — BioMCP never deletes them.
+- **Request correlation (`x-request-id`)** — every response carries an `x-request-id` header (client-supplied or generated 12-hex), stored on both `http_traces` and `tool_traces` rows and indexed, enabling deterministic HTTP↔tool joins; URL query strings are stripped from recorded paths.
+- **Local admin trace diagnostics** — `biomcp daemon status` now reports the active trace database path, size, period window, HTTP/tool record counts, and the archive inventory, read locally from disk (`readTraceDatabaseMetrics`, read-only connection) — also when the daemon is stopped.
+- **Deployment smoke test deep validation** — `deploy/tests/smoke-test.sh` now verifies, inside the running container: SQLite persistence, `request_id` correlation across both tables, the configured 7-day period, the local CLI diagnostics output, and that the retired `/admin/status` returns HTTP 404 (8 steps; hardened INT/TERM traps).
+
+### Changed
+
+- **Trace storage backend: JSONL → SQLite** — structured tables with B-tree indexes replace line-delimited JSON (~40% smaller on disk out of the box, directly SQL-queryable with `sqlite3` or the db tools; archives additionally gzip to ~2% of the JSONL equivalent). The default trace file changes from `biomcp-traces.jsonl` to `biomcp-traces.db`; `sanitizeValue` gains circular-reference detection and a recursion depth limit.
+- **Deploy templates** — `deploy/docker-compose.yml` and `deploy/.env.example` point at `/data/traces/biomcp.db` and set `BIOMCP_TRACE_PERIOD_DAYS=7`; `docs/SELF-HOSTING.md` trace section rewritten for the SQLite architecture (tables, rotation naming, `biomcp daemon status` inspection, direct SQL examples).
+
+### Removed
+
+- **`GET /admin/status` HTTP endpoint** — bearer-token auth carries no role management, so the public HTTP surface is now strictly end-user `/mcp` plus the `/health` liveness probe; administrative inspection moved to the local CLI on the server machine.
+
+### Fixed
+
+- **Tracer failure containment** — batch flush failures no longer risk unbounded queue growth (re-queue is capped at the load-shedding ceiling), and rotation errors recover the active database instead of leaving it closed.
+
+## [1.2.0] - 2026-09-09
+
+### Added
+
+- **Self-hosted Streamable HTTP server (`/mcp`)** — independent HTTP MCP server implementing the modern MCP transport specification (`2025-11-25`), supporting session negotiation, unbuffered Server-Sent Events (SSE) streaming, and direct JSON-RPC dispatch through a single `/mcp` endpoint (`src/remote/server.ts`).
+- **Multi-tenant Bearer authentication** — constant-time SHA-256 token verification (`src/remote/auth.ts`) guarding remote endpoints, with multi-tenant token-to-label mappings (`BIOMCP_AUTH_TOKENS`) for operator-managed access control.
+- **CORS preflight support** — automatic `OPTIONS` preflight handling (HTTP 204) with `Mcp-Session-Id` and `Mcp-Protocol-Version` headers exposed for web-based and browser-connected MCP clients.
+- **CLI foreground & daemon process management** — `biomcp serve` for foreground execution (Docker/systemd/Kubernetes) and `biomcp daemon start|stop|status|restart` for state-file (`daemon.json`) background process management with PID collision safeguards and `/health` startup verification (`src/cli/daemon.ts`).
+- **Audit & traffic tracing (`tracer.ts`)** — optional structured JSON Lines (`.jsonl`) recording of HTTP traffic and tool invocations with automatic parameter truncation (>512 chars) and sensitive credential redaction (`token`, `password`, `key`).
+- **Automated 24-hour Biowasm artifact purge** — startup and periodic hourly cleanup of expired biowasm artifacts older than 24 hours (`src/biowasm/artifacts.ts`), with an in-flight write grace period (<1h) and atomic index file updates.
+- **Production deployment configurations** — production Caddy reverse proxy (`deploy/Caddyfile`) with `flush_interval -1` for real-time SSE delivery, multi-stage `deploy/Dockerfile`, `deploy/docker-compose.yml`, hardened `deploy/biomcp.service`, and `deploy/.env.example`.
+- **End-to-end Docker deployment smoke test** — `deploy/tests/smoke-test.sh` (and `npm run test:deploy`) validating container build, Caddy reverse proxy, Bearer authentication, session initialization, tool execution, and volume trace logging.
+- **Self-hosting documentation** — comprehensive deployment and operations guide in `docs/SELF-HOSTING.md`.
+
+### Changed
+
+- **Clean transport-agnostic server factory** — extracted `createBioMcpServer(options)` in `src/server/factory.ts` while keeping `src/server/index.ts` as the dedicated zero-config stdio entrypoint.
+- **WebR VFS input cleanup** — `runScript` in `src/ranalysis/engine.ts` now unlinks `/input/*` files inside a guaranteed `finally` block to prevent virtual filesystem memory leakage across sessions.
+- **Zero impact on stdio performance** — `src/cli/main.ts` resolves remote server dependencies via lazy dynamic import, ensuring stdio startup latency and memory footprint are 100% unchanged.
+- **Documentation pins swept to `biomcp@1.2`** — `README.md`, `docs/AGENT-INSTALL.md`, `docs/R-ANALYSIS.md`, `docs/DATABASE.md`.
+
 ## [1.1.1] - 2026-09-03
 
 ### Changed

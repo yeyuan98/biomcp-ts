@@ -6,13 +6,23 @@
  * reads process.argv.
  */
 
-export type CliCommand = 'server' | 'help' | 'version' | 'doctor';
+export type CliCommand = 'server' | 'help' | 'version' | 'doctor' | 'serve' | 'daemon' | 'remote';
 
 export interface ParsedCliArgs {
   command: CliCommand;
   json: boolean;
   client?: string;
   unknown: string[];
+  subcommand?: string;
+  host?: string;
+  port?: number;
+  token?: string;
+  trace?: boolean;
+  traceFile?: string;
+  tracePeriodDays?: number;
+  insecureNoAuth?: boolean;
+  domain?: string;
+  user?: string;
 }
 
 export function parseCliArgs(argv: string[]): ParsedCliArgs {
@@ -38,6 +48,111 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
     if (unknown.length > 0) return { command: 'server', json: false, unknown };
     return { command: 'doctor', json, client, unknown };
   }
+
+  if (first === 'serve') {
+    const rest = argv.slice(1);
+    if (rest.includes('--help') || rest.includes('-h')) {
+      return { command: 'help', json: false, unknown: [] };
+    }
+    let host: string | undefined;
+    let port: number | undefined;
+    let token: string | undefined;
+    let trace: boolean | undefined;
+    let traceFile: string | undefined;
+    let tracePeriodDays: number | undefined;
+    let insecureNoAuth: boolean | undefined;
+    const unknown: string[] = [];
+
+    for (let i = 0; i < rest.length; i++) {
+      const arg = rest[i];
+      if (arg === '--host' || arg === '-h') {
+        host = rest[++i];
+      } else if (arg === '--port' || arg === '-p') {
+        port = parseInt(rest[++i], 10);
+      } else if (arg === '--token' || arg === '-t') {
+        token = rest[++i];
+      } else if (arg === '--trace') {
+        trace = true;
+      } else if (arg === '--trace-file') {
+        traceFile = rest[++i];
+      } else if (arg === '--trace-period-days') {
+        tracePeriodDays = parseInt(rest[++i], 10);
+      } else if (arg === '--insecure-no-auth') {
+        insecureNoAuth = true;
+      } else {
+        unknown.push(arg);
+      }
+    }
+    return { command: 'serve', json: false, host, port, token, trace, traceFile, tracePeriodDays, insecureNoAuth, unknown };
+  }
+
+  if (first === 'daemon') {
+    const rest = argv.slice(1);
+    if (rest.includes('--help') || rest.includes('-h')) {
+      return { command: 'help', json: false, unknown: [] };
+    }
+    const subcommand = rest[0];
+    let host: string | undefined;
+    let port: number | undefined;
+    let token: string | undefined;
+    let trace: boolean | undefined;
+    let traceFile: string | undefined;
+    let tracePeriodDays: number | undefined;
+    let insecureNoAuth: boolean | undefined;
+    const unknown: string[] = [];
+
+    for (let i = 1; i < rest.length; i++) {
+      const arg = rest[i];
+      if (arg === '--host' || arg === '-h') {
+        host = rest[++i];
+      } else if (arg === '--port' || arg === '-p') {
+        port = parseInt(rest[++i], 10);
+      } else if (arg === '--token' || arg === '-t') {
+        token = rest[++i];
+      } else if (arg === '--trace') {
+        trace = true;
+      } else if (arg === '--trace-file') {
+        traceFile = rest[++i];
+      } else if (arg === '--trace-period-days') {
+        tracePeriodDays = parseInt(rest[++i], 10);
+      } else if (arg === '--insecure-no-auth') {
+        insecureNoAuth = true;
+      } else {
+        unknown.push(arg);
+      }
+    }
+    return { command: 'daemon', json: false, subcommand, host, port, token, trace, traceFile, tracePeriodDays, insecureNoAuth, unknown };
+  }
+
+  if (first === 'remote') {
+    const rest = argv.slice(1);
+    if (rest.includes('--help') || rest.includes('-h')) {
+      return { command: 'help', json: false, unknown: [] };
+    }
+    const subcommand = rest[0];
+    let domain: string | undefined;
+    let port: number | undefined;
+    let host: string | undefined;
+    let user: string | undefined;
+    const unknown: string[] = [];
+
+    for (let i = 1; i < rest.length; i++) {
+      const arg = rest[i];
+      if (arg === '--domain' || arg === '-d') {
+        domain = rest[++i];
+      } else if (arg === '--port' || arg === '-p') {
+        port = parseInt(rest[++i], 10);
+      } else if (arg === '--host' || arg === '-h') {
+        host = rest[++i];
+      } else if (arg === '--user' || arg === '-u') {
+        user = rest[++i];
+      } else {
+        unknown.push(arg);
+      }
+    }
+    return { command: 'remote', json: false, subcommand, domain, port, host, user, unknown };
+  }
+
   return { command: 'server', json: false, unknown: [] };
 }
 

@@ -13,9 +13,10 @@ describe('parseCliArgs (dispatch contract)', () => {
     { argv: ['doctor', '--json'], command: 'doctor', json: true },
     { argv: ['doctor', '--client', 'opencode'], command: 'doctor', client: 'opencode' },
     { argv: ['doctor', '--json', '--client', 'codex'], command: 'doctor', json: true, client: 'codex' },
+    { argv: ['serve'], command: 'serve' },
     // backward compat: anything unrecognized must stay server mode (the server
     // entry never reads argv; clients may pass stray args)
-    { argv: ['serve'], command: 'server' },
+    { argv: ['foobar'], command: 'server' },
     { argv: ['run'], command: 'server' },
     { argv: ['--bogus'], command: 'server' },
     { argv: ['gene_search'], command: 'server' },

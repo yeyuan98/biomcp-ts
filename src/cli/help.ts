@@ -5,6 +5,12 @@ export function helpText(): string {
 
 Usage:
   biomcp                start the MCP stdio server (this is what MCP clients run)
+  biomcp serve [--port <p>] [--host <h>] [--token <t>] [--trace]
+                        run self-hosted Streamable HTTP server in foreground
+  biomcp daemon start|stop|status|restart
+                        manage background self-hosted daemon process
+  biomcp remote caddyfile|systemd
+                        generate deployment templates for Caddy or systemd
   biomcp doctor [--json] [--client opencode|claude-code|claude-desktop|codex]
                         diagnose this installation: Node version, .biomcp.json health,
                         feature gates, peer dependencies (webr/mysql2). Exit 1 on blockers.
