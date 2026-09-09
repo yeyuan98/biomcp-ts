@@ -212,7 +212,11 @@ tests PASS/PASS* after two check-hardening rounds driven by LLM-variance
 findings — case-insensitive `context` regexes, occurrence-hedged recovery
 arms, aggregate-summary alternatives, and a widened flail bound; the
 first-round root-cause findings F1–F6 are historical context, superseded
-by the round-4 all-green state):
+by the round-4 all-green state). Round 5 adds the first live-network
+literature tests (`article-q01`/`article-q02`, v1.4.0 locator work):
+unlike the biowasm/configure suites they exercise real NCBI/LitSense
+APIs, so a rep can flake on upstream outages — rerun with
+`node agent-test/run.mjs --only article-q* --reps 2` before diagnosing.
 
 | ID | Level | Purpose | Data | Status |
 |----|-------|---------|------|--------|
@@ -234,6 +238,8 @@ by the round-4 all-green state):
 | `configure-q02-enable-pending-restart` | L1 | Enable analysis_r; tools must NOT appear mid-session; report restart contract | — | PASS (3 consecutive rounds) |
 | `configure-q03-sensitive-confirm` | L2 | sqlite_path confirm-gate rejection → retry with confirm_sensitive | — | PASS (3 consecutive rounds; error-then-confirmed call pair each time) |
 | `configure-q04-env-readonly` | L1 | Setting an env-only parameter (ONCOKB_TOKEN) is rejected with guidance | — | PASS (direct-attempt pinned after a status-first round; 2 of 3 rounds) |
+| `article-q01-vancouver-citation` | L1 | Search PubMed → identify BRIM-3 → article_get → Vancouver citation with real volume/issue/pages | — | PASS (round 5, first rep; live NCBI) |
+| `article-q02-litsense-honesty` | L2 | LitSense sentence hits reported with exactly the returned fields; no fabricated metadata; loop completed via article_get | — | PASS (round 5; machine checks green, rubric flag adjudicated SATISFIED from session log) |
 
 "Data": `bam` = NA12878 chr20 BAM + BAI pins, `vcf` = 1kg chr22 VCF + TBI
 pins, `—` = inline/no external data.

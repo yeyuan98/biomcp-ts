@@ -1,0 +1,83 @@
+{
+  "id": "article-q01-vancouver-citation",
+  "name": "Vancouver citation via article search and fetch",
+  "level": "L1",
+  "purpose": "Agent finds the BRIM-3 paper via PubMed search, fetches it with article_get, and produces a Vancouver citation using real locator fields (volume/issue/pages) instead of hallucinated ones.",
+  "prompt": "Use the biomcp article_search tool with source \"pubmed\", query \"vemurafenib BRIM-3 Chapman melanoma\", and limit 10. From the results, identify the 2011 New England Journal of Medicine phase 3 BRIM-3 paper (Chapman et al.). Then use article_get exactly once with that paper's PMID. Finally, output the complete citation in Vancouver style on a single line, followed by the PMID and DOI you used.",
+  "externalData": [],
+  "inlineResources": [],
+  "timeoutMs": 420000,
+  "checks": [
+    {
+      "type": "tool_seq",
+      "seq": [
+        ["article_search", "completed"],
+        ["article_get", "completed"]
+      ]
+    },
+    {
+      "type": "group",
+      "anyOf": [
+        { "type": "args", "tool": "article_search", "occurrence": 1, "path": "source", "op": "equals", "expect": "pubmed" },
+        { "type": "args", "tool": "article_search", "occurrence": 2, "path": "source", "op": "equals", "expect": "pubmed" }
+      ]
+    },
+    {
+      "type": "group",
+      "anyOf": [
+        { "type": "json_path", "tool": "article_get", "occurrence": 1, "path": "pmid", "op": "equals", "expect": "21639808" },
+        { "type": "json_path", "tool": "article_get", "occurrence": 2, "path": "pmid", "op": "equals", "expect": "21639808" }
+      ],
+      "desc": "agent identified the correct BRIM-3 paper (wrong-PMID first fetch then retry is tolerated)"
+    },
+    {
+      "type": "group",
+      "anyOf": [
+        { "type": "json_path", "tool": "article_get", "occurrence": 1, "path": "volume", "op": "equals", "expect": "364" },
+        { "type": "json_path", "tool": "article_get", "occurrence": 2, "path": "volume", "op": "equals", "expect": "364" }
+      ]
+    },
+    {
+      "type": "group",
+      "anyOf": [
+        { "type": "json_path", "tool": "article_get", "occurrence": 1, "path": "issue", "op": "equals", "expect": "26" },
+        { "type": "json_path", "tool": "article_get", "occurrence": 2, "path": "issue", "op": "equals", "expect": "26" }
+      ]
+    },
+    {
+      "type": "group",
+      "anyOf": [
+        { "type": "json_path", "tool": "article_get", "occurrence": 1, "path": "pages", "op": "equals", "expect": "2507-16" },
+        { "type": "json_path", "tool": "article_get", "occurrence": 2, "path": "pages", "op": "equals", "expect": "2507-16" }
+      ]
+    },
+    {
+      "type": "text",
+      "op": "contains",
+      "expect": "2507-16",
+      "source": "tool:article_search#1",
+      "desc": "search path also delivers locators (PubMed leg; survives EuropePMC outages)"
+    },
+    {
+      "type": "group",
+      "anyOf": [
+        { "type": "text", "op": "contains", "expect": "N Engl J Med" },
+        { "type": "text", "op": "contains", "expect": "New England Journal of Medicine" }
+      ],
+      "desc": "journal rendered as Vancouver abbreviation or full name"
+    },
+    { "type": "text", "op": "contains", "expect": "Chapman" },
+    {
+      "type": "text",
+      "op": "regex",
+      "expect": "2507[-–]1?6|2507[-–]2516",
+      "desc": "pages verbatim (2507-16) or Vancouver-expanded (2507-2516)"
+    },
+    {
+      "type": "text",
+      "op": "not_contains",
+      "expect": "&#x",
+      "desc": "no undecoded HTML entity mojibake anywhere in the final answer"
+    }
+  ]
+}
