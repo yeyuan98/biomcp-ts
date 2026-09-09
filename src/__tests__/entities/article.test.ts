@@ -208,6 +208,59 @@ describe('article', () => {
     expect(result[0].source).toBe('litsense');
   });
 
+  test('articleSearch() litsense offset windows client-side via over-fetch', async () => {
+    const rows = [11, 22, 33, 44, 55].map(pmid => ({
+      pmid, text: `Sentence ${pmid}.`, score: 0.9, section: 'abstract', annotations: [],
+    }));
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve(rows),
+    }) as any;
+
+    const result = await articleSearch('brca1', { source: 'litsense', limit: 2, offset: 2 });
+
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(callUrl).toContain('limit=4');
+    expect(result).toHaveLength(2);
+    expect(result.map((r: any) => r.pmid)).toEqual(['33', '44']);
+  });
+
+  test('articleSearch() litsense over-fetch clamps at the 300-row API cap', async () => {
+    const rows = Array.from({ length: 300 }, (_, i) => ({
+      pmid: i + 1, text: `Sentence ${i}.`, score: 0.9, section: 'abstract', annotations: [],
+    }));
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve(rows),
+    }) as any;
+
+    const result = await articleSearch('brca1', { source: 'litsense', limit: 10, offset: 295 });
+
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(callUrl).toContain('limit=300');
+    expect(result).toHaveLength(5);
+    expect(result.map((r: any) => r.pmid)).toEqual(['296', '297', '298', '299', '300']);
+  });
+
+  test('articleSearch() litsense offset beyond results yields empty page', async () => {
+    const rows = [11, 22].map(pmid => ({
+      pmid, text: `Sentence ${pmid}.`, score: 0.9, section: 'abstract', annotations: [],
+    }));
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve(rows),
+    }) as any;
+
+    const result = await articleSearch('brca1', { source: 'litsense', limit: 10, offset: 400 });
+
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(callUrl).toContain('limit=300');
+    expect(result).toEqual([]);
+  });
+
   test('transformPubTator maps new PubTator3 fields correctly', () => {
     const result = transformPubTator({
       _id: '34083286',
