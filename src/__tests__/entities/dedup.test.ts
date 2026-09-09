@@ -241,6 +241,17 @@ describe('deduplicateAndRank', () => {
     expect(result[0].pmid).toBe('123');
   });
 
+  test('never seats a keyed _error row as merge base', () => {
+    const articles = [
+      { pmid: '123', _error: 'backend failed mid-record' },
+      { pmid: '123', title: 'Healthy twin', cited_by: 7 },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe('Healthy twin');
+    expect(result[0]._error).toBeUndefined();
+  });
+
   test('does not merge cross-key identities', () => {
     const articles = [
       { pmid: '123', title: 'By PMID', pmcid: 'PMC001' },

@@ -5,6 +5,7 @@ import * as crossrefProvider from '../../entities/article/citation/crossref.js';
 import * as pubmedProvider from '../../entities/article/citation/pubmed.js';
 import * as opencitationsProvider from '../../entities/article/citation/opencitations.js';
 import * as semanticScholarProvider from '../../entities/article/citation/semantic-scholar.js';
+import { transformCitationEntry } from '../../entities/article/europepmc-shared.js';
 import { connectionManager } from '../../connections/manager.js';
 
 function mockJson(data: unknown) {
@@ -124,6 +125,38 @@ describe('citation module', () => {
       const minimal = { doi: '10.1/a', source: 'test' };
       const rich = { doi: '10.1/a', pmid: '123', title: 'T', authors: ['A'], journal: 'J', year: 2023, source: 'test' };
       expect(fieldScore(rich as any)).toBeGreaterThan(fieldScore(minimal as any));
+    });
+
+    test('locator fields add exactly one point each', () => {
+      const base = { pmid: '123', title: 'T', source: 'test' };
+      const withVolume = { ...base, volume: '364' };
+      const withVolumeIssue = { ...base, volume: '364', issue: '26' };
+      const withAll = { ...base, volume: '364', issue: '26', pages: '2507-16' };
+      expect(fieldScore(withVolume as any)).toBe(fieldScore(base as any) + 1);
+      expect(fieldScore(withVolumeIssue as any)).toBe(fieldScore(base as any) + 2);
+      expect(fieldScore(withAll as any)).toBe(fieldScore(base as any) + 3);
+    });
+  });
+
+  describe('transformCitationEntry', () => {
+    test('maps Europe PMC citation-row locators', () => {
+      const result = transformCitationEntry({
+        id: '27601669',
+        source: 'MED',
+        title: 'Citing article title',
+        authorString: 'One A, Two B',
+        journalAbbreviation: 'PLoS One',
+        volume: '14',
+        issue: '9',
+        pageInfo: 'e016440',
+        pubYear: '2019',
+      } as any);
+      expect(result.pmid).toBe('27601669');
+      expect(result.volume).toBe('14');
+      expect(result.issue).toBe('9');
+      expect(result.pages).toBe('e016440');
+      expect(result.year).toBe(2019);
+      expect(result.source).toBe('europepmc');
     });
   });
 
@@ -588,9 +621,12 @@ describe('citation module', () => {
 <MedlineCitation Status="MEDLINE" Owner="NLM">
 <PMID Version="1">111</PMID>
 <Article PubModel="Electronic">
-<Journal><Title>Nature</Title><ISOAbbreviation>Nature</ISOAbbreviation></Journal>
+<Journal><Title>Nature</Title><ISOAbbreviation>Nature</ISOAbbreviation>
+<JournalIssue><Volume>614</Volume><Issue>7947</Issue>
+<PubDate><Year>2023</Year><Month>Feb</Month></PubDate></JournalIssue></Journal>
 <ArticleTitle>Citing Article</ArticleTitle>
 <Abstract><AbstractText>Abstract text.</AbstractText></Abstract>
+<Pagination><MedlinePgn>104-11</MedlinePgn></Pagination>
 <AuthorList><Author><LastName>Smith</LastName><ForeName>John</ForeName></Author></AuthorList>
 </Article>
 </MedlineCitation>
@@ -617,6 +653,10 @@ describe('citation module', () => {
       expect(result[0].title).toBe('Citing Article');
       expect(result[0].authors).toEqual(['Smith John']);
       expect(result[0].journal).toBe('Nature');
+      expect(result[0].volume).toBe('614');
+      expect(result[0].issue).toBe('7947');
+      expect(result[0].pages).toBe('104-11');
+      expect(result[0].year).toBe(2023);
       expect(result[0].source).toBe('pubmed');
     });
 

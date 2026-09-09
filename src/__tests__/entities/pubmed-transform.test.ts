@@ -448,4 +448,23 @@ describe('parsePubMedXml', () => {
     expect(results[0].title).toBe('\u03b2-catenin & WNT signaling in cancer\u00a0review');
     expect(results[0].authors).toEqual(['J\u00e9r\u00e9my Raymond']);
   });
+
+  test('decodes numeric character references in structured abstracts', () => {
+    const xml = `<?xml version="1.0"?>
+<PubmedArticleSet>
+<PubmedArticle>
+<MedlineCitation><PMID Version="1">666</PMID>
+<Article>
+<ArticleTitle>Abstract entity test</ArticleTitle>
+<Abstract>
+<AbstractText Label="BACKGROUND">The &#x3b2;-catenin pathway drives &amp; sustains resistance.</AbstractText>
+</Abstract>
+</Article>
+</MedlineCitation>
+<PubmedData><ArticleIdList><ArticleId IdType="pubmed">666</ArticleId></ArticleIdList></PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>`;
+    const results = parsePubMedXml(xml);
+    expect(results[0].abstract).toBe('BACKGROUND: The \u03b2-catenin pathway drives & sustains resistance.');
+  });
 });

@@ -10,6 +10,7 @@ export function deduplicateAndRank(articles: Article[], limit: number): Article[
   const seen = new Map<string, Article>();
 
   for (const article of articles) {
+    if (article._error) continue;
     const key = article.pmid || article.pmcid || article.doi || '';
     if (!key) continue;
     const base = seen.get(key);
