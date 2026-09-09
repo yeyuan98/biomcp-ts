@@ -5,6 +5,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-09-09
+
+### Added
+
+- **Self-hosted Streamable HTTP server (`/mcp`)** — independent HTTP MCP server implementing the modern MCP transport specification (`2025-11-25`), supporting session negotiation, unbuffered Server-Sent Events (SSE) streaming, and direct JSON-RPC dispatch through a single `/mcp` endpoint (`src/remote/server.ts`).
+- **Multi-tenant Bearer authentication** — constant-time SHA-256 token verification (`src/remote/auth.ts`) guarding remote endpoints, with multi-tenant token-to-label mappings (`BIOMCP_AUTH_TOKENS`) for operator-managed access control.
+- **CORS preflight support** — automatic `OPTIONS` preflight handling (HTTP 204) with `Mcp-Session-Id` and `Mcp-Protocol-Version` headers exposed for web-based and browser-connected MCP clients.
+- **CLI foreground & daemon process management** — `biomcp serve` for foreground execution (Docker/systemd/Kubernetes) and `biomcp daemon start|stop|status|restart` for state-file (`daemon.json`) background process management with PID collision safeguards and `/health` startup verification (`src/cli/daemon.ts`).
+- **Audit & traffic tracing (`tracer.ts`)** — optional structured JSON Lines (`.jsonl`) recording of HTTP traffic and tool invocations with automatic parameter truncation (>512 chars) and sensitive credential redaction (`token`, `password`, `key`).
+- **Automated 24-hour Biowasm artifact purge** — startup and periodic hourly cleanup of expired biowasm artifacts older than 24 hours (`src/biowasm/artifacts.ts`), with an in-flight write grace period (<1h) and atomic index file updates.
+- **Production deployment configurations** — production Caddy reverse proxy (`deploy/Caddyfile`) with `flush_interval -1` for real-time SSE delivery, multi-stage `deploy/Dockerfile`, `deploy/docker-compose.yml`, hardened `deploy/biomcp.service`, and `deploy/.env.example`.
+- **End-to-end Docker deployment smoke test** — `deploy/tests/smoke-test.sh` (and `npm run test:deploy`) validating container build, Caddy reverse proxy, Bearer authentication, session initialization, tool execution, and volume trace logging.
+- **Self-hosting documentation** — comprehensive deployment and operations guide in `docs/SELF-HOSTING.md`.
+
+### Changed
+
+- **Clean transport-agnostic server factory** — extracted `createBioMcpServer(options)` in `src/server/factory.ts` while keeping `src/server/index.ts` as the dedicated zero-config stdio entrypoint.
+- **WebR VFS input cleanup** — `runScript` in `src/ranalysis/engine.ts` now unlinks `/input/*` files inside a guaranteed `finally` block to prevent virtual filesystem memory leakage across sessions.
+- **Zero impact on stdio performance** — `src/cli/main.ts` resolves remote server dependencies via lazy dynamic import, ensuring stdio startup latency and memory footprint are 100% unchanged.
+- **Documentation pins swept to `biomcp@1.2`** — `README.md`, `docs/AGENT-INSTALL.md`, `docs/R-ANALYSIS.md`, `docs/DATABASE.md`.
+
 ## [1.1.1] - 2026-09-03
 
 ### Changed
