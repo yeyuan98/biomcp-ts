@@ -9,7 +9,8 @@ services:
       - BIOMCP_PORT=3000
       - BIOMCP_AUTH_TOKENS=${BIOMCP_AUTH_TOKENS:-secret-token-change-me}
       - BIOMCP_TRACE=${BIOMCP_TRACE:-true}
-      - BIOMCP_TRACE_FILE=/data/traces/biomcp.jsonl
+      - BIOMCP_TRACE_FILE=/data/traces/biomcp.db
+      - BIOMCP_TRACE_PERIOD_DAYS=${BIOMCP_TRACE_PERIOD_DAYS:-7}
       # Upstream API keys configured centrally for all users
       - NCBI_API_KEY=${NCBI_API_KEY:-}
       - NCBI_EMAIL=${NCBI_EMAIL:-}

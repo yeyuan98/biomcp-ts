@@ -124,52 +124,40 @@ export BIOMCP_AUTH_TOKENS="sec_123:lab-team,sec_456:analyst-bob,sec_789:agent-ru
 
 ## Tool & Traffic Trace Recording
 
-To audit usage and inspect tool executions without leaking sensitive payloads:
+To audit usage and inspect tool executions without leaking sensitive payloads, BioMCP records structured traces in an embedded SQLite database (`node:sqlite`) with WAL mode and micro-batch transactions:
 
 ```bash
-biomcp serve --trace --trace-file /var/log/biomcp/traces.jsonl
+biomcp serve --trace --trace-file /var/log/biomcp/traces.db --trace-period-days 7
 ```
 
 Or via environment variables:
 
 ```bash
 export BIOMCP_TRACE=true
-export BIOMCP_TRACE_FILE=/var/log/biomcp/traces.jsonl
+export BIOMCP_TRACE_FILE=/var/log/biomcp/traces.db
+export BIOMCP_TRACE_PERIOD_DAYS=7
 ```
 
-### Trace Record Format (JSON Lines)
+### Database Architecture & Rotation
 
-**HTTP Traffic Record**:
-```json
-{
-  "type": "http_request",
-  "timestamp": "2026-09-08T12:00:00.000Z",
-  "method": "POST",
-  "path": "/mcp",
-  "status": 200,
-  "durationMs": 128,
-  "clientLabel": "lab-team",
-  "clientIp": "192.168.1.50",
-  "sessionId": "4a2b3c4d-..."
-}
-```
+- **Active Database**: Always written to `--trace-file` (default: `./biomcp-traces.db`).
+- **Periodic Rotation**: Every X days (configured by `--trace-period-days`, default 7), the active database is checkpointed, closed, and rotated to:
+  ```
+  biomcp-traces-archive_<START_UTC>_<END_UTC>.db
+  ```
+- **Inspecting Status**: Admins can inspect trace metrics and archives locally via CLI on the server machine:
+  ```bash
+  biomcp daemon status
+  ```
+  Or query directly using standard SQLite tools:
+  ```bash
+  sqlite3 /var/log/biomcp/traces.db "SELECT tool, COUNT(*), AVG(duration_ms) FROM tool_traces GROUP BY tool;"
+  ```
 
-**Tool Call Record**:
-```json
-{
-  "type": "tool_call",
-  "timestamp": "2026-09-08T12:00:00.050Z",
-  "tool": "gene_search",
-  "sessionId": "4a2b3c4d-...",
-  "clientLabel": "lab-team",
-  "durationMs": 85,
-  "status": "success",
-  "inputArgs": {
-    "query": "BRAF",
-    "limit": 5
-  }
-}
-```
+### Trace Record Tables
+
+- **`http_traces`**: Captures `request_id`, `timestamp`, `epoch_ms`, `method`, `path`, `status`, `duration_ms`, `client_label`, `client_ip`, and `session_id`.
+- **`tool_traces`**: Captures `request_id`, `timestamp`, `epoch_ms`, `tool`, `session_id`, `client_label`, `duration_ms`, `status`, `input_args` (sanitized JSON), and `error`.
 
 *Large parameters (>512 characters) are automatically truncated, and sensitive keys (passwords, tokens, API keys) are redacted.*
 
@@ -194,7 +182,7 @@ To connect any MCP client (Claude Desktop, OpenCode, Cursor, custom agents) to y
 
 ---
 
-## Health & Diagnostics Endpoints
+## Health & Status Inspection
 
 - `GET /health`: Minimal unauthenticated probe returning `{"status":"ok"}` with HTTP 200 (ideal for Docker, Kubernetes, and load balancers).
-- `GET /admin/status`: Authenticated diagnostics returning server version, uptime, active session count, memory usage, and biowasm artifact count.
+- Local CLI Status: Run `biomcp daemon status` directly on the server host to inspect daemon process health, uptime, active session count, memory usage, and SQLite trace database metrics. The HTTP API is strictly reserved for end-user MCP traffic (`/mcp`) and infrastructure health probes (`/health`).

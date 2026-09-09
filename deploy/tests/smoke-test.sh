@@ -35,7 +35,9 @@ cleanup() {
   echo "==> Cleaning up Docker containers and volumes..."
   docker compose -p "${PROJECT_NAME}" -f "${COMPOSE_FILE}" down -v --remove-orphans >/dev/null 2>&1 || true
 }
-trap cleanup EXIT ERR INT TERM
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
 
 echo "==> Building and starting BioMCP + Caddy stack on port ${TEST_PORT}..."
 
@@ -49,9 +51,9 @@ docker compose -p "${PROJECT_NAME}" -f "${COMPOSE_FILE}" up -d --build
 
 BASE_URL="http://127.0.0.1:${TEST_PORT}"
 
-echo "==> [1/6] Waiting for healthcheck probe on ${BASE_URL}/health..."
+echo "==> [1/8] Waiting for healthcheck probe on ${BASE_URL}/health..."
 HEALTHY=0
-for i in $(seq 1 45); do
+for _ in $(seq 1 45); do
   if curl -sf "${BASE_URL}/health" | grep -q '"status":"ok"'; then
     HEALTHY=1
     echo "    Healthcheck probe PASSED."
@@ -66,7 +68,7 @@ if [ "${HEALTHY}" -eq 0 ]; then
   exit 1
 fi
 
-echo "==> [2/6] Verifying Bearer Authentication guard on /mcp..."
+echo "==> [2/8] Verifying Bearer Authentication guard on /mcp..."
 UNAUTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${BASE_URL}/mcp" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}')
@@ -77,7 +79,7 @@ if [ "${UNAUTH_STATUS}" -ne 401 ]; then
 fi
 echo "    Authentication guard PASSED."
 
-echo "==> [3/6] Initializing Streamable HTTP MCP Session..."
+echo "==> [3/8] Initializing Streamable HTTP MCP Session..."
 INIT_HEADERS=$(mktemp)
 INIT_BODY=$(curl -s -D "${INIT_HEADERS}" -X POST "${BASE_URL}/mcp" \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
@@ -104,11 +106,13 @@ if [ -z "${SESSION_ID}" ]; then
 fi
 echo "    Session established: ${SESSION_ID}"
 
-echo "==> [4/6] Executing deterministic tool call through Caddy..."
+echo "==> [4/8] Executing deterministic tool call through Caddy..."
+SMOKE_REQ_ID="smoke-req-$RANDOM"
 TOOL_HEADERS=$(mktemp)
 TOOL_RESP=$(curl -s --no-buffer -D "${TOOL_HEADERS}" -X POST "${BASE_URL}/mcp" \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -H "Mcp-Session-Id: ${SESSION_ID}" \
+  -H "X-Request-Id: ${SMOKE_REQ_ID}" \
   -H "Content-Type: application/json" \
   -H "Accept: text/event-stream, application/json" \
   -d '{
@@ -127,6 +131,13 @@ if ! grep -qi 'content-type:' "${TOOL_HEADERS}"; then
   rm -f "${TOOL_HEADERS}"
   exit 1
 fi
+
+if ! grep -qi "^x-request-id:.*${SMOKE_REQ_ID}" "${TOOL_HEADERS}"; then
+  echo "ERROR: Server did not echo X-Request-Id header. Headers:"
+  cat "${TOOL_HEADERS}"
+  rm -f "${TOOL_HEADERS}"
+  exit 1
+fi
 rm -f "${TOOL_HEADERS}"
 
 if ! echo "${TOOL_RESP}" | grep -q 'running_now'; then
@@ -134,18 +145,85 @@ if ! echo "${TOOL_RESP}" | grep -q 'running_now'; then
   echo "${TOOL_RESP}"
   exit 1
 fi
-echo "    Tool execution PASSED."
+echo "    Tool execution and Request ID echo PASSED."
 
-echo "==> [5/6] Verifying trace persistence in Docker volume..."
-sleep 1
-docker compose -p "${PROJECT_NAME}" -f "${COMPOSE_FILE}" exec -T biomcp \
-  test -s /data/traces/biomcp.jsonl || {
-    echo "ERROR: Trace file /data/traces/biomcp.jsonl is missing or empty."
-    exit 1
-  }
-echo "    Trace logging PASSED."
+echo "==> [5/8] Verifying SQLite trace database and correlation..."
+TRACE_OK=0
+TRACE_ERR_FILE=$(mktemp)
+for _ in $(seq 1 10); do
+  VERIFY_OUT=$(docker compose -p "${PROJECT_NAME}" -f "${COMPOSE_FILE}" exec -T biomcp \
+    node --no-warnings -e "
+      const { DatabaseSync } = require('node:sqlite');
+      try {
+        const db = new DatabaseSync('/data/traces/biomcp.db', { readOnly: true });
+        db.exec('PRAGMA busy_timeout = 5000;');
 
-echo "==> [6/6] Terminating session (DELETE /mcp)..."
+        const httpCount = db.prepare('SELECT COUNT(*) as count FROM http_traces').get()?.count ?? 0;
+        const toolCount = db.prepare('SELECT COUNT(*) as count FROM tool_traces').get()?.count ?? 0;
+        if (httpCount < 1 || toolCount < 1) {
+          process.exit(2); // Queue not flushed yet
+        }
+
+        const correlatedTool = db.prepare('SELECT tool FROM tool_traces WHERE request_id = ?').get('${SMOKE_REQ_ID}');
+        if (!correlatedTool || correlatedTool.tool !== 'biomcp_configure') {
+          process.exit(3); // Tool trace missing or unaligned
+        }
+
+        const correlatedHttp = db.prepare('SELECT method FROM http_traces WHERE request_id = ?').get('${SMOKE_REQ_ID}');
+        if (!correlatedHttp) {
+          process.exit(4); // HTTP trace missing
+        }
+
+        const start = parseInt(db.prepare(\"SELECT value FROM trace_meta WHERE key='period_start_epoch'\").get()?.value, 10);
+        const end = parseInt(db.prepare(\"SELECT value FROM trace_meta WHERE key='period_end_epoch'\").get()?.value, 10);
+        const diffDays = Math.round((end - start) / (1000 * 60 * 60 * 24));
+        if (diffDays !== 7) {
+          console.error('Invalid period days:', diffDays);
+          process.exit(5);
+        }
+
+        db.close();
+        process.stdout.write('OK:http=' + httpCount + ':tool=' + toolCount);
+      } catch (err) {
+        console.error(err);
+        process.exit(1);
+      }
+    " 2>"${TRACE_ERR_FILE}") && {
+      TRACE_OK=1
+      echo "    SQLite trace verification PASSED (${VERIFY_OUT})."
+      break
+    }
+  sleep 0.5
+done
+
+if [ "${TRACE_OK}" -ne 1 ]; then
+  echo "ERROR: SQLite trace validation failed or timed out after 5s. Last diagnostics:"
+  cat "${TRACE_ERR_FILE}"
+  rm -f "${TRACE_ERR_FILE}"
+  exit 1
+fi
+rm -f "${TRACE_ERR_FILE}"
+
+echo "==> [6/8] Verifying in-container CLI diagnostics (daemon status)..."
+CLI_STATUS_OUTPUT=$(docker compose -p "${PROJECT_NAME}" -f "${COMPOSE_FILE}" exec -T biomcp \
+  env NODE_NO_WARNINGS=1 node dist/cli.js daemon status)
+
+if ! echo "${CLI_STATUS_OUTPUT}" | grep -q 'Trace Database (/data/traces/biomcp.db)'; then
+  echo "ERROR: CLI daemon status did not report trace database metrics:"
+  echo "${CLI_STATUS_OUTPUT}"
+  exit 1
+fi
+echo "    Local CLI diagnostics PASSED."
+
+echo "==> [7/8] Verifying retired /admin/status returns HTTP 404..."
+ADMIN_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/admin/status")
+if [ "${ADMIN_STATUS}" -ne 404 ]; then
+  echo "ERROR: Expected HTTP 404 for /admin/status, got ${ADMIN_STATUS}"
+  exit 1
+fi
+echo "    Endpoint hygiene PASSED."
+
+echo "==> [8/8] Terminating session (DELETE /mcp)..."
 DEL_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "${BASE_URL}/mcp" \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -H "Mcp-Session-Id: ${SESSION_ID}")
