@@ -216,7 +216,7 @@ by the round-4 all-green state). Round 5 adds the first live-network
 literature tests (`article-q01`/`article-q02`, v1.4.0 locator work):
 unlike the biowasm/configure suites they exercise real NCBI/LitSense
 APIs, so a rep can flake on upstream outages — rerun with
-`node agent-test/run.mjs --only article-q* --reps 2` before diagnosing.
+`node agent-test/run.mjs --filter 'article-q*' --reps 2` before diagnosing.
 
 | ID | Level | Purpose | Data | Status |
 |----|-------|---------|------|--------|
