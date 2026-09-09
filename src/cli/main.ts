@@ -64,6 +64,7 @@ async function main(): Promise<void> {
       authTokens: parsed.token,
       traceEnabled: parsed.trace,
       traceFile: parsed.traceFile,
+      tracePeriodDays: parsed.tracePeriodDays,
       insecureNoAuth: parsed.insecureNoAuth,
     };
 
@@ -92,6 +93,7 @@ async function main(): Promise<void> {
       token: parsed.token,
       trace: parsed.trace,
       traceFile: parsed.traceFile,
+      tracePeriodDays: parsed.tracePeriodDays,
       insecureNoAuth: parsed.insecureNoAuth,
     };
 

@@ -5,8 +5,10 @@ import {
   isProcessRunning,
   readDaemonState,
   removeDaemonState,
+  statusDaemon,
   writeDaemonState,
 } from '../../cli/daemon.js';
+import { Tracer } from '../../remote/tracer.js';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -53,5 +55,26 @@ describe('Daemon state file & process management', () => {
 
     // Non-existent PID
     expect(isProcessRunning(9999999)).toBe(false);
+  });
+
+  it('statusDaemon reports offline metrics when trace database is present', async () => {
+    const dbPath = join(WORK, 'biomcp-traces.db');
+    const tracer = new Tracer({ enabled: true, filePath: dbPath });
+    tracer.recordHttp('GET', '/health', 200, 5, 'anonymous');
+    tracer.close();
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.join(' '));
+
+    try {
+      await statusDaemon();
+      const output = logs.join('\n');
+      expect(output).toContain('Biomcp daemon is not running');
+      expect(output).toContain('Trace Database');
+      expect(output).toContain('HTTP Logs:   1');
+    } finally {
+      console.log = origLog;
+    }
   });
 });

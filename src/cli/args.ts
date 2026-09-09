@@ -19,6 +19,7 @@ export interface ParsedCliArgs {
   token?: string;
   trace?: boolean;
   traceFile?: string;
+  tracePeriodDays?: number;
   insecureNoAuth?: boolean;
   domain?: string;
   user?: string;
@@ -58,6 +59,7 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
     let token: string | undefined;
     let trace: boolean | undefined;
     let traceFile: string | undefined;
+    let tracePeriodDays: number | undefined;
     let insecureNoAuth: boolean | undefined;
     const unknown: string[] = [];
 
@@ -73,13 +75,15 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
         trace = true;
       } else if (arg === '--trace-file') {
         traceFile = rest[++i];
+      } else if (arg === '--trace-period-days') {
+        tracePeriodDays = parseInt(rest[++i], 10);
       } else if (arg === '--insecure-no-auth') {
         insecureNoAuth = true;
       } else {
         unknown.push(arg);
       }
     }
-    return { command: 'serve', json: false, host, port, token, trace, traceFile, insecureNoAuth, unknown };
+    return { command: 'serve', json: false, host, port, token, trace, traceFile, tracePeriodDays, insecureNoAuth, unknown };
   }
 
   if (first === 'daemon') {
@@ -93,6 +97,7 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
     let token: string | undefined;
     let trace: boolean | undefined;
     let traceFile: string | undefined;
+    let tracePeriodDays: number | undefined;
     let insecureNoAuth: boolean | undefined;
     const unknown: string[] = [];
 
@@ -108,13 +113,15 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
         trace = true;
       } else if (arg === '--trace-file') {
         traceFile = rest[++i];
+      } else if (arg === '--trace-period-days') {
+        tracePeriodDays = parseInt(rest[++i], 10);
       } else if (arg === '--insecure-no-auth') {
         insecureNoAuth = true;
       } else {
         unknown.push(arg);
       }
     }
-    return { command: 'daemon', json: false, subcommand, host, port, token, trace, traceFile, insecureNoAuth, unknown };
+    return { command: 'daemon', json: false, subcommand, host, port, token, trace, traceFile, tracePeriodDays, insecureNoAuth, unknown };
   }
 
   if (first === 'remote') {

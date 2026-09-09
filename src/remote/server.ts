@@ -74,6 +74,9 @@ export async function startRemoteServer(options?: RemoteServerOptions): Promise<
   const tracer = new Tracer({
     enabled: options?.traceEnabled ?? (process.env.BIOMCP_TRACE === 'true' || process.env.BIOMCP_TRACE === '1'),
     filePath: options?.traceFile ?? process.env.BIOMCP_TRACE_FILE,
+    periodDays:
+      options?.tracePeriodDays ??
+      (process.env.BIOMCP_TRACE_PERIOD_DAYS ? parseInt(process.env.BIOMCP_TRACE_PERIOD_DAYS, 10) : undefined),
   });
 
   const sessionManager = new SessionManager(options?.idleTimeoutMs, options?.maxSessions);
@@ -102,6 +105,11 @@ export async function startRemoteServer(options?: RemoteServerOptions): Promise<
 
   const server = createServer(async (req, res) => {
     const startTime = performance.now();
+    const rawReqId = req.headers['x-request-id'];
+    const headerReqId = Array.isArray(rawReqId) ? rawReqId[0] : rawReqId;
+    const requestId = (typeof headerReqId === 'string' && headerReqId.trim()) || randomBytes(6).toString('hex');
+    res.setHeader('x-request-id', requestId);
+
     let clientLabel = 'anonymous';
     let sessionId: string | undefined;
 
@@ -114,6 +122,7 @@ export async function startRemoteServer(options?: RemoteServerOptions): Promise<
         clientLabel,
         req.socket.remoteAddress,
         sessionId,
+        requestId,
       );
     });
 
@@ -130,35 +139,6 @@ export async function startRemoteServer(options?: RemoteServerOptions): Promise<
     if (req.method === 'GET' && pathname === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: 'ok' }));
-      return;
-    }
-
-    // Authenticated admin diagnostics status
-    if (req.method === 'GET' && pathname === '/admin/status') {
-      const auth = verifyBearerToken(req.headers.authorization, validTokens);
-      if (!auth.authorized) {
-        res.writeHead(401, {
-          'WWW-Authenticate': 'Bearer error="invalid_token"',
-          'Content-Type': 'application/json',
-        });
-        res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message: 'Unauthorized' }, id: null }));
-        return;
-      }
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(
-        JSON.stringify(
-          {
-            status: 'ok',
-            version: VERSION,
-            uptime: Math.round(process.uptime()),
-            sessions: sessionManager.count,
-            memory: process.memoryUsage(),
-            biowasmArtifacts: artifactCount(),
-          },
-          null,
-          2,
-        ),
-      );
       return;
     }
 
@@ -262,6 +242,7 @@ export async function startRemoteServer(options?: RemoteServerOptions): Promise<
               sessionId,
               toolArgs,
               isErr ? 'Tool execution reported error' : undefined,
+              requestId,
             );
             return (originalEnd as any)(chunk, ...args);
           };
@@ -336,6 +317,7 @@ export async function startRemoteServer(options?: RemoteServerOptions): Promise<
       clearInterval(purgeInterval);
       sessionManager.stopIdleSweeper();
       await sessionManager.closeAll();
+      tracer.close();
       if (typeof server.closeAllConnections === 'function') {
         server.closeAllConnections();
       }

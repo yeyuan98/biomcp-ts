@@ -13,10 +13,12 @@ export interface RemoteServerOptions {
   insecureNoAuth?: boolean;
   /** When true, disables set/reset mutations in biomcp_configure (default: true). */
   readOnlyConfig?: boolean;
-  /** Enables JSONL trace recording. */
+  /** Enables SQLite trace recording. */
   traceEnabled?: boolean;
-  /** Path to write trace logs (default: ./biomcp-traces.jsonl). */
+  /** Path to write active SQLite trace database (default: ./biomcp-traces.db). */
   traceFile?: string;
+  /** Rotation interval in days for trace database (default: 7). */
+  tracePeriodDays?: number;
   /** Idle timeout in milliseconds for sessions (default: 30 minutes). */
   idleTimeoutMs?: number;
   /** Maximum number of concurrent sessions (default: 500). */

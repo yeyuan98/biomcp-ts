@@ -1,13 +1,15 @@
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
+import { readTraceDatabaseMetrics } from '../remote/tracer.js';
 
 export interface DaemonState {
   pid: number;
   startedAt: number;
   host: string;
   port: number;
+  traceFile?: string;
 }
 
 export function getDaemonDir(): string {
@@ -48,12 +50,19 @@ export function removeDaemonState(): void {
 export function isProcessRunning(pid: number): boolean {
   try {
     process.kill(pid, 0);
+    if (pid === process.pid) {
+      return true;
+    }
     // On Linux, verify cmdline to avoid killing recycled PIDs
     if (process.platform === 'linux') {
       const cmdlinePath = `/proc/${pid}/cmdline`;
       if (existsSync(cmdlinePath)) {
         const cmdline = readFileSync(cmdlinePath, 'utf8');
-        return cmdline.includes('biomcp');
+        return (
+          cmdline.includes('biomcp') ||
+          cmdline.includes('cli.js') ||
+          cmdline.includes('serve')
+        );
       }
     }
     return true;
@@ -68,6 +77,7 @@ export interface DaemonOptions {
   token?: string;
   trace?: boolean;
   traceFile?: string;
+  tracePeriodDays?: number;
   insecureNoAuth?: boolean;
 }
 
@@ -94,6 +104,7 @@ export async function startDaemon(cliPath: string, options?: DaemonOptions): Pro
   const childArgs = [cliPath, 'serve', '--host', host, '--port', String(port)];
   if (options?.trace) childArgs.push('--trace');
   if (options?.traceFile) childArgs.push('--trace-file', options.traceFile);
+  if (options?.tracePeriodDays) childArgs.push('--trace-period-days', String(options.tracePeriodDays));
   if (options?.insecureNoAuth) childArgs.push('--insecure-no-auth');
 
   // Pass token safely via environment to avoid leaking in `ps aux` or /proc
@@ -145,7 +156,19 @@ export async function startDaemon(cliPath: string, options?: DaemonOptions): Pro
   }
 
   if (healthy) {
-    writeDaemonState({ pid, startedAt: Date.now(), host, port });
+    const traceFile = options?.traceFile
+      ? resolve(options.traceFile)
+      : options?.trace
+        ? resolve('biomcp-traces.db')
+        : undefined;
+
+    writeDaemonState({
+      pid,
+      startedAt: Date.now(),
+      host,
+      port,
+      traceFile,
+    });
     console.log(`Biomcp daemon started successfully on http://${host}:${port} (PID: ${pid}).`);
     console.log(`Logs: ${outLog} / ${errLog}`);
   } else {
@@ -213,6 +236,32 @@ export async function statusDaemon(): Promise<void> {
   const state = readDaemonState();
   if (!state) {
     console.log('Biomcp daemon is not running.');
+
+    const candidateTraceFiles = [
+      process.env.BIOMCP_TRACE_FILE,
+      'biomcp-traces.db',
+      join(getDaemonDir(), 'biomcp-traces.db'),
+    ].filter((p): p is string => typeof p === 'string' && Boolean(p));
+
+    for (const p of candidateTraceFiles) {
+      const traceMetrics = readTraceDatabaseMetrics(p);
+      if (traceMetrics) {
+        console.log(`\nTrace Database (${traceMetrics.filePath}):`);
+        console.log(`  DB Size:     ${Math.round(traceMetrics.fileSizeBytes / 1024)} KB`);
+        if (traceMetrics.periodStart || traceMetrics.periodEnd) {
+          console.log(`  Period:      ${traceMetrics.periodStart ?? 'n/a'} -> ${traceMetrics.periodEnd ?? 'n/a'}`);
+        }
+        console.log(`  HTTP Logs:   ${traceMetrics.totalHttpRecords}`);
+        console.log(`  Tool Logs:   ${traceMetrics.totalToolRecords}`);
+        if (traceMetrics.archiveFiles.length > 0) {
+          console.log(`  Archives:    ${traceMetrics.archiveFiles.length} file(s)`);
+          for (const arch of traceMetrics.archiveFiles) {
+            console.log(`    - ${arch.name} (${Math.round(arch.sizeBytes / 1024)} KB)`);
+          }
+        }
+        break;
+      }
+    }
     return;
   }
 
@@ -238,6 +287,37 @@ export async function statusDaemon(): Promise<void> {
   console.log(`  Health:  ${healthOk ? 'healthy (HTTP 200)' : 'unresponsive'}`);
   console.log(`  Uptime:  ${uptimeSec}s`);
   console.log(`  Dir:     ${getDaemonDir()}`);
+
+  const candidateTraceFiles = [
+    state.traceFile,
+    process.env.BIOMCP_TRACE_FILE,
+    'biomcp-traces.db',
+    join(getDaemonDir(), 'biomcp-traces.db'),
+  ].filter((p): p is string => typeof p === 'string' && Boolean(p));
+
+  let traceMetrics = null;
+  for (const p of candidateTraceFiles) {
+    traceMetrics = readTraceDatabaseMetrics(p);
+    if (traceMetrics) break;
+  }
+
+  if (traceMetrics) {
+    console.log(`  Traces:  active (${traceMetrics.filePath})`);
+    console.log(`    DB Size:     ${Math.round(traceMetrics.fileSizeBytes / 1024)} KB`);
+    if (traceMetrics.periodStart || traceMetrics.periodEnd) {
+      console.log(`    Period:      ${traceMetrics.periodStart ?? 'n/a'} -> ${traceMetrics.periodEnd ?? 'n/a'}`);
+    }
+    console.log(`    HTTP Logs:   ${traceMetrics.totalHttpRecords}`);
+    console.log(`    Tool Logs:   ${traceMetrics.totalToolRecords}`);
+    if (traceMetrics.archiveFiles.length > 0) {
+      console.log(`    Archives:    ${traceMetrics.archiveFiles.length} file(s)`);
+      for (const arch of traceMetrics.archiveFiles) {
+        console.log(`      - ${arch.name} (${Math.round(arch.sizeBytes / 1024)} KB)`);
+      }
+    }
+  } else {
+    console.log(`  Traces:  disabled / not active`);
+  }
 }
 
 export async function restartDaemon(cliPath: string, options?: DaemonOptions): Promise<void> {
