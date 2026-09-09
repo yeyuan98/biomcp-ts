@@ -7,6 +7,7 @@ export function parsePubMedXml(xmlString: string): Article[] {
     attributeNamePrefix: '@_',
     textNodeName: '#text',
     parseTagValue: false,
+    htmlEntities: true,
     isArray: (name: string) => {
       return ['PubmedArticle', 'Author', 'AbstractText', 'MeshHeading', 'PublicationType', 'ArticleId', 'Chemical', 'Keyword'].includes(name);
     },
@@ -45,7 +46,7 @@ interface PubmedArticle {
         };
       };
       ArticleTitle?: string;
-      Pagination?: { MedlinePgn?: string };
+      Pagination?: { MedlinePgn?: string; StartPage?: string; EndPage?: string };
       ELocationID?: Array<{ '#text': string; '@_EIdType': string }> | { '#text': string; '@_EIdType': string };
       Abstract?: {
         AbstractText?: Array<{ '#text': string; '@_Label'?: string }> | { '#text': string; '@_Label'?: string } | string;
@@ -110,6 +111,9 @@ function extractArticle(raw: PubmedArticle): Article {
     abstract: extractAbstract(article),
     authors: extractAuthors(article),
     journal: article.Journal?.ISOAbbreviation || article.Journal?.Title,
+    volume: article.Journal?.JournalIssue?.Volume,
+    issue: article.Journal?.JournalIssue?.Issue,
+    pages: extractPages(article),
     publication_date: extractPubDate(article),
     source: 'pubmed',
     mesh_headings: extractMeshHeadings(medline),
@@ -131,14 +135,27 @@ function extractArticleIds(pubmedData: any): { doi?: string; pmcid?: string } {
   return result;
 }
 
-function extractDoiFromELocation(article: any): string | undefined {
+function extractELocationByType(article: any, idType: string): string | undefined {
   const eloc = article?.ELocationID;
   if (!eloc) return undefined;
   const arr = Array.isArray(eloc) ? eloc : [eloc];
   for (const e of arr) {
-    if (e['@_EIdType'] === 'doi') return e['#text'];
+    if (e['@_EIdType'] === idType) return e['#text'];
   }
   return undefined;
+}
+
+function extractDoiFromELocation(article: any): string | undefined {
+  return extractELocationByType(article, 'doi');
+}
+
+function extractPages(article: any): string | undefined {
+  const pagination = article?.Pagination;
+  if (pagination?.MedlinePgn) return pagination.MedlinePgn;
+  if (pagination?.StartPage) {
+    return pagination.EndPage ? `${pagination.StartPage}-${pagination.EndPage}` : pagination.StartPage;
+  }
+  return extractELocationByType(article, 'pii');
 }
 
 function flattenHtmlTitle(value: unknown): string {

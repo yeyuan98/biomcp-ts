@@ -163,4 +163,114 @@ describe('deduplicateAndRank', () => {
     expect(result[0]).toEqual(articles[1]);
     expect(result[1]).toEqual(articles[0]);
   });
+
+  test('merge-fill fills missing fields from later duplicates', () => {
+    const articles = [
+      { pmid: '123', title: 'From PubMed', source: 'pubmed' },
+      { pmid: '123', cited_by: 42, is_open_access: true, volume: '364', issue: '26', pages: '2507-16' },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe('From PubMed');
+    expect(result[0].cited_by).toBe(42);
+    expect(result[0].is_open_access).toBe(true);
+    expect(result[0].volume).toBe('364');
+    expect(result[0].issue).toBe('26');
+    expect(result[0].pages).toBe('2507-16');
+  });
+
+  test('merge-fill never overwrites existing values', () => {
+    const articles = [
+      { pmid: '123', title: 'Primary', cited_by: 5, volume: '9' },
+      { pmid: '123', title: 'Secondary', cited_by: 100, volume: '10' },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result[0].title).toBe('Primary');
+    expect(result[0].cited_by).toBe(5);
+    expect(result[0].volume).toBe('9');
+  });
+
+  test('merge-fill keeps the base source and excludes score from fill', () => {
+    const articles = [
+      { pmid: '123', title: 'Primary', source: 'pubmed' },
+      { pmid: '123', score: 250.5, source: 'pubtator' },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result[0].source).toBe('pubmed');
+    expect(result[0].score).toBeUndefined();
+  });
+
+  test('merge-fill treats empty strings as missing', () => {
+    const articles = [
+      { pmid: '123', title: '', abstract: '' },
+      { pmid: '123', title: 'Filled', abstract: 'Filled abstract' },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result[0].title).toBe('Filled');
+    expect(result[0].abstract).toBe('Filled abstract');
+  });
+
+  test('merge-fill assigns arrays wholesale without concatenating', () => {
+    const articles = [
+      { pmid: '123', title: 'Primary', authors: ['A One'] },
+      { pmid: '123', authors: ['B Two', 'C Three'] },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result[0].authors).toEqual(['A One']);
+  });
+
+  test('merge-fill ranks with absorbed citation counts', () => {
+    const articles = [
+      { pmid: '111', title: 'PubMed record', source: 'pubmed' },
+      { pmid: '111', cited_by: 500 },
+      { pmid: '222', title: 'Other', cited_by: 100 },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result[0].pmid).toBe('111');
+    expect(result[0].cited_by).toBe(500);
+  });
+
+  test('drops _error rows and keeps keyless rows dropped in federated dedup', () => {
+    const articles = [
+      { _error: 'searchLitSense failed: ...' },
+      { title: 'No ID', cited_by: 100 },
+      { pmid: '123', title: 'With ID', cited_by: 10 },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result).toHaveLength(1);
+    expect(result[0].pmid).toBe('123');
+  });
+
+  test('never seats a keyed _error row as merge base', () => {
+    const articles = [
+      { pmid: '123', _error: 'backend failed mid-record' },
+      { pmid: '123', title: 'Healthy twin', cited_by: 7 },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe('Healthy twin');
+    expect(result[0]._error).toBeUndefined();
+  });
+
+  test('does not merge cross-key identities', () => {
+    const articles = [
+      { pmid: '123', title: 'By PMID', pmcid: 'PMC001' },
+      { pmcid: 'PMC002', title: 'Different paper, PMCID only' },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result).toHaveLength(2);
+  });
+
+  test('deduplicates by PMID across more than two duplicates', () => {
+    const articles = [
+      { pmid: '123', title: 'Base', source: 'pubmed' },
+      { pmid: '123', volume: '5' },
+      { pmid: '123', issue: '2', pages: 'e1' },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result).toHaveLength(1);
+    expect(result[0].volume).toBe('5');
+    expect(result[0].issue).toBe('2');
+    expect(result[0].pages).toBe('e1');
+  });
 });

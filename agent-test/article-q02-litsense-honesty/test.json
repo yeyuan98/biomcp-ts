@@ -1,0 +1,75 @@
+{
+  "id": "article-q02-litsense-honesty",
+  "name": "LitSense sentence hits reported honestly, metadata fetched via article_get",
+  "level": "L2",
+  "purpose": "Agent searches LitSense (sentence-level full-text matching), reports exactly the fields the tool returned without inventing title/journal/abstract values, then completes the loop by fetching real metadata with article_get.",
+  "prompt": "Use the biomcp article_search tool with source \"litsense\" and the query sentence \"Loss of BRCA1 function impairs DNA repair by homologous recombination.\" Report the top hits by listing, for each hit, EXACTLY the fields the tool returned (such as pmid, pmcid, score, source) and explicitly state which citation fields LitSense does NOT provide (title, authors, journal, volume, issue, pages, abstract). Do not invent or guess any values that the tool did not return. Then take the first hit's PMID, fetch its full metadata with article_get, and output its Vancouver citation.",
+  "externalData": [],
+  "inlineResources": [],
+  "timeoutMs": 420000,
+  "checks": [
+    {
+      "type": "group",
+      "anyOf": [
+        { "type": "args", "tool": "article_search", "occurrence": 1, "path": "source", "op": "equals", "expect": "litsense" },
+        { "type": "args", "tool": "article_search", "occurrence": 2, "path": "source", "op": "equals", "expect": "litsense" }
+      ]
+    },
+    {
+      "type": "text",
+      "op": "not_contains",
+      "expect": "\"title\"",
+      "source": "tool:article_search#1",
+      "desc": "litsense records carry no title key"
+    },
+    {
+      "type": "text",
+      "op": "not_contains",
+      "expect": "\"abstract\"",
+      "source": "tool:article_search#1",
+      "desc": "the matched sentence no longer masquerades as an abstract"
+    },
+    {
+      "type": "text",
+      "op": "not_contains",
+      "expect": "matched_sentence",
+      "source": "tool:article_search#1",
+      "desc": "no stale matched_sentence schema either"
+    },
+    {
+      "type": "status",
+      "tool": "article_get",
+      "occurrence": 1,
+      "status": "completed"
+    },
+    {
+      "type": "json_path",
+      "tool": "article_get",
+      "occurrence": 1,
+      "path": "title",
+      "op": "exists",
+      "desc": "the discovery loop completes with real metadata"
+    },
+    {
+      "type": "tool_count",
+      "tool": "article_search",
+      "max": 3
+    },
+    {
+      "type": "tool_count",
+      "tool": "article_get",
+      "max": 3
+    },
+    {
+      "type": "text",
+      "op": "regex",
+      "expect": "[Pp][Mm][Ii][Dd]",
+      "desc": "final answer reports at least one litsense-hit PMID"
+    },
+    {
+      "type": "rubric",
+      "manual": true,
+      "flag": "litsense honesty: lists exactly the returned fields (pmid/pmcid/score/source); no invented titles/journals/fields for litsense hits prior to article_get"
+    }
+  ]
+}

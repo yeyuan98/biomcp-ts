@@ -23,21 +23,24 @@ export function transformLitSense(a: LitSenseResult): Article {
   return {
     pmid: String(a.pmid),
     pmcid: a.pmcid,
-    abstract: a.text,
     score: a.score,
     source: 'litsense',
   };
 }
 
-export async function searchLitSense(query: string, limit: number, _offset: number): Promise<Article[]> {
+export async function searchLitSense(query: string, limit: number, offset: number): Promise<Article[]> {
   try {
     const conn = connectionManager.getConnection('litsense');
 
+    // The LitSense API ignores server-side offsets (live-verified; responses
+    // are silently capped at 300 rows), so over-fetch and window client-side,
+    // mirroring the PubTator pagination pattern.
+    const fetchLimit = Math.min(limit + offset, 300);
     const response = await conn.request(
-      `/sentences/?query=${encodeURIComponent(query)}&limit=${limit}`
+      `/sentences/?query=${encodeURIComponent(query)}&limit=${fetchLimit}`
     ) as LitSenseResponse;
 
-    return (Array.isArray(response) ? response : []).slice(0, limit).map(transformLitSense);
+    return (Array.isArray(response) ? response : []).slice(offset, offset + limit).map(transformLitSense);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error('[searchLitSense] Error:', error);

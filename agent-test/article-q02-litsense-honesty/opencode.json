@@ -1,0 +1,1 @@
+{"$schema":"https://opencode.ai/config.json","mcp":{"biomcp":{"type":"local","command":["node","{env:AGENT_TEST_BUNDLE}"],"environment":{"ANALYSIS_BIOWASM":"1","ANALYSIS_BIOWASM_DATA_DIR":"{env:AGENT_TEST_DATA}"}}}}

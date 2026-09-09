@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-09-10
+
+### Added
+
+- **Citation locators on article records** — `article_search` (from backends that provide them: PubMed, EuropePMC) and `article_get` now carry `volume`, `issue`, and `pages` when the upstream record has them. PubMed extraction reads `JournalIssue.Volume`/`Issue` and `Pagination` (`MedlinePgn`, else `StartPage[-EndPage]`, else the `pii` `ELocationID`); EuropePMC search maps the lite-row keys `journalVolume`/`issue`/`pageInfo` (verbatim values, no range expansion; absent when upstream has none). Fixes the downstream failure mode where deep-research agents could not produce Vancouver citations and hallucinated locators.
+- **Citation locators on citation-list records** — `CitationRecord` (forward citations / backward references) gains `volume`/`issue`/`pages`, wired through the PubMed enrichment and EuropePMC citation transforms; `fieldScore` now rewards locator presence so a located record wins dedup ties.
+- **Merge-fill federated deduplication** — duplicate records across backends now fill missing fields into the first-seen (PubMed-first) record instead of being discarded wholesale: PubMed records absorb `cited_by`, `is_open_access`, and locators from EuropePMC/SemanticScholar twins, improving ranking inputs. Existing values are never overwritten; `source` and query-relative `score` are never merged; keyless and `_error` rows are still dropped; cross-key identities remain unmerged.
+- **Journal-scoping guidance in the `article_search` tool description** — PubMed matches full journal names and NLM abbreviations alike (verified live), but EuropePMC `JOURNAL:"…"` filters index NLM abbreviations only (full-name filters return zero hits); the query description now tells agents which form each backend needs.
+
+### Fixed
+
+- **LitSense pagination honors `offset`** — the LitSense API ignores server-side offsets and silently caps responses at 300 rows (both live-verified), so federated `article_search` with `offset > 0` re-injected page-1 sentences. The client now over-fetches (`limit + offset`, clamped at the 300-row cap) and windows client-side, mirroring the PubTator pagination pattern; applies to single-source mode identically. Known issue (deliberate, deferred): the EuropePMC search backend likewise ignores `offset` — its pagination is cursorMark-based, and migrating it to page windows deserves its own change.
+- **HTML entity decoding in PubMed records** — numeric character references (`&#x3b2;`, `&#xe9;`, `&#xa0;`) in titles, abstracts, and authors are decoded to real UTF-8 (`β`, `é`, U+00A0) by enabling `htmlEntities` on the XML parser; XML-predefined entities (`&amp;` etc.) keep decoding as before.
+- **LitSense records no longer fake an abstract** — LitSense returns one sentence-level full-text match per record with no title/journal/authors; that sentence previously shipped as `abstract`, causing downstream agents to fabricate titles from it. LitSense records now use the common article schema with fields it does not provide simply absent (`pmid`, `pmcid`, `score`, `source`). The backend is retained for its unique semantic full-text discovery.
+
 ## [1.3.0] - 2026-09-09
 
 Note: the in-repo `1.2.0` release commit was never published to npm (last published release: 1.1.1); this release supersedes it on the npm registry.
