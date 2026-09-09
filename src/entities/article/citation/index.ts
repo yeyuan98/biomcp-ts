@@ -35,6 +35,9 @@ export function fieldScore(record: CitationRecord): number {
   if (record.title) score += 2;
   if (record.authors && record.authors.length > 0) score += 2;
   if (record.journal) score += 1;
+  if (record.volume) score += 1;
+  if (record.issue) score += 1;
+  if (record.pages) score += 1;
   if (record.year) score += 1;
   return score;
 }

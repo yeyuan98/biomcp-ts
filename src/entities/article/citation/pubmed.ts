@@ -70,6 +70,9 @@ async function enrichPmids(pmids: string[]): Promise<Map<string, CitationRecord>
           title: article.title,
           authors: article.authors,
           journal: article.journal,
+          volume: article.volume,
+          issue: article.issue,
+          pages: article.pages,
           year: article.publication_date ? extractYear(article.publication_date) : undefined,
           source: 'pubmed',
         });

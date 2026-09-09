@@ -23,7 +23,6 @@ export function transformLitSense(a: LitSenseResult): Article {
   return {
     pmid: String(a.pmid),
     pmcid: a.pmcid,
-    abstract: a.text,
     score: a.score,
     source: 'litsense',
   };

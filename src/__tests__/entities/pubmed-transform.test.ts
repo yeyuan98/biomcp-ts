@@ -323,4 +323,129 @@ describe('parsePubMedXml', () => {
     const results = parsePubMedXml(xml);
     expect(results[0].abstract).toBe('');
   });
+
+  test('extracts volume, issue, and pages from MedlinePgn', () => {
+    const xml = `<?xml version="1.0"?>
+<PubmedArticleSet>
+<PubmedArticle>
+<MedlineCitation><PMID Version="1">21639808</PMID>
+<Article>
+<Journal>
+<ISOAbbreviation>N Engl J Med</ISOAbbreviation>
+<JournalIssue><Volume>364</Volume><Issue>26</Issue>
+<PubDate><Year>2011</Year><Month>Jun</Month><Day>30</Day></PubDate>
+</JournalIssue>
+</Journal>
+<ArticleTitle>Improved survival with vemurafenib in melanoma</ArticleTitle>
+<Pagination><StartPage>2507</StartPage><EndPage>2516</EndPage><MedlinePgn>2507-16</MedlinePgn></Pagination>
+<ELocationID EIdType="doi">10.1056/NEJMoa1103782</ELocationID>
+</Article>
+</MedlineCitation>
+<PubmedData><ArticleIdList><ArticleId IdType="pubmed">21639808</ArticleId><ArticleId IdType="doi">10.1056/NEJMoa1103782</ArticleId></ArticleIdList></PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>`;
+    const results = parsePubMedXml(xml);
+    expect(results[0].volume).toBe('364');
+    expect(results[0].issue).toBe('26');
+    expect(results[0].pages).toBe('2507-16');
+    expect(results[0].doi).toBe('10.1056/NEJMoa1103782');
+  });
+
+  test('falls back to StartPage-EndPage when MedlinePgn is missing', () => {
+    const xml = `<?xml version="1.0"?>
+<PubmedArticleSet>
+<PubmedArticle>
+<MedlineCitation><PMID Version="1">111</PMID>
+<Article>
+<Journal><JournalIssue><Volume>12</Volume></JournalIssue></Journal>
+<ArticleTitle>Range pagination</ArticleTitle>
+<Pagination><StartPage>100</StartPage><EndPage>110</EndPage></Pagination>
+</Article>
+</MedlineCitation>
+<PubmedData><ArticleIdList><ArticleId IdType="pubmed">111</ArticleId></ArticleIdList></PubmedData>
+</PubmedArticle>
+<PubmedArticle>
+<MedlineCitation><PMID Version="1">222</PMID>
+<Article>
+<ArticleTitle>Single page</ArticleTitle>
+<Pagination><StartPage>42</StartPage></Pagination>
+</Article>
+</MedlineCitation>
+<PubmedData><ArticleIdList><ArticleId IdType="pubmed">222</ArticleId></ArticleIdList></PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>`;
+    const results = parsePubMedXml(xml);
+    expect(results[0].volume).toBe('12');
+    expect(results[0].pages).toBe('100-110');
+    expect(results[1].pages).toBe('42');
+  });
+
+  test('falls back to pii elocation when no pagination exists', () => {
+    const xml = `<?xml version="1.0"?>
+<PubmedArticleSet>
+<PubmedArticle>
+<MedlineCitation><PMID Version="1">333</PMID>
+<Article>
+<ArticleTitle>Nature e-location paper</ArticleTitle>
+<ELocationID EIdType="pii">nature11071</ELocationID>
+</Article>
+</MedlineCitation>
+<PubmedData><ArticleIdList><ArticleId IdType="pubmed">333</ArticleId></ArticleIdList></PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>`;
+    const results = parsePubMedXml(xml);
+    expect(results[0].pages).toBe('nature11071');
+  });
+
+  test('maps doi and pii from multiple ELocationID entries', () => {
+    const xml = `<?xml version="1.0"?>
+<PubmedArticleSet>
+<PubmedArticle>
+<MedlineCitation><PMID Version="1">444</PMID>
+<Article>
+<ArticleTitle>Dual elocation paper</ArticleTitle>
+<ELocationID EIdType="doi">10.1038/nature11071</ELocationID>
+<ELocationID EIdType="pii">S0140-6736(18)30123-4</ELocationID>
+</Article>
+</MedlineCitation>
+<PubmedData><ArticleIdList><ArticleId IdType="pubmed">444</ArticleId></ArticleIdList></PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>`;
+    const results = parsePubMedXml(xml);
+    expect(results[0].doi).toBe('10.1038/nature11071');
+    expect(results[0].pages).toBe('S0140-6736(18)30123-4');
+  });
+
+  test('doi-only elocation yields no pages', () => {
+    const results = parsePubMedXml(ELOCATION_DOI_XML);
+    expect(results[0].doi).toBe('10.9999/eloc.test');
+    expect(results[0].pages).toBeUndefined();
+  });
+
+  test('leaves locator fields absent when record has none', () => {
+    const results = parsePubMedXml(BATCH_XML);
+    expect(results[0].volume).toBeUndefined();
+    expect(results[0].issue).toBeUndefined();
+    expect(results[0].pages).toBeUndefined();
+  });
+
+  test('decodes numeric character references in titles and authors', () => {
+    const xml = `<?xml version="1.0"?>
+<PubmedArticleSet>
+<PubmedArticle>
+<MedlineCitation><PMID Version="1">555</PMID>
+<Article>
+<ArticleTitle>&#x3b2;-catenin &amp; WNT signaling in cancer&#xa0;review</ArticleTitle>
+<AuthorList>
+<Author><LastName>J&#xe9;r&#xe9;my</LastName><ForeName>Raymond</ForeName></Author>
+</AuthorList>
+</Article>
+</MedlineCitation>
+<PubmedData><ArticleIdList><ArticleId IdType="pubmed">555</ArticleId></ArticleIdList></PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>`;
+    const results = parsePubMedXml(xml);
+    expect(results[0].title).toBe('\u03b2-catenin & WNT signaling in cancer\u00a0review');
+    expect(results[0].authors).toEqual(['J\u00e9r\u00e9my Raymond']);
+  });
 });

@@ -19,6 +19,9 @@ export interface Article {
   abstract?: string;
   authors?: string[];
   journal?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
   publication_date?: string;
   cited_by?: number;
   is_open_access?: boolean;

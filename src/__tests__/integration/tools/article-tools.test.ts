@@ -42,6 +42,16 @@ describe('article_get', () => {
     expect(result.title).toBeTruthy();
   }, 60000);
 
+  // PMID 21639808 = Chapman NEJM BRIM-3. Its efetch XML carries
+  // Volume 364 / Issue 26 / MedlinePgn 2507-16; locators must reach the tool output.
+  it('returns citation locators for the golden case PMID', async () => {
+    const result = await retryOnRateLimit(() => harness.callTool('article_get', { id: '21639808', sections: ['core'] }));
+    expectArticleGetResult(result);
+    expect(result.volume).toBe('364');
+    expect(result.issue).toBe('26');
+    expect(result.pages).toBe('2507-16');
+  }, 60000);
+
   it('returns error for invalid PMID', async () => {
     await expect(
       harness.callTool('article_get', { id: '99999999' })

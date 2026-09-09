@@ -26,6 +26,12 @@ export interface CitationRecord {
   authors?: string[];
   /** Journal name */
   journal?: string;
+  /** Journal volume */
+  volume?: string;
+  /** Journal issue */
+  issue?: string;
+  /** Pages or article number (e.g. '2507-16', 'e71310') */
+  pages?: string;
   /** Publication year */
   year?: number;
   /** Provider source (e.g., 'europepmc', 'semantic_scholar') */

@@ -203,7 +203,7 @@ describe('article', () => {
     expect(callUrl).not.toContain('size=');
     expect(result).toHaveLength(1);
     expect(result[0].pmid).toBe('12345');
-    expect(result[0].abstract).toBe('This is a relevant sentence.');
+    expect(result[0].abstract).toBeUndefined();
     expect(result[0].score).toBe(0.95);
     expect(result[0].source).toBe('litsense');
   });
@@ -244,7 +244,7 @@ describe('article', () => {
 
     expect(result.pmid).toBe('12345');
     expect(result.pmcid).toBe('PMC999');
-    expect(result.abstract).toBe('A sentence about BRCA1.');
+    expect(result.abstract).toBeUndefined();
     expect(result.score).toBe(0.88);
     expect(result.source).toBe('litsense');
   });
@@ -257,6 +257,9 @@ describe('article', () => {
       title: 'Europe PMC Article',
       authorString: 'Smith J, Doe A',
       journalTitle: 'Nature',
+      journalVolume: '12',
+      issue: '3',
+      pageInfo: '456-62',
       firstPublicationDate: '2023-01-15',
       citedByCount: 42,
       isOpenAccess: 'Y',
@@ -268,9 +271,30 @@ describe('article', () => {
     expect(result.title).toBe('Europe PMC Article');
     expect(result.authors).toEqual(['Smith J', 'Doe A']);
     expect(result.journal).toBe('Nature');
+    expect(result.volume).toBe('12');
+    expect(result.issue).toBe('3');
+    expect(result.pages).toBe('456-62');
     expect(result.cited_by).toBe(42);
     expect(result.is_open_access).toBe(true);
     expect(result.source).toBe('europepmc');
+  });
+
+  test('transformEuropePMC maps null locator fields to absent', () => {
+    const result = transformEuropePMC({
+      pmid: '12345',
+      title: 'E-location article',
+      journalTitle: 'J Cell Mol Med',
+      journalVolume: null,
+      issue: '16',
+      pageInfo: 'e71310',
+      firstPublicationDate: '2026-08-01',
+      citedByCount: 0,
+      isOpenAccess: 'N',
+    } as any);
+
+    expect(result.volume).toBeUndefined();
+    expect(result.issue).toBe('16');
+    expect(result.pages).toBe('e71310');
   });
 
   test('transformSemanticScholar maps fields correctly', () => {

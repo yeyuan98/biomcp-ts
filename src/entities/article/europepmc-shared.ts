@@ -11,6 +11,9 @@ export interface EuropePMCRecord {
   title?: string;
   authorString?: string;
   journalTitle?: string;
+  journalVolume?: string | null;
+  issue?: string | null;
+  pageInfo?: string | null;
   firstPublicationDate?: string;
   citedByCount?: number;
   isOpenAccess?: string;
@@ -24,6 +27,9 @@ export interface EuropePMCCitationEntry {
   authorString?: string;
   journalAbbreviation?: string;
   journalTitle?: string;
+  volume?: string;
+  issue?: string;
+  pageInfo?: string;
   pubYear?: string | number;
 }
 
@@ -43,6 +49,9 @@ export function transformCitationEntry(entry: EuropePMCCitationEntry): CitationR
     title: entry.title,
     authors: splitAuthors(entry.authorString),
     journal: entry.journalAbbreviation ?? entry.journalTitle,
+    volume: entry.volume,
+    issue: entry.issue,
+    pages: entry.pageInfo,
     year: parseYear(entry.pubYear),
     source: 'europepmc',
   };
