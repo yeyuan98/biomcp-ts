@@ -7,7 +7,7 @@ describe('help text', () => {
   // Intentional drift guard: static-text smoke test pinning documented
   // flags/commands in the help output; not a behavioral test.
   it('mentions every command', () => {
-    for (const token of ['biomcp doctor', '--version', '--help', '--json', '--client']) {
+    for (const token of ['biomcp doctor', 'biomcp version', '--version', '--help', '--json', '--client']) {
       expect(text).toContain(token);
     }
   });

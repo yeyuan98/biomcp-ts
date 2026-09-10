@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildDoctorReport, exitCodeFor, formatDoctorText, nodeVersionOk, REQUIRED_NODE } from '../../cli/doctor.js';
+import { VERSION } from '../../version.js';
 import { resetLoaderStateForTests } from '../../config/handler.js';
 import { configFilePath } from '../../config/store.js';
 import { ENV_PARAM_ROWS } from '../../config/parameters.js';
@@ -49,6 +50,8 @@ describe('buildDoctorReport', () => {
     const report = buildDoctorReport(dir);
     expect(report.schema_version).toBe(1);
     expect(report.ok).toBe(true);
+    expect(report.biomcp.version).toBe(VERSION);
+    expect(formatDoctorText(report)).toContain(`biomcp: ${VERSION}`);
     expect(report.blockers).toEqual([]);
     expect(report.node.ok).toBe(true);
     expect(report.mode_advice).toContain('mode:');

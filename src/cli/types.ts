@@ -27,6 +27,7 @@ export interface DoctorWarning {
 export interface DoctorReport {
   schema_version: 1;
   ok: boolean;
+  biomcp: { version: string };
   node: { version: string; required: string; ok: boolean };
   server_context: { install_mode: string; bundle_path: string; cwd: string };
   /** install-mode-specific advice, rendered per report (null when unknown mode). */

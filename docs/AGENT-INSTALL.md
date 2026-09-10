@@ -2,7 +2,7 @@
 
 This document is written so a human **or an AI agent** can install and configure BioMCP end-to-end: add it to an MCP client, pick the right invocation form, decide on API keys and optional features, then verify — with `biomcp doctor` as the one diagnostic for everything.
 
-> **What is this?** BioMCP-TS is a TypeScript biomedical MCP server (npm package **`biomcp`**: genes, variants, trials, literature, patents, optional R analysis). CLI subcommands from the similarly-named Python/Rust BioMCP (`biomcp serve`, `biomcp search …`) do not exist here — bare `biomcp` starts the MCP stdio server; the only CLI surface is `--help` / `--version` / `doctor`, and features are enabled with environment variables or a config file.
+> **What is this?** BioMCP-TS is a TypeScript biomedical MCP server (npm package **`biomcp`**: genes, variants, trials, literature, patents, optional R analysis). CLI subcommands from the similarly-named Python/Rust BioMCP (`biomcp serve`, `biomcp search …`) do not exist here — bare `biomcp` starts the MCP stdio server; the only CLI surface is `--help` / `version` (`--version`, `-v`) / `doctor`, and features are enabled with environment variables or a config file.
 
 BioMCP is a standard MCP **stdio** server — any MCP-compatible client can run it.
 
@@ -22,7 +22,7 @@ BioMCP is a standard MCP **stdio** server — any MCP-compatible client can run 
 3. Verify with `npx -y biomcp@1.4 doctor` — **exit 0 means you are clear**; exit 1 means read the blockers (each has a `fix_command`).
 4. In the client, ask something like *"search genes for BRAF"* — `gene_search` should return results.
 
-> Why doctor first: `npx biomcp` with no arguments starts the MCP stdio server and idles silently — in a terminal this looks like a hang. Only MCP clients should launch the bare command; humans and agents should use `--help`, `--version`, or `doctor`.
+> Why doctor first: `npx biomcp` with no arguments starts the MCP stdio server and idles silently — in a terminal this looks like a hang. Only MCP clients should launch the bare command; humans and agents should use `--help`, `biomcp version`, or `doctor`.
 
 ## 2. Add biomcp to your client
 
@@ -254,4 +254,4 @@ Optional keys raise rate limits or unlock premium sources (`NCBI_API_KEY`, `S2_A
 | `cwd_refused` from `biomcp_configure` set | server cwd is `/` or `$HOME` (cwd-less client, e.g. Claude Desktop) | use the env block instead — the tool's error response carries a paste-ready translation |
 | "Ok to proceed?" or timeout on first run | npx first-download under a slow network / interactive stdin | keep the raised `timeout` (OpenCode) and `-y` in the command; retry |
 | Expected features absent, config looks right | stale npx cache holding an old biomcp | clear it: `rm -rf ~/.npm/_npx` (Windows: `%LocalAppData%\npm-cache\_npx`), restart |
-| Upgrade | — | bump the pin in the client config (`biomcp@1.4` → new minor), restart; check `biomcp --version` |
+| Upgrade | — | bump the pin in the client config (`biomcp@1.4` → new minor), restart; check `biomcp version` |
