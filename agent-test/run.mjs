@@ -876,6 +876,63 @@ function checkJsonPath(check, parsed) {
   return result(check, ok ? "pass" : "fail", `json_path "${check.path}" = ${nv}, expect ${ne}±${tol}`);
 }
 
+function checkJsonPathRel(check, parsed) {
+  const op = check.op;
+  if (!["eq", "ne", "lt", "le", "gt", "ge"].includes(op)) return result(check, "error", `invalid json_path_rel op ${JSON.stringify(check.op)}`);
+  for (const k of ["occA", "occB"]) {
+    if (!Number.isInteger(check[k]) || check[k] < 1) return result(check, "error", `json_path_rel requires integer ${k} >= 1`);
+  }
+  const r = resolveToolRef(parsed, check.tool);
+  if (r.error) return result(check, "error", r.error);
+  if (r.missing) return result(check, "fail", `no matching tool call: ${JSON.stringify(check.tool)}`);
+  const a = r.calls[check.occA - 1];
+  const b = r.calls[check.occB - 1];
+  if (!a || !b) return result(check, "fail", `occurrences not found: occA=${check.occA}${a ? "" : " (missing)"} occB=${check.occB}${b ? "" : " (missing)"} of ${r.full} (${r.calls.length} call(s))`);
+  const readPath = (call, key, occ) => {
+    const raw = call.output;
+    if (raw === null || raw === undefined) return { fail: `${r.full}#${occ} has no output` };
+    let obj;
+    if (typeof raw === "string") {
+      try {
+        obj = JSON.parse(raw);
+      } catch {
+        return { fail: `${r.full}#${occ} output is not JSON` };
+      }
+    } else if (typeof raw === "object") {
+      obj = raw;
+    } else {
+      return { fail: `${r.full}#${occ} output is not an object/string` };
+    }
+    const w = walkPath(obj, check.path);
+    if (w.error) return { error: `${key}: ${w.error}` };
+    if (w.missing) return { fail: `path "${check.path}" missing in ${key} (${r.full}#${occ}) output JSON` };
+    return { value: w.value };
+  };
+  const ra = readPath(a, "occA", check.occA);
+  if (ra.error) return result(check, "error", ra.error);
+  if (ra.fail) return result(check, "fail", ra.fail);
+  const rb = readPath(b, "occB", check.occB);
+  if (rb.error) return result(check, "error", rb.error);
+  if (rb.fail) return result(check, "fail", rb.fail);
+  let cmp;
+  if (op === "eq" || op === "ne") {
+    /* Structural equality (string/DOI-safe), unlike args_rel's numeric eq:
+     * output values at paths like "0.pmid" are strings. */
+    const same = deepEqual(ra.value, rb.value);
+    cmp = op === "eq" ? same : !same;
+  } else {
+    const va = Number(ra.value);
+    const vb = Number(rb.value);
+    if (!Number.isFinite(va) || !Number.isFinite(vb)) {
+      return result(check, "fail", `non-numeric value(s) at "${check.path}": occA=${JSON.stringify(ra.value)} occB=${JSON.stringify(rb.value)}`);
+    }
+    cmp = { lt: va < vb, le: va <= vb, gt: va > vb, ge: va >= vb }[op];
+  }
+  const sym = { eq: "==", ne: "!=", lt: "<", le: "<=", gt: ">", ge: ">=" }[op];
+  return result(check, cmp ? "pass" : "fail",
+    `${r.full} "${check.path}": occA(${check.occA})=${JSON.stringify(ra.value)} ${sym} occB(${check.occB})=${JSON.stringify(rb.value)} -> ${cmp}`);
+}
+
 function checkToolCount(check, parsed) {
   if (check.min === undefined && check.max === undefined) return result(check, "error", "tool_count requires min and/or max");
   for (const k of ["min", "max"]) {
@@ -921,9 +978,9 @@ function checkRubric(check) {
   return { ...result(check, "manual", `unadjudicated rubric flag: ${check.flag}`), flag: check.flag };
 }
 
-/* AMBIGUITY: the plan announces "13 check types" but enumerates 12 distinct
- * `type` values; group.anyOf / group.allOf are the two composition modes of a
- * single type. 12 types implemented. */
+/* 13 check types. (An early plan announced "13" while enumerating 12;
+ * json_path_rel — added for cross-occurrence output comparison, e.g.
+ * pagination disjointness — later became the actual 13th.) */
 const CHECK_TYPES = {
   tool_seq: checkToolSeq,
   group: checkGroup,
@@ -933,6 +990,7 @@ const CHECK_TYPES = {
   args: checkArgs,
   args_rel: checkArgsRel,
   json_path: checkJsonPath,
+  json_path_rel: checkJsonPathRel,
   tool_count: checkToolCount,
   no_such_tool: checkNoSuchTool,
   status: checkStatus,

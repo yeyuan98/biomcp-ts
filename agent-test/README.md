@@ -81,7 +81,7 @@ spawn), `--data-root <DIR>`, `--model <ID>`, `--timeout <ms>`.
 | `checks` | yes | Array; every check must hold for a PASS |
 | `expectedOutputs` | | Reference paths under `expected/` for human review |
 
-### Check vocabulary (12 types)
+### Check vocabulary (13 types)
 
 | Type | Key fields | Semantics |
 |------|------------|-----------|
@@ -93,6 +93,7 @@ spawn), `--data-root <DIR>`, `--model <ID>`, `--timeout <ms>`.
 | `args` | `tool`, `occurrence` (default 1), `path`, `op: equals\|regex\|contains\|exists`, `expect` | Asserts on a tool call's input at a dot-path (`a.b.0.c`; array indices are numeric segments) |
 | `args_rel` | `tool`, `path`, `occA`, `occB`, `op: lt\|le\|gt\|ge\|eq` | Compares the same dot-path across two occurrences of one tool |
 | `json_path` | `tool`, `occurrence`, `path`, `op: equals\|near\|exists`, `expect`, `tolerance` | Asserts on a tool call's parsed output JSON; non-JSON output fails the check (not an error) |
+| `json_path_rel` | `tool`, `path`, `occA`, `occB`, `op: eq\|ne\|lt\|le\|gt\|ge` | Compares the same dot-path across two occurrences of one tool's *parsed output* JSON — the output analog of `args_rel`; `eq`/`ne` are structural (string-safe, e.g. `"0.pmid"` PMIDs), ordering ops are numeric; missing call/path or non-JSON output fails the check (not an error) |
 | `tool_count` | `min` and/or `max`, optional `tool` | Bounded call count; without `tool` it counts every non-pending call (biomcp and host tools alike) |
 | `no_such_tool` | `tool` (name or array) | Passes only if none of the named tools was ever called |
 | `status` | `tool`, `occurrence`, `status` | Exact terminal status of one call (`completed`, `error`, …) |
@@ -217,6 +218,17 @@ literature tests (`article-q01`/`article-q02`, v1.4.0 locator work):
 unlike the biowasm/configure suites they exercise real NCBI/LitSense
 APIs, so a rep can flake on upstream outages — rerun with
 `node agent-test/run.mjs --filter 'article-q*' --reps 2` before diagnosing.
+Round 6 adds the pagination tests (`article-q03`/`article-q04`, v1.4.1
+europepmc offset windowing). A federated-mode pagination test was
+deliberately skipped: each backend windows its own `[offset, offset+limit)`
+slice before the merged pool is deduped and re-ranked, so a record can
+legitimately appear on page 1 via one backend and page 2 via another —
+cross-page disjointness is not a post-fix invariant, and pre-fix pollution
+was probabilistic at the ranking layer; no deterministic assertion exists
+(rubric-only at best). q03's machine disjointness is therefore scoped to
+the head row (`json_path_rel 0.pmid ne`), which fails deterministically on
+the pre-fix build (identical page-1 responses) and was validated as a
+negative control from a `main` worktree.
 
 | ID | Level | Purpose | Data | Status |
 |----|-------|---------|------|--------|
@@ -240,6 +252,8 @@ APIs, so a rep can flake on upstream outages — rerun with
 | `configure-q04-env-readonly` | L1 | Setting an env-only parameter (ONCOKB_TOKEN) is rejected with guidance | — | PASS (direct-attempt pinned after a status-first round; 2 of 3 rounds) |
 | `article-q01-vancouver-citation` | L1 | Search PubMed → identify BRIM-3 → article_get → Vancouver citation with real volume/issue/pages | — | PASS (round 5, first rep; live NCBI) |
 | `article-q02-litsense-honesty` | L2 | LitSense sentence hits reported with exactly the returned fields; no fabricated metadata; loop completed via article_get | — | PASS (round 5; machine checks green, rubric flag adjudicated SATISFIED from session log) |
+| `article-q03-europepmc-offset-paging` | L1 | Two europepmc calls (offset 0 then 5); page 2 must be a genuinely different page (`json_path_rel` head disjointness) | — | PASS (round 6, 2/2 reps; rubric flags adjudicated SATISFIED; negative control on pre-fix bundle fails exactly the disjointness check) |
+| `article-q04-offset-cap-honesty` | L2 | offset 1000 (past the 1000-row europepmc cap) returns `[]` as a completed call; agent reports the empty page honestly | — | PASS (round 6, 2/2 reps; rubric flags adjudicated SATISFIED from session logs) |
 
 "Data": `bam` = NA12878 chr20 BAM + BAI pins, `vcf` = 1kg chr22 VCF + TBI
 pins, `—` = inline/no external data.
@@ -254,6 +268,20 @@ pins, `—` = inline/no external data.
 - Text-arm checks cannot prove tool provenance (q06 passed one rep via a
   host python bypass); a `tool_text_number_near` check type is the planned
   follow-up.
+- Cross-occurrence output comparison (q03 pagination disjointness) needs
+  `json_path_rel`: the vocabulary could not otherwise express "page-2 head
+  ≠ page-1 head" for live, unpinned values. Hedge its `occA`/`occB` pairs
+  inside `group.anyOf` (e.g. `(1,2)` and `(2,3)`) the same way `args`
+  occurrences are hedged — a leading discovery call otherwise pairs two
+  same-page calls and false-fails.
+- Negative-control (test-of-the-test): run the new test once against a
+  PRE-FIX bundle to prove it catches the bug. The runner resolves the
+  bundle from its own location (`REPO_ROOT/dist/bundle.js`) and ignores a
+  preset `AGENT_TEST_BUNDLE` env, so create a `git worktree` of the old
+  commit, `npm ci && npm run build` there, copy the new test dir (+ the
+  patched `run.mjs` if it carries a new check type) into it, and run with
+  `--force` (resume would silently re-grade the prior post-fix log). The
+  expected FAIL is informational — never gate CI on it.
 - Q13-style probes, where the agent may install host toolchains, need
   generous timeouts (900 s was required).
 - Dot-paths (`args`/`json_path`) split on `.` and cannot address record keys
