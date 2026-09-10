@@ -30,6 +30,7 @@ export async function runWithWatchdog<T>(job: (handle: WatchdogHandle) => Promis
   const watchdog = new Promise<never>((_, reject) => {
     watchdogReject = reject;
   });
+  let discardTimer: NodeJS.Timeout | null = null;
   const fire = () => {
     if (timedOut) return;
     timedOut = true;
@@ -38,7 +39,7 @@ export async function runWithWatchdog<T>(job: (handle: WatchdogHandle) => Promis
     } catch {
       void 0;
     }
-    setTimeout(() => {
+    discardTimer = setTimeout(() => {
       if (watchdogReject) {
         void opts.discard();
         watchdogReject(opts.discardError);
@@ -67,6 +68,7 @@ export async function runWithWatchdog<T>(job: (handle: WatchdogHandle) => Promis
     settled = true;
     if (timer) clearTimeout(timer);
     if (maxTimer) clearTimeout(maxTimer);
+    if (discardTimer) clearTimeout(discardTimer);
     watchdogReject = null;
   }
 }

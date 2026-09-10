@@ -104,4 +104,25 @@ describe('runWithWatchdog', () => {
     expect(opts.cancel).not.toHaveBeenCalled();
     expect(opts.discard).not.toHaveBeenCalled();
   });
+
+  it('clears the discard timer once the race settles (no lingering handles)', async () => {
+    jest.useFakeTimers();
+    try {
+      const opts = makeOpts({ timeoutMs: 20, watchdogMs: 60_000 });
+      const p = runWithWatchdog(
+        () => new Promise<string>((_resolve, reject) => {
+          setTimeout(() => reject(new Error('a cancel-signature interrupt occurred')), 60);
+        }),
+        opts,
+      );
+      const assertion = expect(p).rejects.toThrow(CANCEL_MESSAGE);
+      await jest.advanceTimersByTimeAsync(60);
+      await assertion;
+      expect(jest.getTimerCount()).toBe(0);
+      await jest.advanceTimersByTimeAsync(60_000);
+      expect(opts.discard).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });

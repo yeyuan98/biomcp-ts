@@ -14,7 +14,8 @@ Usage:
   biomcp doctor [--json] [--client opencode|claude-code|claude-desktop|codex]
                         diagnose this installation: Node version, .biomcp.json health,
                         feature gates, peer dependencies (webr/mysql2). Exit 1 on blockers.
-  biomcp --version      print the version
+  biomcp version [--json]
+                        print the version (aliases: --version, -v)
   biomcp --help         this help
 
 To connect an MCP client, see docs/AGENT-INSTALL.md:

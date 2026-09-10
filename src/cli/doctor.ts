@@ -2,6 +2,7 @@ import { totalmem } from 'node:os';
 import { loadAndApplyToEnv, getStatus, serverContext } from '../config/handler.js';
 import { ENV_PARAM_ROWS, oneShotArgv, oneShotCommand, type PeerPackageName } from '../config/parameters.js';
 import { clientSnippets, type ClientId } from './snippets.js';
+import { VERSION } from '../version.js';
 import type { DoctorBlocker, DoctorReport, DoctorWarning } from './types.js';
 
 /**
@@ -128,6 +129,7 @@ export function buildDoctorReport(dir: string = process.cwd(), client?: ClientId
   return {
     schema_version: 1,
     ok: blockers.length === 0,
+    biomcp: { version: VERSION },
     node: { version: process.versions.node, required: `>=${REQUIRED_NODE.major}.${REQUIRED_NODE.minor}`, ok: nodeOk },
     server_context: context,
     mode_advice: modeAdvice(context.install_mode),
@@ -166,6 +168,7 @@ function modeAdvice(mode: string): string | null {
 export function formatDoctorText(report: DoctorReport): string {
   const lines: string[] = [];
   lines.push(`biomcp doctor — ${report.ok ? 'OK' : `${report.blockers.length} blocker(s)`}`);
+  lines.push(`biomcp: ${report.biomcp.version}`);
   lines.push(`node: ${report.node.version} (required ${report.node.required}) ${report.node.ok ? '✓' : '✗'}`);
   lines.push(`install mode: ${report.server_context.install_mode} (${report.server_context.bundle_path})`);
   if (report.mode_advice) lines.push(`mode: ${report.mode_advice}`);

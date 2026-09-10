@@ -24,12 +24,26 @@ Gates in order, each failing the build on error:
 
 1. `npm ci` — installs exactly from `package-lock.json`
 2. `make typecheck` — both `src/` and `scripts/` tsconfigs
-3. `npm test` — the 900+ mocked unit tests (integration tests are excluded via
+3. `npm test` — the 1300+ mocked unit tests (integration tests are excluded via
    the npm script; they hit live biomedical APIs)
 4. `npm run build` — `tsc` + the two esbuild bundles
 5. `npm audit --audit-level=low` — **full** audit, not `--omit=dev`
 6. stdio MCP handshake smoke — sends one NDJSON `initialize` request to
    `dist/bundle.js` and requires a `serverInfo` response
+
+**Expected log noise in the unit-test step (not failures):** the suite
+intentionally exercises mocked error paths, so `console.error` lines like
+`[fetchProtein] Error: UniProt is down`, `Network timeout`, or
+`SemanticScholar search timed out after 15000ms` — plus `[retry] Attempt X/Y
+failed, retrying in Zms` backoff warnings — are the tests' subject matter,
+asserted to degrade gracefully. Other known benign noise: a `glob@10`
+deprecation warning at install time (transitive via istanbul/test-exclude,
+dev-only, not bundled into `dist/`) and the occasional post-job
+`Failed to save: Unable to reserve cache ...` (a `setup-node` cache race
+between concurrent runs). The test scripts pass
+`--disable-warning=ExperimentalWarning` to suppress Node's VM Modules /
+`node:sqlite` warnings, which are inherent to
+`node --experimental-vm-modules`.
 
 **Why the full audit:** runtime code is *bundled from devDependencies*
 (`fast-xml-parser` and friends end up inside `dist/bundle.js`; the only runtime

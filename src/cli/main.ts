@@ -23,7 +23,7 @@ async function main(): Promise<void> {
   }
 
   if (parsed.command === 'version') {
-    process.stdout.write(`${VERSION}\n`);
+    process.stdout.write(parsed.json ? `${JSON.stringify({ version: VERSION }, null, 2)}\n` : `${VERSION}\n`);
     return;
   }
 

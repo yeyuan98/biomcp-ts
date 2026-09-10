@@ -29,6 +29,10 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
   const [first] = argv;
   if (argv.length === 1 && (first === '--help' || first === '-h')) return { command: 'help', json: false, unknown: [] };
   if (argv.length === 1 && (first === '--version' || first === '-v')) return { command: 'version', json: false, unknown: [] };
+  if (first === 'version') {
+    const rest = argv.slice(1);
+    return { command: 'version', json: rest.includes('--json'), unknown: [] };
+  }
   if (first === 'doctor') {
     const rest = argv.slice(1);
     const json = rest.includes('--json');
