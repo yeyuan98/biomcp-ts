@@ -173,7 +173,7 @@ article/
 │   ├── index.ts          # articleSearch() orchestrator + federatedSearch (20s per-backend throw timeout)
 │   ├── dedup.ts          # deduplicateAndRank()
 │   ├── pubmed.ts         # searchPubMed(), formatPubMedDate()
-│   ├── europepmc.ts      # searchEuropePMC(), transformEuropePMC() (cursorMark deep pagination)
+│   ├── europepmc.ts      # searchEuropePMC(), transformEuropePMC() (cursorMark pagination; offset via client-side windowing, capped at 1000 rows)
 │   ├── semantic-scholar.ts # searchSemanticScholar(), transformSemanticScholar()
 │   ├── pubtator.ts       # searchPubTator(), transformPubTator()
 │   └── litsense.ts       # searchLitSense(), transformLitSense()
@@ -217,7 +217,7 @@ When no `source` is specified, `articleSearch` queries all 5 backends concurrent
 | Backend | Connection | Notes |
 |---------|-----------|-------|
 | PubMed | `eutils` | Two-step: `esearch` → `efetch` XML → `parsePubMedXml` |
-| Europe PMC | `europepmc` | Supports `cursorMark` for deep pagination, `dateRange` as year range |
+| Europe PMC | `europepmc` | Supports `cursorMark` for deep pagination, `dateRange` as year range; `offset` windows client-side (API has none), capped at 1000 rows |
 | Semantic Scholar | `semantic_scholar` | REST API with `externalIds` mapping; all S2 traffic (search + citations) is serialized through the single-flight `semantic-scholar-queue` to avoid unauthenticated 429s |
 | PubTator | `pubtator` | BioNER-annotated search; server-side pagination via `page`/`size` (size clamped 10–100, page derived from offset) |
 | LitSense | `litsense` | Sentence-level search (NCBI) via `limit=` param |

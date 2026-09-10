@@ -44,6 +44,20 @@ const SINGLE_ARTICLE_XML = `<?xml version="1.0"?>
 </PubmedArticle>
 </PubmedArticleSet>`;
 
+const europepmcLitePage = (n: number) => ({
+  resultList: {
+    result: Array.from({ length: n }, (_, i) => ({
+      pmid: String(41721000 + i),
+      title: `Article ${i}`,
+      authorString: 'Smith J',
+      journalTitle: 'Nature',
+      firstPublicationDate: '2026-01-01',
+      citedByCount: i,
+      isOpenAccess: 'N',
+    })),
+  },
+});
+
 describe('article', () => {
   let originalFetch: typeof global.fetch;
 
@@ -259,6 +273,83 @@ describe('article', () => {
     const callUrl = (global.fetch as any).mock.calls[0][0] as string;
     expect(callUrl).toContain('limit=300');
     expect(result).toEqual([]);
+  });
+
+  test('articleSearch() europepmc offset windows client-side via over-fetch', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve(europepmcLitePage(4)),
+    }) as any;
+
+    const result = await articleSearch('brca1', { source: 'europepmc', limit: 2, offset: 2 });
+
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(callUrl).toContain('pageSize=4');
+    expect(callUrl).toContain('cursorMark=*');
+    expect(result).toHaveLength(2);
+    expect(result.map((r: any) => r.pmid)).toEqual(['41721002', '41721003']);
+  });
+
+  test('articleSearch() europepmc over-fetch clamps at the 1000-row API cap', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve(europepmcLitePage(1000)),
+    }) as any;
+
+    const result = await articleSearch('brca1', { source: 'europepmc', limit: 10, offset: 995 });
+
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(callUrl).toContain('pageSize=1000');
+    expect(result).toHaveLength(5);
+    expect(result.map((r: any) => r.pmid)).toEqual(['41721995', '41721996', '41721997', '41721998', '41721999']);
+  });
+
+  test('articleSearch() europepmc offset beyond the cap yields empty page', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve(europepmcLitePage(1000)),
+    }) as any;
+
+    const result = await articleSearch('brca1', { source: 'europepmc', limit: 10, offset: 1000 });
+
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(callUrl).toContain('pageSize=1000');
+    expect(result).toEqual([]);
+  });
+
+  test('articleSearch() europepmc explicit cursorMark takes precedence over offset', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve(europepmcLitePage(5)),
+    }) as any;
+
+    const result = await articleSearch('brca1', { source: 'europepmc', limit: 2, offset: 3, cursorMark: 'AoIIQCC9' });
+
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(callUrl).toContain('pageSize=2');
+    expect(callUrl).toContain('cursorMark=AoIIQCC9');
+    expect(result).toHaveLength(2);
+    expect(result.map((r: any) => r.pmid)).toEqual(['41721000', '41721001']);
+  });
+
+  test('articleSearch() europepmc offset=0 keeps the page-1 request shape', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve(europepmcLitePage(10)),
+    }) as any;
+
+    const result = await articleSearch('brca1', { source: 'europepmc', limit: 5 });
+
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(callUrl).toContain('pageSize=5');
+    expect(callUrl).toContain('cursorMark=*');
+    expect(result).toHaveLength(5);
+    expect(result.map((r: any) => r.pmid)).toEqual(['41721000', '41721001', '41721002', '41721003', '41721004']);
   });
 
   test('transformPubTator maps new PubTator3 fields correctly', () => {

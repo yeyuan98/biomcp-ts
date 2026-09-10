@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-09-10
+
+### Fixed
+
+- **EuropePMC search honors `offset`** — resolves the 1.4.0 known issue. The EuropePMC REST API has no server-side offset (the `page` parameter is silently ignored — live-verified: page=1/3/10 return identical rows and an identical `nextCursorMark`; cursorMark deep-paging cannot jump to a row; single requests hard-cap at `pageSize=1000`, larger requests answered with an HTTP-200 `errCode:404` body), so `article_search` with `offset > 0` silently returned page 1 for the `europepmc` source and re-injected page-1 rows into every federated dedup pool, making federated pagination non-monotone. The client now over-fetches (`limit + offset`, clamped at the 1000-row cap) and windows client-side, mirroring the LitSense/PubTator pagination pattern; `offset ≥ 1000` yields an empty page (LitSense 300-cap parity). An explicit programmatic `cursorMark` takes precedence and defines the window start (offset is ignored within a cursor page — the cursor already skips preceding rows), preserving prior cursor-paging behavior; the `offset=0` request URL is unchanged. The tool's `offset` description now documents the 1000-row europepmc window cap.
+
 ## [1.4.0] - 2026-09-10
 
 ### Added

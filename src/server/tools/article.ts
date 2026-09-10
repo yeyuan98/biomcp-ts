@@ -38,7 +38,7 @@ export function registerArticleTools(server: McpServer): void {
         query: z.string().describe('Search query (title, abstract, or keyword). Journal scoping: PubMed matches full journal names and NLM abbreviations; EuropePMC JOURNAL:"..." filters require the NLM abbreviation (e.g. "N Engl J Med")'),
         source: z.enum(['pubmed', 'europepmc', 'semantic_scholar', 'pubtator', 'litsense']).optional().describe('Specific source to search'),
         limit: z.number().int().min(1).max(50).default(10).describe('Maximum results to return. Applied to final deduplicated results, not per-source. Each source may fetch more internally before deduplication.'),
-        offset: z.number().int().min(0).default(0).describe('Result offset'),
+        offset: z.number().int().min(0).default(0).describe('Result offset. EuropePMC windows are capped at 1000 rows; use narrower queries or another source for deeper results'),
         dateRange: z.string()
           .regex(/^(\d{4}-\d{2}-\d{2})?\/(\d{4}-\d{2}-\d{2})?$/,
             'Date range must be YYYY-MM-DD/YYYY-MM-DD (open-ended: YYYY-MM-DD/ or /YYYY-MM-DD)')
