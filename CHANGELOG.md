@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-09-10
+
+### Fixed
+
+- **Watchdog discard timer no longer leaks after a timed-out run settles** (`src/wasmcore/watchdog.ts`) — when the watchdog fired, it scheduled an inner discard timer (`setTimeout(..., watchdogMs)`) that nothing tracked and the `finally` block never cleared. Two visible symptoms: Jest ended unit-test runs with `A worker process has failed to exit gracefully and has been force exited ... improper teardown` (open-handle leak in `src/__tests__/wasmcore/watchdog.test.ts`), and in production every timed-out R evaluation retained a live no-op timer plus closure for the full 60 s interrupt window (`INTERRUPT_WATCHDOG_MS`, `src/ranalysis/engine.ts`); the `biowasm` engine held a 500 ms equivalent. No correctness impact either way (the callback no-ops once the race settles) — this is purely handle lifetime. The timer is now tracked and cleared alongside the deadline timers when the race settles; when a job never settles, the watchdog still fires exactly as before (it is what rejects the race, so clearing afterwards is a no-op). The `maxRunMs`-ceiling test in `src/__tests__/wasmcore/progress.test.ts` now stops its progress interval deterministically (`try/finally`) instead of via a 1.5 s hygiene timer that also leaked handles; a fake-timer regression test asserts zero pending timers after a settled timeout path. Test scripts now pass `--disable-warning=ExperimentalWarning` (Node ≥ 22.13 supports it; engines already require it) to silence the inherent VM Modules / `node:sqlite` warnings, and `docs/development/CI.md` documents that the unit-test step intentionally prints mocked error-path logs (`UniProt is down`, `Network timeout`, retry warnings) that are not failures.
+
 ## [1.4.1] - 2026-09-10
 
 ### Fixed

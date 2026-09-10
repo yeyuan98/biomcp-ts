@@ -1,6 +1,6 @@
 {
   "name": "biomcp",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "BioMCP-TS — TypeScript biomedical MCP server (genes, variants, trials, literature, patents, R analysis)",
   "keywords": [
     "mcp",
@@ -47,9 +47,9 @@
     "prepack": "npm run build",
     "start": "node dist/bundle.js",
     "dev": "tsx watch src/server/index.ts",
-    "test": "node --experimental-vm-modules node_modules/.bin/jest --testPathIgnorePatterns=integration",
-    "test:coverage": "node --experimental-vm-modules node_modules/.bin/jest --testPathIgnorePatterns=integration --coverage",
-    "test:integration": "node --experimental-vm-modules node_modules/.bin/jest --config jest.integration.config.ts --runInBand",
+    "test": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/.bin/jest --testPathIgnorePatterns=integration",
+    "test:coverage": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/.bin/jest --testPathIgnorePatterns=integration --coverage",
+    "test:integration": "node --experimental-vm-modules --disable-warning=ExperimentalWarning node_modules/.bin/jest --config jest.integration.config.ts --runInBand",
     "test:all": "npm run test && npm run test:integration",
     "test:coverage-all": "npm run test:coverage && npm run test:integration -- --coverage",
     "test:deploy": "bash deploy/tests/smoke-test.sh",

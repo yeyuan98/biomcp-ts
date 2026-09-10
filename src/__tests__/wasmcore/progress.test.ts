@@ -88,17 +88,22 @@ describe('runWithWatchdog activity + ceiling (progress-driven deadlines)', () =>
   it('maxRunMs is an absolute ceiling that activity() cannot extend', async () => {
     const opts = makeOpts({ timeoutMs: 50, watchdogMs: 20, maxRunMs: 140 });
     const started = Date.now();
-    await expect(
-      runWithWatchdog(
-        (handle) =>
-          new Promise<string>(() => {
-            // Chatty but never settles; only the ceiling can stop it.
-            const iv = setInterval(() => handle.activity(), 20);
-            setTimeout(() => clearInterval(iv), 1_500); // hard stop for test hygiene
-          }),
-        opts,
-      ),
-    ).rejects.toThrow('runtime discarded');
+    let stopInterval: (() => void) | null = null;
+    try {
+      await expect(
+        runWithWatchdog(
+          (handle) =>
+            new Promise<string>(() => {
+              // Chatty but never settles; only the ceiling can stop it.
+              const iv = setInterval(() => handle.activity(), 20);
+              stopInterval = () => clearInterval(iv);
+            }),
+          opts,
+        ),
+      ).rejects.toThrow('runtime discarded');
+    } finally {
+      stopInterval?.();
+    }
     const elapsed = Date.now() - started;
     expect(opts.cancel).toHaveBeenCalledTimes(1);
     expect(opts.discard).toHaveBeenCalledTimes(1);
