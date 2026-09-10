@@ -1,0 +1,56 @@
+{
+  "id": "article-q03-europepmc-offset-paging",
+  "name": "EuropePMC offset pagination returns a genuinely different second page",
+  "level": "L1",
+  "purpose": "Agent pages through europepmc search results with offset=5 and receives a different page (pre-1.4.1 the backend ignored offset and re-served page 1 verbatim).",
+  "prompt": "Use the biomcp article_search tool exactly twice, both times with source \"europepmc\", query \"trastuzumab adjuvant breast cancer\", and limit 5. First call: offset 0 (or omit offset). Second call: offset 5. Then output two lists: \"Page 1\" with the five PMIDs of the first call and \"Page 2\" with the five PMIDs of the second call, in the order returned, and state whether any PMID appears on both pages.",
+  "externalData": [],
+  "inlineResources": [],
+  "timeoutMs": 420000,
+  "checks": [
+    {
+      "type": "tool_seq",
+      "seq": [
+        ["article_search", "completed"],
+        ["article_search", "completed"]
+      ]
+    },
+    { "type": "tool_count", "tool": "article_search", "max": 4 },
+    {
+      "type": "group",
+      "anyOf": [
+        { "type": "args", "tool": "article_search", "occurrence": 1, "path": "source", "op": "equals", "expect": "europepmc" },
+        { "type": "args", "tool": "article_search", "occurrence": 2, "path": "source", "op": "equals", "expect": "europepmc" }
+      ]
+    },
+    {
+      "type": "group",
+      "anyOf": [
+        { "type": "args", "tool": "article_search", "occurrence": 2, "path": "offset", "op": "equals", "expect": 5 },
+        { "type": "args", "tool": "article_search", "occurrence": 3, "path": "offset", "op": "equals", "expect": 5 }
+      ],
+      "desc": "an offset-5 follow-up call happens (occurrence-hedged for a leading discovery call)"
+    },
+    {
+      "type": "group",
+      "anyOf": [
+        { "type": "json_path", "tool": "article_search", "occurrence": 2, "path": "0.pmid", "op": "exists" },
+        { "type": "json_path", "tool": "article_search", "occurrence": 3, "path": "0.pmid", "op": "exists" }
+      ],
+      "desc": "the offset-5 page is non-empty"
+    },
+    {
+      "type": "group",
+      "anyOf": [
+        { "type": "json_path_rel", "tool": "article_search", "path": "0.pmid", "occA": 1, "occB": 2, "op": "ne" },
+        { "type": "json_path_rel", "tool": "article_search", "path": "0.pmid", "occA": 2, "occB": 3, "op": "ne" }
+      ],
+      "desc": "page-2 head differs from page-1 head (deterministic pre-1.4.1 failure: identical page-1 responses from the ignored offset)"
+    },
+    {
+      "type": "rubric",
+      "manual": true,
+      "flag": "europepmc paging: the two reported pages are disjoint (no PMID on both pages, modulo upstream relevance-tie reshuffle at the window seam) and faithfully list the rows the tool returned"
+    }
+  ]
+}
