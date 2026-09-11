@@ -423,6 +423,40 @@ describe('article', () => {
     expect(result.source).toBe('europepmc');
   });
 
+  test('transformEuropePMC normalizes raw and escaped markup in titles', () => {
+    const resultRaw = transformEuropePMC({
+      pmid: '34731621',
+      title: 'Human Ca<sub>V</sub>2.2 and Ca<sup>2+</sup> with P &lt; 0.05 in <i>E. coli</i>',
+      authorString: 'Dong Y, Gao Y',
+      journalTitle: 'Cell Rep',
+    });
+    expect(resultRaw.title).toBe('Human Ca(V)2.2 and Ca(2+) with P < 0.05 in E. coli');
+
+    const resultEscaped = transformEuropePMC({
+      pmid: '34731622',
+      title: '&lt;i&gt;Protoplaythoa variabilis&lt;/i&gt; toxin Ca&lt;sub&gt;V&lt;/sub&gt;2.2 &amp; risk',
+      authorString: 'Smith J',
+      journalTitle: 'Toxicon',
+    });
+    expect(resultEscaped.title).toBe('Protoplaythoa variabilis toxin Ca(V)2.2 & risk');
+
+    const resultNested = transformEuropePMC({
+      pmid: '34731623',
+      title: 'Nested 10<sup>2<sup>3</sup></sup> power &amp; &lt;inf&gt;sub&lt;/inf&gt;',
+      authorString: 'Test A',
+      journalTitle: 'Math Bio',
+    });
+    expect(resultNested.title).toBe('Nested 10(2(3)) power & (sub)');
+
+    const resultEmptyTags = transformEuropePMC({
+      pmid: '34731624',
+      title: '<i><b> </b></i>',
+      authorString: 'Test B',
+      journalTitle: 'Empty',
+    });
+    expect(resultEmptyTags.title).toBeUndefined();
+  });
+
   test('transformEuropePMC maps null locator fields to absent', () => {
     const result = transformEuropePMC({
       pmid: '12345',

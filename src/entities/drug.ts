@@ -54,7 +54,7 @@ export async function drugSearch(
 
   const queryParams = new URLSearchParams({
     q: query,
-    fields: 'chebi.name,chebi.id,chebi.formula,chebi.mass,chebi.inchikey,unii.smiles,unii.molecular_formula,unii.display_name,unii.registry_number,unichem.chembl,ndc.nonproprietaryname,ndc.substancename',
+    fields: 'chebi.name,chebi.id,chebi.formula,chebi.mass,chebi.inchikey,unii.smiles,unii.molecular_formula,unii.display_name,unii.registry_number,unichem.chembl,chembl.pref_name,chembl.molecule_chembl_id,chembl.inchi_key,chembl.molecule_properties,ndc.nonproprietaryname,ndc.substancename',
     size: String(limit),
     from: String(offset),
   });
@@ -92,42 +92,54 @@ export function resolveBestMatch(
     const chebi = hit.chebi as Record<string, unknown> | undefined;
     const unii = hit.unii as Record<string, unknown> | undefined;
     const ndc = hit.ndc as Record<string, unknown> | undefined;
+    const chembl = hit.chembl as Record<string, unknown> | undefined;
 
     const chebiName = (chebi?.name as string) || '';
     const displayName = (unii?.display_name as string) || '';
     const nonPropName = (ndc?.nonproprietaryname as string) || '';
+    const chemblName = (chembl?.pref_name as string) || '';
 
-    if (chebiName.toLowerCase() === queryLower) {
+    if (chebiName.toLowerCase() === queryLower || chemblName.toLowerCase() === queryLower) {
       score = 3;
     } else if (
       displayName.toLowerCase() === queryLower ||
       nonPropName.toLowerCase() === queryLower
     ) {
       score = 2;
-    } else if (chebiName.toLowerCase().includes(queryLower)) {
+    } else if (chebiName.toLowerCase().includes(queryLower) || chemblName.toLowerCase().includes(queryLower)) {
       score = 1;
     }
 
     // Check synonym match when not already matched at a higher level
     if (score < 2) {
-      const synonyms = (chebi?.name_synonyms as string[] | undefined) || [];
+      const rawSynonyms = chebi?.name_synonyms;
+      const synonyms = Array.isArray(rawSynonyms)
+        ? rawSynonyms
+        : typeof rawSynonyms === 'string'
+          ? [rawSynonyms]
+          : [];
       if (synonyms.some(s => typeof s === 'string' && s.toLowerCase() === queryLower)) {
         score = 2;
       }
     }
 
-    if (score > bestScore) {
-      bestScore = score;
+    // Tie-breaker: prefer hits with ChEMBL ID
+    const unichem = hit.unichem as Record<string, unknown> | undefined;
+    const hasChembl = Boolean(unichem?.chembl || chembl?.molecule_chembl_id);
+    const effectiveScore = score + (hasChembl && score > 0 ? 0.5 : 0);
+
+    if (effectiveScore > bestScore) {
+      bestScore = effectiveScore;
       bestHit = hit;
     }
   }
 
-  return bestHit ? { hit: bestHit, score: bestScore } : null;
+  return bestHit ? { hit: bestHit, score: Math.floor(bestScore) } : null;
 }
 
 /** Fields we request from MyChem when resolving a drug by name. */
 const DRUG_GET_FIELDS =
-  'chebi.name,chebi.formula,chebi.mass,chebi.inchi,chebi.inchikey,chebi.id,chebi.name_synonyms,unii.smiles,unii.molecular_formula,unii.display_name,unii.registry_number,unichem.chembl,ndc.nonproprietaryname,ndc.substancename';
+  'chebi.name,chebi.formula,chebi.mass,chebi.inchi,chebi.inchikey,chebi.id,chebi.name_synonyms,unii.smiles,unii.molecular_formula,unii.display_name,unii.registry_number,unichem.chembl,chembl.pref_name,chembl.molecule_chembl_id,chembl.smiles,chembl.inchi,chembl.inchi_key,chembl.molecule_properties,ndc.nonproprietaryname,ndc.substancename';
 
 export async function drugGet(
   name: string,
@@ -141,13 +153,13 @@ export async function drugGet(
   const escaped = escapeLucene(name);
 
   // Single combined query covering exact match, synonyms, display names, and broad fallback.
-  // resolveBestMatch scores candidates: 3=exact chebi name, 2=exact synonym/display name, 1=contains, 0=other.
-  const q = `chebi.name:"${escaped}" OR chebi.name_synonyms:"${escaped}" OR unii.display_name:"${escaped}" OR ndc.nonproprietaryname:"${escaped}" OR "${escaped}"`;
+  // resolveBestMatch scores candidates: 3=exact chebi/chembl name, 2=exact synonym/display name, 1=contains, 0=other.
+  const q = `chebi.name:"${escaped}" OR chebi.name_synonyms:"${escaped}" OR chembl.pref_name:"${escaped}" OR unii.display_name:"${escaped}" OR ndc.nonproprietaryname:"${escaped}" OR "${escaped}"`;
 
   const queryParams = new URLSearchParams({
     q,
     fields: DRUG_GET_FIELDS,
-    size: '5',
+    size: '10',
   });
 
   const response = await conn.request(
@@ -165,19 +177,42 @@ export async function drugGet(
   const unii = hit.unii as Record<string, unknown> | undefined;
   const unichem = hit.unichem as Record<string, unknown> | undefined;
   const ndc = hit.ndc as Record<string, unknown> | undefined;
+  const chembl = hit.chembl as Record<string, unknown> | undefined;
+  const chemblProps = chembl?.molecule_properties as Record<string, unknown> | undefined;
 
   const result: DrugResult = {
-    name: (chebi?.name || unii?.display_name || ndc?.nonproprietaryname || ndc?.substancename || unii?.registry_number || name) as string,
-    chembl_id: (unichem?.chembl as string) || undefined,
-    smiles: (unii?.smiles as string) || undefined,
-    inchi: (chebi?.inchi as string) || undefined,
-    inchi_key: (chebi?.inchikey as string) || undefined,
-    molecular_weight: (chebi?.mass as number) || undefined,
-    molecular_formula: (chebi?.formula as string) || (unii?.molecular_formula as string) || undefined,
+    name: (chebi?.name || unii?.display_name || chembl?.pref_name || ndc?.nonproprietaryname || ndc?.substancename || unii?.registry_number || name) as string,
+    chembl_id: (unichem?.chembl as string) || (chembl?.molecule_chembl_id as string) || undefined,
+    smiles: (unii?.smiles as string) || (chembl?.smiles as string) || undefined,
+    inchi: (chebi?.inchi as string) || (chembl?.inchi as string) || undefined,
+    inchi_key: (chebi?.inchikey as string) || (chembl?.inchi_key as string) || undefined,
+    molecular_weight: (chebi?.mass as number) || (chemblProps?.full_mwt as number) || undefined,
+    molecular_formula: (chebi?.formula as string) || (unii?.molecular_formula as string) || (chemblProps?.full_molformula as string) || undefined,
   };
 
   if (unii?.registry_number) {
     result.aliases = [unii.registry_number as string];
+  }
+
+  // Cross-hit field consolidation: if primary hit is missing chembl_id or aliases,
+  // backfill from other matching candidate hits in the response.
+  for (const other of response.hits || []) {
+    if (other === hit) continue;
+    const otherScore = resolveBestMatch(name, [other])?.score ?? 0;
+    if (otherScore >= 2) {
+      if (!result.chembl_id) {
+        const otherUnichem = other.unichem as Record<string, unknown> | undefined;
+        const otherChembl = other.chembl as Record<string, unknown> | undefined;
+        const cId = (otherUnichem?.chembl as string) || (otherChembl?.molecule_chembl_id as string);
+        if (cId) result.chembl_id = cId;
+      }
+      if (!result.aliases) {
+        const otherUnii = other.unii as Record<string, unknown> | undefined;
+        if (otherUnii?.registry_number) {
+          result.aliases = [otherUnii.registry_number as string];
+        }
+      }
+    }
   }
 
   const sectionsToFetch = sectionConfig.includes('all')
@@ -195,7 +230,7 @@ export async function drugGet(
 
     const [openFDALabel, chemblId] = await Promise.all([
       needOpenFDA ? fetchOpenFDALabel(lookupName) : Promise.resolve(null),
-      needOpenTargets ? resolveDrugChemblId(lookupName) : Promise.resolve(undefined),
+      needOpenTargets ? (result.chembl_id || resolveDrugChemblId(lookupName)) : Promise.resolve(undefined),
     ]);
 
     const sectionPromises = sectionsToFetch.map(section => {
@@ -466,13 +501,15 @@ export function transformMyChemHit(hit: Record<string, unknown>): DrugSearchResu
   const unii = hit.unii as Record<string, unknown> | undefined;
   const unichem = hit.unichem as Record<string, unknown> | undefined;
   const ndc = hit.ndc as Record<string, unknown> | undefined;
+  const chembl = hit.chembl as Record<string, unknown> | undefined;
+  const chemblProps = chembl?.molecule_properties as Record<string, unknown> | undefined;
 
   return {
-    name: (chebi?.name || unii?.display_name || ndc?.nonproprietaryname || ndc?.substancename || unii?.registry_number || '') as string,
-    chembl_id: (unichem?.chembl as string) || undefined,
-    inchi_key: (chebi?.inchikey as string) || undefined,
-    molecular_formula: (chebi?.formula as string) || (unii?.molecular_formula as string) || undefined,
-    molecular_weight: (chebi?.mass as number) || undefined,
+    name: (chebi?.name || unii?.display_name || chembl?.pref_name || ndc?.nonproprietaryname || ndc?.substancename || unii?.registry_number || '') as string,
+    chembl_id: (unichem?.chembl as string) || (chembl?.molecule_chembl_id as string) || undefined,
+    inchi_key: (chebi?.inchikey as string) || (chembl?.inchi_key as string) || undefined,
+    molecular_formula: (chebi?.formula as string) || (unii?.molecular_formula as string) || (chemblProps?.full_molformula as string) || undefined,
+    molecular_weight: (chebi?.mass as number) || (chemblProps?.full_mwt as number) || undefined,
     chebi_id: (chebi?.id as string) || undefined,
     unii: (unii?.registry_number as string) || undefined,
   };
@@ -482,14 +519,16 @@ export function transformMyChemResponse(data: Record<string, unknown>): DrugResu
   const chebi = data.chebi as Record<string, unknown> | undefined;
   const unii = data.unii as Record<string, unknown> | undefined;
   const unichem = data.unichem as Record<string, unknown> | undefined;
+  const chembl = data.chembl as Record<string, unknown> | undefined;
+  const chemblProps = chembl?.molecule_properties as Record<string, unknown> | undefined;
 
   return {
-    name: (chebi?.name || unii?.display_name || '') as string,
-    chembl_id: (unichem?.chembl as string) || undefined,
-    inchi: (chebi?.inchi as string) || undefined,
-    inchi_key: (chebi?.inchikey as string) || undefined,
-    smiles: (unii?.smiles as string) || undefined,
-    molecular_weight: (chebi?.mass as number) || undefined,
-    molecular_formula: (chebi?.formula as string) || undefined,
+    name: (chebi?.name || unii?.display_name || chembl?.pref_name || '') as string,
+    chembl_id: (unichem?.chembl as string) || (chembl?.molecule_chembl_id as string) || undefined,
+    inchi: (chebi?.inchi as string) || (chembl?.inchi as string) || undefined,
+    inchi_key: (chebi?.inchikey as string) || (chembl?.inchi_key as string) || undefined,
+    smiles: (unii?.smiles as string) || (chembl?.smiles as string) || undefined,
+    molecular_weight: (chebi?.mass as number) || (chemblProps?.full_mwt as number) || undefined,
+    molecular_formula: (chebi?.formula as string) || (unii?.molecular_formula as string) || (chemblProps?.full_molformula as string) || undefined,
   };
 }

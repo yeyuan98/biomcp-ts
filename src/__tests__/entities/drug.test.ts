@@ -56,6 +56,37 @@ describe('drug', () => {
     expect(results[0].molecular_formula).toBe('C9H8O4');
   });
 
+  test('drugSearch() maps chembl fields when chebi is absent', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        hits: [
+          {
+            _id: 'LGHSQOCGTJHDIL-UTXLBGCNSA-N',
+            chembl: {
+              pref_name: 'ALAMETHICIN',
+              molecule_chembl_id: 'CHEMBL438243',
+              inchi_key: 'LGHSQOCGTJHDIL-UTXLBGCNSA-N',
+              molecule_properties: {
+                full_mwt: 1964.34,
+                full_molformula: 'C92H150N22O25',
+              },
+            },
+          },
+        ],
+      }),
+    }) as any;
+
+    const results = await drugSearch('alamethicin');
+
+    expect(results).toHaveLength(1);
+    expect(results[0].name).toBe('ALAMETHICIN');
+    expect(results[0].chembl_id).toBe('CHEMBL438243');
+    expect(results[0].inchi_key).toBe('LGHSQOCGTJHDIL-UTXLBGCNSA-N');
+    expect(results[0].molecular_weight).toBe(1964.34);
+    expect(results[0].molecular_formula).toBe('C92H150N22O25');
+  });
+
   test('drugGet() uses single combined query', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
@@ -239,6 +270,73 @@ describe('drug', () => {
     });
   });
 
+  test('transformMyChemResponse() maps chembl fields when chebi/unii are absent', () => {
+    const input = {
+      chembl: {
+        pref_name: 'ALAMETHICIN',
+        molecule_chembl_id: 'CHEMBL438243',
+        inchi: 'InChI=1S/test',
+        inchi_key: 'LGHSQOCGTJHDIL-UTXLBGCNSA-N',
+        smiles: 'CC(=O)NC',
+        molecule_properties: {
+          full_mwt: 1964.34,
+          full_molformula: 'C92H150N22O25',
+        },
+      },
+    };
+
+    const result = transformMyChemResponse(input);
+
+    expect(result).toEqual({
+      name: 'ALAMETHICIN',
+      chembl_id: 'CHEMBL438243',
+      inchi: 'InChI=1S/test',
+      inchi_key: 'LGHSQOCGTJHDIL-UTXLBGCNSA-N',
+      smiles: 'CC(=O)NC',
+      molecular_weight: 1964.34,
+      molecular_formula: 'C92H150N22O25',
+    });
+  });
+
+  test('drugGet() resolves ChEMBL hit and consolidates aliases for alamethicin', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        hits: [
+          {
+            _id: 'LGHSQOCGTJHDIL-UTXLBGCNSA-N',
+            chembl: {
+              pref_name: 'ALAMETHICIN',
+              molecule_chembl_id: 'CHEMBL438243',
+              smiles: 'CC(=O)NC...',
+              molecule_properties: {
+                full_molformula: 'C92H150N22O25',
+                full_mwt: 1964.34,
+              },
+            },
+            unichem: { chembl: 'CHEMBL438243' },
+          },
+          {
+            _id: 'NRRXBXXRKXUIFD-ZTEFGAJGSA-N',
+            unii: {
+              display_name: 'ALAMETHICIN',
+              molecular_formula: 'C92H150N22O25',
+              registry_number: '27061-78-5',
+            },
+          },
+        ],
+      }),
+    }) as any;
+
+    const result = await drugGet('alamethicin');
+
+    expect(result.name).toBe('ALAMETHICIN');
+    expect(result.chembl_id).toBe('CHEMBL438243');
+    expect(result.molecular_formula).toBe('C92H150N22O25');
+    expect(result.molecular_weight).toBe(1964.34);
+    expect(result.aliases).toEqual(['27061-78-5']);
+  });
+
   describe('resolveBestMatch', () => {
     test('returns null for empty hits', () => {
       expect(resolveBestMatch('aspirin', [])).toBeNull();
@@ -342,6 +440,35 @@ describe('drug', () => {
       ];
       const result = resolveBestMatch('acetaminophen', hits)!;
       expect(result.score).toBe(2);
+    });
+
+    test('picks exact chembl.pref_name match as score 3', () => {
+      const hits = [
+        { chembl: { pref_name: 'ALAMETHICIN' } },
+        { chebi: { name: 'Some other drug' } },
+      ];
+      const result = resolveBestMatch('alamethicin', hits)!;
+      expect(result.score).toBe(3);
+      expect((result.hit as any).chembl.pref_name).toBe('ALAMETHICIN');
+    });
+
+    test('tie-breaker prefers hit with ChEMBL identifier when scores are equal', () => {
+      const hits = [
+        { unii: { display_name: 'Alamethicin' } },
+        { chembl: { pref_name: 'Alamethicin', molecule_chembl_id: 'CHEMBL438243' } },
+      ];
+      const result = resolveBestMatch('alamethicin', hits)!;
+      expect(result.score).toBe(3);
+      expect((result.hit as any).chembl.molecule_chembl_id).toBe('CHEMBL438243');
+    });
+
+    test('handles single string chebi.name_synonyms without throwing', () => {
+      const hits = [
+        { chebi: { name: 'Compound X', name_synonyms: 'single_synonym' } },
+      ];
+      const result = resolveBestMatch('single_synonym', hits)!;
+      expect(result.score).toBe(2);
+      expect((result.hit as any).chebi.name).toBe('Compound X');
     });
   });
 });

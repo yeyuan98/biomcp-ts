@@ -1,7 +1,33 @@
 import { XMLParser } from 'fast-xml-parser';
 import type { Article } from '../types.js';
 
+function cleanInlineXml(text: string): string {
+  let prev = '';
+  let cur = text;
+  while (cur !== prev) {
+    prev = cur;
+    cur = cur
+      .replace(/<(?:sub|inf)\b[^>]*>([\s\S]*?)<\/(?:sub|inf)>/gi, '($1)')
+      .replace(/<sup\b[^>]*>([\s\S]*?)<\/sup>/gi, '($1)');
+  }
+  return cur.replace(/<\/?(?:i|b|u|em|strong|small|tt|sc|italic|bold|underline|strike)\b[^>]*>/gi, '');
+}
+
+export function preprocessPubMedXml(xml: string): string {
+  return xml
+    .replace(/<ArticleTitle\b([^>]*)>([\s\S]*?)<\/ArticleTitle>/gi, (_, attrs, content) => {
+      return `<ArticleTitle${attrs || ''}>${cleanInlineXml(content)}</ArticleTitle>`;
+    })
+    .replace(/<AbstractText\b([^>]*)>([\s\S]*?)<\/AbstractText>/gi, (_, attrs, content) => {
+      return `<AbstractText${attrs || ''}>${cleanInlineXml(content)}</AbstractText>`;
+    })
+    .replace(/<BookTitle\b([^>]*)>([\s\S]*?)<\/BookTitle>/gi, (_, attrs, content) => {
+      return `<BookTitle${attrs || ''}>${cleanInlineXml(content)}</BookTitle>`;
+    });
+}
+
 export function parsePubMedXml(xmlString: string): Article[] {
+  const preprocessed = preprocessPubMedXml(xmlString);
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: '@_',
@@ -15,7 +41,7 @@ export function parsePubMedXml(xmlString: string): Article[] {
 
   let parsed: any;
   try {
-    parsed = parser.parse(xmlString);
+    parsed = parser.parse(preprocessed);
   } catch (e) {
     throw new Error(`Failed to parse PubMed XML: ${(e as Error).message}`);
   }
@@ -158,50 +184,14 @@ function extractPages(article: any): string | undefined {
   return extractELocationByType(article, 'pii');
 }
 
-function flattenHtmlTitle(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  if (!value || typeof value !== 'object') return '';
-
-  const obj = value as Record<string, unknown>;
-  let result = '';
-
-  // Handle #text first (main text content)
-  if (obj['#text']) {
-    result += String(obj['#text']);
-  }
-
-  // Handle HTML tags in order (i, b, sub, sup, u, etc.)
-  const htmlTags = ['i', 'b', 'sub', 'sup', 'u', 'em', 'strong', 'small', 'tt'];
-  for (const tag of htmlTags) {
-    const tagValue = obj[tag];
-    if (tagValue) {
-      const tagContents = Array.isArray(tagValue) ? tagValue : [tagValue];
-      for (const content of tagContents) {
-        const innerContent = flattenHtmlTitle(content);
-        result += `<${tag}>${innerContent}</${tag}>`;
-      }
-    }
-  }
-
-  // Handle any other keys that aren't #text or known HTML tags
-  for (const [key, val] of Object.entries(obj)) {
-    if (key !== '#text' && !htmlTags.includes(key) && val !== undefined) {
-      const innerContent = flattenHtmlTitle(val);
-      if (innerContent) {
-        result += `<${key}>${innerContent}</${key}>`;
-      }
-    }
-  }
-
-  return result;
-}
-
 function extractTitle(article: any): string | undefined {
   const title = article?.ArticleTitle;
   if (!title) return undefined;
   if (typeof title === 'string') return title;
-  return flattenHtmlTitle(title);
+  if (typeof title === 'object' && title !== null) {
+    if (title['#text']) return String(title['#text']);
+  }
+  return String(title);
 }
 
 function extractAbstract(article: any): string | undefined {
@@ -225,7 +215,8 @@ function extractAuthors(article: any): string[] | undefined {
   if (!authors) return undefined;
   const arr = Array.isArray(authors) ? authors : [authors];
   return arr.map((a: any) => {
-    if (a.ForeName && a.LastName) return `${a.LastName} ${a.ForeName}`;
+    const given = a.ForeName || a.Initials;
+    if (a.LastName && given) return `${a.LastName} ${given}`;
     return a.LastName || a.CollectiveName || '';
   }).filter((n: string) => n.length > 0);
 }
