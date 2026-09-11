@@ -113,7 +113,12 @@ transformMyChemHit(hit: Record<string, unknown>): DrugSearchResult
 transformMyChemResponse(data: Record<string, unknown>): DrugResult
 ```
 
-`drugGet` resolves free-text names to a ChEMBL ID by scoring MyChem candidates (3 = exact ChEMBL name match, 2 = exact synonym/display name, 1 = contains).
+`drugGet` resolves free-text names to a ChEMBL ID by scoring MyChem candidates:
+- **Tier 3 (Exact Name Match)**: Case-insensitive match on `chebi.name` or `chembl.pref_name`
+- **Tier 2 (Display/Synonym Match)**: Case-insensitive match on `unii.display_name`, `ndc.nonproprietaryname`, or `chebi.name_synonyms` (supporting array or single-string shapes)
+- **Tier 1 (Partial Match)**: Substring containment on `chebi.name` or `chembl.pref_name`
+- **Tie-Breaker (`+0.5`)**: Candidate hits carrying a ChEMBL identifier (`unichem.chembl` or `chembl.molecule_chembl_id`) receive a `+0.5` boost, prioritizing pharmacologically indexed records.
+- **Cross-Hit Field Consolidation**: When multi-record compounds split identifiers across InChIKeys in MyChem, `drugGet` backfills missing `chembl_id` or CAS `aliases` from other exact/synonym hits (score $\ge 2$).
 
 ### Sections
 
@@ -123,8 +128,8 @@ transformMyChemResponse(data: Record<string, unknown>): DrugResult
 | `eu_regulatory` | — | — | **Stub**: always returns `{ authorized: false }` |
 | `who_regulatory` | — | — | **Stub**: always returns `{ prequalified: false }` |
 | `safety` | OpenFDA | None | Box warnings, warnings, adverse reactions from drug label |
-| `targets` | OpenTargets (GraphQL) | None | Resolves ChEMBL ID via OpenTargets search, then fetches mechanisms of action with gene targets |
-| `indications` | OpenTargets (GraphQL) | None | Drug indications with max clinical stage, resolved via ChEMBL ID |
+| `targets` | OpenTargets (GraphQL) | None | Fetches mechanisms of action with gene targets using the resolved `chembl_id` directly (falls back to OpenTargets search when absent) |
+| `indications` | OpenTargets (GraphQL) | None | Drug indications with max clinical stage, using the resolved `chembl_id` directly (falls back to OpenTargets search when absent) |
 | `adverse_events` | OpenFDA (`/drug/event.json`, FAERS) | None | Adverse reactions aggregated via `count=patient.reaction.reactionmeddrapt.exact`, ranked by report count, with `total_reports`; searches `patient.drug.openfda.substance_name` → `generic_name` → `medicinalproduct` (HTTP 404 zero-match advances the chain) |
 
 ---
@@ -192,7 +197,7 @@ article/
 │   ├── crossref.ts       # Crossref count + backward references provider
 │   └── opencitations.ts  # OpenCitations v2 DOI-based provider
 └── transform/
-    └── pubmed.ts         # parsePubMedXml()
+    └── pubmed.ts         # parsePubMedXml(), preprocessPubMedXml()
 ```
 
 ### Exported Functions
@@ -256,6 +261,9 @@ Citation records are deduplicated by PMID (primary), then DOI, then PMCID; for d
 - `articleGet` accepts numeric PMIDs, PMCIDs (via ID Converter), and DOIs (via ID Converter or PubMed esearch fallback)
 - Error messages include contextual hints (e.g., rate-limit advice for 429, index-not-found for 400)
 - The `graph` section is deprecated in favor of `citation`; both work for backward compatibility
+- **PubMed XML Preprocessing**: `preprocessPubMedXml` normalizes inline subscript (`<sub>`, `<inf>`) and superscript (`<sup>`) markup to parenthesized text (e.g., `Ca(V)`, `Ca(2+) influx`) and strips formatting tags (`<i>`, `<b>`, etc.) before fast-xml-parser ingestion, avoiding token inversion and retaining full abstract content without dropped words
+- **Legacy Author Fallback**: `extractAuthors` preserves full given names (`LastName ForeName`) from MEDLINE records and falls back to `Initials` (`LastName Initials`) when `ForeName` is absent in legacy pre-2002 citations
+- **Europe PMC Title Sanitization**: `cleanArticleTitle` in `europepmc-shared.ts` normalizes both raw and entity-escaped markup across Europe PMC search and citation entries
 
 ---
 

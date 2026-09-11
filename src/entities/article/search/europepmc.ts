@@ -1,6 +1,6 @@
 import { connectionManager } from '../../../connections/manager.js';
 import type { Article, ParsedDateRange } from '../types.js';
-import { EuropePMCRecord, splitAuthors } from '../europepmc-shared.js';
+import { EuropePMCRecord, splitAuthors, cleanArticleTitle } from '../europepmc-shared.js';
 
 interface EuropePMCResponse {
   resultList?: {
@@ -13,7 +13,7 @@ export function transformEuropePMC(a: EuropePMCRecord): Article {
     pmid: a.pmid,
     pmcid: a.pmcid,
     doi: a.doi,
-    title: a.title,
+    title: cleanArticleTitle(a.title),
     authors: splitAuthors(a.authorString),
     journal: a.journalTitle,
     volume: a.journalVolume ?? undefined,

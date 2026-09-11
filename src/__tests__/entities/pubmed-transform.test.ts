@@ -467,4 +467,81 @@ describe('parsePubMedXml', () => {
     const results = parsePubMedXml(xml);
     expect(results[0].abstract).toBe('BACKGROUND: The \u03b2-catenin pathway drives & sustains resistance.');
   });
+
+  test('normalizes inline subscript markup in article titles and abstracts (PMID 34731621)', () => {
+    const xml = `<?xml version="1.0"?>
+<PubmedArticleSet>
+<PubmedArticle>
+<MedlineCitation><PMID Version="1">34731621</PMID>
+<Article>
+<ArticleTitle>Closed-state inactivation and pore-blocker modulation mechanisms of human Ca<sub>V</sub>2.2.</ArticleTitle>
+<Abstract>
+<AbstractText>N-type voltage-gated calcium (Ca<sub>V</sub>) channels mediate Ca<sup>2+</sup> influx at presynaptic terminals in response to action potentials and play vital roles in synaptogenesis, release of neurotransmitters, and nociceptive transmission.</AbstractText>
+</Abstract>
+</Article>
+</MedlineCitation>
+<PubmedData><ArticleIdList><ArticleId IdType="pubmed">34731621</ArticleId></ArticleIdList></PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>`;
+    const results = parsePubMedXml(xml);
+    expect(results[0].title).toBe('Closed-state inactivation and pore-blocker modulation mechanisms of human Ca(V)2.2.');
+    expect(results[0].abstract).toContain('calcium (Ca(V)) channels mediate Ca(2+) influx at presynaptic terminals');
+  });
+
+  test('preserves mathematical inequalities and decodes entities in titles and abstracts', () => {
+    const xml = `<?xml version="1.0"?>
+<PubmedArticleSet>
+<PubmedArticle>
+<MedlineCitation><PMID Version="1">777</PMID>
+<Article>
+<ArticleTitle>Particle sizing &lt;100 nm and effect with P &lt; 0.05 in <i>E. coli</i></ArticleTitle>
+<Abstract>
+<AbstractText Label="RESULTS">Observed reduction was significant (P &lt; 0.01 &amp; P &gt; 0.001) for <i>subspecies</i> Ca<sub>V</sub> channels.</AbstractText>
+</Abstract>
+</Article>
+</MedlineCitation>
+<PubmedData><ArticleIdList><ArticleId IdType="pubmed">777</ArticleId></ArticleIdList></PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>`;
+    const results = parsePubMedXml(xml);
+    expect(results[0].title).toBe('Particle sizing <100 nm and effect with P < 0.05 in E. coli');
+    expect(results[0].abstract).toBe('RESULTS: Observed reduction was significant (P < 0.01 & P > 0.001) for subspecies Ca(V) channels.');
+  });
+
+  test('falls back to Initials for legacy author records when ForeName is missing', () => {
+    const xml = `<?xml version="1.0"?>
+<PubmedArticleSet>
+<PubmedArticle>
+<MedlineCitation><PMID Version="1">888</PMID>
+<Article>
+<ArticleTitle>Legacy author paper</ArticleTitle>
+<AuthorList>
+<Author><LastName>Smith</LastName><Initials>J</Initials></Author>
+<Author><LastName>Doe</LastName><Initials>AB</Initials></Author>
+<Author><LastName>Taylor</LastName><ForeName>Robert</ForeName><Initials>R</Initials></Author>
+</AuthorList>
+</Article>
+</MedlineCitation>
+<PubmedData><ArticleIdList><ArticleId IdType="pubmed">888</ArticleId></ArticleIdList></PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>`;
+    const results = parsePubMedXml(xml);
+    expect(results[0].authors).toEqual(['Smith J', 'Doe AB', 'Taylor Robert']);
+  });
+
+  test('normalizes legacy MEDLINE <inf> tag as subscript', () => {
+    const xml = `<?xml version="1.0"?>
+<PubmedArticleSet>
+<PubmedArticle>
+<MedlineCitation><PMID Version="1">999</PMID>
+<Article>
+<ArticleTitle>K<inf>ATP</inf> channel openers and cardiac ischemia</ArticleTitle>
+</Article>
+</MedlineCitation>
+<PubmedData><ArticleIdList><ArticleId IdType="pubmed">999</ArticleId></ArticleIdList></PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>`;
+    const results = parsePubMedXml(xml);
+    expect(results[0].title).toBe('K(ATP) channel openers and cardiac ischemia');
+  });
 });

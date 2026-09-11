@@ -1,6 +1,6 @@
 {
   "name": "biomcp",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "BioMCP-TS — TypeScript biomedical MCP server (genes, variants, trials, literature, patents, R analysis)",
   "keywords": [
     "mcp",

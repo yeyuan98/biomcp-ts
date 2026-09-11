@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.3] - 2026-09-11
+
+### Fixed
+
+- **PubMed title and abstract XML markup normalization and entity preservation** (`src/entities/article/transform/pubmed.ts`) — preprocessed PubMed XML to normalize subscript (`<sub>`, `<inf>`) and superscript (`<sup>`) tags to parenthesized text (e.g. `Ca(V)`, `Ca(2+) influx`), and stripped inline formatting tags (`<i>`, `<b>`, `<u>`, `<em>`, `<strong>`, etc.) prior to XML parser ingestion. Eliminated the faulty `flattenHtmlTitle` helper (which scrambled token order and discarded multi-block abstract text) in favor of direct string extraction, completely preserving full abstract content and chemical formulas (such as PMID 34731621). Standard XML and HTML entities and numeric character references are safely decoded without mangling.
+- **Legacy MEDLINE author initials fallback** (`src/entities/article/transform/pubmed.ts`) — `extractAuthors` now falls back to `Initials` (`${a.LastName} ${a.Initials}`) when `ForeName` is absent, restoring complete author names for legacy MEDLINE records lacking forenames while preserving full names for modern records.
+- **Europe PMC title markup sanitization** (`src/entities/article/europepmc-shared.ts`) — added `cleanArticleTitle` to normalize both unescaped (`<sub>...</sub>`) and escaped (`&lt;sub&gt;...&lt;/sub&gt;`) tags into parenthesized text, strip presentation tags, and decode standard HTML/XML entities across Europe PMC search hits and citation entries.
+- **ChEMBL drug resolution and cross-hit identifier consolidation** (`src/entities/drug.ts`) — expanded `drugSearch` and `drugGet` queries to index `chembl.pref_name` and retrieve `chembl.*` fields (`pref_name`, `molecule_chembl_id`, `molecule_properties`). `resolveBestMatch` scoring now awards tier 3 for exact matches against `chembl.pref_name` and adds a `+0.5` tie-breaker for candidates carrying ChEMBL identifiers. Implemented cross-hit consolidation in `drugGet` to backfill missing ChEMBL IDs or CAS aliases across matching candidate records sharing the same search space (e.g. resolving Alamethicin's ChEMBL ID from the ChEMBL hit while preserving CAS aliases from the UNII hit). Section fetchers for `targets` and `indications` now directly reuse the resolved `chembl_id` rather than performing redundant OpenTargets free-text search queries.
+
 ## [1.4.2] - 2026-09-10
 
 Note: the in-repo `1.4.1` release commit was never published to npm (last published release: 1.4.0); this release supersedes it on the npm registry.
