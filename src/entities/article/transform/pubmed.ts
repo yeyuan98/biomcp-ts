@@ -4,13 +4,20 @@ import type { Article } from '../types.js';
 function cleanInlineXml(text: string): string {
   let prev = '';
   let cur = text;
+  // 1. Normalize sub/inf/sup to parenthesized text until convergence
   while (cur !== prev) {
     prev = cur;
     cur = cur
       .replace(/<(?:sub|inf)\b[^>]*>([\s\S]*?)<\/(?:sub|inf)>/gi, '($1)')
       .replace(/<sup\b[^>]*>([\s\S]*?)<\/sup>/gi, '($1)');
   }
-  return cur.replace(/<\/?(?:i|b|u|em|strong|small|tt|sc|italic|bold|underline|strike)\b[^>]*>/gi, '');
+  // 2. Strip all remaining XML/HTML tags until convergence
+  prev = '';
+  while (cur !== prev) {
+    prev = cur;
+    cur = cur.replace(/<[^>]+>/g, '');
+  }
+  return cur;
 }
 
 export function preprocessPubMedXml(xml: string): string {
