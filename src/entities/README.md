@@ -242,6 +242,8 @@ When no `source` is specified, `articleSearch` queries all 6 backends concurrent
 
 Results are deduplicated by PMID/PMCID/DOI/arXiv ID and ranked by citation count via `deduplicateAndRank`.
 
+**Ranking caveat:** arXiv rows typically carry no `cited_by`, so in federated results they sort after cited journal results unless they merge with a Semantic Scholar twin via `arxiv_id` (which fills the count). Note also the `publication_types` casing asymmetry: arXiv rows use `publication_types: ["preprint"]` while `preprint_only` (Europe PMC PPR) rows use `["Preprint"]`.
+
 ### Preprint Fetch (`detail/preprint.ts`)
 
 `articleGet` on a preprint DOI (`isPreprintDoi`: legacy `10.1101/YYYY.MM.DD.NNNNNN` or the new shared `10.64898/*` prefix — both servers post under both, and 10.1101 is also used by CSHL Press journals, hence the strict date-form match) bypasses PMID resolution (preprints have none) and runs: official `api.biorxiv.org` `/details/{server}/{doi}` (try biorxiv, then medrxiv — a miss is a fast HTTP-200 soft error) ‖ Europe PMC core record (PPR id, citation count, OA flag), then in parallel `/pubs/{server}/{doi}/na` (published mapping; upstream-broken for 10.64898 DOIs, those fall back to EPMC's `commentCorrectionList` "Preprint of" link) and, when `sections=["citation"]` is requested, `/PPR/{id}/citations|references` in the `FederatedCitationResult` shape. All official-API errors are HTTP 200 with `messages[0].status` strings — the code branches on the status, never the HTTP code. If the official API is unreachable, the Europe PMC record becomes a degraded core (`preprint.data_source: 'europepmc'`). The `jatsxml_url` is returned as a link; full text is never auto-downloaded (Cloudflare-throttled host; tracked in GitHub issue #44).
