@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **arXiv preprint search backend for `article_search`** — a new `arxiv` source, selectable explicitly (`source: "arxiv"`) and joining the default federated fan-out in both branches (with and without `dateRange`, unlike PubTator/LitSense). Queries the arXiv Atom Query API on `export.arxiv.org` (responses are always Atom XML, never JSON; the transform feed-sniffs the root so HTML error/block pages fail fast with a distinguishable message). Field mapping: `journal: "arXiv"`, `publication_types: ["preprint"]`, `publication_date` from the entry's `published` date, keywords from primary + secondary categories, `doi` only from `arxiv:doi`; `Article` gains a versionless `arxiv_id` (version suffix stripped from the abs URL) that extends the federated dedup key chain to PMID ‖ PMCID ‖ DOI ‖ arXiv ID, so keyless preprints are no longer dropped by `deduplicateAndRank`. Date filtering uses the quoted `submittedDate` range (minute precision; open-ended bounds filled with arXiv-epoch sentinels). The `arxiv` registry entry enforces arXiv's Terms-of-Use rate limit — 1 request / 3 s — client-side per process via the capacity-1 token bucket (one polite re-acquiring retry for 429/5xx/timeouts; HTTP 403 never retried and reworded to name the likely per-IP block, since arXiv offers no API keys). Per-process limiters do not coordinate across instances: for multi-agent single-machine deployments, run a single shared `biomcp serve` daemon (docs/SELF-HOSTING.md) so all agents share one process and one global rate limiter.
+
 ## [1.4.3] - 2026-09-11
 
 ### Fixed

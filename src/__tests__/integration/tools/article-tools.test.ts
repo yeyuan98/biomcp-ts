@@ -35,6 +35,54 @@ describe('article_search', () => {
   }, 60000);
 });
 
+describe('article_search arxiv source', () => {
+  it('returns arXiv results for CRISPR base editing', async () => {
+    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'CRISPR base editing', source: 'arxiv', limit: 5 }));
+    expectArticleSearchResult(results);
+    expect(results.length).toBeGreaterThan(0);
+    const first = results[0];
+    expect(first.source).toBe('arxiv');
+    expect(first.arxiv_id).toBeTruthy();
+    expect(typeof first.title).toBe('string');
+    expect(typeof first.abstract).toBe('string');
+    expect(first.journal).toBe('arXiv');
+    expect(first.publication_types).toContain('preprint');
+  }, 60000);
+
+  it('returns date-filtered arXiv results within 2024', async () => {
+    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'transformer', source: 'arxiv', limit: 3, dateRange: '2024-01-01/2024-12-31' }));
+    expectArticleSearchResult(results);
+    expect(results.length).toBeGreaterThan(0);
+    expect(
+      results.some((r) => typeof r.publication_date === 'string' && r.publication_date.startsWith('2024'))
+    ).toBe(true);
+  }, 60000);
+
+  it('returns empty for nonsensical arXiv query', async () => {
+    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'zzqqxxzz nothingmatches', source: 'arxiv' }));
+    expectArticleSearchResult(results);
+    expect(results.length).toBe(0);
+    expect(results.some((r) => r._error !== undefined)).toBe(false);
+  }, 60000);
+
+  // Federated regression: arXiv normally contributes rows, but its leg is
+  // capped by the 20 s federated timeout and error rows are dropped by
+  // dedup — so absence is only acceptable when the other sources still
+  // delivered results (documented-acceptable absence).
+  it('includes arXiv results in federated search when the leg completes', async () => {
+    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'CRISPR base editing', limit: 20 }));
+    expectArticleSearchResult(results);
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.some((r) => r.source !== 'arxiv')).toBe(true);
+    const arxivRows = results.filter((r) => r.source === 'arxiv');
+    if (arxivRows.length > 0) {
+      expect(arxivRows[0].arxiv_id).toBeTruthy();
+    } else {
+      console.warn('[article-search-arxiv] federated run had no arXiv rows (legitimate timeout/absence); other sources delivered');
+    }
+  }, 90000);
+});
+
 describe('article_get', () => {
   it('returns article by PMID', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('article_get', { id: '25333279' }));

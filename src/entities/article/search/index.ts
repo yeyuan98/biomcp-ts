@@ -6,6 +6,7 @@ import { searchEuropePMC } from './europepmc.js';
 import { searchSemanticScholar } from './semantic-scholar.js';
 import { searchPubTator } from './pubtator.js';
 import { searchLitSense } from './litsense.js';
+import { searchArxiv } from './arxiv.js';
 
 const FEDERATED_SEARCH_TIMEOUT_MS = 20000;
 
@@ -44,11 +45,13 @@ async function federatedSearch(
         withTimeout(searchPubMed(query, limit, offset, dateRange), FEDERATED_SEARCH_TIMEOUT_MS, { onTimeout: 'throw', label: 'PubMed search' }),
         withTimeout(searchEuropePMC(query, limit, offset, undefined, dateRange), FEDERATED_SEARCH_TIMEOUT_MS, { onTimeout: 'throw', label: 'EuropePMC search' }),
         withTimeout(searchSemanticScholar(query, limit, offset, dateRange), FEDERATED_SEARCH_TIMEOUT_MS, { onTimeout: 'throw', label: 'SemanticScholar search' }),
+        withTimeout(searchArxiv(query, limit, offset, dateRange), FEDERATED_SEARCH_TIMEOUT_MS, { onTimeout: 'throw', label: 'arXiv search' }),
       ]
     : [
         withTimeout(searchPubMed(query, limit, offset), FEDERATED_SEARCH_TIMEOUT_MS, { onTimeout: 'throw', label: 'PubMed search' }),
         withTimeout(searchEuropePMC(query, limit, offset), FEDERATED_SEARCH_TIMEOUT_MS, { onTimeout: 'throw', label: 'EuropePMC search' }),
         withTimeout(searchSemanticScholar(query, limit, offset), FEDERATED_SEARCH_TIMEOUT_MS, { onTimeout: 'throw', label: 'SemanticScholar search' }),
+        withTimeout(searchArxiv(query, limit, offset), FEDERATED_SEARCH_TIMEOUT_MS, { onTimeout: 'throw', label: 'arXiv search' }),
         withTimeout(searchPubTator(query, limit, offset), FEDERATED_SEARCH_TIMEOUT_MS, { onTimeout: 'throw', label: 'PubTator search' }),
         withTimeout(searchLitSense(query, limit, offset), FEDERATED_SEARCH_TIMEOUT_MS, { onTimeout: 'throw', label: 'LitSense search' }),
       ];
@@ -74,7 +77,7 @@ async function searchSingleSource(
   dateRange?: ParsedDateRange
 ): Promise<Article[]> {
   if (dateRange && (source === 'pubtator' || source === 'litsense')) {
-    return [{ _error: `${source} does not support date filtering. Use pubmed, europepmc, or semantic_scholar.` } as any];
+    return [{ _error: `${source} does not support date filtering. Use pubmed, europepmc, semantic_scholar, or arxiv.` } as any];
   }
   switch (source) {
     case 'pubmed': return searchPubMed(query, limit, offset, dateRange);
@@ -82,6 +85,7 @@ async function searchSingleSource(
     case 'semantic_scholar': return searchSemanticScholar(query, limit, offset, dateRange);
     case 'pubtator': return searchPubTator(query, limit, offset);
     case 'litsense': return searchLitSense(query, limit, offset);
+    case 'arxiv': return searchArxiv(query, limit, offset, dateRange);
     default: return [];
   }
 }

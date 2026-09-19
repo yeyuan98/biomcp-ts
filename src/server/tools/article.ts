@@ -36,7 +36,7 @@ export function registerArticleTools(server: McpServer): void {
       description: 'Search literature across multiple backends with federated search and deduplication',
       inputSchema: {
         query: z.string().describe('Search query (title, abstract, or keyword). Journal scoping: PubMed matches full journal names and NLM abbreviations; EuropePMC JOURNAL:"..." filters require the NLM abbreviation (e.g. "N Engl J Med")'),
-        source: z.enum(['pubmed', 'europepmc', 'semantic_scholar', 'pubtator', 'litsense']).optional().describe('Specific source to search'),
+        source: z.enum(['pubmed', 'europepmc', 'semantic_scholar', 'pubtator', 'litsense', 'arxiv']).optional().describe('Specific source to search'),
         limit: z.number().int().min(1).max(50).default(10).describe('Maximum results to return. Applied to final deduplicated results, not per-source. Each source may fetch more internally before deduplication.'),
         offset: z.number().int().min(0).default(0).describe('Result offset. EuropePMC windows are capped at 1000 rows; use narrower queries or another source for deeper results'),
         dateRange: z.string()
@@ -44,7 +44,7 @@ export function registerArticleTools(server: McpServer): void {
             'Date range must be YYYY-MM-DD/YYYY-MM-DD (open-ended: YYYY-MM-DD/ or /YYYY-MM-DD)')
           .refine((s: string) => s.split('/').some((p: string) => p.length > 0), 'At least one date endpoint required')
           .optional()
-          .describe('Date range as YYYY-MM-DD/YYYY-MM-DD. Open-ended: "2020-01-01/" or "/2023-12-31". Only pubmed, europepmc, semantic_scholar support this.'),
+          .describe('Date range as YYYY-MM-DD/YYYY-MM-DD. Open-ended: "2020-01-01/" or "/2023-12-31". pubmed, europepmc, semantic_scholar, and arxiv support this.'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },

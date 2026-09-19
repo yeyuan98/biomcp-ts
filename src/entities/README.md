@@ -164,7 +164,7 @@ transformMyDiseaseResponse(data: Record<string, unknown>): DiseaseResult
 
 ## Article (`article/`)
 
-**Primary source:** PubMed (via the shared `eutils` connection) for get; federated across 5 sources for search
+**Primary source:** PubMed (via the shared `eutils` connection) for get; federated across 6 sources for search
 
 ### Architecture
 
@@ -174,14 +174,15 @@ article/
 ├── types.ts              # Article, ArticleSearchOptions, ArticleResult, ArticleGetOptions
 ├── europepmc-shared.ts   # Shared EuropePMC helpers
 ├── semantic-scholar-queue.ts  # Global single-flight queue for ALL Semantic Scholar traffic
-├── search/               # Search backends (5 sources)
+├── search/               # Search backends (6 sources)
 │   ├── index.ts          # articleSearch() orchestrator + federatedSearch (20s per-backend throw timeout)
 │   ├── dedup.ts          # deduplicateAndRank()
 │   ├── pubmed.ts         # searchPubMed(), formatPubMedDate()
 │   ├── europepmc.ts      # searchEuropePMC(), transformEuropePMC() (cursorMark pagination; offset via client-side windowing, capped at 1000 rows)
 │   ├── semantic-scholar.ts # searchSemanticScholar(), transformSemanticScholar()
 │   ├── pubtator.ts       # searchPubTator(), transformPubTator()
-│   └── litsense.ts       # searchLitSense(), transformLitSense()
+│   ├── litsense.ts       # searchLitSense(), transformLitSense()
+│   └── arxiv.ts          # searchArxiv() (Atom Query API on export.arxiv.org)
 ├── detail/               # Article get + sections
 │   ├── index.ts          # articleGet() orchestrator (sections run via Promise.allSettled)
 │   ├── id-resolution.ts  # parseArticleId(), resolveToPmid(), resolveDoiToPmid()
@@ -197,7 +198,8 @@ article/
 │   ├── crossref.ts       # Crossref count + backward references provider
 │   └── opencitations.ts  # OpenCitations v2 DOI-based provider
 └── transform/
-    └── pubmed.ts         # parsePubMedXml(), preprocessPubMedXml()
+    ├── pubmed.ts         # parsePubMedXml(), preprocessPubMedXml()
+    └── arxiv.ts          # parseArxivAtomXml() (feed-root sniff + entry mapping)
 ```
 
 ### Exported Functions
@@ -211,13 +213,14 @@ transformEuropePMC(a: EuropePMCResult): Article
 transformSemanticScholar(a: SemanticScholarPaper): Article
 transformPubTator(a: PubTatorResult): Article
 transformLitSense(a: LitSenseResult): Article
+parseArxivAtomXml(xml: string): Article[]
 ```
 
 (`getCitations` is exported from `article/citation/index.ts`, not the article barrel.)
 
 ### Federated Search
 
-When no `source` is specified, `articleSearch` queries all 5 backends concurrently via `Promise.allSettled`, each wrapped in a 20-second throw-mode `withTimeout` so a hung backend is recorded as an error result. With `dateRange` set, only the 3 backends that support date filtering run (PubMed, Europe PMC, Semantic Scholar).
+When no `source` is specified, `articleSearch` queries all 6 backends concurrently via `Promise.allSettled`, each wrapped in a 20-second throw-mode `withTimeout` so a hung backend is recorded as an error result. With `dateRange` set, only the 4 backends that support date filtering run (PubMed, Europe PMC, Semantic Scholar, arXiv).
 
 | Backend | Connection | Notes |
 |---------|-----------|-------|
@@ -226,8 +229,9 @@ When no `source` is specified, `articleSearch` queries all 5 backends concurrent
 | Semantic Scholar | `semantic_scholar` | REST API with `externalIds` mapping; all S2 traffic (search + citations) is serialized through the single-flight `semantic-scholar-queue` to avoid unauthenticated 429s |
 | PubTator | `pubtator` | BioNER-annotated search; server-side pagination via `page`/`size` (size clamped 10–100, page derived from offset) |
 | LitSense | `litsense` | Sentence-level search (NCBI) via `limit=` param |
+| arXiv | `arxiv` | Preprint server via the Atom Query API (`export.arxiv.org`, always Atom XML); records carry a versionless `arxiv_id`, `journal: "arXiv"`, `publication_types: ["preprint"]`; the registry limiter enforces the arXiv Terms-of-Use rate of 1 request / 3 s |
 
-Results are deduplicated by PMID/PMCID/DOI and ranked by citation count via `deduplicateAndRank`.
+Results are deduplicated by PMID/PMCID/DOI/arXiv ID and ranked by citation count via `deduplicateAndRank`.
 
 ### Federated Citation
 

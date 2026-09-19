@@ -718,16 +718,22 @@ describe('article', () => {
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
           json: () => Promise.resolve({ data: [] }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/atom+xml' }),
+          text: () => Promise.resolve(`<?xml version='1.0' encoding='UTF-8'?>\n<feed xmlns="http://www.w3.org/2005/Atom"><opensearch:totalResults xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">0</opensearch:totalResults></feed>`),
         }) as any;
 
       await articleSearch('brca1', { dateRange: '2020-01-01/2023-12-31' });
 
-      expect(global.fetch).toHaveBeenCalledTimes(3);
+      expect(global.fetch).toHaveBeenCalledTimes(4);
 
       const urls = (global.fetch as any).mock.calls.map((c: any) => c[0] as string);
       expect(urls[0]).toContain('esearch.fcgi');
       expect(urls[1]).toContain('europepmc');
       expect(urls[2]).toContain('semanticscholar');
+      expect(urls[3]).toContain('export.arxiv.org');
     });
 
     test('federated search without dateRange queries all backends', async () => {
@@ -739,7 +745,7 @@ describe('article', () => {
 
       await articleSearch('brca1');
 
-      expect(global.fetch).toHaveBeenCalledTimes(5);
+      expect(global.fetch).toHaveBeenCalledTimes(6);
     });
 
     // Regression for the throw-on-timeout invariant: a hanging backend must

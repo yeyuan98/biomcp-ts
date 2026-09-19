@@ -1,5 +1,5 @@
 export interface ArticleSearchOptions {
-  source?: 'pubmed' | 'europepmc' | 'semantic_scholar' | 'pubtator' | 'litsense';
+  source?: 'pubmed' | 'europepmc' | 'semantic_scholar' | 'pubtator' | 'litsense' | 'arxiv';
   limit?: number;
   offset?: number;
   cursorMark?: string;
@@ -15,6 +15,7 @@ export interface Article {
   pmid?: string;
   pmcid?: string;
   doi?: string;
+  arxiv_id?: string;
   title?: string;
   abstract?: string;
   authors?: string[];

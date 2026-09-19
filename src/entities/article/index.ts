@@ -8,6 +8,8 @@ export { transformSemanticScholar } from './search/semantic-scholar.js';
 export { transformPubTator } from './search/pubtator.js';
 export { transformLitSense } from './search/litsense.js';
 export { parsePubMedXml } from './transform/pubmed.js';
+export { parseArxivAtomXml } from './transform/arxiv.js';
+export { searchArxiv } from './search/arxiv.js';
 export { parseOaXml } from './detail/open-access.js';
 export { getCitations, clearCitationCache } from './citation/index.js';
 export type { ArticleId, CitationRecord, CitationCount, SourceCitationResult, FederatedCitationResult } from './citation/types.js';

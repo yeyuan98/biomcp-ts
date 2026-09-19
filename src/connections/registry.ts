@@ -125,7 +125,7 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   },
 
   // ==========================================
-  // LITERATURE - REST (9 sources)
+  // LITERATURE - REST (10 sources)
   // ==========================================
   // Shared NCBI E-utilities connection: serves PubMed (article_*), GEO
   // (db=gds), SRA (db=sra), GenBank (db=nuccore) and BioSample lookups.
@@ -255,7 +255,22 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     followRedirects: false,
     rateLimit: { intervalMs: 1000 },
   },
-  
+  // arXiv Atom Query API (https://export.arxiv.org/api/query): preprint
+  // literature search. Terms of Use (https://info.arxiv.org/help/api/tou.html)
+  // cap clients at 1 request / 3 s on a single connection, aggregated across
+  // all machines under the operator's control — intervalMs 3000 enforces the
+  // spacing client-side per process (arXiv offers no API keys; a 403 is a
+  // per-IP block). Legacy API: stable ~15 yrs, watch arXiv API news for
+  // breaking changes.
+  arxiv: {
+    sourceId: 'arxiv',
+    baseUrl: 'https://export.arxiv.org/api',
+    protocol: 'rest',
+    handling: { timeoutMs: 15000 },
+    rateLimit: { intervalMs: 3000 },
+    retry: { attempts: 2, backoffMs: 3500 },
+  },
+
   // ==========================================
   // CLINICAL TRIALS - REST (1 source)
   // ==========================================

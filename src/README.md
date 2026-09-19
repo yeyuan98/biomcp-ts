@@ -28,7 +28,7 @@ ESM-only MCP server exposing 40 biomedical tools to LLMs. Federates queries acro
 │             │               │                                │
 │             └───────┬───────┘                                │
 │                     ▼                                        │
-│              registry.ts (36 sources, incl. patents)         │
+│              registry.ts (37 sources, incl. patents)         │
 │                     │                                        │
 │                     ▼                                        │
 │            transform/*.ts                                   │

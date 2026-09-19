@@ -184,7 +184,7 @@ function withTimeout<T>(
 > EPO OPS (OAuth2 client-credentials) and USPTO PPUBS (session-token
 > handshake) live in `src/entities/patent/` as dedicated clients.
 
-### REST (32 sources)
+### REST (33 sources)
 
 | Category | Source IDs |
 |---|---|
@@ -192,7 +192,7 @@ function withTimeout<T>(
 | Proteins & Pathways | `uniprot`, `reactome`, `reactome_analysis` |
 | Drugs & Pharmacology | `mychem`, `openfda` |
 | Diseases | `mydisease`, `monarch` |
-| Literature | `eutils`, `pubtator`, `europepmc`, `semantic_scholar`, `litsense`, `ncbi_idconv`, `pmc_oa`, `crossref`, `opencitations` |
+| Literature | `eutils`, `pubtator`, `europepmc`, `semantic_scholar`, `litsense`, `ncbi_idconv`, `pmc_oa`, `crossref`, `opencitations`, `arxiv` |
 | Clinical Trials | `clinicaltrials` |
 | Ontologies & Analysis | `ols4` |
 | Funding & Research | `nih_reporter` |
