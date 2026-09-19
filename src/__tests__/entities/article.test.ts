@@ -1874,6 +1874,116 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     expect(result.published).toBeNull();
   }, 20000);
 
+  test('articleGet published falls back to the official /details published DOI when /pubs and EPMC yield nothing', async () => {
+    const detailsWithPublishedDoi = {
+      ...biorxivDetailsPayload('bioRxiv', ['1']),
+      collection: [{
+        ...biorxivDetailsPayload('bioRxiv', ['1']).collection[0],
+        published: '10.1234/journal.2024.01.001', // not 'NA'
+      }],
+    };
+    global.fetch = jest.fn((url: unknown) => {
+      const u = String(url);
+      if (u.includes('api.biorxiv.org/details/biorxiv/')) return Promise.resolve(jsonResponse(detailsWithPublishedDoi));
+      // /pubs soft miss → no published mapping from the official pubs endpoint
+      if (u.includes('api.biorxiv.org/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
+      // no EPMC record → no "Preprint of" link either
+      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse({ resultList: { result: [] } }));
+      return Promise.reject(new Error(`unexpected url ${u}`));
+    }) as any;
+
+    const result = await articleGet('10.1101/2025.03.05.641768');
+
+    // fallback chain end: /details record's own `published` DOI field
+    expect(result.published).toEqual({ doi: '10.1234/journal.2024.01.001', source: 'biorxiv_details' });
+  }, 15000);
+
+  test('articleGet preprint citation section carries _error when the PPR endpoints reject', async () => {
+    global.fetch = jest.fn((url: unknown) => {
+      const u = String(url);
+      if (u.includes('api.biorxiv.org/details/biorxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv', ['1'])));
+      if (u.includes('api.biorxiv.org/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
+      // both PPR legs reject; the non-network message keeps the europepmc
+      // registry retry (1 retry on network signatures) out of the timing
+      if (u.includes('/PPR910295/citations') || u.includes('/PPR910295/references')) {
+        return Promise.reject(new Error('PPR citation endpoints exploded'));
+      }
+      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse(epmcCorePayload));
+      return Promise.reject(new Error(`unexpected url ${u}`));
+    }) as any;
+
+    const result = await articleGet('10.1101/2021.10.25.465764', ['citation']);
+
+    // exact fetchPprCitationSection catch shape: `Preprint citation lookup failed: <msg>`
+    expect(result.sections?.citation).toEqual({ _error: 'Preprint citation lookup failed: PPR citation endpoints exploded' });
+  }, 15000);
+
+  test('articleGet omits funders when the official record carries the string "NA"', async () => {
+    const detailsNaFunder = {
+      ...biorxivDetailsPayload('bioRxiv', ['1']),
+      collection: [{
+        ...biorxivDetailsPayload('bioRxiv', ['1']).collection[0],
+        funder: 'NA', // the official API string sentinel, not an array
+      }],
+    };
+    global.fetch = jest.fn((url: unknown) => {
+      const u = String(url);
+      if (u.includes('api.biorxiv.org/details/biorxiv/')) return Promise.resolve(jsonResponse(detailsNaFunder));
+      if (u.includes('api.biorxiv.org/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
+      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse(epmcCorePayload));
+      return Promise.reject(new Error(`unexpected url ${u}`));
+    }) as any;
+
+    const result = await articleGet('10.1101/2025.03.05.641768');
+
+    expect(result.preprint?.data_source).toBe('api.biorxiv.org');
+    expect(result.preprint?.funders).toBeUndefined();
+  }, 15000);
+
+  test('articleGet preprint citation limit slices forward citations and references', async () => {
+    const threeCitations = [1, 2, 3].map(i => ({
+      id: String(1000 + i), source: 'MED', title: `Citing paper ${i}`, authorString: 'Doe J', journalTitle: 'Nature', pubYear: '2023',
+    }));
+    const threeReferences = [1, 2, 3].map(i => ({
+      id: String(2000 + i), source: 'MED', title: `Referenced paper ${i}`, authorString: 'Roe A', journalTitle: 'Science', pubYear: '2019',
+    }));
+    global.fetch = jest.fn((url: unknown) => {
+      const u = String(url);
+      if (u.includes('api.biorxiv.org/details/biorxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv', ['1'])));
+      if (u.includes('api.biorxiv.org/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
+      if (u.includes('/PPR910295/citations')) return Promise.resolve(jsonResponse({ hitCount: 3, citationList: { citation: threeCitations } }));
+      if (u.includes('/PPR910295/references')) return Promise.resolve(jsonResponse({ referenceList: { reference: threeReferences } }));
+      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse(epmcCorePayload));
+      return Promise.reject(new Error(`unexpected url ${u}`));
+    }) as any;
+
+    const result = await articleGet('10.1101/2021.10.25.465764', ['citation'], { limit: 2 });
+
+    const citation = result.sections?.citation as any;
+    expect(citation.forward_citations).toHaveLength(2);
+    // slice keeps the head of the list (post filter+transform)
+    expect(citation.forward_citations.map((c: any) => c.title)).toEqual(['Citing paper 1', 'Citing paper 2']);
+    expect(citation.backward_references).toHaveLength(2);
+    // fetch pageSize = max(limit*3, 10) — the limit still governs the returned window
+    const urls = (global.fetch as any).mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(urls.find(u => u.includes('/PPR910295/citations'))).toContain('pageSize=10');
+  }, 15000);
+
+  test('transformPreprint defaults the server label to bioRxiv when bookOrReportDetails is absent', () => {
+    const result = transformPreprint({
+      id: 'PPR123456',
+      doi: '10.1101/2025.01.01.000001',
+      title: 'A preprint without publisher metadata',
+      authorString: 'Zhang W, Li H',
+      firstPublicationDate: '2025-01-01',
+    });
+
+    expect(result.journal).toBe('bioRxiv');
+    expect(result.preprint_server).toBe('bioRxiv');
+    expect(result.source).toBe('preprint_only');
+    expect(result.ppr_id).toBe('PPR123456');
+  });
+
   test('getPreprintArticle per-segment URL-encodes reserved chars in the DOI path', async () => {
     global.fetch = jest.fn((url: unknown) => {
       const u = String(url);

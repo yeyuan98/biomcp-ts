@@ -132,11 +132,36 @@ const HTML_PAGE = `<!DOCTYPE html>
 <html><head><title>arXiv</title></head>
 <body><h1>Request blocked</h1></body></html>`;
 
+// Starts as a genuine feed but breaks mid-entry (truncated transfer): passes
+// the `<?xml`/`<feed>` sniff, then fast-xml-parser throws on the unterminated
+// tag — the mid-stream counterpart of the HTML fail-fast case.
+const TRUNCATED_MID_ENTRY_XML = `<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/1706.03762v2</id>
+    <title>Attention Is All You Need</title>
+    <published>2017-06-12T17:57:34Z</published>
+    <category te`;
+
+// Minimal single-entry feed wrapper for transform edge cases.
+const singleEntryFeed = (entry: string) => `<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+${entry}
+</feed>`;
+
 function atomResponse(xml: string) {
   return {
     ok: true,
     headers: new Headers({ 'content-type': 'application/atom+xml; charset=utf-8' }),
     text: () => Promise.resolve(xml),
+  };
+}
+
+function jsonResponse(body: unknown) {
+  return {
+    ok: true,
+    headers: new Headers({ 'content-type': 'application/json' }),
+    json: () => Promise.resolve(body),
   };
 }
 
@@ -196,6 +221,39 @@ describe('parseArxivAtomXml', () => {
   test('empty feed returns [] (0 hits are not an error)', () => {
     expect(parseArxivAtomXml(EMPTY_FEED_XML)).toEqual([]);
   });
+
+  test('entry with a non-arxiv <id> yields a keyless row (arxiv_id undefined) without throwing', () => {
+    const articles = parseArxivAtomXml(singleEntryFeed(`  <entry>
+    <id>http://example.org/x</id>
+    <title>Foreign entry outside the arxiv.org abs namespace</title>
+    <published>2020-01-01T00:00:00Z</published>
+    <author>
+      <name>Some One</name>
+    </author>
+  </entry>`));
+
+    // No throw: the id regex simply fails to match → arxiv_id stays undefined
+    expect(articles).toHaveLength(1);
+    expect(articles[0].arxiv_id).toBeUndefined();
+    expect(articles[0].title).toBe('Foreign entry outside the arxiv.org abs namespace');
+    // keyless in dedup terms: no pmid/pmcid/doi either
+    expect(articles[0].doi).toBeUndefined();
+    expect(articles[0].pmid).toBeUndefined();
+  });
+
+  test('absent arxiv:primary_category falls back to categories-only keywords', () => {
+    const articles = parseArxivAtomXml(singleEntryFeed(`  <entry>
+    <id>http://arxiv.org/abs/2104.12345v1</id>
+    <title>No primary category declared</title>
+    <published>2021-04-01T00:00:00Z</published>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+  </entry>`));
+
+    expect(articles).toHaveLength(1);
+    // no primary → categories verbatim, no dedupe-first reordering
+    expect(articles[0].keywords).toEqual(['cs.CL', 'cs.LG']);
+  });
 });
 
 describe('searchArxiv', () => {
@@ -242,6 +300,18 @@ describe('searchArxiv', () => {
     expect(openToEnd).toContain('+AND+submittedDate:%22202001010000+TO+209912312359%22');
     const openFromStart = (global.fetch as any).mock.calls[1][0] as string;
     expect(openFromStart).toContain('+AND+submittedDate:%22199107010000+TO+202012312359%22');
+  });
+
+  test('both-bounds dateRange sends submittedDate:"A TO B" with no sentinel bounds', async () => {
+    global.fetch = jest.fn().mockResolvedValue(atomResponse(EMPTY_FEED_XML)) as any;
+
+    await articleSearch('quantum', { source: 'arxiv', dateRange: '2020-01-01/2020-12-31' });
+
+    const url = (global.fetch as any).mock.calls[0][0] as string;
+    expect(url).toContain('+AND+submittedDate:%22202001010000+TO+202012312359%22');
+    // neither the 1991 arXiv-epoch nor the 2099 upper sentinel leaks in
+    expect(url).not.toContain('199107010000');
+    expect(url).not.toContain('209912312359');
   });
 
   test('clamps max_results at 50 and passes offset as start', async () => {
@@ -313,4 +383,64 @@ describe('searchArxiv', () => {
     expect(result).toEqual([]);
     expect(global.fetch).not.toHaveBeenCalled();
   });
+
+  test('fetch transport rejection surfaces as a single generic _error row', async () => {
+    // 'fetch failed' matches the connection-layer network signature, so the
+    // registry retry policy fires first (attempts: 2 → exactly 2 fetches);
+    // NB: this test sleeps through one real ~3.5 s retry backoff like the
+    // 429 test above (only the rate limiter is mocked — see file header).
+    global.fetch = jest.fn().mockRejectedValue(new TypeError('fetch failed')) as any;
+
+    const result = await searchArxiv('electron', 10, 0);
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(result).toHaveLength(1);
+    // backendErrorRow generic wording, byte-identical to the shared envelope
+    expect(result[0]._error).toBe(
+      'searchArxiv failed: fetch failed. This may be a temporary data source issue. Try again or use a different source.'
+    );
+  });
+
+  test('truncated mid-entry XML fails parsing and surfaces as an _error row', async () => {
+    // Passes the feed sniff (<?xml + <feed>), then the parser hits the
+    // unterminated tag mid-entry and throws — wrapped by the shared catch.
+    global.fetch = jest.fn().mockResolvedValue(atomResponse(TRUNCATED_MID_ENTRY_XML)) as any;
+
+    const result = await searchArxiv('electron', 10, 0);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]._error).toContain('searchArxiv failed');
+    expect(result[0]._error).toContain('Failed to parse arXiv Atom XML');
+  });
+
+  test('federated run drops the arXiv leg\'s _error row when the other legs succeed', async () => {
+    // arXiv leg rejects at the transport level (retried once, then a
+    // single-element _error row); Europe PMC returns keyed rows so the
+    // final federated pool is non-empty and provably _error-free.
+    const europepmcRows = {
+      resultList: {
+        result: [
+          { pmid: '41721000', title: 'Cited journal row', authorString: 'Smith J', journalTitle: 'Nature', firstPublicationDate: '2026-01-01', citedByCount: 5, isOpenAccess: 'N' },
+          { pmid: '41721001', title: 'Second journal row', authorString: 'Doe A', journalTitle: 'Cell', firstPublicationDate: '2026-02-01', citedByCount: 1, isOpenAccess: 'Y' },
+        ],
+      },
+    };
+    global.fetch = jest.fn((url: unknown) => {
+      const u = String(url);
+      if (u.includes('export.arxiv.org')) return Promise.reject(new TypeError('fetch failed'));
+      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse(europepmcRows));
+      if (u.includes('semanticscholar.org')) return Promise.resolve(jsonResponse({ data: [] }));
+      if (u.includes('pubtator3-api')) return Promise.resolve(jsonResponse({ results: [] }));
+      if (u.includes('litsense2-api')) return Promise.resolve(jsonResponse([]));
+      return Promise.resolve(jsonResponse({ esearchresult: { idlist: [] } })); // eutils esearch
+    }) as any;
+
+    const result = await articleSearch('crispr');
+
+    // the arXiv outage degraded to an _error row which dedup dropped
+    expect(result.some(r => Boolean(r._error))).toBe(false);
+    expect(result).toHaveLength(2);
+    expect(result.map(r => r.pmid)).toEqual(['41721000', '41721001']);
+  });
+});
 });
