@@ -33,6 +33,21 @@ export function parseArticleId(id: string): { type: 'pmid' | 'pmcid' | 'doi'; va
   throw new Error(`Unrecognized identifier format: "${id}". Expected PMID (numeric), PMCID (PMC...), or DOI (10.x/...).`);
 }
 
+/**
+ * Preprint DOI classifier for bioRxiv/medRxiv.
+ *
+ * The legacy 10.1101/YYYY.MM.DD.NNNNNN form is shared by both preprint
+ * servers AND by CSHL Press journals (e.g. 10.1101/gr.123456 for Genome
+ * Research), so the strict four-component date form is required — a bare
+ * prefix match would misclassify journal articles. Both preprint servers
+ * now also post under the new 10.64898 prefix (live-verified 2026-09),
+ * which is preprint-only. The prefix never identifies the server; the
+ * record's `server` field does.
+ */
+export function isPreprintDoi(doi: string): boolean {
+  return /^10\.1101\/\d{4}\.\d{2}\.\d{2}\.\d+$/.test(doi) || /^10\.64898\/\S+$/.test(doi);
+}
+
 export async function resolveToPmid(id: string, type: 'doi' | 'pmcid'): Promise<ResolvedPmid> {
   try {
     const conn = connectionManager.getConnection('ncbi_idconv');

@@ -125,7 +125,7 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   },
 
   // ==========================================
-  // LITERATURE - REST (9 sources)
+  // LITERATURE - REST (10 sources)
   // ==========================================
   // Shared NCBI E-utilities connection: serves PubMed (article_*), GEO
   // (db=gds), SRA (db=sra), GenBank (db=nuccore) and BioSample lookups.
@@ -254,6 +254,22 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     // Fail loudly on unexpected redirects instead of silently following them.
     followRedirects: false,
     rateLimit: { intervalMs: 1000 },
+  },
+  // Official bioRxiv/medRxiv API (keyless). Serves preprint record fetching
+  // (details/pubs, DOI-form); topical preprint search goes through Europe
+  // PMC's PPR index instead (this API has no keyword-search endpoint).
+  // All upstream errors are HTTP 200 with messages[0].status strings —
+  // callers branch on the status, never the HTTP code. No published rate
+  // limit, but the host is a small PHP service with highly variable
+  // latency (observed 1.2–12.8 s per DOI-form call): 1 req/s politeness
+  // (measured safe at 2 rps), generous timeout, one retry.
+  biorxiv: {
+    sourceId: 'biorxiv',
+    baseUrl: 'https://api.biorxiv.org',
+    protocol: 'rest',
+    handling: { timeoutMs: 15000 },
+    rateLimit: { intervalMs: 1000 },
+    retry: { attempts: 2, backoffMs: 1000 },
   },
   
   // ==========================================

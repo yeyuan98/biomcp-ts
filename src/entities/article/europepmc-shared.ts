@@ -19,6 +19,36 @@ export interface EuropePMCRecord {
   isOpenAccess?: string;
 }
 
+/** resultType=core search row for a preprint (source=PPR) record.
+ * `abstractText` and `bookOrReportDetails` only exist in core results
+ * (live-verified): abstracts and the per-record bioRxiv/medRxiv server
+ * label are the point of the preprint search backend. */
+export interface EuropePMCPreprintRecord {
+  id?: string;
+  source?: string;
+  doi?: string;
+  title?: string;
+  authorString?: string;
+  abstractText?: string;
+  firstPublicationDate?: string;
+  citedByCount?: number;
+  isOpenAccess?: string;
+  /** "bioRxiv" or "medRxiv" for PPR records */
+  bookOrReportDetails?: {
+    publisher?: string;
+    yearOfPublication?: number;
+  };
+  /** "Preprint of" entries link a preprint to its published version (PMID) */
+  commentCorrectionList?: {
+    commentCorrection?: Array<{
+      source?: string;
+      id?: string;
+      type?: string;
+      reference?: string;
+    }>;
+  };
+}
+
 /** row from /{source}/{id}/citations and /references lists */
 export interface EuropePMCCitationEntry {
   id?: string;

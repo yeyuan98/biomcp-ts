@@ -71,8 +71,8 @@ Full tool schemas (params, enums, defaults) live in [src/server/README.md](src/s
 
 | Tool | Description |
 |------|-------------|
-| `article_search` | Federated literature search across PubMed, EuropePMC, Semantic Scholar, PubTator, and LitSense with optional date range filtering |
-| `article_get` | Get detailed article info by identifier (PMID, PMCID, or DOI) with optional sections: `oa` (open access / license info), `annotations`, `graph` (citation graph), `citation` (fast/full citation data) |
+| `article_search` | Federated literature search across PubMed, EuropePMC, Semantic Scholar, PubTator, and LitSense with optional date range filtering; `source: "preprint_only"` switches to bioRxiv+medRxiv preprints only (abstracts, citation counts, date filtering) |
+| `article_get` | Get detailed article info by identifier (PMID, PMCID, DOI, or bioRxiv/medRxiv preprint DOI) with optional sections: `oa` (open access / license info), `annotations`, `graph` (citation graph), `citation` (fast/full citation data; Europe PMC citations for preprints). Preprint records include all versions, license, category, funders, JATS full-text URL, and published-version mapping |
 
 ### Trial (2)
 

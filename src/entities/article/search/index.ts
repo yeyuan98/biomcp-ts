@@ -6,6 +6,7 @@ import { searchEuropePMC } from './europepmc.js';
 import { searchSemanticScholar } from './semantic-scholar.js';
 import { searchPubTator } from './pubtator.js';
 import { searchLitSense } from './litsense.js';
+import { searchPreprints } from './preprint.js';
 
 const FEDERATED_SEARCH_TIMEOUT_MS = 20000;
 
@@ -74,7 +75,7 @@ async function searchSingleSource(
   dateRange?: ParsedDateRange
 ): Promise<Article[]> {
   if (dateRange && (source === 'pubtator' || source === 'litsense')) {
-    return [{ _error: `${source} does not support date filtering. Use pubmed, europepmc, or semantic_scholar.` } as any];
+    return [{ _error: `${source} does not support date filtering. Use pubmed, europepmc, semantic_scholar, or preprint_only.` } as any];
   }
   switch (source) {
     case 'pubmed': return searchPubMed(query, limit, offset, dateRange);
@@ -82,6 +83,10 @@ async function searchSingleSource(
     case 'semantic_scholar': return searchSemanticScholar(query, limit, offset, dateRange);
     case 'pubtator': return searchPubTator(query, limit, offset);
     case 'litsense': return searchLitSense(query, limit, offset);
+    // Preprint-only mode: bioRxiv + medRxiv via Europe PMC's PPR index.
+    // Deliberately NOT part of the default federated fan-out — preprints
+    // are only returned when explicitly requested.
+    case 'preprint_only': return searchPreprints(query, limit, offset, cursorMark, dateRange);
     default: return [];
   }
 }
