@@ -321,6 +321,19 @@ describe('article', () => {
     expect(result).toEqual([]);
   });
 
+  test('articleSearch() europepmc missing resultList yields empty page', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({ hitCount: 0 }),
+    }) as any;
+
+    const result = await articleSearch('brca1', { source: 'europepmc', limit: 5 });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(result).toEqual([]);
+  });
+
   test('articleSearch() europepmc explicit cursorMark takes precedence over offset', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
@@ -638,6 +651,35 @@ describe('article', () => {
       const callUrl = (global.fetch as any).mock.calls[0][0] as string;
       const decodedUrl = decodeURIComponent(callUrl);
       expect(decodedUrl).toContain('pub_year:[* TO 2023]');
+    });
+
+    test('Europe PMC search date clause is year-granular across distinct years', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ resultList: { result: [] } }),
+      }) as any;
+
+      await articleSearch('brca1', { source: 'europepmc', dateRange: '2020-06-15/2021-03-01' });
+
+      const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+      const decodedUrl = decodeURIComponent(callUrl);
+      // month/day is truncated: the clause carries years only
+      expect(decodedUrl).toContain('brca1 AND pub_year:[2020 TO 2021]');
+    });
+
+    test('Europe PMC search with open-ended from-only dateRange', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ resultList: { result: [] } }),
+      }) as any;
+
+      await articleSearch('brca1', { source: 'europepmc', dateRange: '2020-06-01/' });
+
+      const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+      const decodedUrl = decodeURIComponent(callUrl);
+      expect(decodedUrl).toContain('pub_year:[2020 TO *]');
     });
 
     test('Semantic Scholar search appends publicationDateOrYear param', async () => {
@@ -1613,6 +1655,39 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     expect(url).toContain(`pageSize=${Math.min(3 + 5, 1000)}`);
     // client-side window: rows 5..7 of the 10-row fixture
     expect(result.map(r => r.title)).toEqual(['Preprint 5', 'Preprint 6', 'Preprint 7']);
+  });
+
+  test('articleSearch preprint_only date clause is year-granular and follows the PPR wrapper', async () => {
+    global.fetch = jest.fn().mockResolvedValue(jsonResponse(preprintCorePage(3))) as any;
+
+    await articleSearch('vaccine', { source: 'preprint_only', dateRange: '2020-06-15/2021-03-01' });
+
+    const url = (global.fetch as any).mock.calls[0][0] as string;
+    const decoded = decodeURIComponent(url);
+    expect(decoded).toContain('(vaccine) AND SRC:PPR AND PUBLISHER:(bioRxiv OR medRxiv) AND pub_year:[2020 TO 2021]');
+  });
+
+  test('articleSearch preprint_only explicit cursorMark takes precedence over offset', async () => {
+    global.fetch = jest.fn().mockResolvedValue(jsonResponse(preprintCorePage(6))) as any;
+
+    const result = await articleSearch('crispr', { source: 'preprint_only', limit: 2, offset: 4, cursorMark: 'AoIIQCC9' });
+
+    const url = (global.fetch as any).mock.calls[0][0] as string;
+    expect(url).toContain('pageSize=2');
+    expect(url).toContain('cursorMark=AoIIQCC9');
+    expect(url).not.toContain('cursorMark=*');
+    // the cursor defines the window start: offset is ignored, rows come
+    // from the head of the page with no client-side skip
+    expect(result.map(r => r.title)).toEqual(['Preprint 0', 'Preprint 1']);
+  });
+
+  test('articleSearch preprint_only empty resultList.result yields []', async () => {
+    global.fetch = jest.fn().mockResolvedValue(jsonResponse({ resultList: {} })) as any;
+
+    const result = await articleSearch('crispr', { source: 'preprint_only' });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(result).toEqual([]);
   });
 
   test('articleSearch preprint_only returns _error row on transport failure', async () => {
