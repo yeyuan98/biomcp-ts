@@ -1,0 +1,28 @@
+
+
+
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/ http://www.openarchives.org/OAI/2.0/OAI-PMH.xsd">
+    <responseDate>2026-09-19T11:20:08Z</responseDate>
+    <request verb="Identify">https://pmc.ncbi.nlm.nih.gov/api/oai/v1/mh/</request>
+    
+    <Identify>
+        <repositoryName>PubMed Central</repositoryName>
+        <baseURL>https://pmc.ncbi.nlm.nih.gov/api/oai/v1/mh/</baseURL>
+        <protocolVersion>2.0</protocolVersion>
+        <adminEmail>pubmedcentral@ncbi.nlm.nih.gov</adminEmail>
+        <earliestDatestamp>1999-01-01</earliestDatestamp>
+        <deletedRecord>no</deletedRecord>
+        <granularity>YYYY-MM-DD</granularity>
+        <description>
+            <oai-identifier xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                            xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai-identifier http://www.openarchives.org/OAI/2.0/oai-identifier.xsd">
+                <scheme>oai</scheme>
+                <repositoryIdentifier>pubmedcentral.nih.gov</repositoryIdentifier>
+                <delimiter>:</delimiter>
+                <sampleIdentifier>oai:pubmedcentral.nih.gov:13900</sampleIdentifier>
+            </oai-identifier>
+        </description>
+    </Identify>
+
+</OAI-PMH>

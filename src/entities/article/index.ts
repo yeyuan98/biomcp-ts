@@ -10,6 +10,8 @@ export { transformLitSense } from './search/litsense.js';
 export { transformPreprint } from './search/preprint.js';
 export { getPreprintArticle, splitSemicolonAuthors } from './detail/preprint.js';
 export { parsePubMedXml } from './transform/pubmed.js';
+export { parseArxivAtomXml } from './transform/arxiv.js';
+export { searchArxiv } from './search/arxiv.js';
 export { parseOaXml } from './detail/open-access.js';
 export { getCitations, clearCitationCache } from './citation/index.js';
 export type { ArticleId, CitationRecord, CitationCount, SourceCitationResult, FederatedCitationResult } from './citation/types.js';

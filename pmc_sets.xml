@@ -1,0 +1,570 @@
+
+
+
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/ http://www.openarchives.org/OAI/2.0/OAI-PMH.xsd">
+    <responseDate>2026-09-19T11:20:40Z</responseDate>
+    <request verb="ListSets">https://pmc.ncbi.nlm.nih.gov/api/oai/v1/mh/</request>
+    
+    <ListSets>
+    
+        <set>
+            <setSpec>pmc-open</setSpec>
+            <setName>PMC Open Access Subset</setName>
+        </set>
+    
+       
+        <set>
+            <setSpec>threebio</setSpec>
+            <setName>3 Biotech</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>Springer</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101565857</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>threedpam</setSpec>
+            <setName>3D Printing and Additive Manufacturing</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>SAGE Publications</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101649453</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>threedprintmed</setSpec>
+            <setName>3D Printing in Medicine</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>BMC</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101721758</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>aaceccr</setSpec>
+            <setName>AACE Clinical Case Reports</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Association of Clinical Endocrinology</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101670593</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>aaceed</setSpec>
+            <setName>AACE Endocrinology and Diabetes</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Association of Clinical Endocrinology</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=9919052034906676</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>pharmsci</setSpec>
+            <setName>AAPS PharmSci</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>Springer</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=100897065</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>aapspharm</setSpec>
+            <setName>AAPS PharmSciTech</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>Springer</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=100960111</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>aasopenres</setSpec>
+            <setName>AAS Open Research</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>African Academy of Sciences</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101740247</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>acgcasereps</setSpec>
+            <setName>ACG Case Reports Journal</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American College of Gastroenterology</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101638398</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>aciopen</setSpec>
+            <setName>ACI open</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>Thieme Medical Publishers</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101765514</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>acropen</setSpec>
+            <setName>ACR Open Rheumatology</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>Wiley</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101740025</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>acsbmcau</setSpec>
+            <setName>ACS Bio &amp; Med Chem Au</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Chemical Society</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=9918232604406676</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>acscentsci</setSpec>
+            <setName>ACS Central Science</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Chemical Society</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101660035</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>acschemneuro</setSpec>
+            <setName>ACS Chemical Neuroscience</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Chemical Society</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101525337</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>acsenvau</setSpec>
+            <setName>ACS Environmental Au</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Chemical Society</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=9918300984206676</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>acsmatsau</setSpec>
+            <setName>ACS Materials Au</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Chemical Society</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=9918300688806676</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>acsmsau</setSpec>
+            <setName>ACS Measurement Science Au</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Chemical Society</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=9918232604306676</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>acsmedlett</setSpec>
+            <setName>ACS Medicinal Chemistry Letters</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Chemical Society</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101521073</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>acsnanoau</setSpec>
+            <setName>ACS Nanoscience Au</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Chemical Society</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=9918316881006676</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>acsomega</setSpec>
+            <setName>ACS Omega</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Chemical Society</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101691658</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>acsoiau</setSpec>
+            <setName>ACS Organic &amp; Inorganic Au</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Chemical Society</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=9918282981206676</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>acspts</setSpec>
+            <setName>ACS Pharmacology &amp; Translational Science</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Chemical Society</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101721411</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>acspchemau</setSpec>
+            <setName>ACS Physical Chemistry Au</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Chemical Society</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=9918300980006676</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>acspolymau</setSpec>
+            <setName>ACS Polymers Au</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Chemical Society</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=9918248914506676</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>admet</setSpec>
+            <setName>ADMET &amp; DMPK</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>International Association of Physical Chemists</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101660124</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>aemeductrain</setSpec>
+            <setName>AEM Education and Training</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>Wiley</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101722142</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>apc</setSpec>
+            <setName>AIDS Patient Care and STDs</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>SAGE Publications</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=9607225</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>aid</setSpec>
+            <setName>AIDS Research and Human Retroviruses</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>SAGE Publications</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=8709376</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>aidsresther</setSpec>
+            <setName>AIDS Research and Therapy</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>BMC</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101237921</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>art</setSpec>
+            <setName>AIDS Research and Treatment</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>Wiley</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101553816</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>aimsgenetics</setSpec>
+            <setName>AIMS Genetics</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>KeAi Publishing</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101634348</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>aimsmicrobiol</setSpec>
+            <setName>AIMS Microbiology</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>AIMS Press</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101697141</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>aimsneurosci</setSpec>
+            <setName>AIMS Neuroscience</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>AIMS Press</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101665668</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>aimsph</setSpec>
+            <setName>AIMS Public Health</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>AIMS Press</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101635098</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>aipadv</setSpec>
+            <setName>AIP Advances</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Institute of Physics</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101566109</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>ajnr</setSpec>
+            <setName>AJNR: American Journal of Neuroradiology</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Society of Neuroradiology</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=8003708</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>ajoggr</setSpec>
+            <setName>AJOG Global Reports</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>Elsevier</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101777907</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>ajpr</setSpec>
+            <setName>AJP Reports</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>Thieme Medical Publishers</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101569862</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>ajpmfocus</setSpec>
+            <setName>AJPM Focus</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>Elsevier</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=9918487585606676</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>ambex</setSpec>
+            <setName>AMB Express</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>Springer</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101561785</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>amecasereps</setSpec>
+            <setName>AME Case Reports</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>AME Publications</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101730832</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>procamia</setSpec>
+            <setName>AMIA Annual Symposium Proceedings</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Medical Informatics Association</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101209213</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>amiasummtsp</setSpec>
+            <setName>AMIA Summits on Translational Science Proceedings</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Medical Informatics Association</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101539486</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>amrcor</setSpec>
+            <setName>AMRC Open Research</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>Faculty of 1000 Ltd</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101755131</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>aorta</setSpec>
+            <setName>AORTA Journal</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>Thieme Medical Publishers</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101655549</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>aplbio</setSpec>
+            <setName>APL Bioengineering</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Institute of Physics</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101726398</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>apspcaserep</setSpec>
+            <setName>APSP Journal of Case Reports</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>The Association of Paediatric Surgeons of Pakistan</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101570795</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>aryaath</setSpec>
+            <setName>ARYA Atherosclerosis</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>Isfahan Cardiovascular Research Institute, Isfahan University of Medical Sciences</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101487337</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>asmcr</setSpec>
+            <setName>ASM Case Reports</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>American Society for Microbiology (ASM)</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=9919031604206676</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <set>
+            <setSpec>asnneuro</setSpec>
+            <setName>ASN NEURO</setName>
+            <setDescription>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
+                    <dc:publisher>Taylor &amp; Francis</dc:publisher>
+                    <dc:identifier>https://pmc.ncbi.nlm.nih.gov/journals/?term=101507115</dc:identifier>
+                </oai_dc:dc>
+            </setDescription>
+        </set>
+       
+        <resumptionToken>WzUwXQ:jOT1jBLSYP8Ovp53UNXVZ7FPkxc86-2RTBC2SX7qhgs</resumptionToken>
+    </ListSets>
+
+</OAI-PMH>

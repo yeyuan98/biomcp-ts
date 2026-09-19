@@ -25,6 +25,8 @@ npx biomcp             # zero-config stdio MCP server (this is what MCP clients 
 
 **Setup is guided in [docs/AGENT-INSTALL.md](docs/AGENT-INSTALL.md)** — a one-minute start, copy-paste config entries for Claude Desktop, Claude Code, Codex, and OpenCode (one canonical pinned command covering every feature), `biomcp doctor` as the single troubleshooting entry point, and agent-friendly paths for API keys and optional features.
 
+**Multiple agents on one machine:** biomcp enforces arXiv's Terms-of-Use rate limit (1 request / 3 s) per process. When running multiple biomcp MCP instances on one machine (e.g., one stdio instance per agent), rate limits are not coordinated across processes, and arXiv's TOU applies to all your machines in aggregate. For multi-agent single-machine deployments, run a single shared `biomcp serve` daemon (see [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md)) so all agents share one process and one global rate limiter.
+
 ## Available Tools
 
 Full tool schemas (params, enums, defaults) live in [src/server/README.md](src/server/README.md).
@@ -71,7 +73,7 @@ Full tool schemas (params, enums, defaults) live in [src/server/README.md](src/s
 
 | Tool | Description |
 |------|-------------|
-| `article_search` | Federated literature search across PubMed, EuropePMC, Semantic Scholar, PubTator, and LitSense with optional date range filtering; `source: "preprint_only"` switches to bioRxiv+medRxiv preprints only (abstracts, citation counts, date filtering) |
+| `article_search` | Federated literature search across PubMed, EuropePMC, Semantic Scholar, arXiv, PubTator, and LitSense with optional date range filtering; `source: "preprint_only"` switches to bioRxiv+medRxiv preprints only (abstracts, citation counts, date filtering) |
 | `article_get` | Get detailed article info by identifier (PMID, PMCID, DOI, or bioRxiv/medRxiv preprint DOI) with optional sections: `oa` (open access / license info), `annotations`, `graph` (citation graph), `citation` (fast/full citation data; Europe PMC citations for preprints). Preprint records include all versions, license, category, funders, JATS full-text URL, and published-version mapping |
 
 ### Trial (2)

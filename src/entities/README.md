@@ -164,7 +164,7 @@ transformMyDiseaseResponse(data: Record<string, unknown>): DiseaseResult
 
 ## Article (`article/`)
 
-**Primary source:** PubMed (via the shared `eutils` connection) for get; federated across 5 sources for search
+**Primary source:** PubMed (via the shared `eutils` connection) for get; federated across 6 sources for search
 
 ### Architecture
 
@@ -174,7 +174,7 @@ article/
 ├── types.ts              # Article, ArticleSearchOptions, ArticleResult, ArticleGetOptions
 ├── europepmc-shared.ts   # Shared EuropePMC helpers
 ├── semantic-scholar-queue.ts  # Global single-flight queue for ALL Semantic Scholar traffic
-├── search/               # Search backends (5 sources)
+├── search/               # Search backends (7 sources: 6 in the default federation + preprint_only opt-in)
 │   ├── index.ts          # articleSearch() orchestrator + federatedSearch (20s per-backend throw timeout)
 │   ├── dedup.ts          # deduplicateAndRank()
 │   ├── pubmed.ts         # searchPubMed(), formatPubMedDate()
@@ -182,7 +182,8 @@ article/
 │   ├── semantic-scholar.ts # searchSemanticScholar(), transformSemanticScholar()
 │   ├── pubtator.ts       # searchPubTator(), transformPubTator()
 │   ├── litsense.ts       # searchLitSense(), transformLitSense()
-│   └── preprint.ts       # searchPreprints(), transformPreprint() (bioRxiv+medRxiv via Europe PMC PPR index; resultType=core; NOT in default federation)
+│   ├── preprint.ts       # searchPreprints(), transformPreprint() (bioRxiv+medRxiv via Europe PMC PPR index; resultType=core; NOT in default federation)
+│   └── arxiv.ts          # searchArxiv() (Atom Query API on export.arxiv.org)
 ├── detail/               # Article get + sections
 │   ├── index.ts          # articleGet() orchestrator (sections run via Promise.allSettled; preprint DOIs branch early)
 │   ├── id-resolution.ts  # parseArticleId(), resolveToPmid(), resolveDoiToPmid(), isPreprintDoi()
@@ -199,7 +200,8 @@ article/
 │   ├── crossref.ts       # Crossref count + backward references provider
 │   └── opencitations.ts  # OpenCitations v2 DOI-based provider
 └── transform/
-    └── pubmed.ts         # parsePubMedXml(), preprocessPubMedXml()
+    ├── pubmed.ts         # parsePubMedXml(), preprocessPubMedXml()
+    └── arxiv.ts          # parseArxivAtomXml() (feed-root sniff + entry mapping)
 ```
 
 ### Exported Functions
@@ -217,13 +219,14 @@ transformPreprint(a: EuropePMCPreprintRecord): Article
 getPreprintArticle(doi: string, options?: { sections?: string[]; limit?: number }): Promise<ArticleResult>
 isPreprintDoi(doi: string): boolean
 splitSemicolonAuthors(authors?: string): string[] | undefined
+parseArxivAtomXml(xml: string): Article[]
 ```
 
 (`getCitations` is exported from `article/citation/index.ts`, not the article barrel.)
 
 ### Federated Search
 
-When no `source` is specified, `articleSearch` queries all 5 backends concurrently via `Promise.allSettled`, each wrapped in a 20-second throw-mode `withTimeout` so a hung backend is recorded as an error result. With `dateRange` set, only the 3 backends that support date filtering run (PubMed, Europe PMC, Semantic Scholar).
+When no `source` is specified, `articleSearch` queries all 6 backends concurrently via `Promise.allSettled`, each wrapped in a 20-second throw-mode `withTimeout` so a hung backend is recorded as an error result. With `dateRange` set, only the 4 backends that support date filtering run (PubMed, Europe PMC, Semantic Scholar, arXiv).
 
 | Backend | Connection | Notes |
 |---------|-----------|-------|
@@ -233,8 +236,9 @@ When no `source` is specified, `articleSearch` queries all 5 backends concurrent
 | PubTator | `pubtator` | BioNER-annotated search; server-side pagination via `page`/`size` (size clamped 10–100, page derived from offset) |
 | LitSense | `litsense` | Sentence-level search (NCBI) via `limit=` param |
 | Preprints (bioRxiv+medRxiv) | `europepmc` | `source: 'preprint_only'` only — never in the default federation. `SRC:PPR AND PUBLISHER:(bioRxiv OR medRxiv)` with `resultType=core` (abstracts + `bookOrReportDetails.publisher` server labels only exist in core); same cursorMark/offset-window mechanics as the journal backend |
+| arXiv | `arxiv` | Preprint server via the Atom Query API (`export.arxiv.org`, always Atom XML); records carry a versionless `arxiv_id`, `journal: "arXiv"`, `publication_types: ["preprint"]`; the registry limiter enforces the arXiv Terms-of-Use rate of 1 request / 3 s |
 
-Results are deduplicated by PMID/PMCID/DOI and ranked by citation count via `deduplicateAndRank`.
+Results are deduplicated by PMID/PMCID/DOI/arXiv ID and ranked by citation count via `deduplicateAndRank`.
 
 ### Preprint Fetch (`detail/preprint.ts`)
 

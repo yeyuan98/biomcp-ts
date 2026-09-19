@@ -1,0 +1,185 @@
+
+
+
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/ http://www.openarchives.org/OAI/2.0/OAI-PMH.xsd">
+    <responseDate>2026-09-19T11:23:43Z</responseDate>
+    <request verb="ListRecords" from="2026-09-10" until="2026-09-10" metadataPrefix="oai_dc">https://pmc.ncbi.nlm.nih.gov/api/oai/v1/mh/</request>
+    
+    
+    <ListRecords>
+        
+        <record>
+    <header>
+    <identifier>oai:pubmedcentral.nih.gov:7618889</identifier>
+    <datestamp>2026-09-10</datestamp>
+    
+        
+        <setSpec>pmc-open</setSpec>
+        
+    
+</header>
+    <metadata>
+        
+        <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd"><dc:title>Antecedents and outcomes of a later attention deficit hyperactivity disorder (ADHD) diagnosis in females</dc:title><dc:creator>Martin, Joanna</dc:creator><dc:creator>Rouquette, Olivier Y.</dc:creator><dc:creator>Langley, Kate</dc:creator><dc:creator>Cooper, Miriam</dc:creator><dc:creator>Sayal, Kapil</dc:creator><dc:creator>Ford, Tamsin</dc:creator><dc:creator>John, Ann</dc:creator><dc:creator>Thapar, Anita</dc:creator><dc:source>Br J Psychiatry</dc:source><dc:subject>Article</dc:subject><dc:description>BACKGROUND: Females are less likely than males to be diagnosed with attention deficit hyperactivity disorder (ADHD). When diagnosed, females are older than males. AIMS: In this study, we examined the childhood antecedents of later ADHD diagnosis and its impact on adolescent/emerging adult outcomes, with a focus on females. METHOD: In this cohort study, we used data from a Welsh nation-wide electronic cohort of 13,593 individuals (N=2,680 (19.7%) females) diagnosed with ADHD and 578,793 individuals (N=286,734 (49.5%) females) without ADHD. We compared females with later diagnoses (ages 12&#8211;25) to those with earlier, timely diagnoses (ages 5&#8211;11) and no diagnosis, in terms of childhood (ages 5&#8211;11) antecedents and adolescent/adult (ages 12&#8211;25) outcomes. We also tested for sex differences. RESULTS: Although females with earlier ADHD diagnosis showed more health and educational difficulties in childhood than those with later diagnosed ADHD (ORs ranged from 0.18&#8211;0.92), there was clear evidence of these difficulties in females with later diagnosed ADHD, compared to females without ADHD (ORs: 1.07&#8211;9.02). In adolescence/early adulthood, females with later diagnosed ADHD used more healthcare services and had worse mental health, educational and socioeconomic outcomes than females diagnosed earlier (ORs: 1.39&#8211;4.96) and those without ADHD (ORs: 1.54&#8211;23.98). Many of these outcomes were exacerbated in females compared to males. CONCLUSIONS: The results demonstrate that later ADHD diagnosis is associated with significant negative outcomes by adolescence and disproportionately disadvantages females. Despite later diagnosis, there was clear evidence of childhood mental health and educational difficulties when compared to females without ADHD. Therefore, timely childhood ADHD diagnosis may help to mitigate later risks, especially for females.</dc:description><dc:date>2026-03-10</dc:date><dc:identifier>https://pmc.ncbi.nlm.nih.gov/articles/PMC7618889/</dc:identifier><dc:identifier>https://pubmed.ncbi.nlm.nih.gov/41804225/</dc:identifier><dc:identifier>https://doi.org/10.1192/bjp.2026.10556</dc:identifier><dc:type>Text</dc:type><dc:language>en</dc:language></oai_dc:dc>
+        
+    </metadata>
+</record>
+        
+        <record>
+    <header>
+    <identifier>oai:pubmedcentral.nih.gov:7619471</identifier>
+    <datestamp>2026-09-10</datestamp>
+    
+        
+        <setSpec>pmc-open</setSpec>
+        
+    
+</header>
+    <metadata>
+        
+        <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd"><dc:title>Perinatal palliative care: how to approach antenatal counselling</dc:title><dc:creator>Bertaud, Sophie</dc:creator><dc:creator>Bailey, Paula-Ann</dc:creator><dc:creator>Balmforth, Sara</dc:creator><dc:creator>Brightley, Georgina</dc:creator><dc:creator>English, Sharon</dc:creator><dc:creator>Pearson, Alison</dc:creator><dc:creator>Williams, Katrina</dc:creator><dc:source>Arch Dis Child Educ Pract Ed</dc:source><dc:subject>Article</dc:subject><dc:description>There is a growing recognition that perinatal palliative care is appropriate whenever there is uncertainty about a baby&#8217;s survival outcome. Many aspects of this care can, and should, be provided by existing perinatal teams, with support from community and specialist services where required. However, delivering perinatal palliative care can be practically, ethically and emotionally challenging for professionals without adequate guidance and training. In this best practice paper, we offer practical guidance for clinicians who may be involved in antenatal counselling when a baby has been diagnosed with a potentially life-limiting condition during pregnancy. We consider how to approach antenatal counselling in the context of prognostic uncertainty, how to support families in being able to treasure their pregnancy, how to remain open to all possibilities, how to develop individualised care plans for families and finally consider how to close the consultation and arrange follow up. Drawing on the parental experience of one of our authors we explore how to navigate the concept of hope in perinatal consultations.</dc:description><dc:date>2026-04-15</dc:date><dc:identifier>https://pmc.ncbi.nlm.nih.gov/articles/PMC7619471/</dc:identifier><dc:identifier>https://pubmed.ncbi.nlm.nih.gov/41986116/</dc:identifier><dc:identifier>https://doi.org/10.1136/archdischild-2025-329875</dc:identifier><dc:type>Text</dc:type><dc:language>en</dc:language><dc:rights>This work is licensed under a CC BY 4.0 International license.</dc:rights><dc:rights>https://creativecommons.org/licenses/by/4.0/</dc:rights></oai_dc:dc>
+        
+    </metadata>
+</record>
+        
+        <record>
+    <header>
+    <identifier>oai:pubmedcentral.nih.gov:7619472</identifier>
+    <datestamp>2026-09-10</datestamp>
+    
+        
+        <setSpec>pmc-open</setSpec>
+        
+    
+</header>
+    <metadata>
+        
+        <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd"><dc:title>Bridging-Induced Phase Separation and Loop Extrusion Drive Noise in Chromatin Transcription</dc:title><dc:creator>Chiang, Michael</dc:creator><dc:creator>Battaglia, Cleis</dc:creator><dc:creator>Forte, Giada</dc:creator><dc:creator>Brackley, Chris A.</dc:creator><dc:creator>Gilbert, Nick</dc:creator><dc:creator>Marenduzzo, Davide</dc:creator><dc:source>Phys Rev Lett</dc:source><dc:subject>Article</dc:subject><dc:description>Cell-to-cell heterogeneity in transcription, or transcriptional noise, is important in cellular development and in disease. The molecular mechanisms driving it are, however, elusive and ill-understood. Here, we use computer simulations to explore the role of 3D chromatin structure in driving transcriptional noise. We study a simple polymer model where proteins&#8212;modeling complexes of transcription factors and polymerases&#8212;bind multivalently to transcription units&#8212;modeling regulatory elements such as promoters and enhancers. We also include cohesinlike factors that extrude chromatin loops that are important for the physiological folding of chromosomes. We find that transcription factor binding creates spatiotemporal patterning and a highly variable correlation time in transcriptional dynamics, which is linked to the cell-to-cell variation in gene expression. Loop extrusion also contributes to noise, as the stochastic nature of this process leads to different networks of cohesin loops in different cells in our model. Our results could be tested with single-cell experiments and provide a pathway to understanding the principles underlying transcriptional plasticity in vivo.</dc:description><dc:date>2025-10-10</dc:date><dc:identifier>https://pmc.ncbi.nlm.nih.gov/articles/PMC7619472/</dc:identifier><dc:identifier>https://pubmed.ncbi.nlm.nih.gov/41138076/</dc:identifier><dc:identifier>https://doi.org/10.1103/bjq4-xnsy</dc:identifier><dc:type>Text</dc:type><dc:language>en</dc:language><dc:rights>This work is licensed under a CC BY 4.0 International license.</dc:rights><dc:rights>https://creativecommons.org/licenses/by/4.0/</dc:rights></oai_dc:dc>
+        
+    </metadata>
+</record>
+        
+        <record>
+    <header>
+    <identifier>oai:pubmedcentral.nih.gov:7619473</identifier>
+    <datestamp>2026-09-10</datestamp>
+    
+        
+        <setSpec>pmc-open</setSpec>
+        
+    
+</header>
+    <metadata>
+        
+        <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd"><dc:title>Enhanced Ultrasound Image Formation With Computationally Efficient Cross-Angular Delay Multiply and Sum Beamforming</dc:title><dc:creator>Smith, Cameron A.B.</dc:creator><dc:creator>Toulemonde, Matthieu</dc:creator><dc:creator>Lerendegui, Marcelo</dc:creator><dc:creator>Riemer, Kai</dc:creator><dc:creator>Malounda, Dina</dc:creator><dc:creator>Weinberg, Peter D.</dc:creator><dc:creator>Shapiro, Mikhail G.</dc:creator><dc:creator>Tang, Meng-Xing</dc:creator><dc:source>Ultrasound Med Biol</dc:source><dc:subject>Article</dc:subject><dc:description>OBJECTIVE: Ultrasound imaging as a clinical tool is commonly achieved using the delay and sum (DAS) beamforming algorithm, which has limited resolution and suffers from high side lobes. Recently nonlinear processing has proven to be an effective way to enhance image quality. In this work, we describe a new beamforming algorithm called Cross-Angular Delay Multiply and Sum (CADMAS). METHODS: CADMAS takes advantage of nonlinear compounding across planewave steering angles to enhance image contrast. This is then implemented with a mathematical reformulation to produce images at a low computational cost. We tested CADMAS in both conventional B-Mode and amplitude modulation imaging across in vitro and in vivo datasets, and for microbubbles and gas vesicles. We compared the results to DAS and two other nonlinear beamformers, frame multiply and sum (FMAS) and delay multiply and sum (DMAS), as well as the combination of the two. RESULTS: Our results show on average across our datasets a 7.6 to 40 dB improvement in image contrast over DAS and a 4.8 to 20 dB improvement over DMAS. The computation time of CADMAS is between 1 and 2 times that of DAS; in our implementation we experienced a less than 6% increase in computation time. CONCLUSION: Our results show a robust improvement in contrast across multiple datasets both in vitro and in vivo, demonstrating its potential for biological and clinical applications.</dc:description><dc:date>2025-06-28</dc:date><dc:identifier>https://pmc.ncbi.nlm.nih.gov/articles/PMC7619473/</dc:identifier><dc:identifier>https://pubmed.ncbi.nlm.nih.gov/40582893/</dc:identifier><dc:identifier>https://doi.org/10.1016/j.ultrasmedbio.2025.05.023</dc:identifier><dc:type>Text</dc:type><dc:language>en</dc:language><dc:rights>This work is licensed under a CC BY 4.0 International license.</dc:rights><dc:rights>https://creativecommons.org/licenses/by/4.0/</dc:rights></oai_dc:dc>
+        
+    </metadata>
+</record>
+        
+        <record>
+    <header>
+    <identifier>oai:pubmedcentral.nih.gov:7619474</identifier>
+    <datestamp>2026-09-10</datestamp>
+    
+        
+        <setSpec>pmc-open</setSpec>
+        
+    
+</header>
+    <metadata>
+        
+        <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd"><dc:title>A developmental framework of interpersonal neural synchrony</dc:title><dc:creator>Hoehl, Stefanie</dc:creator><dc:creator>B&#225;nki, Anna</dc:creator><dc:creator>Brzozowska, Alicja</dc:creator><dc:creator>Carollo, Alessandro</dc:creator><dc:creator>Kostorz, Kathrin</dc:creator><dc:creator>Nguyen, Trinh</dc:creator><dc:creator>Pletti, Carolina</dc:creator><dc:creator>Reisner, Susanne</dc:creator><dc:creator>Sch&#228;fer, Verena T.</dc:creator><dc:creator>Schaetz, Christina</dc:creator><dc:creator>T&#252;nte, Markus R.</dc:creator><dc:source>Dev Rev</dc:source><dc:subject>Article</dc:subject><dc:description>Interpersonal neural synchrony (INS), the temporal alignment of brain activities between individuals, has been proposed as a biomarker for successful communication and smooth social interaction. Surging empirical evidence shows that INS emerges spontaneously between infants, children, and their caregivers from early on in development. Yet, little is known about the developmental preconditions and functions of INS in childhood. This paper presents a developmental framework for understanding INS, integrating insights from structural and functional brain maturation, as well as behavioral, social, and cognitive development. We discuss how early caregiver-infant interactions, characterized by shared perceptual rhythms, facilitate the emergence of INS. Given initial limitations in temporal precision of neural processing, early INS is likely constrained to low-frequency brain rhythms and evolves alongside the maturation of neural networks and socio-cognitive abilities. We outline how INS may support critical developmental processes, including social learning, language acquisition, and attachment formation, through enabling mutual prediction and co-regulation between caregivers and children. Furthermore, we hypothesize that tasks requiring higher-order mutual understanding are linked to qualitative changes in INS patterns over time. This framework highlights the potential of INS as both a marker and a driver of developmental change, offering new avenues for research and intervention. Longitudinal studies and rhythm-based interventions could deepen our understanding of how INS supports development, with implications for enhancing social learning and attachment in populations at risk for developmental challenges. This work underscores the importance of adopting a developmental perspective in INS research.</dc:description><dc:date>2025-12</dc:date><dc:identifier>https://pmc.ncbi.nlm.nih.gov/articles/PMC7619474/</dc:identifier><dc:identifier>https://pubmed.ncbi.nlm.nih.gov/42719923/</dc:identifier><dc:identifier>https://doi.org/10.1016/j.dr.2025.101234</dc:identifier><dc:type>Text</dc:type><dc:language>en</dc:language><dc:rights>This is an open access article under the CC BY license (http://creativecommons.org/licenses/by/4.0/).</dc:rights><dc:rights>https://creativecommons.org/licenses/by/4.0/</dc:rights></oai_dc:dc>
+        
+    </metadata>
+</record>
+        
+        <record>
+    <header>
+    <identifier>oai:pubmedcentral.nih.gov:12419879</identifier>
+    <datestamp>2026-09-10</datestamp>
+    
+        
+        <setSpec>interface</setSpec>
+        
+    
+</header>
+    <metadata>
+        
+        <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd"><dc:title>Single camera estimation of microswimmer depth with a convolutional network</dc:title><dc:creator>Hosseini, Ali</dc:creator><dc:creator>Fosse, C&#233;lia</dc:creator><dc:creator>Awada, Maya</dc:creator><dc:creator>Stimberg, Marcel</dc:creator><dc:creator>Brette, Romain</dc:creator><dc:source>J R Soc Interface</dc:source><dc:subject>Life Sciences&#8211;Engineering interface</dc:subject><dc:description>A number of techniques have been developed to measure the three-dimensional trajectories of protists, which require special experimental set-ups, such as a pair of orthogonal cameras. On the other hand, machine learning techniques have been used to estimate the vertical position of spherical particles from the defocus pattern, but they require the acquisition of a labelled dataset with finely spaced vertical positions. Here, we describe a simple way to make a dataset of Paramecium images labelled with vertical position from a single 5 min movie, based on a tilted slide set-up. We used this dataset to train a simple convolutional network to estimate the vertical position of Paramecium from conventional bright field images. As an application, we show that this technique has sufficient accuracy to study the surface following behaviour of Paramecium (thigmotaxis).</dc:description><dc:publisher>The Royal Society</dc:publisher><dc:date>2025-09-10</dc:date><dc:identifier>https://pmc.ncbi.nlm.nih.gov/articles/PMC12419879/</dc:identifier><dc:identifier>https://pubmed.ncbi.nlm.nih.gov/40925556/</dc:identifier><dc:identifier>https://doi.org/10.1098/rsif.2025.0428</dc:identifier><dc:type>Text</dc:type><dc:language>en</dc:language><dc:rights>&#169; 2025 The Author(s). Published by the Royal Society. All rights reserved.</dc:rights><dc:rights>https://royalsociety.org/-/media/journals/author/Licence-to-Publish-20062019-final.pdf</dc:rights><dc:rights>https://royalsociety.org/journals/ethics-policies/data-sharing-mining/</dc:rights></oai_dc:dc>
+        
+    </metadata>
+</record>
+        
+        <record>
+    <header>
+    <identifier>oai:pubmedcentral.nih.gov:12419880</identifier>
+    <datestamp>2026-09-10</datestamp>
+    
+        
+        <setSpec>interface</setSpec>
+        
+    
+</header>
+    <metadata>
+        
+        <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd"><dc:title>Seasonal variation in SARS-CoV-2 transmission in The Netherlands, 2020&#8211;2022: statistical evidence for an inverse association with solar radiation and temperature</dc:title><dc:creator>Klinkenberg, Don</dc:creator><dc:creator>Backer, Jantien</dc:creator><dc:creator>Reusken, Chantal</dc:creator><dc:creator>Wallinga, Jacco</dc:creator><dc:source>J R Soc Interface</dc:source><dc:subject>Life Sciences&#8211;Mathematics interface</dc:subject><dc:description>In temperate regions, respiratory viruses such as SARS-CoV-2 are better transmitted in winter than in summer. Understanding how the weather is associated with SARS-CoV-2 transmissibility can enhance projections of COVID-19 incidence and improve estimation of the effectiveness of control measures. During the pandemic, transmissibility was tracked by the reproduction number R(t). This study aims to determine whether information about the daily temperature, absolute humidity and solar radiation improves predictions of R(t) in The Netherlands from 2020 to 2022, and to quantify the relationship between R(t) and daily weather data. We conducted a regression analysis, accounting for immunity from vaccination and previous infection, higher transmissibility of new variants and changes in contact behaviour due to control measures. Results show a linear association between logR(t) and daily solar radiation and temperature, indicating a ratio of R(t) in winter versus summer of 1.7 (95% CI, 1.4; 2.1). The possibility that this association arises from unrelated seasonal patterns was dismissed, as weather data from earlier years provided poorer fits with only small effect sizes. This suggests a causal relationship between solar radiation and temperature with SARS-CoV-2 transmissibility, enhancing confidence in using this relationship for short-term predictions and other epidemiological analyses.</dc:description><dc:publisher>The Royal Society</dc:publisher><dc:date>2025-09-10</dc:date><dc:identifier>https://pmc.ncbi.nlm.nih.gov/articles/PMC12419880/</dc:identifier><dc:identifier>https://pubmed.ncbi.nlm.nih.gov/40925557/</dc:identifier><dc:identifier>https://doi.org/10.1098/rsif.2025.0317</dc:identifier><dc:type>Text</dc:type><dc:language>en</dc:language><dc:rights>&#169; 2025 The Author(s). Published by the Royal Society. All rights reserved.</dc:rights><dc:rights>https://royalsociety.org/-/media/journals/author/Licence-to-Publish-20062019-final.pdf</dc:rights><dc:rights>https://royalsociety.org/journals/ethics-policies/data-sharing-mining/</dc:rights></oai_dc:dc>
+        
+    </metadata>
+</record>
+        
+        <record>
+    <header>
+    <identifier>oai:pubmedcentral.nih.gov:12419887</identifier>
+    <datestamp>2026-09-10</datestamp>
+    
+        
+        <setSpec>interface</setSpec>
+        
+    
+</header>
+    <metadata>
+        
+        <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd"><dc:title>Assessing the relative roles of systemic, non-systemic and transovarial transmission pathways for severe fever with thrombocytopaenia syndrome virus and its implications for future research and intervention strategies</dc:title><dc:creator>Cheng, Qu</dc:creator><dc:creator>Li, Qi</dc:creator><dc:creator>Hassall, Richard</dc:creator><dc:creator>Li, Sen</dc:creator><dc:creator>Peng, Zhihang</dc:creator><dc:creator>Liu, Wei</dc:creator><dc:creator>Fang, Li-Qun</dc:creator><dc:creator>Yang, Yang</dc:creator><dc:creator>Purse, Bethan V.</dc:creator><dc:source>J R Soc Interface</dc:source><dc:subject>Life Sciences&#8211;Mathematics interface</dc:subject><dc:description>Severe fever with thrombocytopaenia syndrome virus (SFTSV) was identified by the World Health Organization as a priority pathogen due to its high case-fatality rate in humans and rapid spread. It is maintained in nature through three transmission pathways: systemic, non-systemic and transovarial. Understanding the relative contributions of these transmission pathways is crucial for developing evidence-informed public health interventions to reduce its spillover risks to humans. Using next-generation matrices, sensitivity analyses, elasticity analyses and random forest models, we estimated the basic reproduction number R(0), relative contribution of each pathway, and identified the most sensitive model parameters across 27 scenarios. Results showed that [Formula: see text] ranged from 0.72 to 2.08 across scenarios, increasing with higher tick abundance and longer viraemia. Transovarial transmission dominated in 26 scenarios, while the importance of the other two varied, with non-systemic transmission more important under high tick abundance, short viraemia or aggregated tick distribution. [Formula: see text] dropped below 1 in all scenarios when transovarial transmission was excluded. These findings emphasize the need for interventions targeting transovarial transmission, such as reducing female adult tick survival and limiting large vertebrate host movement, and underscore the importance of laboratory studies measuring sensitive parameters including transovarial transmission efficiency, tick survival probabilities and the duration of viraemia and potential for non-systemic transmission for key animal host species with high seroprevalence rates.</dc:description><dc:publisher>The Royal Society</dc:publisher><dc:date>2025-09-10</dc:date><dc:identifier>https://pmc.ncbi.nlm.nih.gov/articles/PMC12419887/</dc:identifier><dc:identifier>https://pubmed.ncbi.nlm.nih.gov/40925560/</dc:identifier><dc:identifier>https://doi.org/10.1098/rsif.2025.0140</dc:identifier><dc:type>Text</dc:type><dc:language>en</dc:language><dc:rights>&#169; 2025 The Author(s). Published by the Royal Society. All rights reserved.</dc:rights><dc:rights>https://royalsociety.org/-/media/journals/author/Licence-to-Publish-20062019-final.pdf</dc:rights><dc:rights>https://royalsociety.org/journals/ethics-policies/data-sharing-mining/</dc:rights></oai_dc:dc>
+        
+    </metadata>
+</record>
+        
+        <record>
+    <header>
+    <identifier>oai:pubmedcentral.nih.gov:12419891</identifier>
+    <datestamp>2026-09-10</datestamp>
+    
+        
+        <setSpec>interface</setSpec>
+        
+    
+</header>
+    <metadata>
+        
+        <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd"><dc:title>Multilayer thin-film produces recurrent evolution of iridescence in mammals</dc:title><dc:creator>Dobson, Jessica L</dc:creator><dc:creator>Babarovi&#263;, Frane</dc:creator><dc:creator>Nicola&#239;, Micha&#235;l PJ</dc:creator><dc:creator>Debruyn, Gerben</dc:creator><dc:creator>Shawkey, Matthew D</dc:creator><dc:creator>D'Alba, Liliana</dc:creator><dc:source>J R Soc Interface</dc:source><dc:subject>Life Sciences&#8211;Earth Science interface</dc:subject><dc:description>Iridescent coloration is a vibrant structural colour that is widespread in nature, but in mammals is thought to be limited. Although multiple rodent and Eulipotyphlan species have been anecdotally described as iridescent, empirical evidence outside of the Chrysochloridae (golden mole) family is lacking. As iridescence in golden moles is created through a thin-film mechanism from a compressed cuticle structure, and the structure of hair is highly conserved, we expect iridescence to be present, and produced by the same mechanism, in mammals that share similar hair properties. Here, we test this hypothesis by first collecting and analysing existing documentation of iridescence in mammals, finding written evidence spanning 25 genera across eight mammalian families. We then identified the underlying mechanisms of iridescence for 14 species from Rodentia and Afrosoricida (including one outside Chrysochloridae), and showed that iridescence in these species is created through the same system of thin, alternating layers of keratin and probably lipid-rich material within the cuticle, in similar proportions as Chrysochloridae. These data suggest that iridescence in mammals is more common than originally thought, adding another dimension to mammal coloration research.</dc:description><dc:publisher>The Royal Society</dc:publisher><dc:date>2025-09-10</dc:date><dc:identifier>https://pmc.ncbi.nlm.nih.gov/articles/PMC12419891/</dc:identifier><dc:identifier>https://pubmed.ncbi.nlm.nih.gov/40925559/</dc:identifier><dc:identifier>https://doi.org/10.1098/rsif.2025.0508</dc:identifier><dc:type>Text</dc:type><dc:language>en</dc:language><dc:rights>&#169; 2025 The Author(s). Published by the Royal Society. All rights reserved.</dc:rights><dc:rights>https://royalsociety.org/-/media/journals/author/Licence-to-Publish-20062019-final.pdf</dc:rights><dc:rights>https://royalsociety.org/journals/ethics-policies/data-sharing-mining/</dc:rights></oai_dc:dc>
+        
+    </metadata>
+</record>
+        
+        <record>
+    <header>
+    <identifier>oai:pubmedcentral.nih.gov:12419893</identifier>
+    <datestamp>2026-09-10</datestamp>
+    
+        
+        <setSpec>procb</setSpec>
+        
+    
+</header>
+    <metadata>
+        
+        <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd"><dc:title>&#8216;Are you sure?&#8217; The importance of understanding your own sensory uncertainty</dc:title><dc:creator>Beierholm, Ulrik</dc:creator><dc:creator>Nardini, Marko</dc:creator><dc:source>Proc Biol Sci</dc:source><dc:subject>Neuroscience and Cognition</dc:subject><dc:publisher>The Royal Society</dc:publisher><dc:date>2025-09-10</dc:date><dc:identifier>https://pmc.ncbi.nlm.nih.gov/articles/PMC12419893/</dc:identifier><dc:identifier>https://pubmed.ncbi.nlm.nih.gov/40925563/</dc:identifier><dc:identifier>https://doi.org/10.1098/rspb.2025.1139</dc:identifier><dc:type>Text</dc:type><dc:language>en</dc:language><dc:rights>&#169; 2025 The Author(s). Published by the Royal Society. All rights reserved.</dc:rights><dc:rights>https://royalsociety.org/-/media/journals/author/Licence-to-Publish-20062019-final.pdf</dc:rights><dc:rights>https://royalsociety.org/journals/ethics-policies/data-sharing-mining/</dc:rights></oai_dc:dc>
+        
+    </metadata>
+</record>
+        
+      <resumptionToken>.eJyLNjQyMbS0sDTRySvNydFRMjIwMtM1sNQ1NFBC4-QnZsanJCvFAgAmgQvR:n_sJSYLkvZIDOBv4vdSB78Cy27kX3Vn3DRfZR2RClsE</resumptionToken>
+    </ListRecords>
+
+</OAI-PMH>

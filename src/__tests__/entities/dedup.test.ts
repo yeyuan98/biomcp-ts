@@ -50,6 +50,25 @@ describe('deduplicateAndRank', () => {
     expect(result[0].title).toBe('First');
   });
 
+  test('deduplicates by arxiv_id (most arXiv preprints have no pmid/pmcid/doi)', () => {
+    const articles = [
+      { arxiv_id: '1706.03762', title: 'First', source: 'arxiv' },
+      { arxiv_id: '1706.03762', title: 'Second', source: 'arxiv' },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe('First');
+  });
+
+  test('prioritizes DOI over arxiv_id for dedup key (same record from two sources)', () => {
+    const articles = [
+      { doi: '10.1140/epjc/s2003-01326-x', arxiv_id: 'hep-ex/0307015', title: 'Published' },
+      { arxiv_id: 'hep-ex/0307015', title: 'Preprint twin' },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result).toHaveLength(2);
+  });
+
   test('prioritizes PMID over PMCID over DOI for dedup key', () => {
     const articles = [
       { pmid: '12345', pmcid: 'PMC001', doi: '10.1/a' },
@@ -250,6 +269,22 @@ describe('deduplicateAndRank', () => {
     expect(result).toHaveLength(1);
     expect(result[0].title).toBe('Healthy twin');
     expect(result[0]._error).toBeUndefined();
+  });
+
+  test('merges S2/arXiv twins on arxiv_id with first-seen source and fill-merge', () => {
+    const articles = [
+      { source: 'semantic_scholar', title: 'Attention Is All You Need', arxiv_id: '1706.03762', cited_by: 500 },
+      { source: 'arxiv', title: 'Attention Is All You Need', arxiv_id: '1706.03762', journal: 'arXiv', publication_types: ['preprint'] },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result).toHaveLength(1);
+    // Federation order is pubmed, europepmc, S2, arXiv: first-seen (S2) wins
+    expect(result[0].source).toBe('semantic_scholar');
+    // arXiv row's fields fill-merge where the S2 row was undefined
+    expect(result[0].journal).toBe('arXiv');
+    expect(result[0].publication_types).toEqual(['preprint']);
+    // S2 citation count survives
+    expect(result[0].cited_by).toBe(500);
   });
 
   test('does not merge cross-key identities', () => {

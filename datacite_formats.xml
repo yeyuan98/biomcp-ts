@@ -1,0 +1,21 @@
+<?xml version="1.0" ?><?xml-stylesheet type="text/xsl" href="/static/oaitohtml.xsl"?><OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/ http://www.openarchives.org/OAI/2.0/OAI-PMH.xsd">
+  <responseDate>2026-09-19T11:27:01Z</responseDate>
+  <request verb="ListMetadataFormats">https://oai.datacite.org/oai</request>
+  <ListMetadataFormats>
+    <metadataFormat>
+      <metadataPrefix>oai_dc</metadataPrefix>
+      <schema>http://www.openarchives.org/OAI/2.0/oai_dc.xsd</schema>
+      <metadataNamespace>http://www.openarchives.org/OAI/2.0/oai_dc/</metadataNamespace>
+    </metadataFormat>
+    <metadataFormat>
+      <metadataPrefix>oai_datacite</metadataPrefix>
+      <schema>http://schema.datacite.org/oai/oai-1.1/oai.xsd</schema>
+      <metadataNamespace>http://schema.datacite.org/oai/oai-1.1/</metadataNamespace>
+    </metadataFormat>
+    <metadataFormat>
+      <metadataPrefix>datacite</metadataPrefix>
+      <schema>http://schema.datacite.org/meta/nonexistant/nonexistant.xsd</schema>
+      <metadataNamespace>http://datacite.org/schema/nonexistant</metadataNamespace>
+    </metadataFormat>
+  </ListMetadataFormats>
+</OAI-PMH>
