@@ -1,5 +1,6 @@
 import type { Article, ParsedDateRange } from '../types.js';
 import { EuropePMCPreprintRecord, splitAuthors, cleanArticleTitle, epmcSearchWindow, epmcPreprintServerLabel } from '../europepmc-shared.js';
+import { backendErrorRow } from './backend-error.js';
 
 export function transformPreprint(a: EuropePMCPreprintRecord): Article {
   const server = epmcPreprintServerLabel(a.bookOrReportDetails?.publisher);
@@ -47,8 +48,6 @@ export async function searchPreprints(
     });
     return rows.map(transformPreprint);
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error('[searchPreprints] Error:', error);
-    return [{ _error: `searchPreprints failed: ${msg}. This may be a temporary data source issue. Try again or use a different source.` } as any];
+    return backendErrorRow('searchPreprints', error);
   }
 }

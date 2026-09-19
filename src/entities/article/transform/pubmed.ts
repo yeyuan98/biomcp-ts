@@ -1,5 +1,5 @@
-import { XMLParser } from 'fast-xml-parser';
 import type { Article } from '../types.js';
+import { asArray, createXmlParser } from './xml-utils.js';
 
 function cleanInlineXml(text: string): string {
   let prev = '';
@@ -35,16 +35,9 @@ export function preprocessPubMedXml(xml: string): string {
 
 export function parsePubMedXml(xmlString: string): Article[] {
   const preprocessed = preprocessPubMedXml(xmlString);
-  const parser = new XMLParser({
-    ignoreAttributes: false,
-    attributeNamePrefix: '@_',
-    textNodeName: '#text',
-    parseTagValue: false,
-    htmlEntities: true,
-    isArray: (name: string) => {
-      return ['PubmedArticle', 'Author', 'AbstractText', 'MeshHeading', 'PublicationType', 'ArticleId', 'Chemical', 'Keyword'].includes(name);
-    },
-  });
+  const parser = createXmlParser([
+    'PubmedArticle', 'Author', 'AbstractText', 'MeshHeading', 'PublicationType', 'ArticleId', 'Chemical', 'Keyword',
+  ]);
 
   let parsed: any;
   try {
@@ -56,7 +49,7 @@ export function parsePubMedXml(xmlString: string): Article[] {
   const articleSet = parsed?.PubmedArticleSet;
   if (!articleSet) return [];
 
-  const articles: PubmedArticle[] = articleSet.PubmedArticle || [];
+  const articles: PubmedArticle[] = asArray(articleSet.PubmedArticle);
   return articles.map(extractArticle);
 }
 
@@ -159,7 +152,7 @@ function extractArticle(raw: PubmedArticle): Article {
 function extractArticleIds(pubmedData: any): { doi?: string; pmcid?: string } {
   const ids = pubmedData?.ArticleIdList?.ArticleId;
   if (!ids) return {};
-  const idArray = Array.isArray(ids) ? ids : [ids];
+  const idArray = asArray(ids);
   const result: { doi?: string; pmcid?: string } = {};
   for (const id of idArray) {
     if (id['@_IdType'] === 'doi') result.doi = id['#text'];
@@ -171,7 +164,7 @@ function extractArticleIds(pubmedData: any): { doi?: string; pmcid?: string } {
 function extractELocationByType(article: any, idType: string): string | undefined {
   const eloc = article?.ELocationID;
   if (!eloc) return undefined;
-  const arr = Array.isArray(eloc) ? eloc : [eloc];
+  const arr = asArray(eloc);
   for (const e of arr) {
     if (e['@_EIdType'] === idType) return e['#text'];
   }
@@ -207,7 +200,7 @@ function extractAbstract(article: any): string | undefined {
 
   if (typeof abstractEl === 'string') return abstractEl;
 
-  const parts = Array.isArray(abstractEl) ? abstractEl : [abstractEl];
+  const parts = asArray(abstractEl);
   return parts
     .map((p: any) => {
       const text = typeof p === 'string' ? p : (p['#text'] || '');
@@ -220,7 +213,7 @@ function extractAbstract(article: any): string | undefined {
 function extractAuthors(article: any): string[] | undefined {
   const authors = article?.AuthorList?.Author;
   if (!authors) return undefined;
-  const arr = Array.isArray(authors) ? authors : [authors];
+  const arr = asArray(authors);
   return arr.map((a: any) => {
     const given = a.ForeName || a.Initials;
     if (a.LastName && given) return `${a.LastName} ${given}`;
@@ -239,7 +232,7 @@ function extractPubDate(article: any): string | undefined {
 function extractMeshHeadings(medline: any): string[] | undefined {
   const headings = medline?.MeshHeadingList?.MeshHeading;
   if (!headings) return undefined;
-  const arr = Array.isArray(headings) ? headings : [headings];
+  const arr = asArray(headings);
   return arr.map((h: any) => {
     const dn = h.DescriptorName;
     return typeof dn === 'string' ? dn : (dn?.['#text'] || '');
@@ -249,21 +242,21 @@ function extractMeshHeadings(medline: any): string[] | undefined {
 function extractPublicationTypes(article: any): string[] | undefined {
   const types = article?.PublicationTypeList?.PublicationType;
   if (!types) return undefined;
-  const arr = Array.isArray(types) ? types : [types];
+  const arr = asArray(types);
   return arr.map((t: any) => typeof t === 'string' ? t : (t?.['#text'] || '')).filter((s: string) => s);
 }
 
 function extractKeywords(medline: any): string[] | undefined {
   const kw = medline?.KeywordList?.Keyword;
   if (!kw) return undefined;
-  const arr = Array.isArray(kw) ? kw : [kw];
+  const arr = asArray(kw);
   return arr.map((k: any) => typeof k === 'string' ? k : (k?.['#text'] || '')).filter((s: string) => s);
 }
 
 function extractChemicals(medline: any): string[] | undefined {
   const chemicals = medline?.ChemicalList?.Chemical;
   if (!chemicals) return undefined;
-  const arr = Array.isArray(chemicals) ? chemicals : [chemicals];
+  const arr = asArray(chemicals);
   return arr.map((c: any) => {
     const ns = c.NameOfSubstance;
     return typeof ns === 'string' ? ns : (ns?.['#text'] || '');

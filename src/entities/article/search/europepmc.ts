@@ -1,5 +1,6 @@
 import type { Article, ParsedDateRange } from '../types.js';
 import { EuropePMCRecord, splitAuthors, cleanArticleTitle, epmcSearchWindow } from '../europepmc-shared.js';
+import { backendErrorRow } from './backend-error.js';
 
 export function transformEuropePMC(a: EuropePMCRecord): Article {
   return {
@@ -31,8 +32,6 @@ export async function searchEuropePMC(query: string, limit: number, offset: numb
     });
     return rows.map(transformEuropePMC);
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error('[searchEuropePMC] Error:', error);
-    return [{ _error: `searchEuropePMC failed: ${msg}. This may be a temporary data source issue. Try again or use a different source.` } as any];
+    return backendErrorRow('searchEuropePMC', error);
   }
 }

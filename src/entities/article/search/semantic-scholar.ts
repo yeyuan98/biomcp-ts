@@ -2,6 +2,7 @@ import { connectionManager } from '../../../connections/manager.js';
 import { withTimeout } from '../../../connections/fetch-utils.js';
 import type { Article, ParsedDateRange } from '../types.js';
 import { s2RequestQueue } from '../semantic-scholar-queue.js';
+import { backendErrorRow } from './backend-error.js';
 
 export interface SemanticScholarPaper {
   title?: string;
@@ -80,8 +81,6 @@ export async function searchSemanticScholar(query: string, limit: number, offset
 
     return (response.data || []).map(transformSemanticScholar);
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error('[searchSemanticScholar] Error:', error);
-    return [{ _error: `searchSemanticScholar failed: ${msg}. This may be a temporary data source issue. Try again or use a different source.` } as any];
+    return backendErrorRow('searchSemanticScholar', error);
   }
 }

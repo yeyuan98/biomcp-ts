@@ -1,5 +1,5 @@
-import { XMLParser } from 'fast-xml-parser';
 import type { Article } from '../types.js';
+import { asArray, createXmlParser } from './xml-utils.js';
 
 // Entry <id> values are always http(s) abs URLs, versioned unless the entry
 // is the latest version (e.g. "http://arxiv.org/abs/1706.03762v7" — plan D8).
@@ -27,31 +27,6 @@ interface ArxivAtomEntry {
   'arxiv:journal_ref'?: string;
 }
 
-function asArray<T>(value: T | T[] | undefined | null): T[] {
-  if (value === undefined || value === null) return [];
-  return Array.isArray(value) ? value : [value];
-}
-
-/**
- * Disambiguate an entry's mixed link array (element order is NOT fixed
- * across entries): the abs-page link carries rel="alternate", the PDF link
- * title="pdf", and the publisher-DOI link title="doi". The field mapping
- * (plan D7) deliberately uses none of these — doi comes from
- * <arxiv:doi> only and Article has no URL field — but the disambiguation
- * is pinned here for tests and future URL enrichment.
- */
-export function disambiguateArxivLinks(links: ArxivAtomLink[] | undefined): { abs?: string; pdf?: string; doi?: string } {
-  const result: { abs?: string; pdf?: string; doi?: string } = {};
-  for (const link of asArray(links)) {
-    const href = link?.['@_href'];
-    if (typeof href !== 'string') continue;
-    if (link['@_rel'] === 'alternate' && !result.abs) result.abs = href;
-    if (link['@_title'] === 'pdf' && !result.pdf) result.pdf = href;
-    if (link['@_title'] === 'doi' && !result.doi) result.doi = href;
-  }
-  return result;
-}
-
 /**
  * Parse an arXiv Atom Query API response (always XML, never JSON) into
  * Article[] per the plan D7 field map. Throws a descriptive Error on
@@ -70,19 +45,11 @@ export function parseArxivAtomXml(xml: string): Article[] {
     );
   }
 
-  // Mirrors transform/pubmed.ts; attributes surface as @_term/@_href/@_rel/
-  // @_title. Repeated elements (author, category, link, plus the
-  // affiliation children of authors) are forced to arrays so entries with a
-  // single child do not collapse to scalar objects.
-  const parser = new XMLParser({
-    ignoreAttributes: false,
-    attributeNamePrefix: '@_',
-    textNodeName: '#text',
-    parseTagValue: false,
-    htmlEntities: true,
-    isArray: (name: string) =>
-      ['entry', 'author', 'category', 'link', 'arxiv:affiliation'].includes(name),
-  });
+  // Mirrors transform/pubmed.ts via the shared xml-utils parser; attributes
+  // surface as @_term/@_href/@_rel/@_title. Repeated elements (author,
+  // category, link, plus the affiliation children of authors) are forced to
+  // arrays so entries with a single child do not collapse to scalar objects.
+  const parser = createXmlParser(['entry', 'author', 'category', 'link', 'arxiv:affiliation']);
 
   let parsed: any;
   try {
@@ -110,7 +77,11 @@ function extractArxivEntry(entry: ArxivAtomEntry): Article {
   const categories = asArray(entry.category)
     .map(category => category?.['@_term'] || '')
     .filter(term => term.length > 0);
-  const keywords = primaryCategory ? [primaryCategory, ...categories] : categories;
+  // arXiv always repeats the primary category inside <category>; drop the
+  // duplicate while keeping the primary first.
+  const keywords = primaryCategory
+    ? [primaryCategory, ...categories.filter(term => term !== primaryCategory)]
+    : categories;
 
   const publishedMatch = /^(\d{4}-\d{2}-\d{2})/.exec(entry.published ?? '');
 

@@ -1,6 +1,5 @@
 import { jest } from '@jest/globals';
 import { articleSearch, searchArxiv, parseArxivAtomXml } from '../../entities/article.js';
-import { disambiguateArxivLinks } from '../../entities/article/transform/arxiv.js';
 import { connectionManager } from '../../connections/manager.js';
 
 // The 'arxiv' registry source enforces the arXiv Terms-of-Use rate (1
@@ -155,7 +154,8 @@ describe('parseArxivAtomXml', () => {
     expect(articles[0].authors).toEqual(['H1 Collaboration']);
     expect(articles[0].journal).toBe('arXiv');
     expect(articles[0].publication_date).toBe('2003-07-07');
-    expect(articles[0].keywords).toEqual(['hep-ex', 'hep-ex']);
+    // Keywords dedupe: arXiv repeats the primary (hep-ex) in <category>.
+    expect(articles[0].keywords).toEqual(['hep-ex']);
     expect(articles[0].publication_types).toEqual(['preprint']);
     expect(articles[0].source).toBe('arxiv');
     expect(articles[0].pmid).toBeUndefined();
@@ -177,7 +177,8 @@ describe('parseArxivAtomXml', () => {
     expect(articles).toHaveLength(1);
     expect(articles[0].arxiv_id).toBe('1706.03762');
     expect(articles[0].title).toBe('Attention Is All You Need');
-    expect(articles[0].keywords).toEqual(['cs.CL', 'cs.CL', 'cs.LG']);
+    // Keywords dedupe: primary cs.CL repeated in <category> is dropped.
+    expect(articles[0].keywords).toEqual(['cs.CL', 'cs.LG']);
     expect(articles[0].publication_date).toBe('2017-06-12');
   });
 
@@ -194,23 +195,6 @@ describe('parseArxivAtomXml', () => {
 
   test('empty feed returns [] (0 hits are not an error)', () => {
     expect(parseArxivAtomXml(EMPTY_FEED_XML)).toEqual([]);
-  });
-
-  test('disambiguateArxivLinks separates abs/pdf/doi links regardless of order', () => {
-    // Order as in real feeds: alternate, pdf, then doi appended after authors.
-    expect(disambiguateArxivLinks([
-      { '@_href': 'https://arxiv.org/abs/1706.03762v2', '@_rel': 'alternate' },
-      { '@_href': 'https://arxiv.org/pdf/1706.03762v2', '@_rel': 'related', '@_title': 'pdf' },
-      { '@_href': 'https://doi.org/10.1140/epjc/s2003-01326-x', '@_rel': 'related', '@_title': 'doi' },
-    ])).toEqual({
-      abs: 'https://arxiv.org/abs/1706.03762v2',
-      pdf: 'https://arxiv.org/pdf/1706.03762v2',
-      doi: 'https://doi.org/10.1140/epjc/s2003-01326-x',
-    });
-
-    // Single (would-be scalar) link object is normalized too.
-    expect(disambiguateArxivLinks({ '@_href': 'https://arxiv.org/abs/1706.03762', '@_rel': 'alternate' } as any))
-      .toEqual({ abs: 'https://arxiv.org/abs/1706.03762' });
   });
 });
 

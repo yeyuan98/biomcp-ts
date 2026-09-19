@@ -177,6 +177,7 @@ article/
 ├── search/               # Search backends (7 sources: 6 in the default federation + preprint_only opt-in)
 │   ├── index.ts          # articleSearch() orchestrator + federatedSearch (20s per-backend throw timeout)
 │   ├── dedup.ts          # deduplicateAndRank()
+│   ├── backend-error.ts  # backendErrorRow() — shared `_error`-row catch envelope for all backends
 │   ├── pubmed.ts         # searchPubMed(), formatPubMedDate()
 │   ├── europepmc.ts      # searchEuropePMC(), transformEuropePMC() (cursorMark pagination; offset via client-side windowing, capped at 1000 rows)
 │   ├── semantic-scholar.ts # searchSemanticScholar(), transformSemanticScholar()
@@ -200,6 +201,7 @@ article/
 │   ├── crossref.ts       # Crossref count + backward references provider
 │   └── opencitations.ts  # OpenCitations v2 DOI-based provider
 └── transform/
+    ├── xml-utils.ts      # asArray(), createXmlParser() — shared fast-xml-parser setup
     ├── pubmed.ts         # parsePubMedXml(), preprocessPubMedXml()
     └── arxiv.ts          # parseArxivAtomXml() (feed-root sniff + entry mapping)
 ```

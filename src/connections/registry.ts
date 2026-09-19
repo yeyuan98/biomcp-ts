@@ -282,7 +282,13 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     sourceId: 'arxiv',
     baseUrl: 'https://export.arxiv.org/api',
     protocol: 'rest',
-    handling: { timeoutMs: 15000 },
+    // arXiv always answers Atom XML — declare contentType so the Accept
+    // header stops claiming application/json (matches pmc_oa). timeoutMs
+    // 10000: worst case = 3 s limiter spacing + 2×10 s timeouts + 3.5 s
+    // retry backoff ≈ 26.5 s < the 30 s article_search tool cap, so an
+    // arXiv outage surfaces as a friendly _error row instead of a tool
+    // timeout.
+    handling: { contentType: 'xml', timeoutMs: 10000 },
     rateLimit: { intervalMs: 3000 },
     retry: { attempts: 2, backoffMs: 3500 },
   },

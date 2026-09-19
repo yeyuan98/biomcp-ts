@@ -8,9 +8,9 @@
 // attempts: 2 = one polite re-acquiring retry). arXiv offers NO API keys;
 // an HTTP 403 here is a per-IP block, not a missing credential.
 import { connectionManager } from '../../../connections/manager.js';
-import { HttpConnectionError } from '../../../connections/errors.js';
 import { parseArxivAtomXml } from '../transform/arxiv.js';
 import type { Article, ParsedDateRange } from '../types.js';
+import { backendErrorRow } from './backend-error.js';
 
 // Open date-range bounds (plan D5): arXiv's earliest submissions date to
 // 1991-07; the upper bound only needs to exceed any real query date.
@@ -72,31 +72,24 @@ export async function searchArxiv(
 
     return parseArxivAtomXml(xml);
   } catch (error) {
-    if (error instanceof HttpConnectionError && error.status === 403) {
-      // Reworded (plan D9): arXiv has no API keys, so the stock 403 hint
-      // ("set the required API key") is a false lead — a 403 from arXiv is
-      // a per-IP block, and retrying would only hammer a blocked IP.
-      return [{
-        _error:
+    return backendErrorRow('searchArxiv', error, {
+      statusMessages: {
+        // Reworded (plan D9): arXiv has no API keys, so the stock 403 hint
+        // ("set the required API key") is a false lead — a 403 from arXiv is
+        // a per-IP block, and retrying would only hammer a blocked IP.
+        403:
           'searchArxiv failed: HTTP 403 from arXiv. This is most likely a per-IP block imposed after ' +
           'rate-limit violations of the arXiv API Terms of Use (https://info.arxiv.org/help/api/tou.html — ' +
           'max 1 request per 3 seconds). Wait before retrying, or contact arXiv administrators to request ' +
           'an unblock. Note: arXiv does not offer API keys, so there is no credential to configure.',
-      } as any];
-    }
-    if (error instanceof HttpConnectionError && error.status === 429) {
-      // Reworded like the 403 case: arXiv has no API keys, so the stock 429
-      // hint ("set the … API key") is a false lead.
-      return [{
-        _error:
+        // Reworded like the 403 case: arXiv has no API keys, so the stock 429
+        // hint ("set the … API key") is a false lead.
+        429:
           'searchArxiv failed: HTTP 429 from arXiv (rate limited). The built-in limiter already spaces ' +
           'requests to 1 per 3 seconds per process; if you are running multiple biomcp instances on one ' +
           'machine, use a single shared `biomcp serve` daemon so all agents share one rate limiter ' +
           '(see README). Wait a few seconds before retrying.',
-      } as any];
-    }
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error('[searchArxiv] Error:', error);
-    return [{ _error: `searchArxiv failed: ${msg}. This may be a temporary data source issue. Try again or use a different source.` } as any];
+      },
+    });
   }
 }

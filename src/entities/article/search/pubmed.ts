@@ -1,6 +1,7 @@
 import { connectionManager } from '../../../connections/manager.js';
 import { parsePubMedXml } from '../transform/pubmed.js';
 import type { Article, ParsedDateRange } from '../types.js';
+import { backendErrorRow } from './backend-error.js';
 
 interface PubMedSearchResponse {
   esearchresult?: {
@@ -36,8 +37,6 @@ export async function searchPubMed(query: string, limit: number, offset: number,
 
     return parsePubMedXml(xmlString);
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error('[searchPubMed] Error:', error);
-    return [{ _error: `searchPubMed failed: ${msg}. This may be a temporary data source issue. Try again or use a different source.` } as any];
+    return backendErrorRow('searchPubMed', error);
   }
 }
