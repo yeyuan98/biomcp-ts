@@ -1,6 +1,7 @@
 import { jest } from '@jest/globals';
 import { geneSearch, geneGet, transformMyGeneResponse } from '../../entities/gene.js';
 import { connectionManager } from '../../connections/manager.js';
+import { parseMockUrl } from '../helpers/mock-url.js';
 
 describe('gene', () => {
   let originalFetch: typeof global.fetch;
@@ -1730,7 +1731,7 @@ describe('geneGet with expression section', () => {
 
   test('geneGet() expression section returns GTEx tissues as {tissue, tpm}', async () => {
     global.fetch = jest.fn().mockImplementation((rawUrl: string) => {
-      if (rawUrl.includes('mygene.info')) {
+      if (parseMockUrl(rawUrl).hostname === 'mygene.info') {
         return Promise.resolve(okJson({
           hits: [{ symbol: 'TP53', name: 'Tumor protein p53', summary: 'Tumor suppressor.' }],
         }));
@@ -1756,7 +1757,7 @@ describe('geneGet with expression section', () => {
 
   test('geneGet() expression section surfaces _error when gene is not in GTEx', async () => {
     global.fetch = jest.fn().mockImplementation((rawUrl: string) => {
-      if (rawUrl.includes('mygene.info')) {
+      if (parseMockUrl(rawUrl).hostname === 'mygene.info') {
         return Promise.resolve(okJson({
           hits: [{ symbol: 'NOGTEX1', name: 'Not in GTEx', summary: 'A gene.' }],
         }));
@@ -1777,7 +1778,7 @@ describe('geneGet with expression section', () => {
 
   test('geneGet() expression section surfaces _error for empty median data', async () => {
     global.fetch = jest.fn().mockImplementation((rawUrl: string) => {
-      if (rawUrl.includes('mygene.info')) {
+      if (parseMockUrl(rawUrl).hostname === 'mygene.info') {
         return Promise.resolve(okJson({
           hits: [{ symbol: 'TP53', name: 'Tumor protein p53', summary: 'Tumor suppressor.' }],
         }));

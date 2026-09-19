@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals';
 import { HttpConnectionError } from '../../connections/errors.js';
+import { parseMockUrl, mockFetchRouter } from '../helpers/mock-url.js';
 
 const REQUIRED_TEMPLATE_KEY = 'showDocPerFamilyPref';
 
@@ -237,7 +238,8 @@ describe('seminal prior-art mining', () => {
   }) {
     return jest.fn().mockImplementation((url: any, init?: any) => {
       const u = String(url);
-      if (u.includes('patents.google.com')) {
+      const { hostname } = parseMockUrl(u);
+      if (hostname === 'patents.google.com') {
         return Promise.reject(new Error('no network')); // google_patents leg fails softly
       }
       if (u.includes('/api/users/me/session')) {
@@ -389,7 +391,8 @@ describe('seminal prior-art mining', () => {
   test('mining failures degrade to a note without breaking the search', async () => {
     global.fetch = jest.fn().mockImplementation((url: any) => {
       const u = String(url);
-      if (u.includes('patents.google.com')) return Promise.reject(new Error('no network'));
+      const { hostname } = parseMockUrl(u);
+      if (hostname === 'patents.google.com') return Promise.reject(new Error('no network'));
       if (u.includes('/api/users/me/session')) {
         return jsonResp({ userCase: { caseId: 1 } }, { 'x-access-token': 'tok-1', 'content-type': 'application/json' });
       }
@@ -417,7 +420,8 @@ describe('seminal prior-art mining', () => {
   }) {
     return jest.fn().mockImplementation((url: any, init?: any) => {
       const u = String(url);
-      if (u.includes('patents.google.com')) {
+      const { hostname } = parseMockUrl(u);
+      if (hostname === 'patents.google.com') {
         return Promise.reject(new Error('no network'));
       }
       if (u.includes('/api/users/me/session')) {
@@ -524,7 +528,8 @@ describe('seminal prior-art mining', () => {
   test('non-200 getDocument bodies do not inflate the mined denominator', async () => {
     global.fetch = jest.fn().mockImplementation((url: any) => {
       const u = String(url);
-      if (u.includes('patents.google.com')) return Promise.reject(new Error('no network'));
+      const { hostname } = parseMockUrl(u);
+      if (hostname === 'patents.google.com') return Promise.reject(new Error('no network'));
       if (u.includes('/api/users/me/session')) {
         return jsonResp({ userCase: { caseId: 1 } }, { 'x-access-token': 'tok-1', 'content-type': 'application/json' });
       }
@@ -598,6 +603,7 @@ describe('seminal prior-art mining', () => {
     };
     global.fetch = jest.fn().mockImplementation((url: any, init?: any) => {
       const u = String(url);
+      const { hostname } = parseMockUrl(u);
       if (u.includes('accesstoken')) {
         return jsonResp({ access_token: 'tok', expires_in: 1199 });
       }
@@ -608,8 +614,8 @@ describe('seminal prior-art mining', () => {
       if (u.includes('/published-data/publication/epodoc/US6261804/biblio')) {
         return jsonResp(biblioPayload, {});
       }
-      if (u.includes('patents.google.com')) return Promise.reject(new Error('no network'));
-      if (u.includes('ppubs.uspto.gov')) {
+      if (hostname === 'patents.google.com') return Promise.reject(new Error('no network'));
+      if (hostname === 'ppubs.uspto.gov') {
         // ppubs legs: no shared US ref this time (pure WO candidate)
         return ppubsSeminalMock({
           pool: POOL_GRANTS,
@@ -663,6 +669,7 @@ describe('seminal prior-art mining', () => {
     let detailCalls = 0;
     global.fetch = jest.fn().mockImplementation((url: any) => {
       const u = String(url);
+      const { hostname, pathname } = parseMockUrl(u);
       if (u.includes('/api/users/me/session')) {
         return jsonResp({ userCase: { caseId: 1 } }, { 'x-access-token': 'tok-1', 'content-type': 'application/json' });
       }
@@ -674,7 +681,7 @@ describe('seminal prior-art mining', () => {
           if (u.includes(guid)) return jsonResp(doc);
         }
       }
-      if (u.includes('patents.google.com/patent/')) {
+      if (hostname === 'patents.google.com' && pathname.startsWith('/patent/')) {
         detailCalls++;
         if (u.includes('WO1999060835A2')) {
           // second variant attempt: correct page identifying as WO1999060835A2
@@ -765,7 +772,7 @@ describe('patent search federation', () => {
     connectionManager.closeAll();
     global.fetch = jest.fn().mockImplementation((url: any) => {
       const u = String(url);
-      if (u.includes('api.uspto.gov')) {
+      if (parseMockUrl(u).hostname === 'api.uspto.gov') {
         return Promise.resolve({
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
@@ -820,7 +827,7 @@ describe('patent search federation', () => {
     gp.resetGooglePatentsBreaker();
     global.fetch = jest.fn().mockImplementation((url: any) => {
       const u = String(url);
-      if (u.includes('api.uspto.gov')) {
+      if (parseMockUrl(u).hostname === 'api.uspto.gov') {
         const payload = JSON.stringify({
           count: 1,
           patentFileWrapperDataBag: [{
@@ -869,7 +876,7 @@ describe('patent search federation', () => {
     expect(markers.some(p => p._note)).toBe(false);
     // no USPTO ODP endpoint hit (no key configured → no fallback attempt)
     const calledUrls = (global.fetch as any).mock.calls.map((c: any[]) => String(c[0]));
-    expect(calledUrls.some(u => u.includes('api.uspto.gov'))).toBe(false);
+    expect(calledUrls.some(u => parseMockUrl(u).hostname === 'api.uspto.gov')).toBe(false);
     gp.resetGooglePatentsBreaker();
     (await import('../../connections/manager.js')).connectionManager.closeAll();
   });
@@ -890,7 +897,7 @@ describe('patent search federation', () => {
     expect(response.patents.some(p => p._error?.includes("'ppubs' failed"))).toBe(true);
     expect(response.patents.some(p => p._note)).toBe(false);
     const calledUrls = (global.fetch as any).mock.calls.map((c: any[]) => String(c[0]));
-    expect(calledUrls.some(u => u.includes('api.uspto.gov'))).toBe(false);
+    expect(calledUrls.some(u => parseMockUrl(u).hostname === 'api.uspto.gov')).toBe(false);
     nowSpy.mockRestore();
     gp.resetGooglePatentsBreaker();
     (await import('../../connections/manager.js')).connectionManager.closeAll();
@@ -927,7 +934,7 @@ describe('patent search federation', () => {
     }));
     global.fetch = jest.fn().mockImplementation((url: any) => {
       const u = String(url);
-      return u.includes('ppubs.uspto.gov') ? odpSearch(url) : gpSearch(url);
+      return parseMockUrl(u).hostname === 'ppubs.uspto.gov' ? odpSearch(url) : gpSearch(url);
     }) as any;
 
     const { patentSearch } = await import('../../entities/patent/search/index.js');
@@ -1497,7 +1504,9 @@ describe('wayback fallback', () => {
     expect(await findWaybackSnapshot('https://patents.google.com/patent/US11027025B2/en')).toBeNull();
     // Only the availability API was hit — no doomed web.archive.org playback fetch.
     expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(String((global.fetch as any).mock.calls[0][0])).toContain('archive.org/wayback/available');
+    const availUrl = parseMockUrl((global.fetch as any).mock.calls[0][0]);
+    expect(availUrl.hostname).toBe('archive.org');
+    expect(availUrl.pathname).toBe('/wayback/available');
   });
 
   test('findWaybackSnapshot returns null when the snapshot is marked unavailable', async () => {
@@ -2183,14 +2192,16 @@ describe('patentGet orchestration (chains)', () => {
   function ppubsMock(core: Record<string, unknown>) {
     return jest.fn().mockImplementation((url: any) => {
       const u = String(url);
-      if (u.includes('archive.org')) {
+      const { hostname } = parseMockUrl(u);
+      // wayback legs: availability (archive.org) and playback (web.archive.org)
+      if (hostname === 'archive.org' || hostname === 'web.archive.org') {
         return Promise.resolve({
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
           text: () => Promise.resolve(JSON.stringify({ archived_snapshots: {} })),
         });
       }
-      if (u.includes('patents.google.com')) {
+      if (hostname === 'patents.google.com') {
         return Promise.resolve({
           ok: false,
           status: 503,
@@ -2310,33 +2321,38 @@ describe('fetchGooglePatentDetail block-page detection', () => {
       '<meta name="DC.title" content="Wayback title"><span itemprop="publicationNumber">US11027025B2</span>'
     ));
     let googleDetailCalls = 0;
-    global.fetch = jest.fn().mockImplementation((url: any) => {
-      const u = String(url);
-      if (u.includes('web.archive.org')) {
-        return Promise.resolve({
+    global.fetch = mockFetchRouter([
+      {
+        host: 'web.archive.org',
+        reply: () => Promise.resolve({
           ok: true,
           arrayBuffer: () => Promise.resolve(gz.buffer.slice(gz.byteOffset, gz.byteOffset + gz.byteLength)),
-        });
-      }
-      if (u.includes('archive.org/wayback/available')) {
-        return Promise.resolve({
+        }),
+      },
+      {
+        host: 'archive.org',
+        path: '/wayback/available',
+        reply: () => Promise.resolve({
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
           text: () => Promise.resolve(JSON.stringify({
             archived_snapshots: { closest: { url: 'x', timestamp: '20260215174326', status: '200' } },
           })),
-        });
-      }
-      if (u.includes('patents.google.com/patent/')) {
-        googleDetailCalls++;
-        return Promise.resolve({
-          ok: true,
-          headers: new Headers({ 'content-type': 'text/html' }),
-          text: () => Promise.resolve('<html>Sorry... automated queries</html>'),
-        });
-      }
-      return Promise.reject(new Error(`unexpected ${u}`));
-    }) as any;
+        }),
+      },
+      {
+        host: 'patents.google.com',
+        path: '/patent/',
+        reply: () => {
+          googleDetailCalls++;
+          return Promise.resolve({
+            ok: true,
+            headers: new Headers({ 'content-type': 'text/html' }),
+            text: () => Promise.resolve('<html>Sorry... automated queries</html>'),
+          });
+        },
+      },
+    ]) as any;
 
     const { fetchGooglePatentDetail } = await import('../../entities/patent/detail/google-patents.js');
     const parsed = await fetchGooglePatentDetail('US11027025B2');
@@ -2350,7 +2366,8 @@ describe('fetchGooglePatentDetail block-page detection', () => {
     connectionManager.closeAll();
     global.fetch = jest.fn().mockImplementation((url: any) => {
       const u = String(url);
-      if (u.includes('patents.google.com/patent/')) {
+      const { hostname, pathname } = parseMockUrl(u);
+      if (hostname === 'patents.google.com' && pathname.startsWith('/patent/')) {
         return Promise.resolve({
           ok: false,
           status: 503,
@@ -2359,7 +2376,8 @@ describe('fetchGooglePatentDetail block-page detection', () => {
           text: () => Promise.resolve('Sorry...'),
         });
       }
-      if (u.includes('archive.org')) {
+      // wayback legs: availability (archive.org) and playback (web.archive.org)
+      if (hostname === 'archive.org' || hostname === 'web.archive.org') {
         return Promise.resolve({
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),

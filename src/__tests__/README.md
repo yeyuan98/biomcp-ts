@@ -48,6 +48,7 @@ src/__tests__/
   helpers/
     mcp-harness.ts       # In-process MCP client harness (InMemoryTransport)
     assertions.ts        # Type-guard validators (expectGeneSearchResult, ...)
+    mock-url.ts          # parseMockUrl + mockFetchRouter: exact-hostname fetch-mock routing
     retry.ts             # retryOnRateLimit for integration tests
   biowasm/               # biowasm analyzers, artifacts, engine, registry, schemas, validation
   config/
@@ -152,6 +153,23 @@ Gated suites **skip silently** when their environment is absent — a green
 ### Unit Tests (`npm test`)
 
 All unit tests use mocked `global.fetch` to avoid real network calls.
+
+**Exact-hostname convention (`helpers/mock-url.ts`):** route mocks and URL
+assertions by EXACT hostname (plus optional pathname prefix) via
+`parseMockUrl(url)` — never by `url.includes('<host>')` substring checks,
+which CodeQL flags as incomplete URL validation
+(`js/incomplete-url-substring-sanitization`) and which a spoofed URL like
+`https://evil.com/?x=api.biorxiv.org` would defeat. Mocks with ≥3 hostname
+routes use the `mockFetchRouter(routes, fallback?)` route table (first
+matching `{ host, path?, reply }` wins; unmatched calls reject with
+`unexpected url …` unless a fallback is given); 1–2-route mocks and call
+assertions use direct `const { hostname, pathname } = parseMockUrl(u)`
+checks. Hostnames must match the real `baseUrl` hosts in
+`src/connections/registry.ts` (or the constants in the module under test,
+e.g. `ppubs.uspto.gov` in `src/entities/patent/ppubs-client.ts`,
+`archive.org`/`web.archive.org` in `src/entities/patent/detail/wayback.ts`).
+Path/content substring checks (`esearch`, `/api/search`, `V600E`, …) are not
+host checks and remain plain `includes`.
 
 - **Connections:** URL construction, auth headers, rate limiting, retry logic, content-type handling, proxy dispatcher self-initialization
 - **Entities:** API endpoint correctness, query parameter construction, field mapping transforms, citation orchestration, deduplication, ID resolution

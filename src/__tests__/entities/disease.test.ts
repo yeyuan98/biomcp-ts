@@ -1,6 +1,7 @@
 import { jest } from '@jest/globals';
 import { diseaseSearch, diseaseGet, transformMyDiseaseResponse } from '../../entities/disease.js';
 import { connectionManager } from '../../connections/manager.js';
+import { parseMockUrl } from '../helpers/mock-url.js';
 
 describe('disease', () => {
   let originalFetch: typeof global.fetch;
@@ -148,7 +149,7 @@ describe('diseaseGet gene_associations section (DisGeNET)', () => {
   test('queries gda/summary with normalized disease code and raw Authorization key', async () => {
     global.fetch = jest.fn().mockImplementation((input: any) => {
       const url = typeof input === 'string' ? input : input.url;
-      if (url.includes('mydisease.info')) {
+      if (parseMockUrl(url).hostname === 'mydisease.info') {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
@@ -185,7 +186,7 @@ describe('diseaseGet gene_associations section (DisGeNET)', () => {
     const result = await diseaseGet('C0006142', ['gene_associations']);
 
     const calls = (global.fetch as any).mock.calls;
-    const disgenetCall = calls.find((c: any[]) => String(c[0]).includes('api.disgenet.com'));
+    const disgenetCall = calls.find((c: any[]) => parseMockUrl(c[0]).hostname === 'api.disgenet.com');
     expect(disgenetCall).toBeDefined();
     const url = new URL(disgenetCall[0] as string);
     expect(url.pathname).toBe('/api/v1/gda/summary');
@@ -209,7 +210,7 @@ describe('diseaseGet gene_associations section (DisGeNET)', () => {
   test('normalizes colon-form MONDO ids to DisGeNET underscore form', async () => {
     global.fetch = jest.fn().mockImplementation((input: any) => {
       const url = typeof input === 'string' ? input : input.url;
-      if (url.includes('mydisease.info')) {
+      if (parseMockUrl(url).hostname === 'mydisease.info') {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
@@ -228,7 +229,7 @@ describe('diseaseGet gene_associations section (DisGeNET)', () => {
 
     await diseaseGet('MONDO:0007254', ['gene_associations']);
 
-    const disgenetCall = (global.fetch as any).mock.calls.find((c: any[]) => String(c[0]).includes('api.disgenet.com'));
+    const disgenetCall = (global.fetch as any).mock.calls.find((c: any[]) => parseMockUrl(c[0]).hostname === 'api.disgenet.com');
     expect(disgenetCall).toBeDefined();
     const url = new URL(disgenetCall[0] as string);
     expect(url.searchParams.get('disease')).toBe('MONDO_0007254');
