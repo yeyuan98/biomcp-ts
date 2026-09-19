@@ -36,7 +36,7 @@ describe('article_search', () => {
 });
 
 describe('article_search preprint_only (bioRxiv + medRxiv)', () => {
-  it('returns labeled preprints with abstracts from both servers', async () => {
+  it('returns labeled preprints with abstracts', async () => {
     const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'crispr base editing', source: 'preprint_only', limit: 5 }));
     expectArticleSearchResult(results);
     expect(results.length).toBeGreaterThan(0);

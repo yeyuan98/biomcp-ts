@@ -121,7 +121,11 @@ function encodeDoiPath(doi: string): string {
  * the failure. Worst case is therefore one server's transport failure
  * (~31 s: 2 attempts × 15 s + 1 s backoff) and no /pubs call
  * (getPreprintArticle skips it when the official API is unreachable).
- * The Europe PMC leg runs in parallel and is untouched. */
+ * The Europe PMC leg runs in parallel and is untouched. Residual exposure:
+ * in the pathological slow-but-succeeding-host case (not an outage — those
+ * fast-skip), step 2's /pubs call can still add up to ~31 s after step 1,
+ * pushing the theoretical total past the 60 s article_get cap; the tool
+ * timeout then surfaces as an error rather than a hang. */
 async function fetchOfficialDetails(
   doi: string
 ): Promise<{ server: 'biorxiv' | 'medrxiv'; records: BiorxivDetailsRecord[] } | undefined> {
