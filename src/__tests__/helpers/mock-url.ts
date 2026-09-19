@@ -16,7 +16,7 @@ import { jest } from '@jest/globals';
  */
 export function parseMockUrl(url: unknown): URL {
   try {
-    return new URL(String(url));
+    return new URL(url instanceof Request ? url.url : String(url));
   } catch {
     return new URL('https://mock.invalid/');
   }
