@@ -317,5 +317,16 @@ describe('searchArxiv', () => {
     expect(result).toHaveLength(1);
     expect(result[0]._error).toContain('searchArxiv failed');
     expect(result[0]._error).toContain('HTTP 429');
+    expect(result[0]._error).toContain('shared `biomcp serve` daemon');
+    expect(result[0]._error).not.toContain('API key');
+  });
+
+  test('query reduced to nothing by sanitization returns [] without a network call', async () => {
+    global.fetch = jest.fn() as any;
+
+    const result = await searchArxiv('()"")', 10, 0);
+
+    expect(result).toEqual([]);
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });

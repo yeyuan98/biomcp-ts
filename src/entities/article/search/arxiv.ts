@@ -44,10 +44,16 @@ export async function searchArxiv(
   dateRange?: ParsedDateRange
 ): Promise<Article[]> {
   try {
+    // A query reduced to nothing by sanitization (pure syntax characters)
+    // would make arXiv answer HTTP 400 for `all:()` — return [] instead of
+    // burning a rate-limited round-trip on it.
+    const sanitized = sanitizeArxivQuery(query);
+    if (!sanitized) return [];
+
     // `+` is arXiv's documented space separator (≡ %20); the date filter is
     // the evidenced quoted submittedDate range (plan D5), with quotes
     // %22-encoded to mirror arXiv's own self-referencing feed links.
-    let searchQuery = `all:(${encodeURIComponent(sanitizeArxivQuery(query))})`;
+    let searchQuery = `all:(${encodeURIComponent(sanitized)})`;
     if (dateRange?.from || dateRange?.to) {
       const from = formatArxivDateBound(dateRange.from, '0000', DEFAULT_DATE_FROM);
       const to = formatArxivDateBound(dateRange.to, '2359', DEFAULT_DATE_TO);
@@ -76,6 +82,17 @@ export async function searchArxiv(
           'rate-limit violations of the arXiv API Terms of Use (https://info.arxiv.org/help/api/tou.html — ' +
           'max 1 request per 3 seconds). Wait before retrying, or contact arXiv administrators to request ' +
           'an unblock. Note: arXiv does not offer API keys, so there is no credential to configure.',
+      } as any];
+    }
+    if (error instanceof HttpConnectionError && error.status === 429) {
+      // Reworded like the 403 case: arXiv has no API keys, so the stock 429
+      // hint ("set the … API key") is a false lead.
+      return [{
+        _error:
+          'searchArxiv failed: HTTP 429 from arXiv (rate limited). The built-in limiter already spaces ' +
+          'requests to 1 per 3 seconds per process; if you are running multiple biomcp instances on one ' +
+          'machine, use a single shared `biomcp serve` daemon so all agents share one rate limiter ' +
+          '(see README). Wait a few seconds before retrying.',
       } as any];
     }
     const msg = error instanceof Error ? error.message : String(error);
