@@ -4,6 +4,7 @@ import { clearCitationCache } from '../../entities/article/citation/index.js';
 import { clearWorkCache } from '../../entities/article/citation/crossref.js';
 import { clearCitedInCache } from '../../entities/article/citation/pubmed.js';
 import { fetchOpenAccess } from '../../entities/article/detail/open-access.js';
+import { getPreprintArticle } from '../../entities/article/detail/preprint.js';
 import { connectionManager } from '../../connections/manager.js';
 
 const SINGLE_ARTICLE_XML = `<?xml version="1.0"?>
@@ -1737,4 +1738,67 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     expect(result.cited_by).toBe(44);
     expect(result.ppr_id).toBe('PPR910295');
   }, 20000);
+
+  test('articleGet transport outage skips medrxiv probe and /pubs, degrades to EPMC', async () => {
+    global.fetch = jest.fn((url: unknown) => {
+      const u = String(url);
+      if (u.includes('api.biorxiv.org/')) return Promise.reject(new Error('network down'));
+      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse(epmcCorePayload));
+      return Promise.reject(new Error(`unexpected url ${u}`));
+    }) as any;
+
+    const result = await articleGet('10.1101/2021.10.25.465764');
+
+    const urls = (global.fetch as any).mock.calls.map((c: unknown[]) => String(c[0]));
+    // same host serves both collections → no medrxiv probe after transport failure
+    expect(urls.some(u => u.includes('/details/medrxiv/'))).toBe(false);
+    // official API unreachable → /pubs would be pure wasted latency
+    expect(urls.some(u => u.includes('/pubs/'))).toBe(false);
+    // EPMC degraded core with published from the "Preprint of" link, no network call
+    expect(result.preprint?.data_source).toBe('europepmc');
+    expect(result.published).toEqual({ pmid: '32015507', source: 'europepmc' });
+  }, 20000);
+
+  test('articleGet transport outage yields published null without an EPMC preprint-of link', async () => {
+    const epmcWithoutLink = {
+      resultList: {
+        result: [{
+          ...epmcCorePayload.resultList.result[0],
+          commentCorrectionList: undefined,
+        }],
+      },
+    };
+    global.fetch = jest.fn((url: unknown) => {
+      const u = String(url);
+      if (u.includes('api.biorxiv.org/')) return Promise.reject(new Error('network down'));
+      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse(epmcWithoutLink));
+      return Promise.reject(new Error(`unexpected url ${u}`));
+    }) as any;
+
+    const result = await articleGet('10.1101/2021.10.25.465764');
+
+    expect(result.preprint?.data_source).toBe('europepmc');
+    expect(result.published).toBeNull();
+  }, 20000);
+
+  test('getPreprintArticle per-segment URL-encodes reserved chars in the DOI path', async () => {
+    global.fetch = jest.fn((url: unknown) => {
+      const u = String(url);
+      if (u.includes('api.biorxiv.org/details/biorxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv', ['1'])));
+      if (u.includes('api.biorxiv.org/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
+      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse({ resultList: { result: [] } }));
+      return Promise.reject(new Error(`unexpected url ${u}`));
+    }) as any;
+
+    const result = await getPreprintArticle('10.1101/2024.01.01.12345?v=x');
+
+    expect(result.preprint?.data_source).toBe('api.biorxiv.org');
+    const urls = (global.fetch as any).mock.calls.map((c: unknown[]) => String(c[0]));
+    const detailsUrl = urls.find(u => u.includes('/details/biorxiv/')) ?? '';
+    // reserved chars encoded per segment ('?' → %3F, '=' → %3D), '/' preserved
+    expect(detailsUrl).toContain('2024.01.01.12345%3Fv%3Dx');
+    expect(detailsUrl).not.toContain('?v=x');
+    const pubsUrl = urls.find(u => u.includes('/pubs/')) ?? '';
+    expect(pubsUrl).toContain('2024.01.01.12345%3Fv%3Dx/na');
+  }, 15000);
 });

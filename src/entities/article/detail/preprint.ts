@@ -105,17 +105,27 @@ function normalizeFunders(funder?: BiorxivFunder[] | string): PreprintFunder[] |
   return out.length > 0 ? out : undefined;
 }
 
+/** The biorxiv API interpolates the DOI into the URL path. parseArticleId
+ * admits any non-whitespace DOI, so reserved chars ('?', '#', '%', '&')
+ * would silently mutate the URL — encode each '/'-separated segment while
+ * keeping the legitimate '/' separators the API path expects. */
+function encodeDoiPath(doi: string): string {
+  return doi.split('/').map(encodeURIComponent).join('/');
+}
+
 /** /details/{server}/{doi} returns one record per version; the DOI's prefix
  * cannot tell biorxiv from medrxiv (10.1101 is shared with CSHL Press
  * journals and the new 10.64898 prefix is shared by both preprint servers),
- * so try biorxiv then medrxiv — a miss is a fast soft error (~1–2 s).
+ * so try biorxiv then medrxiv — a soft miss ("no posts found") is a fast
+ * fall-through to the other server (~1–2 s plus 1 req/s limiter spacing).
  *
- * Worst-case timing note: with registry retry {attempts: 2} and 15 s
- * per-attempt timeouts, a pathological hang-then-timeout on BOTH servers
- * costs ~62 s, past the 60 s article_get tool cap — the tool timeout then
- * surfaces as an error rather than a hang. Refusals fail fast; this only
- * bites under full outages, where Europe PMC-only results are preferable
- * but not worth weakening the per-call budgets for. */
+ * Worst-case timing note: a TRANSPORT-level failure (timeout, network,
+ * HTTP error status) aborts the federation immediately — api.biorxiv.org
+ * hosts BOTH server collections, so probing medrxiv would only duplicate
+ * the failure. Worst case is therefore one server's transport failure
+ * (~31 s: 2 attempts × 15 s + 1 s backoff) and no /pubs call
+ * (getPreprintArticle skips it when the official API is unreachable).
+ * The Europe PMC leg runs in parallel and is untouched. */
 async function fetchOfficialDetails(
   doi: string
 ): Promise<{ server: 'biorxiv' | 'medrxiv'; records: BiorxivDetailsRecord[] } | undefined> {
@@ -123,7 +133,7 @@ async function fetchOfficialDetails(
   for (const server of ['biorxiv', 'medrxiv'] as const) {
     try {
       const response = await conn.request(
-        `/details/${server}/${doi}`
+        `/details/${server}/${encodeDoiPath(doi)}`
       ) as BiorxivDetailsResponse;
       const status = response.messages?.[0]?.status;
       const records = response.collection ?? [];
@@ -133,7 +143,10 @@ async function fetchOfficialDetails(
       // Soft miss ("no posts found") or empty collection → try the other server.
     } catch (error) {
       console.error(`[getPreprintArticle] /details/${server} failed:`, error);
-      // Transport-level failure on biorxiv → still try medrxiv, then EPMC fallback.
+      // Transport-level failure: the same host serves both collections,
+      // so medrxiv would fail identically — return immediately and let
+      // the EPMC fallback cover the data.
+      return undefined;
     }
   }
   return undefined;
@@ -242,7 +255,7 @@ async function fetchPublishedVersion(
   try {
     const conn = connectionManager.getConnection('biorxiv');
     const response = await conn.request(
-      `/pubs/${server}/${doi}/na`
+      `/pubs/${server}/${encodeDoiPath(doi)}/na`
     ) as BiorxivPubsResponse;
     const rec = response.collection?.[0];
     if (response.messages?.[0]?.status !== 'ok' || !rec?.published_doi) return null;
@@ -377,15 +390,24 @@ export async function getPreprintArticle(
 
   const wantsCitation = options?.sections?.includes('citation') || options?.sections?.includes('all');
 
-  const step2: Promise<void>[] = [
-    fetchPublishedVersion(server, doi).then(p => {
-      // Fallback chain: official /pubs mapping → EPMC "Preprint of" link →
-      // the official /details `published` DOI field → null.
-      result.published = p
-        ?? publishedFromEpmc(epmc)
-        ?? (officialPublishedDoi ? { doi: officialPublishedDoi, source: 'biorxiv_details' } : null);
-    }),
-  ];
+  const step2: Promise<void>[] = [];
+
+  if (official) {
+    step2.push(
+      fetchPublishedVersion(server, doi).then(p => {
+        // Fallback chain: official /pubs mapping → EPMC "Preprint of" link →
+        // the official /details `published` DOI field → null.
+        result.published = p
+          ?? publishedFromEpmc(epmc)
+          ?? (officialPublishedDoi ? { doi: officialPublishedDoi, source: 'biorxiv_details' } : null);
+      })
+    );
+  } else {
+    // Official API unreachable → /pubs on the same host is also unreachable;
+    // calling it is pure wasted latency. officialPublishedDoi is undefined
+    // in this branch by construction, so only the EPMC link remains.
+    result.published = publishedFromEpmc(epmc) ?? null;
+  }
 
   if (wantsCitation) {
     step2.push(
