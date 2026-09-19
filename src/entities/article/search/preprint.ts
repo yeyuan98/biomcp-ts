@@ -1,15 +1,8 @@
-import { connectionManager } from '../../../connections/manager.js';
 import type { Article, ParsedDateRange } from '../types.js';
-import { EuropePMCPreprintRecord, splitAuthors, cleanArticleTitle } from '../europepmc-shared.js';
-
-interface EuropePMCSearchResponse {
-  resultList?: {
-    result?: EuropePMCPreprintRecord[];
-  };
-}
+import { EuropePMCPreprintRecord, splitAuthors, cleanArticleTitle, epmcSearchWindow, epmcPreprintServerLabel } from '../europepmc-shared.js';
 
 export function transformPreprint(a: EuropePMCPreprintRecord): Article {
-  const server = a.bookOrReportDetails?.publisher === 'medRxiv' ? 'medRxiv' : 'bioRxiv';
+  const server = epmcPreprintServerLabel(a.bookOrReportDetails?.publisher);
   return {
     doi: a.doi,
     title: cleanArticleTitle(a.title),
@@ -44,29 +37,15 @@ export async function searchPreprints(
   dateRange?: ParsedDateRange
 ): Promise<Article[]> {
   try {
-    const conn = connectionManager.getConnection('europepmc');
-
-    let queryString = `(${query}) AND SRC:PPR AND PUBLISHER:(bioRxiv OR medRxiv)`;
-    if (dateRange?.from || dateRange?.to) {
-      const fromYear = dateRange.from ? dateRange.from.slice(0, 4) : '*';
-      const toYear = dateRange.to ? dateRange.to.slice(0, 4) : '*';
-      queryString += ` AND pub_year:[${fromYear} TO ${toYear}]`;
-    }
-
-    // Same over-fetch windowing as the journal backend (europepmc.ts):
-    // the `page` param is silently ignored and cursorMark cannot jump to a
-    // row, so window client-side; pageSize hard-caps at 1000. An explicit
-    // cursorMark defines the window start (offset ignored in that case).
-    const fromCursor = Boolean(cursorMark);
-    const fetchLimit = fromCursor ? limit : Math.min(limit + offset, 1000);
-    const cursor = cursorMark || '*';
-    const response = await conn.request(
-      `/search?query=${encodeURIComponent(queryString)}&resultType=core&format=json&pageSize=${fetchLimit}&cursorMark=${encodeURIComponent(cursor)}`
-    ) as EuropePMCSearchResponse;
-
-    const rows = response.resultList?.result || [];
-    const window = fromCursor ? rows.slice(0, limit) : rows.slice(offset, offset + limit);
-    return window.map(transformPreprint);
+    const rows = await epmcSearchWindow<EuropePMCPreprintRecord>({
+      query: `(${query}) AND SRC:PPR AND PUBLISHER:(bioRxiv OR medRxiv)`,
+      resultTypeParam: 'resultType=core',
+      limit,
+      offset,
+      cursorMark,
+      dateRange,
+    });
+    return rows.map(transformPreprint);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error('[searchPreprints] Error:', error);

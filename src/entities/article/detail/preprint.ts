@@ -2,10 +2,12 @@ import { connectionManager } from '../../../connections/manager.js';
 import { withTimeout, DEFAULT_PROVIDER_TIMEOUT_MS } from '../../../connections/fetch-utils.js';
 import {
   EuropePMCPreprintRecord,
+  EuropePMCSearchResponse,
   EuropePMCCitationEntry,
   splitAuthors,
   cleanArticleTitle,
   transformCitationEntry,
+  epmcPreprintServerLabel,
 } from '../europepmc-shared.js';
 import type {
   ArticleResult,
@@ -65,12 +67,6 @@ interface BiorxivPubsRecord {
 interface BiorxivPubsResponse {
   messages?: Array<{ status?: string }>;
   collection?: BiorxivPubsRecord[];
-}
-
-interface EuropePMCSearchResponse {
-  resultList?: {
-    result?: EuropePMCPreprintRecord[];
-  };
 }
 
 interface EuropePMCCitationsResponse {
@@ -158,7 +154,7 @@ async function fetchEpmcPreprint(doi: string): Promise<EuropePMCPreprintRecord |
     const response = await withTimeout(
       conn.request(
         `/search?query=${encodeURIComponent(`DOI:"${doi}"`)}&resultType=core&format=json&pageSize=1`
-      ) as Promise<EuropePMCSearchResponse>,
+      ) as Promise<EuropePMCSearchResponse<EuropePMCPreprintRecord>>,
       DEFAULT_PROVIDER_TIMEOUT_MS,
       { onTimeout: 'null' }
     );
@@ -225,7 +221,7 @@ function buildOfficialCore(
 }
 
 function buildEpmcCore(doi: string, rec: EuropePMCPreprintRecord): ArticleResult {
-  const serverLabel = rec.bookOrReportDetails?.publisher === 'medRxiv' ? 'medRxiv' : 'bioRxiv';
+  const serverLabel = epmcPreprintServerLabel(rec.bookOrReportDetails?.publisher);
   return {
     doi: rec.doi ?? doi,
     title: cleanArticleTitle(rec.title),
@@ -371,7 +367,7 @@ export async function getPreprintArticle(
     result = built.core;
     officialPublishedDoi = built.officialPublishedDoi;
   } else if (epmc) {
-    server = epmc.bookOrReportDetails?.publisher === 'medRxiv' ? 'medrxiv' : 'biorxiv';
+    server = epmcPreprintServerLabel(epmc.bookOrReportDetails?.publisher).toLowerCase() as 'biorxiv' | 'medrxiv';
     result = buildEpmcCore(doi, epmc);
   } else {
     throw new Error(

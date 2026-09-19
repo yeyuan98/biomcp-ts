@@ -1,3 +1,4 @@
+import { connectionManager } from '../../connections/manager.js';
 import type { CitationRecord } from './citation/types.js';
 
 /** Shared field assumptions for Europe PMC REST (v6.9) response records,
@@ -61,6 +62,15 @@ export interface EuropePMCCitationEntry {
   issue?: string;
   pageInfo?: string;
   pubYear?: string | number;
+}
+
+/** envelope of the /search endpoint responses (shared by the search,
+ * preprint-search, preprint-detail, and citation adapters). */
+export interface EuropePMCSearchResponse<Row = unknown> {
+  hitCount?: number;
+  resultList?: {
+    result?: Row[];
+  };
 }
 
 const XML_ENTITY_MAP: Record<string, string> = {
@@ -133,4 +143,65 @@ export function transformCitationEntry(entry: EuropePMCCitationEntry): CitationR
     year: parseYear(entry.pubYear),
     source: 'europepmc',
   };
+}
+
+/** Year-granularity date filter for /search queries. Returns the bare
+ * `pub_year:[X TO Y]` predicate ('' when the range is absent), with `*`
+ * as the open-bound sentinel on either side. Callers append it with a
+ * leading ' AND ' only when non-empty. */
+export function epmcPubYearClause(dateRange?: { from?: string; to?: string }): string {
+  if (!dateRange?.from && !dateRange?.to) return '';
+  const fromYear = dateRange.from ? dateRange.from.slice(0, 4) : '*';
+  const toYear = dateRange.to ? dateRange.to.slice(0, 4) : '*';
+  return `pub_year:[${fromYear} TO ${toYear}]`;
+}
+
+/** Server label for a Europe PMC preprint (source=PPR) record: the
+ * publisher field is "medRxiv" or "bioRxiv"; anything else (including
+ * missing) defaults to bioRxiv. */
+export function epmcPreprintServerLabel(publisher?: string): 'bioRxiv' | 'medRxiv' {
+  return publisher === 'medRxiv' ? 'medRxiv' : 'bioRxiv';
+}
+
+/** Core /search mechanics shared by the journal (search/europepmc.ts)
+ * and preprint (search/preprint.ts) backends: query assembly, optional
+ * year-granularity date clause, and window selection. Returns the rows
+ * of the requested window; errors propagate to the caller so each
+ * backend keeps its own `_error` row envelope.
+ *
+ * EuropePMC has no server-side offset: the `page` parameter is silently
+ * ignored (live-verified: page=1/3/10 return identical rows) and
+ * cursorMark deep-paging cannot jump to a row, so over-fetch the window
+ * in one request (pageSize hard-caps at 1000 — larger requests are
+ * answered with an errCode:404 body) and window client-side, mirroring
+ * the LitSense/PubTator pagination pattern. An explicit cursorMark takes
+ * precedence and defines the window start (the cursor already skips
+ * preceding rows), so offset is ignored in that case.
+ *
+ * `resultTypeParam` is interpolated verbatim: the journal backend sends
+ * `resulttype=lite` while the preprint backend sends `resultType=core`
+ * (both live-verified shapes). */
+export async function epmcSearchWindow<Row = unknown>(options: {
+  query: string;
+  resultTypeParam: string;
+  limit: number;
+  offset: number;
+  cursorMark?: string;
+  dateRange?: { from?: string; to?: string };
+}): Promise<Row[]> {
+  const conn = connectionManager.getConnection('europepmc');
+
+  let queryString = options.query;
+  const dateClause = epmcPubYearClause(options.dateRange);
+  if (dateClause) queryString += ` AND ${dateClause}`;
+
+  const fromCursor = Boolean(options.cursorMark);
+  const fetchLimit = fromCursor ? options.limit : Math.min(options.limit + options.offset, 1000);
+  const cursor = options.cursorMark || '*';
+  const response = await conn.request(
+    `/search?query=${encodeURIComponent(queryString)}&${options.resultTypeParam}&format=json&pageSize=${fetchLimit}&cursorMark=${encodeURIComponent(cursor)}`
+  ) as EuropePMCSearchResponse<Row>;
+
+  const rows = response.resultList?.result || [];
+  return fromCursor ? rows.slice(0, options.limit) : rows.slice(options.offset, options.offset + options.limit);
 }
