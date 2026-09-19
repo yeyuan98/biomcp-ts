@@ -6,6 +6,7 @@ import { clearCitedInCache } from '../../entities/article/citation/pubmed.js';
 import { fetchOpenAccess } from '../../entities/article/detail/open-access.js';
 import { getPreprintArticle } from '../../entities/article/detail/preprint.js';
 import { connectionManager } from '../../connections/manager.js';
+import { parseMockUrl } from '../helpers/mock-url.js';
 
 const SINGLE_ARTICLE_XML = `<?xml version="1.0"?>
 <PubmedArticleSet>
@@ -721,8 +722,8 @@ describe('article', () => {
         });
         let releaseFirst!: (v: unknown) => void;
         global.fetch = jest.fn().mockImplementation((url: unknown) => {
-          if (!String(url).includes('semanticscholar')) return Promise.resolve(ok());
-          if ((global.fetch as any).mock.calls.filter((c: any[]) => String(c[0]).includes('semanticscholar')).length === 1) {
+          if (parseMockUrl(url).hostname !== 'api.semanticscholar.org') return Promise.resolve(ok());
+          if ((global.fetch as any).mock.calls.filter((c: any[]) => parseMockUrl(c[0]).hostname === 'api.semanticscholar.org').length === 1) {
             return new Promise(resolve => { releaseFirst = resolve; });
           }
           return Promise.resolve(ok());
@@ -812,7 +813,7 @@ describe('article', () => {
       jest.useFakeTimers();
       try {
         global.fetch = jest.fn().mockImplementation((url: unknown) => {
-          if (String(url).includes('semanticscholar')) {
+          if (parseMockUrl(url).hostname === 'api.semanticscholar.org') {
             return new Promise(() => {});
           }
           return Promise.resolve({
@@ -1712,15 +1713,16 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
   test('articleGet on preprint DOI builds record from official API + EPMC enrichment', async () => {
     global.fetch = jest.fn((url: unknown) => {
       const u = String(url);
+      const { hostname, pathname } = parseMockUrl(u);
       // duplicate version numbers exercise the dedupe path
-      if (u.includes('api.biorxiv.org/details/biorxiv/')) return Promise.resolve(jsonResponse({ ...biorxivDetailsPayload('bioRxiv'), collection: [...biorxivDetailsPayload('bioRxiv').collection, { ...biorxivDetailsPayload('bioRxiv').collection[0] }] }));
-      if (u.includes('api.biorxiv.org/pubs/')) {
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/details/biorxiv/')) return Promise.resolve(jsonResponse({ ...biorxivDetailsPayload('bioRxiv'), collection: [...biorxivDetailsPayload('bioRxiv').collection, { ...biorxivDetailsPayload('bioRxiv').collection[0] }] }));
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/pubs/')) {
         return Promise.resolve(jsonResponse({
           messages: [{ status: 'ok' }],
           collection: [{ preprint_doi: '10.1101/2025.03.05.641768', published_doi: '10.3389/fbinf.2025.1577324', published_journal: 'Frontiers in Bioinformatics', published_date: '2025-09-04', preprint_date: '2025-03-05' }],
         }));
       }
-      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse(epmcCorePayload));
+      if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse(epmcCorePayload));
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
@@ -1751,14 +1753,15 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
   test('articleGet falls back to medrxiv server on biorxiv soft miss', async () => {
     global.fetch = jest.fn((url: unknown) => {
       const u = String(url);
-      if (u.includes('api.biorxiv.org/details/biorxiv/')) {
+      const { hostname, pathname } = parseMockUrl(u);
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/details/biorxiv/')) {
         return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
       }
-      if (u.includes('api.biorxiv.org/details/medrxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('medRxiv', ['1'])));
-      if (u.includes('api.biorxiv.org/pubs/')) {
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/details/medrxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('medRxiv', ['1'])));
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/pubs/')) {
         return Promise.resolve(jsonResponse({ messages: [{ status: 'no articles found for published version of ' }], collection: [] }));
       }
-      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse(epmcCorePayload));
+      if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse(epmcCorePayload));
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
@@ -1774,10 +1777,11 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
   test('articleGet on unknown preprint DOI throws not-found', async () => {
     global.fetch = jest.fn((url: unknown) => {
       const u = String(url);
-      if (u.includes('api.biorxiv.org/details/')) {
+      const { hostname, pathname } = parseMockUrl(u);
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/details/')) {
         return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
       }
-      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse({ resultList: { result: [] } }));
+      if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse({ resultList: { result: [] } }));
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
@@ -1787,8 +1791,9 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
   test('articleGet preprint citation section uses PPR endpoints', async () => {
     global.fetch = jest.fn((url: unknown) => {
       const u = String(url);
-      if (u.includes('api.biorxiv.org/details/biorxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv', ['1'])));
-      if (u.includes('api.biorxiv.org/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
+      const { hostname, pathname } = parseMockUrl(u);
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/details/biorxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv', ['1'])));
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
       if (u.includes('/PPR910295/citations')) {
         return Promise.resolve(jsonResponse({
           citationList: { citation: [{ id: '123', source: 'MED', title: 'Citing paper', authorString: 'Doe J', journalTitle: 'Nature', pubYear: '2023' }] },
@@ -1799,7 +1804,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
           referenceList: { reference: [{ id: '456', source: 'MED', title: 'Referenced paper', authorString: 'Roe A', journalTitle: 'Science', pubYear: '2019' }] },
         }));
       }
-      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse(epmcCorePayload));
+      if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse(epmcCorePayload));
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
@@ -1818,8 +1823,9 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
   test('articleGet degrades to Europe PMC core when the official API is unreachable', async () => {
     global.fetch = jest.fn((url: unknown) => {
       const u = String(url);
-      if (u.includes('api.biorxiv.org/')) return Promise.reject(new Error('connection refused'));
-      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse(epmcCorePayload));
+      const { hostname, pathname } = parseMockUrl(u);
+      if (hostname === 'api.biorxiv.org') return Promise.reject(new Error('connection refused'));
+      if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse(epmcCorePayload));
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
@@ -1835,8 +1841,9 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
   test('articleGet transport outage skips medrxiv probe and /pubs, degrades to EPMC', async () => {
     global.fetch = jest.fn((url: unknown) => {
       const u = String(url);
-      if (u.includes('api.biorxiv.org/')) return Promise.reject(new Error('network down'));
-      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse(epmcCorePayload));
+      const { hostname, pathname } = parseMockUrl(u);
+      if (hostname === 'api.biorxiv.org') return Promise.reject(new Error('network down'));
+      if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse(epmcCorePayload));
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
@@ -1863,8 +1870,9 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     };
     global.fetch = jest.fn((url: unknown) => {
       const u = String(url);
-      if (u.includes('api.biorxiv.org/')) return Promise.reject(new Error('network down'));
-      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse(epmcWithoutLink));
+      const { hostname, pathname } = parseMockUrl(u);
+      if (hostname === 'api.biorxiv.org') return Promise.reject(new Error('network down'));
+      if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse(epmcWithoutLink));
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
@@ -1884,11 +1892,12 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     };
     global.fetch = jest.fn((url: unknown) => {
       const u = String(url);
-      if (u.includes('api.biorxiv.org/details/biorxiv/')) return Promise.resolve(jsonResponse(detailsWithPublishedDoi));
+      const { hostname, pathname } = parseMockUrl(u);
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/details/biorxiv/')) return Promise.resolve(jsonResponse(detailsWithPublishedDoi));
       // /pubs soft miss → no published mapping from the official pubs endpoint
-      if (u.includes('api.biorxiv.org/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
       // no EPMC record → no "Preprint of" link either
-      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse({ resultList: { result: [] } }));
+      if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse({ resultList: { result: [] } }));
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
@@ -1901,14 +1910,15 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
   test('articleGet preprint citation section carries _error when the PPR endpoints reject', async () => {
     global.fetch = jest.fn((url: unknown) => {
       const u = String(url);
-      if (u.includes('api.biorxiv.org/details/biorxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv', ['1'])));
-      if (u.includes('api.biorxiv.org/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
+      const { hostname, pathname } = parseMockUrl(u);
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/details/biorxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv', ['1'])));
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
       // both PPR legs reject; the non-network message keeps the europepmc
       // registry retry (1 retry on network signatures) out of the timing
       if (u.includes('/PPR910295/citations') || u.includes('/PPR910295/references')) {
         return Promise.reject(new Error('PPR citation endpoints exploded'));
       }
-      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse(epmcCorePayload));
+      if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse(epmcCorePayload));
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
@@ -1928,9 +1938,10 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     };
     global.fetch = jest.fn((url: unknown) => {
       const u = String(url);
-      if (u.includes('api.biorxiv.org/details/biorxiv/')) return Promise.resolve(jsonResponse(detailsNaFunder));
-      if (u.includes('api.biorxiv.org/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
-      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse(epmcCorePayload));
+      const { hostname, pathname } = parseMockUrl(u);
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/details/biorxiv/')) return Promise.resolve(jsonResponse(detailsNaFunder));
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
+      if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse(epmcCorePayload));
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
@@ -1949,11 +1960,12 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     }));
     global.fetch = jest.fn((url: unknown) => {
       const u = String(url);
-      if (u.includes('api.biorxiv.org/details/biorxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv', ['1'])));
-      if (u.includes('api.biorxiv.org/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
+      const { hostname, pathname } = parseMockUrl(u);
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/details/biorxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv', ['1'])));
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
       if (u.includes('/PPR910295/citations')) return Promise.resolve(jsonResponse({ hitCount: 3, citationList: { citation: threeCitations } }));
       if (u.includes('/PPR910295/references')) return Promise.resolve(jsonResponse({ referenceList: { reference: threeReferences } }));
-      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse(epmcCorePayload));
+      if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse(epmcCorePayload));
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
@@ -1987,9 +1999,10 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
   test('getPreprintArticle per-segment URL-encodes reserved chars in the DOI path', async () => {
     global.fetch = jest.fn((url: unknown) => {
       const u = String(url);
-      if (u.includes('api.biorxiv.org/details/biorxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv', ['1'])));
-      if (u.includes('api.biorxiv.org/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
-      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse({ resultList: { result: [] } }));
+      const { hostname, pathname } = parseMockUrl(u);
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/details/biorxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv', ['1'])));
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
+      if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse({ resultList: { result: [] } }));
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
@@ -1997,7 +2010,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
 
     expect(result.preprint?.data_source).toBe('api.biorxiv.org');
     const urls = (global.fetch as any).mock.calls.map((c: unknown[]) => String(c[0]));
-    const detailsUrl = urls.find(u => u.includes('/details/biorxiv/')) ?? '';
+    const detailsUrl = urls.find(u => parseMockUrl(u).pathname.startsWith('/details/biorxiv/')) ?? '';
     // reserved chars encoded per segment ('?' → %3F, '=' → %3D), '/' preserved
     expect(detailsUrl).toContain('2024.01.01.12345%3Fv%3Dx');
     expect(detailsUrl).not.toContain('?v=x');

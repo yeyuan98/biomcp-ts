@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals';
 import { articleSearch, searchArxiv, parseArxivAtomXml } from '../../entities/article.js';
+import { parseMockUrl } from '../helpers/mock-url.js';
 import { connectionManager } from '../../connections/manager.js';
 
 // The 'arxiv' registry source enforces the arXiv Terms-of-Use rate (1
@@ -427,11 +428,12 @@ describe('searchArxiv', () => {
     };
     global.fetch = jest.fn((url: unknown) => {
       const u = String(url);
-      if (u.includes('export.arxiv.org')) return Promise.reject(new TypeError('fetch failed'));
-      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse(europepmcRows));
-      if (u.includes('semanticscholar.org')) return Promise.resolve(jsonResponse({ data: [] }));
-      if (u.includes('pubtator3-api')) return Promise.resolve(jsonResponse({ results: [] }));
-      if (u.includes('litsense2-api')) return Promise.resolve(jsonResponse([]));
+      const { hostname, pathname } = parseMockUrl(u);
+      if (hostname === 'export.arxiv.org') return Promise.reject(new TypeError('fetch failed'));
+      if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse(europepmcRows));
+      if (hostname === 'api.semanticscholar.org') return Promise.resolve(jsonResponse({ data: [] }));
+      if (hostname === 'www.ncbi.nlm.nih.gov' && pathname.startsWith('/research/pubtator3-api')) return Promise.resolve(jsonResponse({ results: [] }));
+      if (hostname === 'www.ncbi.nlm.nih.gov' && pathname.startsWith('/research/litsense2-api')) return Promise.resolve(jsonResponse([]));
       return Promise.resolve(jsonResponse({ esearchresult: { idlist: [] } })); // eutils esearch
     }) as any;
 
