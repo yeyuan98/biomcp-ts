@@ -35,6 +35,29 @@ describe('article_search', () => {
   }, 60000);
 });
 
+describe('article_search preprint_only (bioRxiv + medRxiv)', () => {
+  it('returns labeled preprints with abstracts from both servers', async () => {
+    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'crispr base editing', source: 'preprint_only', limit: 5 }));
+    expectArticleSearchResult(results);
+    expect(results.length).toBeGreaterThan(0);
+    for (const r of results) {
+      expect(r.publication_types).toContain('Preprint');
+      expect(['bioRxiv', 'medRxiv']).toContain(r.journal);
+      expect(r.abstract).toBeTruthy();
+      expect(r.source).toBe('preprint_only');
+    }
+  }, 60000);
+
+  it('applies dateRange filtering', async () => {
+    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'crispr', source: 'preprint_only', limit: 5, dateRange: '2020-01-01/2021-12-31' }));
+    expectArticleSearchResult(results);
+    for (const r of results) {
+      const year = String(r.publication_date ?? '').slice(0, 4);
+      expect(['2020', '2021']).toContain(year);
+    }
+  }, 60000);
+});
+
 describe('article_get', () => {
   it('returns article by PMID', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('article_get', { id: '25333279' }));
@@ -77,6 +100,41 @@ describe('article_get', () => {
   it('returns error for invalid identifier format', async () => {
     await expect(harness.callTool('article_get', { id: 'not-a-valid-id' })).rejects.toThrow('article_get');
   }, 60000);
+});
+
+describe('article_get preprint DOIs (bioRxiv/medRxiv)', () => {
+  // 10.1101/2021.10.25.465764: bioRxiv preprint with a published version
+  // (Frontiers in Bioinformatics) and a citation count — exercises the
+  // official /details + /pubs path plus EPMC enrichment.
+  it('returns preprint record with versions, license and published mapping by legacy DOI', async () => {
+    const result = await retryOnRateLimit(() => harness.callTool('article_get', { id: '10.1101/2021.10.25.465764', sections: ['core'] }));
+    expectArticleGetResult(result);
+    expect(result.abstract).toBeTruthy();
+    expect(['bioRxiv', 'medRxiv']).toContain(result.preprint_server);
+    expect(Array.isArray(result.preprint?.versions)).toBe(true);
+    expect(result.preprint?.versions.length).toBeGreaterThan(0);
+    expect(result.license).toBeTruthy();
+    expect(result.published?.doi || result.published?.pmid).toBeTruthy();
+  }, 60000);
+
+  // New shared bioRxiv/medRxiv DOI prefix (live-verified posting).
+  it('returns preprint record by new-prefix DOI (10.64898)', async () => {
+    const result = await retryOnRateLimit(() => harness.callTool('article_get', { id: '10.64898/2026.08.11.744243' }));
+    expectArticleGetResult(result);
+    expect(result.preprint).toBeDefined();
+    expect(['bioRxiv', 'medRxiv']).toContain(result.preprint_server);
+  }, 60000);
+
+  it('citation section returns Europe PMC preprint citations', async () => {
+    // AlphaFold-Multimer preprint (PPR403752): 1000+ citations, stable.
+    const result = await retryOnRateLimit(() => harness.callTool('article_get', { id: '10.1101/2021.10.04.463034', sections: ['citation'] }));
+    const citation = (result as any)?.sections?.citation;
+    expect(citation).toBeDefined();
+    expect(citation._error).toBeUndefined();
+    expect(Array.isArray(citation.citation_counts)).toBe(true);
+    expect(citation.citation_counts[0]?.total ?? 0).toBeGreaterThan(0);
+    expect(Array.isArray(citation.backward_references)).toBe(true);
+  }, 90000);
 });
 
 describe('article_get sections', () => {

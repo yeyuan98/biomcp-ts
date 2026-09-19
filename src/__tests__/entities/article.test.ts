@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { articleSearch, articleGet, transformPubTator, transformLitSense, transformEuropePMC, transformSemanticScholar, parseDateRange, parseArticleId, parseOaXml } from '../../entities/article.js';
+import { articleSearch, articleGet, transformPubTator, transformLitSense, transformEuropePMC, transformSemanticScholar, transformPreprint, parseDateRange, parseArticleId, isPreprintDoi, parseOaXml } from '../../entities/article.js';
 import { clearCitationCache } from '../../entities/article/citation/index.js';
 import { clearWorkCache } from '../../entities/article/citation/crossref.js';
 import { clearCitedInCache } from '../../entities/article/citation/pubmed.js';
@@ -1481,4 +1481,260 @@ describe('article', () => {
       expect(result.license_url).toBe('https://creativecommons.org/licenses/by/4.0/');
     });
   });
+});
+
+describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
+  let originalFetch: typeof global.fetch;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    originalFetch = global.fetch;
+    connectionManager.closeAll();
+    process.env.NCBI_API_KEY = '';
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    delete process.env.NCBI_API_KEY;
+  });
+
+  const jsonResponse = (body: unknown) => ({
+    ok: true,
+    headers: new Headers({ 'content-type': 'application/json' }),
+    json: () => Promise.resolve(body),
+  });
+
+  const preprintCorePage = (n: number) => ({
+    resultList: {
+      result: Array.from({ length: n }, (_, i) => ({
+        id: `PPR${1000000 + i}`,
+        source: 'PPR',
+        doi: `10.1101/2025.05.19.65489${i}`,
+        title: `Preprint ${i}`,
+        authorString: 'Zhang W, Li H',
+        abstractText: `Abstract ${i}`,
+        firstPublicationDate: '2025-05-19',
+        citedByCount: i,
+        isOpenAccess: 'Y',
+        bookOrReportDetails: { publisher: i % 2 === 0 ? 'bioRxiv' : 'medRxiv' },
+      })),
+    },
+  });
+
+  const biorxivDetailsPayload = (server: string, versions: string[] = ['1', '2']) => ({
+    messages: [{ status: 'ok' }],
+    collection: versions.map(v => ({
+      doi: '10.1101/2025.03.05.641768',
+      title: 'Rationality self-organizes beyond subjective reasonings',
+      authors: 'Yonekura, S.; Kanazawa, H.',
+      author_corresponding: 'Shogo Yonekura',
+      author_corresponding_institution: 'The University of Tokyo',
+      date: v === '1' ? '2025-03-05' : '2025-09-10',
+      version: v,
+      type: 'new results',
+      license: 'cc_by',
+      category: 'neuroscience',
+      jatsxml: 'https://www.biorxiv.org/content/early/2025/03/05/2025.03.05.641768.source.xml',
+      abstract: 'The somatic marker hypothesis proposes…',
+      funder: [{ name: 'JST', id: 'https://ror.org/04yrw5x43', 'id-type': 'ROR', award: 'JPMJCR' }],
+      published: 'NA',
+      server,
+    })),
+  });
+
+  const epmcCorePayload = {
+    resultList: {
+      result: [{
+        id: 'PPR910295',
+        source: 'PPR',
+        doi: '10.1101/2021.10.25.465764',
+        title: 'The preprint title',
+        authorString: 'Al-okaily, A, Tbakhi, A',
+        abstractText: 'The preprint abstract',
+        firstPublicationDate: '2021-10-26',
+        citedByCount: 44,
+        isOpenAccess: 'Y',
+        bookOrReportDetails: { publisher: 'bioRxiv' },
+        commentCorrectionList: { commentCorrection: [{ source: 'MED', id: '32015507', type: 'Preprint of' }] },
+      }],
+    },
+  };
+
+  test('articleSearch preprint_only builds the PPR publisher query with resultType=core', async () => {
+    global.fetch = jest.fn().mockResolvedValue(jsonResponse(preprintCorePage(10))) as any;
+
+    const result = await articleSearch('crispr', { source: 'preprint_only' });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const url = (global.fetch as any).mock.calls[0][0] as string;
+    const decoded = decodeURIComponent(url);
+    expect(decoded).toContain('SRC:PPR');
+    expect(decoded).toContain('PUBLISHER:(bioRxiv OR medRxiv)');
+    expect(url).toContain('resultType=core');
+    expect(url).toContain('cursorMark=*');
+
+    expect(result).toHaveLength(10);
+    expect(result[0].publication_types).toEqual(['Preprint']);
+    expect(result[0].abstract).toBe('Abstract 0');
+    expect(result[0].journal).toBe('bioRxiv');
+    expect(result[0].preprint_server).toBe('bioRxiv');
+    expect(result[1].journal).toBe('medRxiv');
+    expect(result[0].ppr_id).toBe('PPR1000000');
+    expect(result[0].source).toBe('preprint_only');
+    expect(result[0].authors).toEqual(['Zhang W', 'Li H']);
+  });
+
+  test('articleSearch preprint_only applies date range and offset window', async () => {
+    global.fetch = jest.fn().mockResolvedValue(jsonResponse(preprintCorePage(10))) as any;
+
+    const result = await articleSearch('vaccine', { source: 'preprint_only', limit: 3, offset: 5, dateRange: '2025-01-01/2025-12-31' });
+
+    const url = (global.fetch as any).mock.calls[0][0] as string;
+    expect(url).toContain(encodeURIComponent('AND pub_year:[2025 TO 2025]'));
+    expect(url).toContain(`pageSize=${Math.min(3 + 5, 1000)}`);
+    // client-side window: rows 5..7 of the 10-row fixture
+    expect(result.map(r => r.title)).toEqual(['Preprint 5', 'Preprint 6', 'Preprint 7']);
+  });
+
+  test('articleSearch preprint_only returns _error row on transport failure', async () => {
+    global.fetch = jest.fn().mockRejectedValue(new Error('network down')) as any;
+
+    const result = await articleSearch('crispr', { source: 'preprint_only' });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]._error).toContain('searchPreprints failed');
+  });
+
+  test('isPreprintDoi classifies both prefixes and rejects journal DOIs', () => {
+    expect(isPreprintDoi('10.1101/2025.03.05.641768')).toBe(true);
+    expect(isPreprintDoi('10.1101/2021.10.25.465764')).toBe(true);
+    expect(isPreprintDoi('10.64898/2026.08.11.744243')).toBe(true);
+    // CSHL Press journal shares the 10.1101 prefix — must NOT classify
+    expect(isPreprintDoi('10.1101/gr.123456')).toBe(false);
+    expect(isPreprintDoi('10.1038/s41586-021-03819-2')).toBe(false);
+    expect(isPreprintDoi('10.1101/2025.03')).toBe(false);
+  });
+
+  test('articleGet on preprint DOI builds record from official API + EPMC enrichment', async () => {
+    global.fetch = jest.fn((url: unknown) => {
+      const u = String(url);
+      // duplicate version numbers exercise the dedupe path
+      if (u.includes('api.biorxiv.org/details/biorxiv/')) return Promise.resolve(jsonResponse({ ...biorxivDetailsPayload('bioRxiv'), collection: [...biorxivDetailsPayload('bioRxiv').collection, { ...biorxivDetailsPayload('bioRxiv').collection[0] }] }));
+      if (u.includes('api.biorxiv.org/pubs/')) {
+        return Promise.resolve(jsonResponse({
+          messages: [{ status: 'ok' }],
+          collection: [{ preprint_doi: '10.1101/2025.03.05.641768', published_doi: '10.3389/fbinf.2025.1577324', published_journal: 'Frontiers in Bioinformatics', published_date: '2025-09-04', preprint_date: '2025-03-05' }],
+        }));
+      }
+      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse(epmcCorePayload));
+      return Promise.reject(new Error(`unexpected url ${u}`));
+    }) as any;
+
+    const result = await articleGet('10.1101/2025.03.05.641768');
+
+    // official core: semicolon authors, versions sorted, license, jatsxml
+    expect(result.title).toBe('Rationality self-organizes beyond subjective reasonings');
+    expect(result.authors).toEqual(['Yonekura, S.', 'Kanazawa, H.']);
+    expect(result.preprint_server).toBe('bioRxiv');
+    expect(result.license).toBe('cc_by');
+    expect(result.category).toBe('neuroscience');
+    expect(result.jatsxml_url).toContain('.source.xml');
+    expect(result.version).toBe(2);
+    expect(result.preprint?.data_source).toBe('api.biorxiv.org');
+    expect(result.preprint?.versions.map(v => v.version)).toEqual([1, 2]);
+    expect(result.preprint?.corresponding_author?.name).toBe('Shogo Yonekura');
+    expect(result.preprint?.funders?.[0].id_type).toBe('ROR');
+    // EPMC enrichment: citation count + OA flag
+    expect(result.cited_by).toBe(44);
+    expect(result.is_open_access).toBe(true);
+    // published mapping from /pubs (legacy 10.1101 DOI)
+    expect(result.published?.doi).toBe('10.3389/fbinf.2025.1577324');
+    expect(result.published?.journal).toBe('Frontiers in Bioinformatics');
+    // no sections requested → none attached
+    expect(result.sections).toBeUndefined();
+  });
+
+  test('articleGet falls back to medrxiv server on biorxiv soft miss', async () => {
+    global.fetch = jest.fn((url: unknown) => {
+      const u = String(url);
+      if (u.includes('api.biorxiv.org/details/biorxiv/')) {
+        return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
+      }
+      if (u.includes('api.biorxiv.org/details/medrxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('medRxiv', ['1'])));
+      if (u.includes('api.biorxiv.org/pubs/')) {
+        return Promise.resolve(jsonResponse({ messages: [{ status: 'no articles found for published version of ' }], collection: [] }));
+      }
+      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse(epmcCorePayload));
+      return Promise.reject(new Error(`unexpected url ${u}`));
+    }) as any;
+
+    const result = await articleGet('10.1101/2025.03.05.641768');
+
+    expect(result.preprint_server).toBe('medRxiv');
+    expect(result.journal).toBe('medRxiv');
+    // /pubs soft-miss → published falls back to EPMC's Preprint-of link
+    expect(result.published?.pmid).toBe('32015507');
+    expect(result.published?.source).toBe('europepmc');
+  }, 15000);
+
+  test('articleGet on unknown preprint DOI throws not-found', async () => {
+    global.fetch = jest.fn((url: unknown) => {
+      const u = String(url);
+      if (u.includes('api.biorxiv.org/details/')) {
+        return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
+      }
+      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse({ resultList: { result: [] } }));
+      return Promise.reject(new Error(`unexpected url ${u}`));
+    }) as any;
+
+    await expect(articleGet('10.1101/2099.01.01.000001')).rejects.toThrow(/not found on bioRxiv\/medRxiv/);
+  }, 15000);
+
+  test('articleGet preprint citation section uses PPR endpoints', async () => {
+    global.fetch = jest.fn((url: unknown) => {
+      const u = String(url);
+      if (u.includes('api.biorxiv.org/details/biorxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv', ['1'])));
+      if (u.includes('api.biorxiv.org/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
+      if (u.includes('/PPR910295/citations')) {
+        return Promise.resolve(jsonResponse({
+          citationList: { citation: [{ id: '123', source: 'MED', title: 'Citing paper', authorString: 'Doe J', journalTitle: 'Nature', pubYear: '2023' }] },
+        }));
+      }
+      if (u.includes('/PPR910295/references')) {
+        return Promise.resolve(jsonResponse({
+          referenceList: { reference: [{ id: '456', source: 'MED', title: 'Referenced paper', authorString: 'Roe A', journalTitle: 'Science', pubYear: '2019' }] },
+        }));
+      }
+      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse(epmcCorePayload));
+      return Promise.reject(new Error(`unexpected url ${u}`));
+    }) as any;
+
+    const result = await articleGet('10.1101/2021.10.25.465764', ['citation']);
+
+    const citation = result.sections?.citation as any;
+    expect(citation).toBeDefined();
+    expect(citation._error).toBeUndefined();
+    expect(citation.article_id).toEqual({ doi: '10.1101/2021.10.25.465764' });
+    expect(citation.citation_counts).toEqual([{ total: 44, source: 'europepmc' }]);
+    expect(citation.forward_citations[0].title).toBe('Citing paper');
+    expect(citation.backward_references[0].title).toBe('Referenced paper');
+    expect(citation.items_available).toBe(true);
+  }, 15000);
+
+  test('articleGet degrades to Europe PMC core when the official API is unreachable', async () => {
+    global.fetch = jest.fn((url: unknown) => {
+      const u = String(url);
+      if (u.includes('api.biorxiv.org/')) return Promise.reject(new Error('connection refused'));
+      if (u.includes('ebi.ac.uk')) return Promise.resolve(jsonResponse(epmcCorePayload));
+      return Promise.reject(new Error(`unexpected url ${u}`));
+    }) as any;
+
+    const result = await articleGet('10.1101/2021.10.25.465764');
+
+    expect(result.title).toBe('The preprint title');
+    expect(result.abstract).toBe('The preprint abstract');
+    expect(result.preprint?.data_source).toBe('europepmc');
+    expect(result.cited_by).toBe(44);
+    expect(result.ppr_id).toBe('PPR910295');
+  }, 20000);
 });

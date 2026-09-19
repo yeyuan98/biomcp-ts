@@ -130,8 +130,8 @@ src/__tests__/
 
 Counts below are refresh-when-touched — update them when you add suites to the touched area.
 
-- **Unit:** 85 suites / 1387 tests (`npm test`)
-- **Integration:** 19 files / 182 declared tests (`npm run test:integration`)
+- **Unit:** 85 suites / 1411 tests (`npm test`)
+- **Integration:** 19 files / 187 declared tests (`npm run test:integration`)
 
 ## Integration Suite Gating
 
