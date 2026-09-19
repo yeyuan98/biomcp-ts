@@ -11,7 +11,9 @@ export function deduplicateAndRank(articles: Article[], limit: number): Article[
 
   for (const article of articles) {
     if (article._error) continue;
-    const key = article.pmid || article.pmcid || article.doi || '';
+    // Key chain: pmid ‖ pmcid ‖ doi ‖ arxiv_id — most arXiv preprints carry
+    // none of the first three, so arxiv_id keeps them deduplicable.
+    const key = article.pmid || article.pmcid || article.doi || article.arxiv_id || '';
     if (!key) continue;
     const base = seen.get(key);
     if (!base) {

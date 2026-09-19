@@ -125,7 +125,7 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   },
 
   // ==========================================
-  // LITERATURE - REST (9 sources)
+  // LITERATURE - REST (11 sources)
   // ==========================================
   // Shared NCBI E-utilities connection: serves PubMed (article_*), GEO
   // (db=gds), SRA (db=sra), GenBank (db=nuccore) and BioSample lookups.
@@ -255,7 +255,43 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     followRedirects: false,
     rateLimit: { intervalMs: 1000 },
   },
-  
+  // Official bioRxiv/medRxiv API (keyless). Serves preprint record fetching
+  // (details/pubs, DOI-form); topical preprint search goes through Europe
+  // PMC's PPR index instead (this API has no keyword-search endpoint).
+  // All upstream errors are HTTP 200 with messages[0].status strings —
+  // callers branch on the status, never the HTTP code. No published rate
+  // limit, but the host is a small PHP service with highly variable
+  // latency (observed 1.2–12.8 s per DOI-form call): 1 req/s politeness
+  // (measured safe at 2 rps), generous timeout, one retry.
+  biorxiv: {
+    sourceId: 'biorxiv',
+    baseUrl: 'https://api.biorxiv.org',
+    protocol: 'rest',
+    handling: { timeoutMs: 15000 },
+    rateLimit: { intervalMs: 1000 },
+    retry: { attempts: 2, backoffMs: 1000 },
+  },
+  // arXiv Atom Query API (https://export.arxiv.org/api/query): preprint
+  // literature search. Terms of Use (https://info.arxiv.org/help/api/tou.html)
+  // cap clients at 1 request / 3 s on a single connection, aggregated across
+  // all machines under the operator's control — intervalMs 3000 enforces the
+  // spacing client-side per process (arXiv offers no API keys; a 403 is a
+  // per-IP block). Legacy API: stable ~15 yrs, watch arXiv API news for
+  // breaking changes.
+  arxiv: {
+    sourceId: 'arxiv',
+    baseUrl: 'https://export.arxiv.org/api',
+    protocol: 'rest',
+    // arXiv always answers Atom XML — declare contentType so the Accept
+    // header stops claiming application/json (matches pmc_oa). timeoutMs
+    // 10000: worst case = 3 s limiter spacing + 2×10 s timeouts + 3.5 s
+    // retry backoff ≈ 26.5 s < the 30 s article_search tool cap, so an
+    // arXiv outage surfaces as a friendly _error row instead of a tool
+    // timeout.
+    handling: { contentType: 'xml', timeoutMs: 10000 },
+    rateLimit: { intervalMs: 3000 },
+    retry: { attempts: 2, backoffMs: 3500 },
+  },
   // ==========================================
   // CLINICAL TRIALS - REST (1 source)
   // ==========================================

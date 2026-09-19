@@ -1,7 +1,8 @@
 import { connectionManager } from '../../../connections/manager.js';
 import { parsePubMedXml } from '../transform/pubmed.js';
-import { parseArticleId, resolveToPmid, resolveDoiToPmid } from './id-resolution.js';
+import { parseArticleId, resolveToPmid, resolveDoiToPmid, isPreprintDoi } from './id-resolution.js';
 import type { ResolvedPmid } from './id-resolution.js';
+import { getPreprintArticle } from './preprint.js';
 import { fetchOpenAccess } from './open-access.js';
 import { fetchAnnotations, fetchCitationGraph } from './annotations.js';
 import { getCitations } from '../citation/index.js';
@@ -57,6 +58,12 @@ export async function articleGet(
   options?: CitationOptions
 ): Promise<ArticleResult> {
   const parsed = parseArticleId(identifier);
+
+  // Preprint DOIs (bioRxiv/medRxiv) have no PMID — bypass PubMed resolution
+  // entirely and build the record from the preprint sources.
+  if (parsed.type === 'doi' && isPreprintDoi(parsed.value)) {
+    return getPreprintArticle(parsed.value, { sections, limit: options?.limit });
+  }
 
   let pmid: string;
   let resolvedIds: ResolvedPmid | undefined;

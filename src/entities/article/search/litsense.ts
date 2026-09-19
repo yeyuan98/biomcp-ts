@@ -1,5 +1,6 @@
 import { connectionManager } from '../../../connections/manager.js';
 import type { Article } from '../types.js';
+import { backendErrorRow } from './backend-error.js';
 
 export interface LitSenseResult {
   pmid: number;
@@ -42,8 +43,6 @@ export async function searchLitSense(query: string, limit: number, offset: numbe
 
     return (Array.isArray(response) ? response : []).slice(offset, offset + limit).map(transformLitSense);
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error('[searchLitSense] Error:', error);
-    return [{ _error: `searchLitSense failed: ${msg}. This may be a temporary data source issue. Try again or use a different source.` } as any];
+    return backendErrorRow('searchLitSense', error);
   }
 }

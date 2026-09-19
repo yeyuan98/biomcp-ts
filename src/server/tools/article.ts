@@ -36,15 +36,15 @@ export function registerArticleTools(server: McpServer): void {
       description: 'Search literature across multiple backends with federated search and deduplication',
       inputSchema: {
         query: z.string().describe('Search query (title, abstract, or keyword). Journal scoping: PubMed matches full journal names and NLM abbreviations; EuropePMC JOURNAL:"..." filters require the NLM abbreviation (e.g. "N Engl J Med")'),
-        source: z.enum(['pubmed', 'europepmc', 'semantic_scholar', 'pubtator', 'litsense']).optional().describe('Specific source to search'),
+        source: z.enum(['pubmed', 'europepmc', 'semantic_scholar', 'pubtator', 'litsense', 'preprint_only', 'arxiv']).optional().describe('Specific source to search. "preprint_only" searches ONLY bioRxiv+medRxiv preprints (bioRxiv/medRxiv DOIs, abstracts, citation counts, via Europe PMC\'s preprint index); "arxiv" searches the arXiv preprint server (quotes, parentheses, and field prefixes like ti:/au: are stripped from the query for arXiv only). Default (unset) = federated journal-literature search across PubMed, EuropePMC, Semantic Scholar, arXiv, PubTator, LitSense; bioRxiv/medRxiv preprints are NOT included unless explicitly requested via preprint_only.'),
         limit: z.number().int().min(1).max(50).default(10).describe('Maximum results to return. Applied to final deduplicated results, not per-source. Each source may fetch more internally before deduplication.'),
-        offset: z.number().int().min(0).default(0).describe('Result offset. EuropePMC windows are capped at 1000 rows; use narrower queries or another source for deeper results'),
+        offset: z.number().int().min(0).default(0).describe('Result offset. EuropePMC and preprint_only windows are capped at 1000 rows; use narrower queries or another source for deeper results'),
         dateRange: z.string()
           .regex(/^(\d{4}-\d{2}-\d{2})?\/(\d{4}-\d{2}-\d{2})?$/,
             'Date range must be YYYY-MM-DD/YYYY-MM-DD (open-ended: YYYY-MM-DD/ or /YYYY-MM-DD)')
           .refine((s: string) => s.split('/').some((p: string) => p.length > 0), 'At least one date endpoint required')
           .optional()
-          .describe('Date range as YYYY-MM-DD/YYYY-MM-DD. Open-ended: "2020-01-01/" or "/2023-12-31". Only pubmed, europepmc, semantic_scholar support this.'),
+          .describe('Date range as YYYY-MM-DD/YYYY-MM-DD. Open-ended: "2020-01-01/" or "/2023-12-31". Only pubmed, europepmc, semantic_scholar, preprint_only, and arxiv support this.'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
@@ -64,9 +64,9 @@ export function registerArticleTools(server: McpServer): void {
   server.registerTool(
     'article_get',
     {
-      description: 'Get article by PMID/PMCID/DOI. Citation: fast mode (~4s, 4 providers, auto-fallback to PubMed) or full mode (~15-30s, all 5 providers incl. PubMed). Forward citation lists come from Europe PMC, Semantic Scholar, and OpenCitations; Crossref provides counts and references only.',
+      description: 'Get article by PMID/PMCID/DOI. Preprint DOIs (bioRxiv/medRxiv, e.g. "10.1101/2025.03.05.641768" or new prefix "10.64898/...") return the preprint record: all versions, license, category, funders, JATS full-text URL, published-version mapping, and (with sections=["citation"]) Europe PMC preprint citations. Journal-article citation: fast mode (~4s, 4 providers, auto-fallback to PubMed) or full mode (~15-30s, all 5 providers incl. PubMed). Forward citation lists come from Europe PMC, Semantic Scholar, and OpenCitations; Crossref provides counts and references only.',
       inputSchema: {
-        id: z.string().describe('Article identifier: PMID (numeric, e.g. "12345"), PMCID (e.g. "PMC1234567"), or DOI (e.g. "10.1038/s41586-021-03819-2")'),
+        id: z.string().describe('Article identifier: PMID (numeric, e.g. "12345"), PMCID (e.g. "PMC1234567"), DOI (e.g. "10.1038/s41586-021-03819-2"), or preprint DOI (e.g. "10.1101/2021.10.25.465764", "10.64898/2026.08.11.744243")'),
         sections: z.array(z.enum(ARTICLE_SECTIONS)).optional().describe('Sections to include. Use ["citation"] for citation data, ["all"] for everything.'),
         limit: z.number().int().min(1).max(100).default(20).describe('Maximum items per section (e.g., 20 citations)'),
         citation_mode: z.enum(['fast', 'full']).optional().default('fast').describe(
@@ -79,7 +79,10 @@ export function registerArticleTools(server: McpServer): void {
     },
     async ({ id, sections, limit, citation_mode, citation_direction }) => {
       try {
-        const result = await withToolTimeout(articleGet(id, sections, { citationMode: citation_mode, citationDirection: citation_direction, limit }));
+        // 60s (vs 30s default): the preprint branch may hit api.biorxiv.org
+        // twice (biorxiv miss → medrxiv) with per-attempt timeouts + retries;
+        // journal paths finish well within this budget regardless.
+        const result = await withToolTimeout(articleGet(id, sections, { citationMode: citation_mode, citationDirection: citation_direction, limit }), 60000);
         const requestedSections = (sections ?? []).includes('all')
           ? ARTICLE_ALL_SECTIONS
           : (sections ?? []);

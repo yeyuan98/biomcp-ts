@@ -28,7 +28,7 @@ ESM-only MCP server exposing 40 biomedical tools to LLMs. Federates queries acro
 │             │               │                                │
 │             └───────┬───────┘                                │
 │                     ▼                                        │
-│              registry.ts (36 sources, incl. patents)         │
+│              registry.ts (38 sources, incl. patents)         │
 │                     │                                        │
 │                     ▼                                        │
 │            transform/*.ts                                   │
@@ -121,7 +121,7 @@ Hides upstream API protocol differences behind a uniform interface.
 - `AuthConfig`: env var name, delivery method (header, bearer, query-param), conditional rate limits
 
 ### `connections/registry.ts`
-`SOURCE_REGISTRY`: `Record<string, ConnectionOptions>` with 36 data source configurations. Organized by domain (genomics, proteins/pathways, drugs, diseases, literature, clinical trials, patents). Each entry specifies URL, protocol (rest/graphql), auth config, and rate limit (including conditional keyed vs. fallback rates).
+`SOURCE_REGISTRY`: `Record<string, ConnectionOptions>` with 38 data source configurations. Organized by domain (genomics, proteins/pathways, drugs, diseases, literature, clinical trials, patents). Each entry specifies URL, protocol (rest/graphql), auth config, and rate limit (including conditional keyed vs. fallback rates).
 
 ### `connections/manager.ts`
 `ConnectionManager` — module-level singleton exported as `connectionManager`. Lazy factory: `getConnection(sourceId)` creates the connection on first access, caches in a `Map`. `createConnection()` dispatches on `protocol` to instantiate `RestConnection` or `GraphQLConnection`.

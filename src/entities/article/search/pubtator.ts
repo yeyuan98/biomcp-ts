@@ -1,5 +1,6 @@
 import { connectionManager } from '../../../connections/manager.js';
 import type { Article } from '../types.js';
+import { backendErrorRow } from './backend-error.js';
 
 export interface PubTatorResult {
   _id: string;
@@ -60,8 +61,6 @@ export async function searchPubTator(query: string, limit: number, offset: numbe
 
     return (response.results || []).slice(start, start + limit).map(transformPubTator);
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error('[searchPubTator] Error:', error);
-    return [{ _error: `searchPubTator failed: ${msg}. This may be a temporary data source issue. Try again or use a different source.` } as any];
+    return backendErrorRow('searchPubTator', error);
   }
 }

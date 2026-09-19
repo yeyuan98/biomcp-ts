@@ -1,7 +1,7 @@
 import { connectionManager } from '../../../connections/manager.js';
 import type { ArticleId, CitationRecord, CitationCount } from './types.js';
 import { withTimeout, DEFAULT_PROVIDER_TIMEOUT_MS } from '../../../connections/fetch-utils.js';
-import { EuropePMCRecord, EuropePMCCitationEntry, transformCitationEntry } from '../europepmc-shared.js';
+import { EuropePMCRecord, EuropePMCCitationEntry, transformCitationEntry, EuropePMCSearchResponse } from '../europepmc-shared.js';
 
 interface EuropePMCCitationsResponse {
   citationList?: {
@@ -21,12 +21,6 @@ interface EuropePMCReferencesResponse {
   };
 }
 
-interface EuropePMCSearchResponse {
-  resultList?: {
-    result?: EuropePMCRecord[];
-  };
-}
-
 async function resolveToPMID(id: ArticleId): Promise<string | null> {
   if (id.pmid) return id.pmid;
 
@@ -39,7 +33,7 @@ async function resolveToPMID(id: ArticleId): Promise<string | null> {
       conn.request(`/search?query=${encodeURIComponent(query)}&resulttype=lite&format=json&pageSize=1`),
       DEFAULT_PROVIDER_TIMEOUT_MS,
       { onTimeout: 'null' }
-    ) as EuropePMCSearchResponse | null;
+    ) as EuropePMCSearchResponse<EuropePMCRecord> | null;
 
     return response?.resultList?.result?.[0]?.pmid || null;
   } catch {
@@ -122,7 +116,7 @@ export async function getCitationCount(id: ArticleId): Promise<CitationCount | n
   try {
     const conn = connectionManager.getConnection('europepmc');
     const response = await withTimeout(
-      conn.request(`/search?query=${encodeURIComponent(query)}&resulttype=lite&format=json&pageSize=1`) as Promise<EuropePMCSearchResponse>,
+      conn.request(`/search?query=${encodeURIComponent(query)}&resulttype=lite&format=json&pageSize=1`) as Promise<EuropePMCSearchResponse<EuropePMCRecord>>,
       DEFAULT_PROVIDER_TIMEOUT_MS,
       { onTimeout: 'null' }
     );

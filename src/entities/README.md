@@ -164,7 +164,7 @@ transformMyDiseaseResponse(data: Record<string, unknown>): DiseaseResult
 
 ## Article (`article/`)
 
-**Primary source:** PubMed (via the shared `eutils` connection) for get; federated across 5 sources for search
+**Primary source:** PubMed (via the shared `eutils` connection) for get; federated across 6 sources for search
 
 ### Architecture
 
@@ -174,17 +174,21 @@ article/
 ├── types.ts              # Article, ArticleSearchOptions, ArticleResult, ArticleGetOptions
 ├── europepmc-shared.ts   # Shared EuropePMC helpers
 ├── semantic-scholar-queue.ts  # Global single-flight queue for ALL Semantic Scholar traffic
-├── search/               # Search backends (5 sources)
+├── search/               # Search backends (7 sources: 6 in the default federation + preprint_only opt-in)
 │   ├── index.ts          # articleSearch() orchestrator + federatedSearch (20s per-backend throw timeout)
 │   ├── dedup.ts          # deduplicateAndRank()
+│   ├── backend-error.ts  # backendErrorRow() — shared `_error`-row catch envelope for all backends
 │   ├── pubmed.ts         # searchPubMed(), formatPubMedDate()
 │   ├── europepmc.ts      # searchEuropePMC(), transformEuropePMC() (cursorMark pagination; offset via client-side windowing, capped at 1000 rows)
 │   ├── semantic-scholar.ts # searchSemanticScholar(), transformSemanticScholar()
 │   ├── pubtator.ts       # searchPubTator(), transformPubTator()
-│   └── litsense.ts       # searchLitSense(), transformLitSense()
+│   ├── litsense.ts       # searchLitSense(), transformLitSense()
+│   ├── preprint.ts       # searchPreprints(), transformPreprint() (bioRxiv+medRxiv via Europe PMC PPR index; resultType=core; NOT in default federation)
+│   └── arxiv.ts          # searchArxiv() (Atom Query API on export.arxiv.org)
 ├── detail/               # Article get + sections
-│   ├── index.ts          # articleGet() orchestrator (sections run via Promise.allSettled)
-│   ├── id-resolution.ts  # parseArticleId(), resolveToPmid(), resolveDoiToPmid()
+│   ├── index.ts          # articleGet() orchestrator (sections run via Promise.allSettled; preprint DOIs branch early)
+│   ├── id-resolution.ts  # parseArticleId(), resolveToPmid(), resolveDoiToPmid(), isPreprintDoi()
+│   ├── preprint.ts       # getPreprintArticle() — official api.biorxiv.org /details + /pubs ‖ Europe PMC PPR enrichment/citations
 │   ├── open-access.ts    # fetchOpenAccess(), parseOaXml()
 │   └── annotations.ts    # fetchAnnotations(), fetchCitationGraph()
 ├── citation/             # Citation providers
@@ -197,7 +201,9 @@ article/
 │   ├── crossref.ts       # Crossref count + backward references provider
 │   └── opencitations.ts  # OpenCitations v2 DOI-based provider
 └── transform/
-    └── pubmed.ts         # parsePubMedXml(), preprocessPubMedXml()
+    ├── xml-utils.ts      # asArray(), createXmlParser() — shared fast-xml-parser setup
+    ├── pubmed.ts         # parsePubMedXml(), preprocessPubMedXml()
+    └── arxiv.ts          # parseArxivAtomXml() (feed-root sniff + entry mapping)
 ```
 
 ### Exported Functions
@@ -211,13 +217,18 @@ transformEuropePMC(a: EuropePMCResult): Article
 transformSemanticScholar(a: SemanticScholarPaper): Article
 transformPubTator(a: PubTatorResult): Article
 transformLitSense(a: LitSenseResult): Article
+transformPreprint(a: EuropePMCPreprintRecord): Article
+getPreprintArticle(doi: string, options?: { sections?: string[]; limit?: number }): Promise<ArticleResult>
+isPreprintDoi(doi: string): boolean
+splitSemicolonAuthors(authors?: string): string[] | undefined
+parseArxivAtomXml(xml: string): Article[]
 ```
 
 (`getCitations` is exported from `article/citation/index.ts`, not the article barrel.)
 
 ### Federated Search
 
-When no `source` is specified, `articleSearch` queries all 5 backends concurrently via `Promise.allSettled`, each wrapped in a 20-second throw-mode `withTimeout` so a hung backend is recorded as an error result. With `dateRange` set, only the 3 backends that support date filtering run (PubMed, Europe PMC, Semantic Scholar).
+When no `source` is specified, `articleSearch` queries all 6 backends concurrently via `Promise.allSettled`, each wrapped in a 20-second throw-mode `withTimeout` so a hung backend is recorded as an error result. With `dateRange` set, only the 4 backends that support date filtering run (PubMed, Europe PMC, Semantic Scholar, arXiv).
 
 | Backend | Connection | Notes |
 |---------|-----------|-------|
@@ -226,8 +237,16 @@ When no `source` is specified, `articleSearch` queries all 5 backends concurrent
 | Semantic Scholar | `semantic_scholar` | REST API with `externalIds` mapping; all S2 traffic (search + citations) is serialized through the single-flight `semantic-scholar-queue` to avoid unauthenticated 429s |
 | PubTator | `pubtator` | BioNER-annotated search; server-side pagination via `page`/`size` (size clamped 10–100, page derived from offset) |
 | LitSense | `litsense` | Sentence-level search (NCBI) via `limit=` param |
+| Preprints (bioRxiv+medRxiv) | `europepmc` | `source: 'preprint_only'` only — never in the default federation. `SRC:PPR AND PUBLISHER:(bioRxiv OR medRxiv)` with `resultType=core` (abstracts + `bookOrReportDetails.publisher` server labels only exist in core); same cursorMark/offset-window mechanics as the journal backend |
+| arXiv | `arxiv` | Preprint server via the Atom Query API (`export.arxiv.org`, always Atom XML); records carry a versionless `arxiv_id`, `journal: "arXiv"`, `publication_types: ["preprint"]`; the registry limiter enforces the arXiv Terms-of-Use rate of 1 request / 3 s |
 
-Results are deduplicated by PMID/PMCID/DOI and ranked by citation count via `deduplicateAndRank`.
+Results are deduplicated by PMID/PMCID/DOI/arXiv ID and ranked by citation count via `deduplicateAndRank`.
+
+**Ranking caveat:** arXiv rows typically carry no `cited_by`, so in federated results they sort after cited journal results unless they merge with a Semantic Scholar twin via `arxiv_id` (which fills the count). Note also the `publication_types` casing asymmetry: arXiv rows use `publication_types: ["preprint"]` while `preprint_only` (Europe PMC PPR) rows use `["Preprint"]`.
+
+### Preprint Fetch (`detail/preprint.ts`)
+
+`articleGet` on a preprint DOI (`isPreprintDoi`: legacy `10.1101/YYYY.MM.DD.NNNNNN` or the new shared `10.64898/*` prefix — both servers post under both, and 10.1101 is also used by CSHL Press journals, hence the strict date-form match) bypasses PMID resolution (preprints have none) and runs: official `api.biorxiv.org` `/details/{server}/{doi}` (try biorxiv, then medrxiv — a miss is a fast HTTP-200 soft error) ‖ Europe PMC core record (PPR id, citation count, OA flag), then in parallel `/pubs/{server}/{doi}/na` (published mapping; upstream-broken for 10.64898 DOIs, those fall back to EPMC's `commentCorrectionList` "Preprint of" link) and, when `sections=["citation"]` is requested, `/PPR/{id}/citations|references` in the `FederatedCitationResult` shape. All official-API errors are HTTP 200 with `messages[0].status` strings — the code branches on the status, never the HTTP code. If the official API is unreachable, the Europe PMC record becomes a degraded core (`preprint.data_source: 'europepmc'`). The `jatsxml_url` is returned as a link; full text is never auto-downloaded (Cloudflare-throttled host; tracked in GitHub issue #44).
 
 ### Federated Citation
 

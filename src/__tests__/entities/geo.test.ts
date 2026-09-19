@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals';
 import { connectionManager } from '../../connections/manager.js';
+import { parseMockUrl } from '../helpers/mock-url.js';
 import { readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
@@ -254,7 +255,7 @@ function callUrls(): string[] {
 }
 
 function eutilsUrls(): string[] {
-  return callUrls().filter(u => u.includes('eutils'));
+  return callUrls().filter(u => parseMockUrl(u).hostname === 'eutils.ncbi.nlm.nih.gov');
 }
 
 describe('geoSearch', () => {

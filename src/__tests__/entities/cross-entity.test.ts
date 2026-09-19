@@ -5,6 +5,7 @@ import {
   drugToAdverseEvents, diseaseToDrugs, diseaseToGenes,
 } from '../../entities/cross-entity.js';
 import { connectionManager } from '../../connections/manager.js';
+import { parseMockUrl, mockFetchRouter } from '../helpers/mock-url.js';
 
 describe('cross-entity', () => {
   let originalFetch: typeof global.fetch;
@@ -40,10 +41,10 @@ describe('cross-entity', () => {
 
     expect(global.fetch).toHaveBeenCalled();
     const urls = (global.fetch as any).mock.calls.map((c: any[]) => c[0] as string);
-    const hasMygene = urls.some((u: string) => u.includes('mygene.info'));
-    const hasMyvariant = urls.some((u: string) => u.includes('myvariant.info'));
-    const hasMychem = urls.some((u: string) => u.includes('mychem.info'));
-    const hasMydisease = urls.some((u: string) => u.includes('mydisease.info'));
+    const hasMygene = urls.some((u: string) => parseMockUrl(u).hostname === 'mygene.info');
+    const hasMyvariant = urls.some((u: string) => parseMockUrl(u).hostname === 'myvariant.info');
+    const hasMychem = urls.some((u: string) => parseMockUrl(u).hostname === 'mychem.info');
+    const hasMydisease = urls.some((u: string) => parseMockUrl(u).hostname === 'mydisease.info');
     expect(hasMygene).toBe(true);
     expect(hasMyvariant).toBe(true);
     expect(hasMychem).toBe(true);
@@ -65,12 +66,12 @@ describe('cross-entity', () => {
 
     expect(global.fetch).toHaveBeenCalled();
     const urls = (global.fetch as any).mock.calls.map((c: any[]) => c[0] as string);
-    const hasMygene = urls.some((u: string) => u.includes('mygene.info'));
-    const hasMyvariant = urls.some((u: string) => u.includes('myvariant.info'));
-    const hasMychem = urls.some((u: string) => u.includes('mychem.info'));
-    const hasMydisease = urls.some((u: string) => u.includes('mydisease.info'));
-    const hasClinicaltrials = urls.some((u: string) => u.includes('clinicaltrials.gov'));
-    const hasEutils = urls.some((u: string) => u.includes('eutils.ncbi.nlm.nih.gov'));
+    const hasMygene = urls.some((u: string) => parseMockUrl(u).hostname === 'mygene.info');
+    const hasMyvariant = urls.some((u: string) => parseMockUrl(u).hostname === 'myvariant.info');
+    const hasMychem = urls.some((u: string) => parseMockUrl(u).hostname === 'mychem.info');
+    const hasMydisease = urls.some((u: string) => parseMockUrl(u).hostname === 'mydisease.info');
+    const hasClinicaltrials = urls.some((u: string) => parseMockUrl(u).hostname === 'clinicaltrials.gov');
+    const hasEutils = urls.some((u: string) => parseMockUrl(u).hostname === 'eutils.ncbi.nlm.nih.gov');
     expect(hasMygene).toBe(true);
     expect(hasMyvariant).toBe(true);
     expect(hasMychem).toBe(true);
@@ -109,17 +110,18 @@ describe('cross-entity', () => {
   });
 
   test('discover() falls back to OLS4 when no other results found', async () => {
-    let callCount = 0;
-    global.fetch = jest.fn().mockImplementation((url: string) => {
-      callCount++;
-      if (url.includes('mygene.info') || url.includes('myvariant.info') || url.includes('mychem.info') || url.includes('mydisease.info')) {
-        return Promise.resolve({
+    global.fetch = mockFetchRouter([
+      {
+        host: ['mygene.info', 'myvariant.info', 'mychem.info', 'mydisease.info'],
+        reply: () => Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ hits: [] }),
-        });
-      }
-      if (url.includes('ols4')) {
-        return Promise.resolve({
+        }),
+      },
+      {
+        host: 'www.ebi.ac.uk',
+        path: '/ols4',
+        reply: () => Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
             response: {
@@ -129,18 +131,20 @@ describe('cross-entity', () => {
               numFound: 1,
             },
           }),
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({}),
-      });
-    }) as any;
+        }),
+      },
+    ], () => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({}),
+    })) as any;
 
     const results = await discover('BRCA1');
 
     const urls = (global.fetch as any).mock.calls.map((c: any[]) => c[0] as string);
-    const hasOls4 = urls.some((u: string) => u.includes('ols4') && u.includes('/api/search'));
+    const hasOls4 = urls.some((u: string) => {
+      const { hostname, pathname } = parseMockUrl(u);
+      return hostname === 'www.ebi.ac.uk' && pathname.startsWith('/ols4/api/search');
+    });
     expect(hasOls4).toBe(true);
     expect(results.some(r => r.name === 'BRCA1' && r.source === 'hgnc')).toBe(true);
   });
@@ -199,7 +203,7 @@ describe('variantToTrials', () => {
 
     // Verify the trial search used gene + protein change, not raw rsID
     const urls = (global.fetch as any).mock.calls.map((c: any[]) => c[0] as string);
-    const trialUrl = urls.find((u: string) => u.includes('clinicaltrials.gov'));
+    const trialUrl = urls.find((u: string) => parseMockUrl(u).hostname === 'clinicaltrials.gov');
     expect(trialUrl).toBeDefined();
     expect(trialUrl).toContain('BRAF');
   });
@@ -239,7 +243,7 @@ describe('variantToTrials', () => {
 
     expect(results).toHaveLength(1);
     const urls = (global.fetch as any).mock.calls.map((c: any[]) => c[0] as string);
-    const trialUrl = urls.find((u: string) => u.includes('clinicaltrials.gov'));
+    const trialUrl = urls.find((u: string) => parseMockUrl(u).hostname === 'clinicaltrials.gov');
     expect(trialUrl).toContain('BRAF');
   });
 
@@ -297,7 +301,7 @@ describe('variantToTrials', () => {
 
     expect(results).toHaveLength(1);
     const urls = (global.fetch as any).mock.calls.map((c: any[]) => c[0] as string);
-    const trialUrl = urls.find((u: string) => u.includes('clinicaltrials.gov'));
+    const trialUrl = urls.find((u: string) => parseMockUrl(u).hostname === 'clinicaltrials.gov');
     // Should use V600E shorthand, not Val600Glu
     expect(trialUrl).toContain('V600E');
     expect(trialUrl).not.toContain('Val600Glu');
@@ -383,7 +387,7 @@ describe('variantToTrials', () => {
     const results = await variantToTrials('rs99999');
     expect(results).toHaveLength(1);
     const urls = (global.fetch as any).mock.calls.map((c: any[]) => c[0] as string);
-    const trialUrl = urls.find((u: string) => u.includes('clinicaltrials.gov'));
+    const trialUrl = urls.find((u: string) => parseMockUrl(u).hostname === 'clinicaltrials.gov');
     // Arg123Ter -> R123*
     expect(trialUrl).toContain('R123*');
   });
@@ -694,7 +698,7 @@ describe('drugToTrials', () => {
     expect(results[0].nct_id).toBe('NCT00000333');
 
     const urls = (global.fetch as any).mock.calls.map((c: any[]) => c[0] as string);
-    const trialUrl = urls.find((u: string) => u.includes('clinicaltrials.gov'));
+    const trialUrl = urls.find((u: string) => parseMockUrl(u).hostname === 'clinicaltrials.gov');
     expect(trialUrl).toBeDefined();
     // Should use query.intr (intervention) instead of query.cond (condition)
     expect(trialUrl).toContain('query.intr');
@@ -1281,55 +1285,60 @@ describe('searchAll additional tests', () => {
   });
 
   test('returns partial results with _error when one search fails', async () => {
-    global.fetch = jest.fn().mockImplementation((url: string) => {
+    global.fetch = mockFetchRouter([
       // gene search (mygene) fails
-      if (url.includes('mygene.info')) {
-        return Promise.reject(new Error('mygene down'));
-      }
+      {
+        host: 'mygene.info',
+        reply: () => Promise.reject(new Error('mygene down')),
+      },
       // drug search (mychem) succeeds
-      if (url.includes('mychem.info')) {
-        return Promise.resolve({
+      {
+        host: 'mychem.info',
+        reply: () => Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
             hits: [{ name: 'TestDrug' }],
           }),
-        });
-      }
+        }),
+      },
       // variant search (myvariant) succeeds
-      if (url.includes('myvariant.info')) {
-        return Promise.resolve({
+      {
+        host: 'myvariant.info',
+        reply: () => Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ hits: [] }),
-        });
-      }
+        }),
+      },
       // disease search (mydisease) succeeds
-      if (url.includes('mydisease.info')) {
-        return Promise.resolve({
+      {
+        host: 'mydisease.info',
+        reply: () => Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ hits: [] }),
-        });
-      }
+        }),
+      },
       // ClinicalTrials.gov
-      if (url.includes('clinicaltrials.gov')) {
-        return Promise.resolve({
+      {
+        host: 'clinicaltrials.gov',
+        reply: () => Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ studies: [] }),
-        });
-      }
+        }),
+      },
       // NCBI eutils
-      if (url.includes('eutils.ncbi.nlm.nih.gov')) {
-        return Promise.resolve({
+      {
+        host: 'eutils.ncbi.nlm.nih.gov',
+        reply: () => Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
             esearchresult: { idlist: [] },
           }),
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({}),
-      });
-    }) as any;
+        }),
+      },
+    ], () => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({}),
+    })) as any;
 
     const results = await searchAll('test');
 

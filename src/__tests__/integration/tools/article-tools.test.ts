@@ -35,6 +35,77 @@ describe('article_search', () => {
   }, 60000);
 });
 
+describe('article_search preprint_only (bioRxiv + medRxiv)', () => {
+  it('returns labeled preprints with abstracts', async () => {
+    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'crispr base editing', source: 'preprint_only', limit: 5 }));
+    expectArticleSearchResult(results);
+    expect(results.length).toBeGreaterThan(0);
+    for (const r of results) {
+      expect(r.publication_types).toContain('Preprint');
+      expect(['bioRxiv', 'medRxiv']).toContain(r.journal);
+      expect(r.abstract).toBeTruthy();
+      expect(r.source).toBe('preprint_only');
+    }
+  }, 60000);
+
+  it('applies dateRange filtering', async () => {
+    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'crispr', source: 'preprint_only', limit: 5, dateRange: '2020-01-01/2021-12-31' }));
+    expectArticleSearchResult(results);
+    for (const r of results) {
+      const year = String(r.publication_date ?? '').slice(0, 4);
+      expect(['2020', '2021']).toContain(year);
+    }
+  }, 60000);
+});
+
+describe('article_search arxiv source', () => {
+  it('returns arXiv results for CRISPR base editing', async () => {
+    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'CRISPR base editing', source: 'arxiv', limit: 5 }));
+    expectArticleSearchResult(results);
+    expect(results.length).toBeGreaterThan(0);
+    const first = results[0];
+    expect(first.source).toBe('arxiv');
+    expect(first.arxiv_id).toBeTruthy();
+    expect(typeof first.title).toBe('string');
+    expect(typeof first.abstract).toBe('string');
+    expect(first.journal).toBe('arXiv');
+    expect(first.publication_types).toContain('preprint');
+  }, 60000);
+
+  it('returns date-filtered arXiv results within 2024', async () => {
+    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'transformer', source: 'arxiv', limit: 3, dateRange: '2024-01-01/2024-12-31' }));
+    expectArticleSearchResult(results);
+    expect(results.length).toBeGreaterThan(0);
+    expect(
+      results.some((r) => typeof r.publication_date === 'string' && r.publication_date.startsWith('2024'))
+    ).toBe(true);
+  }, 60000);
+
+  it('returns empty for nonsensical arXiv query', async () => {
+    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'zzqqxxzz nothingmatches', source: 'arxiv' }));
+    expectArticleSearchResult(results);
+    expect(results.length).toBe(0);
+    expect(results.some((r) => r._error !== undefined)).toBe(false);
+  }, 60000);
+
+  // Federated regression: arXiv normally contributes rows, but its leg is
+  // capped by the 20 s federated timeout and error rows are dropped by
+  // dedup — so absence is only acceptable when the other sources still
+  // delivered results (documented-acceptable absence).
+  it('includes arXiv results in federated search when the leg completes', async () => {
+    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'CRISPR base editing', limit: 20 }));
+    expectArticleSearchResult(results);
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.some((r) => r.source !== 'arxiv')).toBe(true);
+    const arxivRows = results.filter((r) => r.source === 'arxiv');
+    if (arxivRows.length > 0) {
+      expect(arxivRows[0].arxiv_id).toBeTruthy();
+    } else {
+      console.warn('[article-search-arxiv] federated run had no arXiv rows (legitimate timeout/absence); other sources delivered');
+    }
+  }, 90000);
+});
+
 describe('article_get', () => {
   it('returns article by PMID', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('article_get', { id: '25333279' }));
@@ -77,6 +148,41 @@ describe('article_get', () => {
   it('returns error for invalid identifier format', async () => {
     await expect(harness.callTool('article_get', { id: 'not-a-valid-id' })).rejects.toThrow('article_get');
   }, 60000);
+});
+
+describe('article_get preprint DOIs (bioRxiv/medRxiv)', () => {
+  // 10.1101/2021.10.25.465764: bioRxiv preprint with a published version
+  // (Frontiers in Bioinformatics) and a citation count — exercises the
+  // official /details + /pubs path plus EPMC enrichment.
+  it('returns preprint record with versions, license and published mapping by legacy DOI', async () => {
+    const result = await retryOnRateLimit(() => harness.callTool('article_get', { id: '10.1101/2021.10.25.465764', sections: ['core'] }));
+    expectArticleGetResult(result);
+    expect(result.abstract).toBeTruthy();
+    expect(['bioRxiv', 'medRxiv']).toContain(result.preprint_server);
+    expect(Array.isArray(result.preprint?.versions)).toBe(true);
+    expect(result.preprint?.versions.length).toBeGreaterThan(0);
+    expect(result.license).toBeTruthy();
+    expect(result.published?.doi || result.published?.pmid).toBeTruthy();
+  }, 60000);
+
+  // New shared bioRxiv/medRxiv DOI prefix (live-verified posting).
+  it('returns preprint record by new-prefix DOI (10.64898)', async () => {
+    const result = await retryOnRateLimit(() => harness.callTool('article_get', { id: '10.64898/2026.08.11.744243' }));
+    expectArticleGetResult(result);
+    expect(result.preprint).toBeDefined();
+    expect(['bioRxiv', 'medRxiv']).toContain(result.preprint_server);
+  }, 60000);
+
+  it('citation section returns Europe PMC preprint citations', async () => {
+    // AlphaFold-Multimer preprint (PPR403752): 1000+ citations, stable.
+    const result = await retryOnRateLimit(() => harness.callTool('article_get', { id: '10.1101/2021.10.04.463034', sections: ['citation'] }));
+    const citation = (result as any)?.sections?.citation;
+    expect(citation).toBeDefined();
+    expect(citation._error).toBeUndefined();
+    expect(Array.isArray(citation.citation_counts)).toBe(true);
+    expect(citation.citation_counts[0]?.total ?? 0).toBeGreaterThan(0);
+    expect(Array.isArray(citation.backward_references)).toBe(true);
+  }, 90000);
 });
 
 describe('article_get sections', () => {

@@ -1,6 +1,7 @@
 import { jest, describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 import { connectionManager } from '../../connections/manager.js';
 import { createMcpTestHarness, type McpTestHarness } from '../helpers/mcp-harness.js';
+import { parseMockUrl } from '../helpers/mock-url.js';
 
 const EUTILS = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
 const GEO_ACC = 'https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi';
@@ -175,7 +176,7 @@ describe('geo tools', () => {
       platform_ids: ['GPL11154'],
     });
     expect(detail.download).toBeUndefined();
-    expect(fetchUrls().some(u => u.includes('ftp.ncbi.nlm.nih.gov'))).toBe(false);
+    expect(fetchUrls().some(u => parseMockUrl(u).hostname === 'ftp.ncbi.nlm.nih.gov')).toBe(false);
   });
 
   it('geo_get download=true saves the supplementary file and returns its metadata', async () => {
