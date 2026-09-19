@@ -15,6 +15,7 @@ export interface SemanticScholarPaper {
     PMID?: string;
     PMCID?: string;
     DOI?: string;
+    ArXiv?: string;
   };
 }
 
@@ -32,6 +33,7 @@ interface SemanticScholarResponse {
       PMID?: string;
       PMCID?: string;
       DOI?: string;
+      ArXiv?: string;
     };
   }>;
 }
@@ -41,6 +43,7 @@ export function transformSemanticScholar(a: SemanticScholarPaper): Article {
     pmid: a.externalIds?.PMID,
     pmcid: a.externalIds?.PMCID,
     doi: a.externalIds?.DOI,
+    arxiv_id: a.externalIds?.ArXiv,
     title: a.title,
     abstract: a.abstract,
     authors: a.authors?.map((au: { name: string }) => au.name),

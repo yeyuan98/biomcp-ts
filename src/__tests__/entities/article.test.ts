@@ -523,6 +523,18 @@ describe('article', () => {
     expect(result.source).toBe('semantic_scholar');
   });
 
+  test('transformSemanticScholar maps ArXiv external id for arXiv-only papers', () => {
+    const result = transformSemanticScholar({
+      title: 'Attention Is All You Need',
+      externalIds: { ArXiv: '1706.03762' },
+    });
+
+    expect(result.arxiv_id).toBe('1706.03762');
+    expect(result.pmid).toBeUndefined();
+    expect(result.pmcid).toBeUndefined();
+    expect(result.doi).toBeUndefined();
+  });
+
   test('articleSearch() returns empty for unknown source', async () => {
     const result = await articleSearch('brca1', { source: 'unknown' as any });
     expect(result).toEqual([]);
