@@ -1,4 +1,29 @@
-import { deduplicateAndRank } from '../../entities/article/search/dedup.js';
+import { deduplicateAndRank, dedupKey } from '../../entities/article/search/dedup.js';
+
+describe('dedupKey', () => {
+  test('normalizes DOI to lowercase', () => {
+    expect(dedupKey({ doi: '10.1109/ICASSP.2023.10095950' } as any)).toBe('10.1109/icassp.2023.10095950');
+    expect(dedupKey({ doi: '10.1038/S41586-020-2649-2' } as any)).toBe('10.1038/s41586-020-2649-2');
+  });
+
+  test('prioritizes PMID without lowercase modification over other IDs', () => {
+    expect(dedupKey({ pmid: '12345', pmcid: 'PMC999', doi: '10.1109/ICASSP' } as any)).toBe('12345');
+  });
+
+  test('prioritizes PMCID over DOI and preserves PMCID casing', () => {
+    expect(dedupKey({ pmcid: 'PMC12345', doi: '10.1109/ICASSP' } as any)).toBe('PMC12345');
+  });
+
+  test('falls back to arxiv_id preserving casing', () => {
+    expect(dedupKey({ arxiv_id: 'hep-th/9901001' } as any)).toBe('hep-th/9901001');
+    expect(dedupKey({ arxiv_id: '2301.12345' } as any)).toBe('2301.12345');
+  });
+
+  test('returns empty string when no identifier is present', () => {
+    expect(dedupKey({ title: 'No ID article' } as any)).toBe('');
+    expect(dedupKey({} as any)).toBe('');
+  });
+});
 
 describe('deduplicateAndRank', () => {
   test('returns empty array for empty input', () => {
@@ -48,6 +73,30 @@ describe('deduplicateAndRank', () => {
     expect(result).toHaveLength(1);
     expect(result[0].doi).toBe('10.1234/test');
     expect(result[0].title).toBe('First');
+  });
+
+  test('deduplicates mixed-case DOI twins (case-insensitive DOI matching)', () => {
+    const articles = [
+      { doi: '10.1109/ICASSP.2023.10095950', title: 'First (uppercase DOI)', cited_by: 5 },
+      { doi: '10.1109/icassp.2023.10095950', title: 'Second (lowercase DOI)', cited_by: 10 },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe('First (uppercase DOI)');
+  });
+
+  test('merges arXiv mixed-case DOI twin into registry-cased record with fill-merge', () => {
+    const articles = [
+      { source: 'semantic_scholar', doi: '10.1038/s41586-020-2649-2', title: 'Nature Article', cited_by: 100 },
+      { source: 'arxiv', doi: '10.1038/S41586-020-2649-2', arxiv_id: '2008.00001', journal: 'arXiv' },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result).toHaveLength(1);
+    expect(result[0].source).toBe('semantic_scholar');
+    expect(result[0].doi).toBe('10.1038/s41586-020-2649-2');
+    expect(result[0].arxiv_id).toBe('2008.00001');
+    expect(result[0].journal).toBe('arXiv');
+    expect(result[0].cited_by).toBe(100);
   });
 
   test('deduplicates by arxiv_id (most arXiv preprints have no pmid/pmcid/doi)', () => {
