@@ -6,14 +6,25 @@ function isMissing(value: unknown): boolean {
   return value === undefined || value === null || value === '';
 }
 
+/**
+ * Derive canonical deduplication key for an article.
+ *
+ * Key chain: pmid ‖ pmcid ‖ doi (case-insensitive) ‖ arxiv_id.
+ * DOIs are case-insensitive per the DOI handbook, but submitter-entered
+ * metadata (e.g. arXiv) frequently uses mixed casing while registries return
+ * lowercase, so DOIs are normalized to lowercase. PMID, PMCID, and arxiv_id
+ * are unaffected.
+ */
+export function dedupKey(article: Article): string {
+  return article.pmid || article.pmcid || article.doi?.toLowerCase() || article.arxiv_id || '';
+}
+
 export function deduplicateAndRank(articles: Article[], limit: number): Article[] {
   const seen = new Map<string, Article>();
 
   for (const article of articles) {
     if (article._error) continue;
-    // Key chain: pmid ‖ pmcid ‖ doi ‖ arxiv_id — most arXiv preprints carry
-    // none of the first three, so arxiv_id keeps them deduplicable.
-    const key = article.pmid || article.pmcid || article.doi || article.arxiv_id || '';
+    const key = dedupKey(article);
     if (!key) continue;
     const base = seen.get(key);
     if (!base) {

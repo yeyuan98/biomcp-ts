@@ -1,7 +1,7 @@
 export type { ArticleSearchOptions, Article, ArticleResult, ArticleGetOptions, PreprintFunder, PreprintVersionInfo, PreprintCorrespondingAuthor, PreprintDetails, PreprintPublishedVersion } from './types.js';
 export { articleSearch, parseDateRange } from './search/index.js';
 export { articleGet } from './detail/index.js';
-export { deduplicateAndRank } from './search/dedup.js';
+export { deduplicateAndRank, dedupKey } from './search/dedup.js';
 export { parseArticleId, isPreprintDoi } from './detail/id-resolution.js';
 export { transformEuropePMC } from './search/europepmc.js';
 export { transformSemanticScholar } from './search/semantic-scholar.js';
