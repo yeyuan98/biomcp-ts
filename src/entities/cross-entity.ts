@@ -3,7 +3,7 @@ import { RestConnection } from '../connections/rest.js';
 import { fetchWithTimeout } from '../connections/fetch-utils.js';
 import { geneSearch, GeneSearchResult } from './gene.js';
 import { variantSearch, VariantSearchResult } from './variant.js';
-import { drugSearch, DrugSearchResult, fetchAdverseEvents, AdverseEventsResult } from './drug.js';
+import { drugSearch, DrugSearchResult, drugIdentityKey, fetchAdverseEvents, AdverseEventsResult } from './drug.js';
 import { diseaseSearch, DiseaseSearchResult } from './disease.js';
 import { trialSearch } from './trial.js';
 import { articleSearch, Article } from './article/index.js';
@@ -11,7 +11,94 @@ import { fetchDisgenetGdaSummary } from './disgenet.js';
 
 const SECTION_TIMEOUT_MS = 8000;
 
-export async function geneToDrugs(geneSymbol: string): Promise<Array<{ drug_name: string; source: string; action_type?: string }>> {
+// ============================================================
+// OpenTargets drug-candidate ranking (shared by geneToDrugs and
+// diseaseToDrugs). The v4 drugAndClinicalCandidates connection
+// exposes no orderBy and no approved flag, so ranking is client-side.
+// ============================================================
+
+/** Row shape of the drugAndClinicalCandidates connection (both directions). */
+interface OtDrugCandidateRow {
+  maxClinicalStage?: string;
+  clinicalReports?: Array<{ id?: string }>;
+  drug?: { id?: string; name?: string; drugType?: string };
+}
+
+/**
+ * Numeric rank for an OpenTargets maxClinicalStage value; higher is more
+ * clinically advanced. Observed live values (api.platform.opentargets.org,
+ * schema v4) are uppercase underscore strings: 'APPROVAL', 'PHASE_4',
+ * 'PHASE_3', 'PHASE_2_3', 'PHASE_2', 'PHASE_1_2', 'PHASE_1',
+ * 'EARLY_PHASE_1', 'IND', 'UNKNOWN'. Normalization is deliberately robust
+ * to case, spaces and 'Phase 3'-style display strings; the resulting order is:
+ *
+ *   approval/approved (7) > phase 4 (4) > phase 3 (3) > phase 2/3 (2.5) >
+ *   phase 2 (2) > phase 1/2 (1.5) > phase 1 (1) > early phase 1 (0.75) >
+ *   phase 0 / preclinical / IND (0.5) > unknown/unparsable (0)
+ *
+ * A phase range ('PHASE_1_2', 'Phase 2/3') ranks at its midpoint so it sits
+ * strictly between its endpoints.
+ */
+function clinicalStageRank(stage: string | undefined): number {
+  const norm = (stage ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+  if (!norm) return 0;
+  if (norm.includes('approv') || norm.includes('launch')) return 7;
+  const phases = (norm.match(/\d+/g) || []).map(Number);
+  if (phases.length === 0) {
+    // 'ind' (investigational new drug application) and 'preclinical' sit
+    // just below early phase 1 but above unknown.
+    if (norm === 'ind' || norm.includes('preclinical')) return 0.5;
+    return 0;
+  }
+  let score = phases.reduce((sum, n) => sum + n, 0) / phases.length;
+  if (norm.includes('early')) score -= 0.25;
+  if (score <= 0) return 0.5; // phase 0 / preclinical tier
+  return Math.min(score, 4);
+}
+
+/**
+ * Rank OpenTargets drugAndClinicalCandidates rows before taking a top-N
+ * slice (the API returns them unranked):
+ * 1. Sort by (a) maxClinicalStage rank descending, (b) clinicalReports
+ *    count descending, (c) drug name ascending case-insensitively as a
+ *    deterministic tie-break.
+ * 2. Salt-collapse rows sharing a drugIdentityKey (name-keyed here, so
+ *    e.g. DABRAFENIB MESYLATE and DABRAFENIB keep only the single
+ *    best-ranked row of the group).
+ * The caller slices the returned list to its page size.
+ */
+function rankOtDrugRows(rows: OtDrugCandidateRow[]): OtDrugCandidateRow[] {
+  const reportCount = (r: OtDrugCandidateRow) =>
+    Array.isArray(r.clinicalReports) ? r.clinicalReports.length : 0;
+
+  const sorted = [...rows].sort((a, b) => {
+    const stageDiff = clinicalStageRank(b.maxClinicalStage) - clinicalStageRank(a.maxClinicalStage);
+    if (stageDiff !== 0) return stageDiff;
+    const reportDiff = reportCount(b) - reportCount(a);
+    if (reportDiff !== 0) return reportDiff;
+    const nameA = (a.drug?.name ?? '').toLowerCase();
+    const nameB = (b.drug?.name ?? '').toLowerCase();
+    if (nameA !== nameB) return nameA < nameB ? -1 : 1;
+    return 0;
+  });
+
+  // First row seen in ranked order is the group's best; keep it.
+  const byKey = new Map<string, OtDrugCandidateRow>();
+  sorted.forEach((row, index) => {
+    const name = (row.drug?.name ?? '').trim();
+    // Nameless rows never collapse onto anything; they keep their sorted
+    // position under unique per-index keys.
+    const key = name ? drugIdentityKey({ name }) : `__noname_${index}`;
+    if (!byKey.has(key)) byKey.set(key, row);
+  });
+  return [...byKey.values()];
+}
+
+export async function geneToDrugs(geneSymbol: string): Promise<Array<{ drug_name: string; source: string; action_type?: string; phase?: string; report_count?: number }>> {
   try {
     const conn = connectionManager.getConnection('opentargets');
     
@@ -32,19 +119,21 @@ export async function geneToDrugs(geneSymbol: string): Promise<Array<{ drug_name
     const drugQuery = `query($ensemblId: String!) {
       target(ensemblId: $ensemblId) {
         drugAndClinicalCandidates {
-          rows { maxClinicalStage drug { id name drugType } }
+          rows { maxClinicalStage clinicalReports { id } drug { id name drugType } }
         }
       }
     }`;
-    
+
     const drugRaw = await conn.request(drugQuery, { ensemblId: targetId }, { rootField: 'target' }) as any;
     const drugData = JSON.parse(JSON.stringify(drugRaw));
-    const rows = drugData?.data?.target?.drugAndClinicalCandidates?.rows || [];
-    
-    return rows.slice(0, 20).map((r: { maxClinicalStage?: string; drug?: { name?: string; drugType?: string } }) => ({
+    const rows: OtDrugCandidateRow[] = drugData?.data?.target?.drugAndClinicalCandidates?.rows || [];
+
+    return rankOtDrugRows(rows).slice(0, 20).map((r) => ({
       drug_name: r.drug?.name || 'unknown',
       source: 'opentargets',
       action_type: r.drug?.drugType,
+      phase: r.maxClinicalStage || undefined,
+      report_count: (r.clinicalReports || []).length,
     }));
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -239,7 +328,7 @@ export async function drugToAdverseEvents(drugName: string, limit = 20): Promise
   return fetchAdverseEvents(drugName, limit);
 }
 
-export async function diseaseToDrugs(diseaseQuery: string): Promise<Array<{ drug_name: string; source: string; phase?: string }>> {
+export async function diseaseToDrugs(diseaseQuery: string): Promise<Array<{ drug_name: string; source: string; phase?: string; report_count?: number }>> {
   try {
     const conn = connectionManager.getConnection('opentargets');
     
@@ -292,19 +381,20 @@ export async function diseaseToDrugs(diseaseQuery: string): Promise<Array<{ drug
       disease(efoId: $efoId) {
         id name
         drugAndClinicalCandidates {
-          rows { maxClinicalStage drug { id name drugType } }
+          rows { maxClinicalStage clinicalReports { id } drug { id name drugType } }
         }
       }
     }`;
-    
+
     const drugRaw = await conn.request(drugQuery, { efoId: diseaseId }, { rootField: 'disease' }) as any;
     const drugData = JSON.parse(JSON.stringify(drugRaw));
-    const rows = drugData?.data?.disease?.drugAndClinicalCandidates?.rows || [];
-    
-    return rows.slice(0, 20).map((r: { maxClinicalStage?: string; drug?: { name?: string } }) => ({
+    const rows: OtDrugCandidateRow[] = drugData?.data?.disease?.drugAndClinicalCandidates?.rows || [];
+
+    return rankOtDrugRows(rows).slice(0, 20).map((r) => ({
       drug_name: r.drug?.name || '',
       source: 'opentargets',
       phase: r.maxClinicalStage || undefined,
+      report_count: (r.clinicalReports || []).length,
     }));
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);

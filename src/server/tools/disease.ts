@@ -94,7 +94,7 @@ export function registerDiseaseTools(server: McpServer): void {
   server.registerTool(
     'disease_drugs',
     {
-      description: 'Get drugs for a disease via OpenTargets',
+      description: 'Get drugs for a disease via OpenTargets. Results are ranked by max clinical phase, then trial-report count, with salt forms collapsed',
       inputSchema: {
         disease_id: z.string().describe('Disease ID'),
         limit: z.number().int().min(1).max(50).default(20),

@@ -641,8 +641,91 @@ describe('geneToDrugs', () => {
       drug_name: 'Vemurafenib',
       source: 'opentargets',
       action_type: 'Small molecule',
+      phase: 'Phase 3',
+      report_count: 0,
     });
     expect(results[1].drug_name).toBe('Dabrafenib');
+  });
+
+  test('ranks drugs by clinical stage and report count (observed OT enum format)', async () => {
+    let callCount = 0;
+    global.fetch = jest.fn().mockImplementation(() => {
+      callCount++;
+      return Promise.resolve({
+        ok: true,
+        json: () => {
+          if (callCount === 1) {
+            return Promise.resolve({
+              data: {
+                search: {
+                  hits: [{ id: 'ENSG00000157764', name: 'BRAF', entity: 'target' }],
+                },
+              },
+            });
+          }
+          // Scrambled on purpose: naive slice(0,20) would keep the API order.
+          return Promise.resolve({
+            data: {
+              target: {
+                drugAndClinicalCandidates: {
+                  rows: [
+                    { maxClinicalStage: 'PHASE_2', clinicalReports: [{ id: '1' }, { id: '2' }], drug: { id: 'CHEMBL1', name: 'ALUMINUM HYDROXIDE', drugType: 'Small molecule' } },
+                    { maxClinicalStage: 'PHASE_4', clinicalReports: Array.from({ length: 9 }, (_, i) => ({ id: `v${i}` })), drug: { id: 'CHEMBL2', name: 'VEMURAFENIB', drugType: 'Small molecule' } },
+                    { maxClinicalStage: 'PHASE_3', clinicalReports: [{ id: '3' }], drug: { id: 'CHEMBL3', name: 'QS-21', drugType: 'Small molecule' } },
+                  ],
+                },
+              },
+            },
+          });
+        },
+      });
+    }) as any;
+
+    const results = await geneToDrugs('BRAF');
+
+    expect(results.map(r => r.drug_name)).toEqual(['VEMURAFENIB', 'QS-21', 'ALUMINUM HYDROXIDE']);
+    expect(results[0].phase).toBe('PHASE_4');
+    expect(results[0].report_count).toBe(9);
+  });
+
+  test('collapses salt variants onto the best-ranked row', async () => {
+    let callCount = 0;
+    global.fetch = jest.fn().mockImplementation(() => {
+      callCount++;
+      return Promise.resolve({
+        ok: true,
+        json: () => {
+          if (callCount === 1) {
+            return Promise.resolve({
+              data: {
+                search: {
+                  hits: [{ id: 'ENSG00000157764', name: 'BRAF', entity: 'target' }],
+                },
+              },
+            });
+          }
+          return Promise.resolve({
+            data: {
+              target: {
+                drugAndClinicalCandidates: {
+                  rows: [
+                    { maxClinicalStage: 'PHASE_3', clinicalReports: [{ id: '1' }], drug: { id: 'CHEMBL1', name: 'DABRAFENIB MESYLATE', drugType: 'Small molecule' } },
+                    { maxClinicalStage: 'PHASE_1', clinicalReports: [], drug: { id: 'CHEMBL2', name: 'DABRAFENIB', drugType: 'Small molecule' } },
+                    { maxClinicalStage: 'PHASE_2', clinicalReports: [{ id: '2' }], drug: { id: 'CHEMBL3', name: 'TRAMETINIB', drugType: 'Small molecule' } },
+                  ],
+                },
+              },
+            },
+          });
+        },
+      });
+    }) as any;
+
+    const results = await geneToDrugs('BRAF');
+
+    // Salt form and base form collapse; the higher-staged row survives.
+    expect(results.map(r => r.drug_name)).toEqual(['DABRAFENIB MESYLATE', 'TRAMETINIB']);
+    expect(results[0].phase).toBe('PHASE_3');
   });
 
   test('returns error when gene not found', async () => {
@@ -1132,6 +1215,132 @@ describe('diseaseToDrugs', () => {
 
     expect(results).toHaveLength(1);
     expect(results[0].drug_name).toBe('Dabrafenib');
+  });
+
+  test('ranks drugs by clinical stage then report count (observed OT enum format)', async () => {
+    let callCount = 0;
+    global.fetch = jest.fn().mockImplementation(() => {
+      callCount++;
+      return Promise.resolve({
+        ok: true,
+        json: () => {
+          if (callCount === 1) {
+            return Promise.resolve({
+              data: {
+                search: { hits: [{ id: 'EFO_0000616', name: 'melanoma', entity: 'disease' }] },
+              },
+            });
+          }
+          // Scrambled on purpose: naive slice(0,20) would keep the API order
+          // (QS-21 / ALUMINUM HYDROXIDE ranking above standard of care).
+          return Promise.resolve({
+            data: {
+              disease: {
+                id: 'EFO_0000616',
+                name: 'melanoma',
+                drugAndClinicalCandidates: {
+                  rows: [
+                    { maxClinicalStage: 'PHASE_3', clinicalReports: [{ id: '1' }, { id: '2' }], drug: { id: 'CHEMBL1', name: 'QS-21' } },
+                    { maxClinicalStage: 'PHASE_2', clinicalReports: [{ id: '3' }], drug: { id: 'CHEMBL2', name: 'ALUMINUM HYDROXIDE' } },
+                    { maxClinicalStage: 'PHASE_4', clinicalReports: Array.from({ length: 12 }, (_, i) => ({ id: `v${i}` })), drug: { id: 'CHEMBL3', name: 'VEMURAFENIB' } },
+                  ],
+                },
+              },
+            },
+          });
+        },
+      });
+    }) as any;
+
+    const results = await diseaseToDrugs('melanoma');
+
+    expect(results.map(r => r.drug_name)).toEqual(['VEMURAFENIB', 'QS-21', 'ALUMINUM HYDROXIDE']);
+    expect(results[0].phase).toBe('PHASE_4');
+    expect(results[0].report_count).toBe(12);
+    expect(results[1].report_count).toBe(2);
+  });
+
+  test('normalizes differently-formatted stage values when ranking', async () => {
+    let callCount = 0;
+    global.fetch = jest.fn().mockImplementation(() => {
+      callCount++;
+      return Promise.resolve({
+        ok: true,
+        json: () => {
+          if (callCount === 1) {
+            return Promise.resolve({
+              data: {
+                search: { hits: [{ id: 'EFO_0000616', name: 'melanoma', entity: 'disease' }] },
+              },
+            });
+          }
+          // Display-string 'Phase 3' must outrank the enum 'PHASE_2', and
+          // 'Approved' (APPROVAL synonym) must outrank both.
+          return Promise.resolve({
+            data: {
+              disease: {
+                id: 'EFO_0000616',
+                name: 'melanoma',
+                drugAndClinicalCandidates: {
+                  rows: [
+                    { maxClinicalStage: 'PHASE_2', clinicalReports: [{ id: '1' }], drug: { id: 'CHEMBL1', name: 'DRUG PHASE2' } },
+                    { maxClinicalStage: 'Phase 3', clinicalReports: [{ id: '2' }], drug: { id: 'CHEMBL2', name: 'DRUG DISPLAY' } },
+                    { maxClinicalStage: 'Approved', clinicalReports: [{ id: '3' }], drug: { id: 'CHEMBL3', name: 'DRUG APPROVED' } },
+                  ],
+                },
+              },
+            },
+          });
+        },
+      });
+    }) as any;
+
+    const results = await diseaseToDrugs('melanoma');
+
+    expect(results.map(r => r.drug_name)).toEqual(['DRUG APPROVED', 'DRUG DISPLAY', 'DRUG PHASE2']);
+    expect(results[1].phase).toBe('Phase 3');
+  });
+
+  test('collapses salt variants onto the best-ranked row', async () => {
+    let callCount = 0;
+    global.fetch = jest.fn().mockImplementation(() => {
+      callCount++;
+      return Promise.resolve({
+        ok: true,
+        json: () => {
+          if (callCount === 1) {
+            return Promise.resolve({
+              data: {
+                search: { hits: [{ id: 'EFO_0000616', name: 'melanoma', entity: 'disease' }] },
+              },
+            });
+          }
+          return Promise.resolve({
+            data: {
+              disease: {
+                id: 'EFO_0000616',
+                name: 'melanoma',
+                drugAndClinicalCandidates: {
+                  rows: [
+                    { maxClinicalStage: 'PHASE_2', clinicalReports: [{ id: '1' }], drug: { id: 'CHEMBL1', name: 'DABRAFENIB MESYLATE' } },
+                    { maxClinicalStage: 'APPROVAL', clinicalReports: [{ id: '2' }, { id: '3' }], drug: { id: 'CHEMBL2', name: 'DABRAFENIB' } },
+                    { maxClinicalStage: 'PHASE_3', clinicalReports: [{ id: '4' }], drug: { id: 'CHEMBL3', name: 'TRAMETINIB' } },
+                  ],
+                },
+              },
+            },
+          });
+        },
+      });
+    }) as any;
+
+    const results = await diseaseToDrugs('melanoma');
+
+    // DABRAFENIB MESYLATE and DABRAFENIB share an identity key; the
+    // approved base form survives, the salt form is dropped.
+    expect(results.map(r => r.drug_name)).toEqual(['DABRAFENIB', 'TRAMETINIB']);
+    expect(results[0].phase).toBe('APPROVAL');
+    expect(results[0].report_count).toBe(2);
   });
 
   test('returns error when disease not found', async () => {
