@@ -15,6 +15,13 @@ import { applyLimit } from '../../server/tools/utils.js';
 import { connectionManager } from '../../connections/manager.js';
 import { parseMockUrl } from '../helpers/mock-url.js';
 
+// Fake-timer helpers (patent.test.ts convention, see src/__tests__/README.md):
+// limiters only refill when the clock moves forward, so any fake-timer
+// install must start later than real time AND later than the fake time any
+// earlier install reached.
+const REAL_TIME_AT_LOAD = Date.now();
+let fakeTimersInstalled = 0;
+
 const SINGLE_ARTICLE_XML = `<?xml version="1.0"?>
 <PubmedArticleSet>
 <PubmedArticle>
@@ -2352,6 +2359,75 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     expect(result.preprint?.data_source).toBe('europepmc');
     expect(result.published).toBeNull();
   }, 20000);
+
+  test('getPreprintArticle skips /pubs with a published note when step 1 exceeds the budget threshold', async () => {
+    // Patent-suite convention (see src/__tests__/README.md): a Date.now spy
+    // would leak the +25 s jump into token-bucket limiters (their refill
+    // freezes while the clock reads in the future), so use fake timers with
+    // a monotonic base and flip the clock via setSystemTime instead. The
+    // happy-path mocks resolve on microtasks alone — no timer advancement
+    // is needed for the call to settle.
+    fakeTimersInstalled++;
+    jest.useFakeTimers({ now: REAL_TIME_AT_LOAD + fakeTimersInstalled * 3_600_000 });
+    const base = Date.now();
+    global.fetch = jest.fn((url: unknown) => {
+      const u = String(url);
+      const { hostname, pathname } = parseMockUrl(u);
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/details/biorxiv/')) {
+        jest.setSystemTime(base + 25_000); // step 1 consumed 25 s — past the 20 s skip threshold
+        return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv', ['1'])));
+      }
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/pubs/')) {
+        // Would win the fallback chain if (incorrectly) requested.
+        return Promise.resolve(jsonResponse({
+          messages: [{ status: 'ok' }],
+          collection: [{ preprint_doi: '10.1101/2025.03.05.641768', published_doi: '10.3389/fbinf.2025.1577324' }],
+        }));
+      }
+      if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse(epmcCorePayload));
+      return Promise.reject(new Error(`unexpected url ${u}`));
+    }) as any;
+
+    try {
+      const result = await getPreprintArticle('10.1101/2025.03.05.641768');
+
+      const urls = requestedUrls();
+      // budget guard: /pubs never hit the wire despite the official API succeeding
+      expect(urls.some(u => u.includes('/pubs/'))).toBe(false);
+      // published mapping degrades to the EPMC "Preprint of" link...
+      expect(result.published).toMatchObject({ pmid: '32015507', source: 'europepmc' });
+      // ...with the skip disclosed on the natural note field
+      expect((result.published as any).note).toContain('/pubs skipped');
+      expect((result.published as any).note).toContain('25s already spent');
+    } finally {
+      jest.useRealTimers();
+      // fresh limiters for later tests (they were constructed against the fake clock)
+      connectionManager.closeAll();
+    }
+  }, 15000);
+
+  test('getPreprintArticle still calls /pubs (no skip note) when step 1 is fast', async () => {
+    global.fetch = jest.fn((url: unknown) => {
+      const u = String(url);
+      const { hostname, pathname } = parseMockUrl(u);
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/details/biorxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv', ['1'])));
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/pubs/')) {
+        return Promise.resolve(jsonResponse({
+          messages: [{ status: 'ok' }],
+          collection: [{ preprint_doi: '10.1101/2025.03.05.641768', published_doi: '10.3389/fbinf.2025.1577324', published_journal: 'Frontiers in Bioinformatics', published_date: '2025-09-04', preprint_date: '2025-03-05' }],
+        }));
+      }
+      if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse(epmcCorePayload));
+      return Promise.reject(new Error(`unexpected url ${u}`));
+    }) as any;
+
+    const result = await getPreprintArticle('10.1101/2025.03.05.641768');
+
+    const urls = requestedUrls();
+    expect(urls.some(u => u.includes('/pubs/'))).toBe(true);
+    expect(result.published).toMatchObject({ doi: '10.3389/fbinf.2025.1577324', source: 'biorxiv_pubs' });
+    expect((result.published as any).note).toBeUndefined();
+  }, 15000);
 
   test('articleGet published falls back to the official /details published DOI when /pubs and EPMC yield nothing', async () => {
     const detailsWithPublishedDoi = {

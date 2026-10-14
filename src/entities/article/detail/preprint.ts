@@ -119,6 +119,22 @@ function encodeDoiPath(doi: string): string {
   return doi.split('/').map(encodeURIComponent).join('/');
 }
 
+/** Tool-level timeout budget article_get runs under (server/tools/article.ts
+ * caps the tool at 60 s via withToolTimeout). Exported — mirroring the
+ * patent-search precedent PATENT_SEARCH_TOOL_BUDGET_MS — so the cap the
+ * preprint path schedules itself against is referenceable in one place. */
+export const PREPRINT_TOOL_BUDGET_MS = 60_000;
+
+/** Elapsed-time threshold past which the step-2 /pubs call is skipped.
+ * Arithmetic: a /pubs call on the slow-host worst case costs ~32.2 s
+ * (2 attempts × 15 s timeout + ~1.15 s retry backoff + ~1 s limiter
+ * spacing), so gating at 20 s bounds the theoretical total at
+ * 20 s (step 1) + 32.2 s (/pubs) ≈ 52.2 s — under the 60 s tool cap with
+ * ~8 s of serialization/transport margin. Step-1 worst cases ABOVE 20 s
+ * (biorxiv probe chain, EPMC) skip /pubs and degrade to the
+ * published-version fallback chain with a note on `published`. */
+export const PREPRINT_PUBS_SKIP_THRESHOLD_MS = 20_000;
+
 /** /details/{server}/{doi} returns one record per version; the DOI's prefix
  * cannot tell biorxiv from medrxiv (10.1101 is shared with CSHL Press
  * journals and the new 10.64898 prefix is shared by both preprint servers),
@@ -131,11 +147,17 @@ function encodeDoiPath(doi: string): string {
  * the failure. Worst case is therefore one server's transport failure
  * (~31 s: 2 attempts × 15 s + 1 s backoff) and no /pubs call
  * (getPreprintArticle skips it when the official API is unreachable).
- * The Europe PMC leg runs in parallel and is untouched. Residual exposure:
- * in the pathological slow-but-succeeding-host case (not an outage — those
- * fast-skip), step 2's /pubs call can still add up to ~31 s after step 1,
- * pushing the theoretical total past the 60 s article_get cap; the tool
- * timeout then surfaces as an error rather than a hang. */
+ * The Europe PMC leg runs in parallel and is untouched. The residual
+ * slow-but-succeeding-host exposure (not an outage — those fast-skip) is
+ * bounded by the /pubs budget guard: getPreprintArticle records its start
+ * time and skips /pubs once step 1 has consumed more than
+ * PREPRINT_PUBS_SKIP_THRESHOLD_MS (20 s) — 20 s + /pubs' ~32.2 s worst ≈
+ * 52.2 s stays under PREPRINT_TOOL_BUDGET_MS (60 s) with ~8 s of margin,
+ * and the published mapping falls back to Europe PMC's "Preprint of" link
+ * or the /details `published` DOI field with a note on `published`. The
+ * PPR citation leg is not the binding constraint (10 s-capped via
+ * DEFAULT_PROVIDER_TIMEOUT_MS). No AbortSignal plumbing — skip-and-note
+ * suffices because every /pubs consumer has a fallback. */
 async function fetchOfficialDetails(
   doi: string
 ): Promise<{ server: 'biorxiv' | 'medrxiv'; records: BiorxivDetailsRecord[] } | undefined> {
@@ -398,6 +420,10 @@ export async function getPreprintArticle(
   }
 ): Promise<ArticleResult> {
   const limit = options?.limit ?? 20;
+  // Budget anchor for the /pubs skip gate (issue #51): measures step-1
+  // latency so a slow-but-succeeding official API cannot push step 2 past
+  // the 60 s article_get tool cap.
+  const startedAt = Date.now();
 
   const [official, epmc] = await Promise.all([
     fetchOfficialDetails(doi),
@@ -462,15 +488,38 @@ export async function getPreprintArticle(
   const step2: Promise<void>[] = [];
 
   if (official) {
-    step2.push(
-      fetchPublishedVersion(server, doi).then(p => {
-        // Fallback chain: official /pubs mapping → EPMC "Preprint of" link →
-        // the official /details `published` DOI field → null.
-        result.published = p
-          ?? publishedFromEpmc(epmc)
-          ?? (officialPublishedDoi ? { doi: officialPublishedDoi, source: 'biorxiv_details' } : null);
-      })
-    );
+    const elapsed = Date.now() - startedAt;
+    if (elapsed > PREPRINT_PUBS_SKIP_THRESHOLD_MS) {
+      // Budget guard (issue #51): step 1 was slow-but-succeeding (an outage
+      // fast-skips above), so a /pubs call — worst case ~32.2 s on the same
+      // slow host — risks blowing the 60 s article_get cap. Skip it and
+      // serve the published mapping from the fallback chain over data
+      // already in hand, with a note disclosing the skip.
+      const fallback = publishedFromEpmc(epmc)
+        ?? (officialPublishedDoi ? { doi: officialPublishedDoi, source: 'biorxiv_details' as const } : null);
+      // PreprintPublishedVersion (article/types.ts) has no note field and
+      // that module is outside this change; the intersection types the
+      // runtime disclosure without widening the shared shape.
+      const published: (PreprintPublishedVersion & { note?: string }) | null = fallback
+        ? {
+          ...fallback,
+          note: `biorxiv /pubs skipped — step-1 latency consumed the tool budget `
+            + `(${Math.round(elapsed / 1000)}s already spent); published mapping from the `
+            + 'Europe PMC / biorxiv-details fallback',
+        }
+        : null;
+      result.published = published;
+    } else {
+      step2.push(
+        fetchPublishedVersion(server, doi).then(p => {
+          // Fallback chain: official /pubs mapping → EPMC "Preprint of" link →
+          // the official /details `published` DOI field → null.
+          result.published = p
+            ?? publishedFromEpmc(epmc)
+            ?? (officialPublishedDoi ? { doi: officialPublishedDoi, source: 'biorxiv_details' } : null);
+        })
+      );
+    }
   } else {
     // Official API unreachable → /pubs on the same host is also unreachable;
     // calling it is pure wasted latency. officialPublishedDoi is undefined
