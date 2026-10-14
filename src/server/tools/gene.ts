@@ -126,7 +126,7 @@ export function registerGeneTools(server: McpServer): void {
   server.registerTool(
     'gene_drugs',
     {
-      description: 'Find drugs targeting a gene',
+      description: 'Find drugs targeting a gene. Results are ranked by max clinical phase, then trial-report count, with salt forms collapsed',
       inputSchema: {
         symbol: z.string().describe('HGNC gene symbol (e.g., "BRAF", "TP53")'),
       },
