@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`drug_search` result quality: name-less rows, case duplicates, and salt-form variants** (`src/entities/drug.ts`) — MyChem records whose only name-bearing annotation is an FDA orphan designation were invisible to the old field projection and transformed into `{"name": ""}` rows that buried exact matches (GitHub issue #63). The search projection now requests `fda_orphan_drug` and `transformMyChemHit`'s name fallback chain extracts the designation's `generic_name` as a last-resort name, placed after the curated ChEBI/UNII/ChEMBL/NDC names and before the UNII registry number (orphan designation is a weaker identity source than any curated name; `trade_name` is deliberately unused). Live-verified on mychem.info: each orphan entry carries a usable `generic_name` (e.g. `"pembrolizumab"`, `"artesunate"`) alongside indication-only text, and orphan-only records exist with no chebi/unii/ndc at all (e.g. `_id FIHJKUPKCHIPAT-UHFFFAOYSA-N`); entries lacking `generic_name` still yield an empty name and are dropped by the new filter. Search results are then normalized and deduplicated through the new exported helpers `drugIdentityKey()` (ChEMBL id → InChIKey → case-normalized, salt-stripped name) and `collapseSaltVariants()` (rows with empty/whitespace names dropped; case variants and salt/ester forms — mesylate/methanesulfonate, fumarate, tosylate, hydrochloride/HCl, sulfate, sodium, phosphate, citrate, tartrate, maleate, succinate, acetate, besylate, matched as trailing whole-word tokens only, never substrings, stripped iteratively — collapse onto one row; the survivor is the record with the richest identity: ChEMBL id, then InChIKey, then most populated fields, with deterministic shortest-name then lexicographic tie-breaks). The limit is not refetched/refilled after filtering — returning fewer than `limit` rows is accepted. Unit tests in `src/__tests__/entities/drug.test.ts` (orphan-only name-less rows dropped, orphan `generic_name` fallback, case/salt collapse policy pinned incl. survivor rationale, whole-word-vs-substring and leading-token guards, distinct-drugs-stay-separate sanity, empty-name filter).
+
 ## [1.5.1] - 2026-10-14
 
 ### Changed

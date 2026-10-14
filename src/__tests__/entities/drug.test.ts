@@ -1,5 +1,14 @@
 import { jest } from '@jest/globals';
-import { drugSearch, drugGet, fetchAdverseEvents, transformMyChemResponse, resolveBestMatch } from '../../entities/drug.js';
+import {
+  drugSearch,
+  drugGet,
+  fetchAdverseEvents,
+  transformMyChemResponse,
+  resolveBestMatch,
+  collapseSaltVariants,
+  drugIdentityKey,
+} from '../../entities/drug.js';
+import type { DrugSearchResult } from '../../entities/drug.js';
 import { connectionManager } from '../../connections/manager.js';
 
 describe('drug', () => {
@@ -85,6 +94,141 @@ describe('drug', () => {
     expect(results[0].inchi_key).toBe('LGHSQOCGTJHDIL-UTXLBGCNSA-N');
     expect(results[0].molecular_weight).toBe(1964.34);
     expect(results[0].molecular_formula).toBe('C92H150N22O25');
+  });
+
+  // Regression for GitHub issue #63: MyChem records whose only annotation is
+  // an FDA orphan designation (without even a generic_name) previously
+  // transformed into {name: ""} rows that buried the real matches.
+  test('drugSearch() drops name-less orphan-only rows and keeps the named hit', async () => {
+    const nameLessHits = Array.from({ length: 8 }, (_, i) => ({
+      _id: `orphan-only-${i}`,
+      // Orphan designations carrying only indication text/dates — no
+      // generic_name, so no usable name falls out of the fallback chain.
+      fda_orphan_drug: [{
+        designated_date: '2015-06-16',
+        designation_status: 'Designated/Approved',
+        orphan_designation: { original_text: 'Treatment of something rare' },
+      }],
+    }));
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        hits: [
+          ...nameLessHits,
+          {
+            _id: '354355033',
+            chebi: { name: 'pembrolizumab' },
+            unii: { registry_number: 'Q153Y5Z106' },
+            unichem: { chembl: 'CHEMBL3338463' },
+          },
+        ],
+      }),
+    }) as any;
+
+    const results = await drugSearch('pembrolizumab');
+
+    expect(results).toHaveLength(1);
+    expect(results[0].name).toBe('pembrolizumab');
+    expect(results[0].chembl_id).toBe('CHEMBL3338463');
+    // The orphan annotation is now part of the search projection.
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(callUrl).toContain('fda_orphan_drug');
+  });
+
+  test('drugSearch() uses the orphan designation generic_name as a last-resort name', async () => {
+    // Live-verified shape: records exist with fda_orphan_drug but no
+    // chebi/unii/chembl-pref_name/ndc (e.g. mychem _id FIHJKUPKCHIPAT-UHFFFAOYSA-N).
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        hits: [{
+          _id: 'FIHJKUPKCHIPAT-UHFFFAOYSA-N',
+          fda_orphan_drug: [{
+            generic_name: 'artesunate',
+            designated_date: '2006-03-28',
+            designation_status: 'Designated/Approved',
+            orphan_designation: { original_text: 'treatment of severe malaria' },
+          }],
+        }],
+      }),
+    }) as any;
+
+    const results = await drugSearch('artesunate');
+
+    expect(results).toHaveLength(1);
+    expect(results[0].name).toBe('artesunate');
+  });
+
+  test('drugSearch() collapses case and salt variants onto the richest row', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        hits: [
+          { _id: 'A', unii: { display_name: 'Imatinib Mesylate' } },
+          { _id: 'B', chembl: { pref_name: 'imatinib mesylate' } },
+          { _id: 'C', ndc: { nonproprietaryname: 'IMATINIB MESYLATE' } },
+          // Richest identity for the same base name: curated ChEBI data — must survive.
+          { _id: 'D', chebi: { name: 'imatinib', formula: 'C29H31N7O', mass: 493.6 } },
+        ],
+      }),
+    }) as any;
+
+    const results = await drugSearch('imatinib');
+
+    // Collapse policy: all four rows share the identity key "imatinib"
+    // (name lowercased, trailing "mesylate" stripped), so exactly one row
+    // survives. The ChEBI row wins on the most-populated-fields tier
+    // (the other three carry nothing but a name).
+    expect(results).toHaveLength(1);
+    expect(results[0].name).toBe('imatinib');
+    expect(results[0].molecular_formula).toBe('C29H31N7O');
+    expect(results[0].molecular_weight).toBe(493.6);
+  });
+
+  describe('collapseSaltVariants', () => {
+    const row = (name: string, extra: Partial<DrugSearchResult> = {}): DrugSearchResult => ({ name, ...extra });
+
+    test('collapses methanesulfonate and sodium salt forms with the base drug', () => {
+      expect(collapseSaltVariants([row('imatinib methanesulfonate'), row('imatinib')])).toHaveLength(1);
+      expect(collapseSaltVariants([row('diclofenac sodium'), row('diclofenac')])).toHaveLength(1);
+    });
+
+    test('strips trailing salt tokens iteratively and case-insensitively', () => {
+      const rows = collapseSaltVariants([
+        row('Imatinib Mesylate'),
+        row('imatinib methanesulfonate'),
+        row('IMATINIB HYDROCHLORIDE'),
+      ]);
+      expect(rows).toHaveLength(1);
+    });
+
+    test('strips salt tokens only as trailing whole words, never substrings or leading tokens', () => {
+      // Leading "sodium" is not a trailing token: distinct keys, no collapse.
+      expect(collapseSaltVariants([row('sodium stibogluconate'), row('stibogluconate')])).toHaveLength(2);
+      // Whole-word matching: a name merely containing salt-like letters is untouched.
+      expect(drugIdentityKey({ name: 'hydrochlorothiazide' })).toBe('hydrochlorothiazide');
+    });
+
+    test('keeps distinct drugs separate (different chembl ids and base names)', () => {
+      const rows = collapseSaltVariants([
+        row('imatinib mesylate', { chembl_id: 'CHEMBL38868' }),
+        row('dasatinib', { chembl_id: 'CHEMBL2178' }),
+      ]);
+      expect(rows).toHaveLength(2);
+      expect(rows.map(r => r.name).sort()).toEqual(['dasatinib', 'imatinib mesylate']);
+    });
+
+    test('breaks richness ties deterministically: shortest name wins', () => {
+      const rows = collapseSaltVariants([row('Imatinib Mesylate'), row('imatinib')]);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].name).toBe('imatinib');
+    });
+
+    test('drops rows with empty or whitespace-only names', () => {
+      const rows = collapseSaltVariants([row(''), row('   '), row('aspirin')]);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].name).toBe('aspirin');
+    });
   });
 
   test('drugGet() uses single combined query', async () => {
