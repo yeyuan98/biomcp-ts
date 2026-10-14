@@ -222,7 +222,6 @@ transformLitSense(a: LitSenseResult): Article
 transformPreprint(a: EuropePMCPreprintRecord): Article
 getPreprintArticle(doi: string, options?: { sections?: string[]; limit?: number }): Promise<ArticleResult>
 isPreprintDoi(doi: string): boolean
-splitSemicolonAuthors(authors?: string): string[] | undefined
 parseArxivAtomXml(xml: string): Article[]
 ```
 
@@ -242,9 +241,9 @@ When no `source` is specified, `articleSearch` queries all 6 backends concurrent
 | Preprints (bioRxiv+medRxiv) | `europepmc` | `source: 'preprint_only'` only — never in the default federation. `SRC:PPR AND PUBLISHER:(bioRxiv OR medRxiv)` with `resultType=core` (abstracts + `bookOrReportDetails.publisher` server labels only exist in core); same cursorMark/offset-window mechanics as the journal backend |
 | arXiv | `arxiv` | Preprint server via the Atom Query API (`export.arxiv.org`, always Atom XML); records carry a versionless `arxiv_id`, `journal: "arXiv"`, `publication_types: ["preprint"]`; the registry limiter enforces the arXiv Terms-of-Use rate of 1 request / 3 s |
 
-Results are deduplicated by PMID/PMCID/DOI/arXiv ID and ranked by citation count via `deduplicateAndRank`.
+Results are deduplicated by PMID/PMCID/DOI/arXiv ID (DOI keys are case-insensitive, so arXiv submitter-cased DOIs merge with registry-cased twins) and ranked by citation count via `deduplicateAndRank`.
 
-**Ranking caveat:** arXiv rows typically carry no `cited_by`, so in federated results they sort after cited journal results unless they merge with a Semantic Scholar twin via `arxiv_id` (which fills the count). Note also the `publication_types` casing asymmetry: arXiv rows use `publication_types: ["preprint"]` while `preprint_only` (Europe PMC PPR) rows use `["Preprint"]`.
+**Ranking caveat:** arXiv rows typically carry no `cited_by`, so in federated results they sort after cited journal results unless they merge with a Semantic Scholar twin via `arxiv_id` (which fills the count). Preprint rows from every source (`preprint_only` and arXiv) carry the same lowercase marker `publication_types: ["preprint"]`.
 
 ### Preprint Fetch (`detail/preprint.ts`)
 

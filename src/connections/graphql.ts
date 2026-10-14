@@ -6,8 +6,43 @@ import {
 } from './base.js';
 import { VERSION } from '../version.js';
 import { TokenBucketRateLimiter, RateLimiterFactory } from './rate-limiter.js';
-import { withRetry } from './retry.js';
+import { withRetry, isRetryableError } from './retry.js';
 import { HttpConnectionError } from './errors.js';
+
+/**
+ * Wrap transport-level fetch rejections (DNS failure, refused sockets,
+ * timeouts below the abort threshold) in a typed `HttpConnectionError` with
+ * `status` undefined (retryable) instead of letting a raw
+ * `TypeError: fetch failed` escape with its real signal (`ECONNREFUSED`,
+ * `ETIMEDOUT`, …) buried in `cause.code`. The original error is preserved
+ * verbatim as `.cause`, and its message is kept as-is — with
+ * ` (<cause code>)` appended only when a code exists, so string-matching
+ * consumers (`fetch failed`) keep working and messages never degrade to
+ * `fetch failed (undefined)`.
+ *
+ * Classification gates (mirrors the REST connection's contract exactly):
+ * - Abort/timeout rejections (caller cancellation via AbortSignal, or the
+ *   15 s `AbortSignal.timeout`) are NOT wrapped: callers pin their current
+ *   observable shape — `name === 'AbortError'/'TimeoutError'` and the
+ *   `/abort|timeout/` message matchers — so they propagate untouched.
+ * - Only rejections the retry layer already classifies as network failures
+ *   (message / `cause.code` signature — every real-world Node fetch
+ *   rejection, `TypeError: fetch failed`, matches) are wrapped. Messages
+ *   without a network signature keep today's raw escape and
+ *   non-retryable classification, so retry counts — and the real-backoff
+ *   timings callers budget for — are unchanged.
+ */
+function wrapTransportError(error: unknown): unknown {
+  if (error instanceof HttpConnectionError) return error;
+  const name = (error as { name?: unknown } | null | undefined)?.name;
+  if (name === 'AbortError' || name === 'TimeoutError') return error;
+  if (!isRetryableError(error)) return error;
+  const original = error as Error;
+  const code = (original.cause as { code?: string } | undefined)?.code;
+  const wrapped = new HttpConnectionError(code ? `${original.message} (${code})` : original.message);
+  wrapped.cause = original;
+  return wrapped;
+}
 
 export class GraphQLConnection implements IConnection<string, unknown> {
   readonly sourceId: string;
@@ -73,12 +108,17 @@ export class GraphQLConnection implements IConnection<string, unknown> {
     if (options?.signal) signals.push(options.signal);
     const signal = signals.length === 1 ? signals[0] : AbortSignal.any(signals);
 
-    const response = await fetch(this.options.baseUrl, {
-      method: 'POST',
-      headers: this.buildHeaders(),
-      body: JSON.stringify(body),
-      signal,
-    });
+    let response: Response;
+    try {
+      response = await fetch(this.options.baseUrl, {
+        method: 'POST',
+        headers: this.buildHeaders(),
+        body: JSON.stringify(body),
+        signal,
+      });
+    } catch (error) {
+      throw wrapTransportError(error);
+    }
     
     if (!response.ok) {
       throw new HttpConnectionError(

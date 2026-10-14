@@ -6,25 +6,15 @@ import { asArray, createXmlParser } from './xml-utils.js';
 const ENTRY_ID_PATTERN = /^https?:\/\/arxiv\.org\/abs\/(.+)$/;
 const VERSION_SUFFIX_PATTERN = /v\d+$/;
 
-interface ArxivAtomLink {
-  '@_href'?: string;
-  '@_rel'?: string;
-  '@_title'?: string;
-}
-
 interface ArxivAtomEntry {
   id?: string;
   title?: string;
   summary?: string;
   published?: string;
-  updated?: string;
   author?: Array<{ name?: string; 'arxiv:affiliation'?: unknown }>;
   category?: Array<{ '@_term'?: string }>;
-  link?: ArxivAtomLink[];
   'arxiv:primary_category'?: { '@_term'?: string };
   'arxiv:doi'?: string;
-  'arxiv:comment'?: string;
-  'arxiv:journal_ref'?: string;
 }
 
 /**
@@ -46,10 +36,11 @@ export function parseArxivAtomXml(xml: string): Article[] {
   }
 
   // Mirrors transform/pubmed.ts via the shared xml-utils parser; attributes
-  // surface as @_term/@_href/@_rel/@_title. Repeated elements (author,
-  // category, link, plus the affiliation children of authors) are forced to
-  // arrays so entries with a single child do not collapse to scalar objects.
-  const parser = createXmlParser(['entry', 'author', 'category', 'link', 'arxiv:affiliation']);
+  // surface as @_-prefixed keys (e.g. category '@_term'). Repeated elements
+  // (author, category, plus the affiliation children of authors) are forced
+  // to arrays so entries with a single child do not collapse to scalar
+  // objects.
+  const parser = createXmlParser(['entry', 'author', 'category', 'arxiv:affiliation']);
 
   let parsed: any;
   try {

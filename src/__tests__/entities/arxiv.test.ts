@@ -315,14 +315,26 @@ describe('searchArxiv', () => {
     expect(url).not.toContain('209912312359');
   });
 
-  test('clamps max_results at 50 and passes offset as start', async () => {
+  test('clamps max_results at 50, passes offset as start, and clamps start at the 30000 deep-paging ceiling', async () => {
     global.fetch = jest.fn().mockResolvedValue(atomResponse(EMPTY_FEED_XML)) as any;
 
     await searchArxiv('electron', 100, 5);
 
-    const url = (global.fetch as any).mock.calls[0][0] as string;
+    let url = (global.fetch as any).mock.calls[0][0] as string;
     expect(url).toContain('&start=5&max_results=50&');
     expect(url).not.toContain('max_results=100');
+
+    // Below the ceiling the offset passes through verbatim.
+    await searchArxiv('electron', 10, 100);
+    url = (global.fetch as any).mock.calls[1][0] as string;
+    expect(url).toContain('&start=100&max_results=10&');
+
+    // Past the ceiling start is clamped so start + max_results ≤ 30000
+    // (29950 + 50); a raw offset here makes the API answer HTTP 500.
+    await searchArxiv('electron', 50, 999999);
+    url = (global.fetch as any).mock.calls[2][0] as string;
+    expect(url).toContain('&start=29950&max_results=50&');
+    expect(url).not.toContain('999999');
   });
 
   test('empty feed resolves to [] (not an error result)', async () => {

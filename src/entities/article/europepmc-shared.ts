@@ -26,7 +26,6 @@ export interface EuropePMCRecord {
  * label are the point of the preprint search backend. */
 export interface EuropePMCPreprintRecord {
   id?: string;
-  source?: string;
   doi?: string;
   title?: string;
   authorString?: string;
@@ -37,7 +36,6 @@ export interface EuropePMCPreprintRecord {
   /** "bioRxiv" or "medRxiv" for PPR records */
   bookOrReportDetails?: {
     publisher?: string;
-    yearOfPublication?: number;
   };
   /** "Preprint of" entries link a preprint to its published version (PMID) */
   commentCorrectionList?: {

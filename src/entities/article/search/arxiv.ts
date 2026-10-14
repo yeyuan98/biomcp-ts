@@ -17,6 +17,16 @@ import { backendErrorRow } from './backend-error.js';
 const DEFAULT_DATE_FROM = '199107010000';
 const DEFAULT_DATE_TO = '209912312359';
 
+// Interactive page cap (plan D6) and the deep-paging ceiling: the Atom API
+// HTTP-500s once a request's cumulative window crosses ~30000 results —
+// the same 30000 boundary that 500s oversized max_results requests
+// (live-verified 2026-10-14: all:electron at start=29990 and start=30100
+// both answered HTTP 500 error feeds). max_results is clamped to 50 and
+// start to 29950 so start + max_results never exceeds 30000; below the
+// ceiling both values pass through unchanged.
+const ARXIV_MAX_RESULTS = 50;
+const ARXIV_MAX_START = 29950;
+
 // arXiv field prefixes (ti/au/abs/co/jr/cat/rn/all) are query syntax —
 // neutralize them so user queries are treated as plain terms (plan D4).
 const FIELD_PREFIX_PATTERN = /\b(?:ti|au|abs|co|jr|cat|rn|all):/gi;
@@ -62,8 +72,11 @@ export async function searchArxiv(
 
     // sortBy=relevance only; sortOrder is documented but unevidenced, so it
     // is omitted. max_results >30000 makes arXiv HTTP-500; interactive
-    // pages are capped at 50 (plan D6).
-    const path = `/query?search_query=${searchQuery}&start=${offset}&max_results=${Math.min(limit, 50)}&sortBy=relevance`;
+    // pages are capped at 50 (plan D6) and start is clamped to keep
+    // start + max_results within the ~30000 deep-paging ceiling (above).
+    const maxResults = Math.min(limit, ARXIV_MAX_RESULTS);
+    const start = Math.min(offset, ARXIV_MAX_START);
+    const path = `/query?search_query=${searchQuery}&start=${start}&max_results=${maxResults}&sortBy=relevance`;
 
     // arXiv always answers application/atom+xml, so the connection returns
     // response text. Retry/rate-limit policy lives on the registry entry.

@@ -2275,9 +2275,11 @@ describe('patentGet orchestration (chains)', () => {
     const sections: Record<string, unknown> = {
       claims: { claims: ['a', 'b', 'c'], number_of_claims: 3, source: 'ppubs' },
     };
-    applyLimit(sections, ['claims'], {}, { claims: ['claims'] }, 2);
-    expect((sections.claims as any).claims).toEqual(['a', 'b']);
-    expect((sections.claims as any).number_of_claims).toBe(3);
+    const limited = applyLimit(sections, ['claims'], {}, { claims: ['claims'] }, 2);
+    expect((limited.claims as any).claims).toEqual(['a', 'b']);
+    expect((limited.claims as any).number_of_claims).toBe(3);
+    // applyLimit is non-mutating: the input sections are left untouched.
+    expect((sections.claims as any).claims).toEqual(['a', 'b', 'c']);
   });
 
   test("'all' expands to every section", async () => {

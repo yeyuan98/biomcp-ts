@@ -79,7 +79,7 @@ export function registerDiseaseTools(server: McpServer): void {
           ? DISEASE_ALL_SECTIONS
           : (sections ?? []);
         if (result.sections) {
-          applyLimit(result.sections, requestedSections, DISEASE_STORAGE_KEYS, DISEASE_ARRAY_KEYS, limit);
+          result.sections = applyLimit(result.sections, requestedSections, DISEASE_STORAGE_KEYS, DISEASE_ARRAY_KEYS, limit);
         }
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       } catch (error) {

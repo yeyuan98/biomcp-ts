@@ -54,7 +54,7 @@ describe('article_search preprint_only (bioRxiv + medRxiv)', () => {
     expectArticleSearchResult(results);
     expect(results.length).toBeGreaterThan(0);
     for (const r of results) {
-      expect(r.publication_types).toContain('Preprint');
+      expect(r.publication_types).toContain('preprint');
       expect(['bioRxiv', 'medRxiv']).toContain(r.journal);
       expect(r.abstract).toBeTruthy();
       expect(r.source).toBe('preprint_only');
@@ -281,5 +281,14 @@ describe('article_get sections', () => {
       citation_mode: 'fast',
     }));
     expectCitationSection(result);
+    // Context bound (issue #60): provider rows are summaries — no record
+    // arrays duplicating the deduplicated forward/backward lists — and the
+    // whole citation section stays modest at the default limit.
+    const citation = (result as any)?.sections?.citation;
+    for (const row of citation.source_results) {
+      expect(row.forward_citations).toBeUndefined();
+      expect(row.backward_references).toBeUndefined();
+    }
+    expect(JSON.stringify(citation).length).toBeLessThan(20000);
   }, 120000);
 });

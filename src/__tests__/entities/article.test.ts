@@ -11,8 +11,16 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, readdirSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getPreprintArticle } from '../../entities/article/detail/preprint.js';
+import { applyLimit } from '../../server/tools/utils.js';
 import { connectionManager } from '../../connections/manager.js';
 import { parseMockUrl } from '../helpers/mock-url.js';
+
+// Fake-timer helpers (patent.test.ts convention, see src/__tests__/README.md):
+// limiters only refill when the clock moves forward, so any fake-timer
+// install must start later than real time AND later than the fake time any
+// earlier install reached.
+const REAL_TIME_AT_LOAD = Date.now();
+let fakeTimersInstalled = 0;
 
 const SINGLE_ARTICLE_XML = `<?xml version="1.0"?>
 <PubmedArticleSet>
@@ -2033,6 +2041,32 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     },
   };
 
+  // Shared fetch router for the preprint citation-section tests: full happy
+  // path (official details + /pubs soft miss + both PPR endpoints + EPMC
+  // core) with three records per PPR direction so limit slicing is visible.
+  const pprCitationRouter = () => jest.fn((url: unknown) => {
+    const u = String(url);
+    const { hostname, pathname } = parseMockUrl(u);
+    if (hostname === 'api.biorxiv.org' && pathname.startsWith('/details/biorxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv', ['1'])));
+    if (hostname === 'api.biorxiv.org' && pathname.startsWith('/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
+    if (u.includes('/PPR910295/citations')) {
+      return Promise.resolve(jsonResponse({
+        hitCount: 3,
+        citationList: { citation: [1, 2, 3].map(i => ({ id: String(1000 + i), source: 'MED', title: `Citing paper ${i}`, authorString: 'Doe J', journalTitle: 'Nature', pubYear: '2023' })) },
+      }));
+    }
+    if (u.includes('/PPR910295/references')) {
+      return Promise.resolve(jsonResponse({
+        hitCount: 3,
+        referenceList: { reference: [1, 2, 3].map(i => ({ id: String(2000 + i), source: 'MED', title: `Referenced paper ${i}`, authorString: 'Roe A', journalTitle: 'Science', pubYear: '2019' })) },
+      }));
+    }
+    if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse(epmcCorePayload));
+    return Promise.reject(new Error(`unexpected url ${u}`));
+  });
+
+  const requestedUrls = () => (global.fetch as any).mock.calls.map((c: unknown[]) => String(c[0]));
+
   test('articleSearch preprint_only builds the PPR publisher query with resultType=core', async () => {
     global.fetch = jest.fn().mockResolvedValue(jsonResponse(preprintCorePage(10))) as any;
 
@@ -2047,7 +2081,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     expect(url).toContain('cursorMark=*');
 
     expect(result).toHaveLength(10);
-    expect(result[0].publication_types).toEqual(['Preprint']);
+    expect(result[0].publication_types).toEqual(['preprint']);
     expect(result[0].abstract).toBe('Abstract 0');
     expect(result[0].journal).toBe('bioRxiv');
     expect(result[0].preprint_server).toBe('bioRxiv');
@@ -2326,6 +2360,75 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     expect(result.published).toBeNull();
   }, 20000);
 
+  test('getPreprintArticle skips /pubs with a published note when step 1 exceeds the budget threshold', async () => {
+    // Patent-suite convention (see src/__tests__/README.md): a Date.now spy
+    // would leak the +25 s jump into token-bucket limiters (their refill
+    // freezes while the clock reads in the future), so use fake timers with
+    // a monotonic base and flip the clock via setSystemTime instead. The
+    // happy-path mocks resolve on microtasks alone — no timer advancement
+    // is needed for the call to settle.
+    fakeTimersInstalled++;
+    jest.useFakeTimers({ now: REAL_TIME_AT_LOAD + fakeTimersInstalled * 3_600_000 });
+    const base = Date.now();
+    global.fetch = jest.fn((url: unknown) => {
+      const u = String(url);
+      const { hostname, pathname } = parseMockUrl(u);
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/details/biorxiv/')) {
+        jest.setSystemTime(base + 25_000); // step 1 consumed 25 s — past the 20 s skip threshold
+        return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv', ['1'])));
+      }
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/pubs/')) {
+        // Would win the fallback chain if (incorrectly) requested.
+        return Promise.resolve(jsonResponse({
+          messages: [{ status: 'ok' }],
+          collection: [{ preprint_doi: '10.1101/2025.03.05.641768', published_doi: '10.3389/fbinf.2025.1577324' }],
+        }));
+      }
+      if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse(epmcCorePayload));
+      return Promise.reject(new Error(`unexpected url ${u}`));
+    }) as any;
+
+    try {
+      const result = await getPreprintArticle('10.1101/2025.03.05.641768');
+
+      const urls = requestedUrls();
+      // budget guard: /pubs never hit the wire despite the official API succeeding
+      expect(urls.some(u => u.includes('/pubs/'))).toBe(false);
+      // published mapping degrades to the EPMC "Preprint of" link...
+      expect(result.published).toMatchObject({ pmid: '32015507', source: 'europepmc' });
+      // ...with the skip disclosed on the natural note field
+      expect((result.published as any).note).toContain('/pubs skipped');
+      expect((result.published as any).note).toContain('25s already spent');
+    } finally {
+      jest.useRealTimers();
+      // fresh limiters for later tests (they were constructed against the fake clock)
+      connectionManager.closeAll();
+    }
+  }, 15000);
+
+  test('getPreprintArticle still calls /pubs (no skip note) when step 1 is fast', async () => {
+    global.fetch = jest.fn((url: unknown) => {
+      const u = String(url);
+      const { hostname, pathname } = parseMockUrl(u);
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/details/biorxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv', ['1'])));
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/pubs/')) {
+        return Promise.resolve(jsonResponse({
+          messages: [{ status: 'ok' }],
+          collection: [{ preprint_doi: '10.1101/2025.03.05.641768', published_doi: '10.3389/fbinf.2025.1577324', published_journal: 'Frontiers in Bioinformatics', published_date: '2025-09-04', preprint_date: '2025-03-05' }],
+        }));
+      }
+      if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse(epmcCorePayload));
+      return Promise.reject(new Error(`unexpected url ${u}`));
+    }) as any;
+
+    const result = await getPreprintArticle('10.1101/2025.03.05.641768');
+
+    const urls = requestedUrls();
+    expect(urls.some(u => u.includes('/pubs/'))).toBe(true);
+    expect(result.published).toMatchObject({ doi: '10.3389/fbinf.2025.1577324', source: 'biorxiv_pubs' });
+    expect((result.published as any).note).toBeUndefined();
+  }, 15000);
+
   test('articleGet published falls back to the official /details published DOI when /pubs and EPMC yield nothing', async () => {
     const detailsWithPublishedDoi = {
       ...biorxivDetailsPayload('bioRxiv', ['1']),
@@ -2423,6 +2526,114 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     // fetch pageSize = max(limit*3, 10) — the limit still governs the returned window
     const urls = (global.fetch as any).mock.calls.map((c: unknown[]) => String(c[0]));
     expect(urls.find(u => u.includes('/PPR910295/citations'))).toContain('pageSize=10');
+  }, 15000);
+
+  test('articleGet preprint citation_direction="forward" requests only /citations; skipped array key stays empty', async () => {
+    global.fetch = pprCitationRouter() as any;
+
+    const result = await articleGet('10.1101/2021.10.25.465764', ['citation'], { citationDirection: 'forward' });
+
+    const urls = requestedUrls();
+    expect(urls.some(u => u.includes('/PPR910295/citations'))).toBe(true);
+    expect(urls.some(u => u.includes('/PPR910295/references'))).toBe(false);
+    const citation = result.sections?.citation as any;
+    expect(citation.forward_citations.map((c: any) => c.title)).toEqual(['Citing paper 1', 'Citing paper 2', 'Citing paper 3']);
+    // envelope key intact for the skipped direction → applyLimit still slices a real array
+    expect(Array.isArray(citation.backward_references)).toBe(true);
+    expect(citation.backward_references).toEqual([]);
+    // skipped direction ⇒ no EPMC hitCount for it; total falls back to the core record count
+    expect(citation.citation_counts).toEqual([{ total: 44, source: 'europepmc' }]);
+  }, 15000);
+
+  test('articleGet preprint citation_direction="backward" requests only /references', async () => {
+    global.fetch = pprCitationRouter() as any;
+
+    const result = await articleGet('10.1101/2021.10.25.465764', ['citation'], { citationDirection: 'backward' });
+
+    const urls = requestedUrls();
+    expect(urls.some(u => u.includes('/PPR910295/citations'))).toBe(false);
+    expect(urls.some(u => u.includes('/PPR910295/references'))).toBe(true);
+    const citation = result.sections?.citation as any;
+    expect(citation.backward_references.map((c: any) => c.title)).toEqual(['Referenced paper 1', 'Referenced paper 2', 'Referenced paper 3']);
+    expect(Array.isArray(citation.forward_citations)).toBe(true);
+    expect(citation.forward_citations).toEqual([]);
+  }, 15000);
+
+  test('articleGet preprint default direction requests both PPR endpoints (no regression)', async () => {
+    global.fetch = pprCitationRouter() as any;
+
+    const result = await articleGet('10.1101/2021.10.25.465764', ['citation']);
+
+    const urls = requestedUrls();
+    expect(urls.some(u => u.includes('/PPR910295/citations'))).toBe(true);
+    expect(urls.some(u => u.includes('/PPR910295/references'))).toBe(true);
+    const citation = result.sections?.citation as any;
+    expect(citation.forward_citations).toHaveLength(3);
+    expect(citation.backward_references).toHaveLength(3);
+  }, 15000);
+
+  test('articleGet preprint names unsupported sections and citation_mode via sections._note', async () => {
+    global.fetch = pprCitationRouter() as any;
+
+    const result = await articleGet('10.1101/2021.10.25.465764', ['citation', 'oa', 'graph'], { citationMode: 'full' });
+
+    // unsupported sections are NOT attached on the preprint path...
+    expect(result.sections?.open_access).toBeUndefined();
+    expect(result.sections?.citation_graph).toBeUndefined();
+    // ...and the reply discloses both the sections and the meaningless mode
+    const note = (result.sections?._note as string) ?? '';
+    expect(note).toContain('"oa"');
+    expect(note).toContain('"graph"');
+    expect(note).not.toContain('"annotations"');
+    expect(note).toContain('citation_mode="full"');
+    expect(note).toContain('Europe PMC PPR');
+  }, 15000);
+
+  test('articleGet preprint supported requests carry no sections._note', async () => {
+    global.fetch = pprCitationRouter() as any;
+
+    const result = await articleGet('10.1101/2021.10.25.465764', ['citation']);
+
+    expect(result.sections?.citation).toBeDefined();
+    expect(result.sections?._note).toBeUndefined();
+  }, 15000);
+
+  test('articleGet preprint citation source_results rows are compact summaries (no record arrays)', async () => {
+    global.fetch = pprCitationRouter() as any;
+
+    const result = await articleGet('10.1101/2021.10.25.465764', ['citation'], { limit: 2 });
+
+    const rows = (result.sections?.citation as any).source_results;
+    expect(rows).toHaveLength(1);
+    // counts + display name only — records live solely in the top-level arrays
+    expect(rows[0]).toEqual({ source_id: 'europepmc', source: 'Europe PMC', forward_count: 2, backward_count: 2, total: 4 });
+    expect(rows[0].forward_citations).toBeUndefined();
+    expect(rows[0].backward_references).toBeUndefined();
+    expect(rows[0].citation_count).toBeUndefined();
+  }, 15000);
+
+  test('applyLimit slices the preprint citation arrays and passes sections._note through untouched', async () => {
+    global.fetch = pprCitationRouter() as any;
+
+    // forward-only + a mode request ⇒ _note present; limit 2 pre-slices inside the preprint path
+    const result = await articleGet('10.1101/2021.10.25.465764', ['citation'], { citationDirection: 'forward', citationMode: 'fast', limit: 2 });
+    // the tool layer's own maps (mirrors server/tools/article.ts)
+    const limited = applyLimit(
+      result.sections!,
+      ['citation'],
+      { citation: 'citation' },
+      { citation: ['forward_citations', 'backward_references'] },
+      1
+    );
+
+    const citation = limited.citation as any;
+    expect(citation.forward_citations).toHaveLength(1);
+    expect(citation.forward_citations[0].title).toBe('Citing paper 1');
+    // top-level keys intact: the skipped direction is still a (empty) array
+    expect(citation.backward_references).toEqual([]);
+    expect(citation._error).toBeUndefined();
+    // the runtime note is not a section key — applyLimit must not drop it
+    expect(limited._note).toContain('citation_mode="fast"');
   }, 15000);
 
   test('transformPreprint defaults the server label to bioRxiv when bookOrReportDetails is absent', () => {

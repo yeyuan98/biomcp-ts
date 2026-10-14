@@ -6,8 +6,44 @@ import {
 } from './base.js';
 import { VERSION } from '../version.js';
 import { TokenBucketRateLimiter, RateLimiterFactory } from './rate-limiter.js';
-import { withRetry } from './retry.js';
+import { withRetry, isRetryableError } from './retry.js';
 import { HttpConnectionError } from './errors.js';
+
+/**
+ * Wrap transport-level fetch rejections (DNS failure, refused sockets,
+ * timeouts below the abort threshold) in a typed `HttpConnectionError` with
+ * `status` undefined (retryable) instead of letting a raw
+ * `TypeError: fetch failed` escape with its real signal (`ECONNREFUSED`,
+ * `ETIMEDOUT`, …) buried in `cause.code`. The original error is preserved
+ * verbatim as `.cause`, and its message is kept as-is — with
+ * ` (<cause code>)` appended only when a code exists, so string-matching
+ * consumers (`fetch failed`) keep working and messages never degrade to
+ * `fetch failed (undefined)`.
+ *
+ * Classification gates:
+ * - Abort/timeout rejections (caller cancellation via AbortSignal, or the
+ *   15 s `AbortSignal.timeout`) are NOT wrapped: callers pin their current
+ *   observable shape — `name === 'AbortError'/'TimeoutError'` (geneGet) and
+ *   the `/abort|timeout/` message matchers (cross-entity, server/errors,
+ *   fetch-utils) — so they propagate untouched, exactly as before.
+ * - Only rejections the retry layer already classifies as network failures
+ *   (message / `cause.code` signature — every real-world Node fetch
+ *   rejection, `TypeError: fetch failed`, matches) are wrapped. Messages
+ *   without a network signature keep today's raw escape and
+ *   non-retryable classification, so retry counts — and the real-backoff
+ *   timings callers budget for — are unchanged.
+ */
+function wrapTransportError(error: unknown): unknown {
+  if (error instanceof HttpConnectionError) return error;
+  const name = (error as { name?: unknown } | null | undefined)?.name;
+  if (name === 'AbortError' || name === 'TimeoutError') return error;
+  if (!isRetryableError(error)) return error;
+  const original = error as Error;
+  const code = (original.cause as { code?: string } | undefined)?.code;
+  const wrapped = new HttpConnectionError(code ? `${original.message} (${code})` : original.message);
+  wrapped.cause = original;
+  return wrapped;
+}
 
 function getHttpStatusHint(status: number, sourceId: string): string {
   if (status === 400) {
@@ -67,12 +103,17 @@ export class RestConnection implements IConnection<string, unknown> {
     if (options?.signal) signals.push(options.signal);
     const signal = signals.length > 0 ? (signals.length === 1 ? signals[0] : AbortSignal.any(signals)) : undefined;
 
-    const response = await fetch(url, {
-      method: 'GET',
-      headers,
-      signal,
-      redirect: this.options.followRedirects === false ? 'manual' : 'follow',
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'GET',
+        headers,
+        signal,
+        redirect: this.options.followRedirects === false ? 'manual' : 'follow',
+      });
+    } catch (error) {
+      throw wrapTransportError(error);
+    }
     
     if (!response.ok) {
       if (this.options.followRedirects === false) {
@@ -107,13 +148,18 @@ export class RestConnection implements IConnection<string, unknown> {
     if (options?.signal) signals.push(options.signal);
     const signal = signals.length > 0 ? (signals.length === 1 ? signals[0] : AbortSignal.any(signals)) : undefined;
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: typeof body === 'string' ? body : JSON.stringify(body),
-      signal,
-      redirect: this.options.followRedirects === false ? 'manual' : 'follow',
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: typeof body === 'string' ? body : JSON.stringify(body),
+        signal,
+        redirect: this.options.followRedirects === false ? 'manual' : 'follow',
+      });
+    } catch (error) {
+      throw wrapTransportError(error);
+    }
 
     if (response.status === 204) return null;
 

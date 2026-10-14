@@ -56,9 +56,17 @@ export async function articleGet(
   const parsed = parseArticleId(identifier);
 
   // Preprint DOIs (bioRxiv/medRxiv) have no PMID — bypass PubMed resolution
-  // entirely and build the record from the preprint sources.
+  // entirely and build the record from the preprint sources. citationMode has
+  // no preprint meaning (single EPMC source) but is passed through so the
+  // preprint path can DISCLOSE that via sections._note instead of silently
+  // dropping it; citationDirection gates the PPR citation fetch.
   if (parsed.type === 'doi' && isPreprintDoi(parsed.value)) {
-    return getPreprintArticle(parsed.value, { sections, limit: options?.limit });
+    return getPreprintArticle(parsed.value, {
+      sections,
+      limit: options?.limit,
+      citationMode: options?.citationMode,
+      citationDirection: options?.citationDirection,
+    });
   }
 
   let pmid: string;

@@ -214,6 +214,130 @@ describe('cross-entity', () => {
     expect(hasOls4).toBe(true);
     expect(results.some(r => r.name === 'BRCA1' && r.source === 'hgnc')).toBe(true);
   });
+
+  test('discover() prefers an exact symbol match over an earlier substring hit', async () => {
+    // mygene ranks a substring name match first (issue #65 symptom);
+    // the exact-symbol hit appears later in the candidate list.
+    global.fetch = mockFetchRouter([
+      {
+        host: 'mygene.info',
+        reply: () => Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            hits: [
+              { symbol: 'BAGE', name: 'B melanoma antigen' },
+              { symbol: 'BRAF', name: 'B-Raf proto-oncogene, serine/threonine kinase' },
+            ],
+          }),
+        }),
+      },
+      {
+        host: ['myvariant.info', 'mychem.info', 'mydisease.info'],
+        reply: () => Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ hits: [] }),
+        }),
+      },
+    ]) as any;
+
+    const results = await discover('BRAF');
+
+    expect(results).toHaveLength(1);
+    expect(results[0].entity_type).toBe('gene');
+    expect(results[0].identifier).toBe('BRAF');
+    expect(results[0].name).toBe('B-Raf proto-oncogene, serine/threonine kinase');
+    expect(results[0].matched_on).toBe('exact');
+  });
+
+  test('discover() falls back to the first non-empty candidate when no exact match exists', async () => {
+    // Multi-word query: no disease candidate equals "lung cancer" verbatim,
+    // so the backend's first hit must still win (no regression vs. old
+    // first-hit behavior). The mychem hit list starts with a nameless hit
+    // that must be skipped in favor of the next non-empty candidate.
+    global.fetch = mockFetchRouter([
+      {
+        host: 'mydisease.info',
+        reply: () => Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            hits: [
+              { _id: 'MONDO:0012159', mondo: { label: 'lung cancer susceptibility 1', id: 'MONDO:0012159' } },
+              { _id: 'MONDO:0005061', mondo: { label: 'lung adenocarcinoma', id: 'MONDO:0005061' } },
+            ],
+          }),
+        }),
+      },
+      {
+        host: 'mychem.info',
+        reply: () => Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            hits: [{}, { chebi: { name: 'Gefitinib' } }],
+          }),
+        }),
+      },
+      {
+        host: ['mygene.info', 'myvariant.info'],
+        reply: () => Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ hits: [] }),
+        }),
+      },
+    ]) as any;
+
+    const results = await discover('lung cancer');
+
+    expect(results).toHaveLength(2);
+    const disease = results.find(r => r.entity_type === 'disease');
+    expect(disease).toBeDefined();
+    expect(disease!.identifier).toBe('MONDO:0012159');
+    expect(disease!.name).toBe('lung cancer susceptibility 1');
+    expect(disease!.matched_on).toBe('first');
+    // Empty first mychem hit skipped; next non-empty candidate used.
+    const drug = results.find(r => r.entity_type === 'drug');
+    expect(drug).toBeDefined();
+    expect(drug!.name).toBe('Gefitinib');
+    expect(drug!.matched_on).toBe('first');
+  });
+
+  test('discover() emits no record for a backend whose hits are all empty', async () => {
+    global.fetch = mockFetchRouter([
+      {
+        host: 'mychem.info',
+        reply: () => Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            hits: [{}, { unii: { registry_number: '' } }],
+          }),
+        }),
+      },
+      {
+        host: 'mydisease.info',
+        reply: () => Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            hits: [{ _id: 'MONDO:0005105', mondo: { label: 'melanoma', id: 'MONDO:0005105' } }],
+          }),
+        }),
+      },
+      {
+        host: ['mygene.info', 'myvariant.info'],
+        reply: () => Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ hits: [] }),
+        }),
+      },
+    ]) as any;
+
+    const results = await discover('melanoma');
+
+    // mychem hits map to nameless drug candidates — no drug record emitted.
+    expect(results.some(r => r.entity_type === 'drug')).toBe(false);
+    expect(results).toHaveLength(1);
+    expect(results[0].entity_type).toBe('disease');
+    expect(results[0].name).toBe('melanoma');
+    expect(results[0].matched_on).toBe('exact');
+  });
 });
 
 describe('variantToTrials', () => {

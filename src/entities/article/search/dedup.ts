@@ -6,14 +6,28 @@ function isMissing(value: unknown): boolean {
   return value === undefined || value === null || value === '';
 }
 
+// Key chain: pmid ‖ pmcid ‖ doi ‖ arxiv_id — most arXiv preprints carry
+// none of the first three, so arxiv_id keeps them deduplicable.
+// DOIs are case-insensitive per the DOI handbook, and arXiv submitter-cased
+// DOIs (e.g. 10.1109/ICASSP...) must merge with registry-cased twins — so
+// only the DOI is lowercased here. The stored `doi` field itself is never
+// normalized: first-seen display casing survives, matching fill-merge.
+function dedupKey(article: Article): string {
+  return (
+    article.pmid ||
+    article.pmcid ||
+    (article.doi ? article.doi.trim().toLowerCase() : '') ||
+    article.arxiv_id ||
+    ''
+  );
+}
+
 export function deduplicateAndRank(articles: Article[], limit: number): Article[] {
   const seen = new Map<string, Article>();
 
   for (const article of articles) {
     if (article._error) continue;
-    // Key chain: pmid ‖ pmcid ‖ doi ‖ arxiv_id — most arXiv preprints carry
-    // none of the first three, so arxiv_id keeps them deduplicable.
-    const key = article.pmid || article.pmcid || article.doi || article.arxiv_id || '';
+    const key = dedupKey(article);
     if (!key) continue;
     const base = seen.get(key);
     if (!base) {

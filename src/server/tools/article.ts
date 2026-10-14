@@ -39,7 +39,7 @@ export function registerArticleTools(server: McpServer): void {
         query: z.string().describe('Search query (title, abstract, or keyword). Journal scoping: PubMed matches full journal names and NLM abbreviations; EuropePMC JOURNAL:"..." filters require the NLM abbreviation (e.g. "N Engl J Med")'),
         source: z.enum(['pubmed', 'europepmc', 'semantic_scholar', 'pubtator', 'litsense', 'preprint_only', 'arxiv']).optional().describe('Specific source to search. "preprint_only" searches ONLY bioRxiv+medRxiv preprints (bioRxiv/medRxiv DOIs, abstracts, citation counts, via Europe PMC\'s preprint index); "arxiv" searches the arXiv preprint server (quotes, parentheses, and field prefixes like ti:/au: are stripped from the query for arXiv only). Default (unset) = federated journal-literature search across PubMed, EuropePMC, Semantic Scholar, arXiv, PubTator, LitSense; bioRxiv/medRxiv preprints are NOT included unless explicitly requested via preprint_only.'),
         limit: z.number().int().min(1).max(50).default(10).describe('Maximum results to return. Applied to final deduplicated results, not per-source. Each source may fetch more internally before deduplication.'),
-        offset: z.number().int().min(0).default(0).describe('Result offset. EuropePMC and preprint_only windows are capped at 1000 rows; use narrower queries or another source for deeper results'),
+        offset: z.number().int().min(0).default(0).describe('Result offset. EuropePMC and preprint_only windows are capped at 1000 rows; arXiv clamps the start offset so start + page size stays within its ~30000-result deep-paging ceiling (the API errors past it); use narrower queries or another source for deeper results'),
         dateRange: z.string()
           .regex(/^(\d{4}-\d{2}-\d{2})?\/(\d{4}-\d{2}-\d{2})?$/,
             'Date range must be YYYY-MM-DD/YYYY-MM-DD (open-ended: YYYY-MM-DD/ or /YYYY-MM-DD)')
@@ -76,7 +76,7 @@ export function registerArticleTools(server: McpServer): void {
           'Fast: Europe PMC, Semantic Scholar, OpenCitations, Crossref counts/references (~4s). Full: All 5 providers incl. PubMed (~15-30s). ' +
           'Fast mode auto-falls back to PubMed when other providers return no items.'
         ),
-        citation_direction: z.enum(['forward', 'backward', 'both']).optional().default('both').describe('Citation direction: "forward" (articles citing this one), "backward" (references), "both" (default)'),
+        citation_direction: z.enum(['forward', 'backward', 'both']).optional().default('both').describe('Citation direction: "forward" (articles citing this one), "backward" (references), "both" (default); honored for preprint PPR citations too — the skipped direction returns an empty array'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
@@ -90,7 +90,7 @@ export function registerArticleTools(server: McpServer): void {
           ? ARTICLE_ALL_SECTIONS
           : (sections ?? []);
         if (result.sections) {
-          applyLimit(result.sections, requestedSections, ARTICLE_STORAGE_KEYS, ARTICLE_ARRAY_KEYS, limit);
+          result.sections = applyLimit(result.sections, requestedSections, ARTICLE_STORAGE_KEYS, ARTICLE_ARRAY_KEYS, limit);
         }
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       } catch (error) {
