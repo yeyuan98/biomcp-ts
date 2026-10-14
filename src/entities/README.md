@@ -222,7 +222,6 @@ transformLitSense(a: LitSenseResult): Article
 transformPreprint(a: EuropePMCPreprintRecord): Article
 getPreprintArticle(doi: string, options?: { sections?: string[]; limit?: number }): Promise<ArticleResult>
 isPreprintDoi(doi: string): boolean
-splitSemicolonAuthors(authors?: string): string[] | undefined
 parseArxivAtomXml(xml: string): Article[]
 ```
 

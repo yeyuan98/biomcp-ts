@@ -8,7 +8,7 @@ export { transformSemanticScholar } from './search/semantic-scholar.js';
 export { transformPubTator } from './search/pubtator.js';
 export { transformLitSense } from './search/litsense.js';
 export { transformPreprint } from './search/preprint.js';
-export { getPreprintArticle, splitSemicolonAuthors } from './detail/preprint.js';
+export { getPreprintArticle } from './detail/preprint.js';
 export { parsePubMedXml } from './transform/pubmed.js';
 export { parseArxivAtomXml } from './transform/arxiv.js';
 export { searchArxiv } from './search/arxiv.js';
