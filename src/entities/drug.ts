@@ -44,6 +44,109 @@ export interface DrugSearchResult extends DrugResult {
   _score?: number;
 }
 
+/**
+ * Trailing salt/counterion tokens stripped when computing a drug identity key.
+ * Matched case-insensitively as whole whitespace-delimited words at the END of
+ * the name only (never as substrings), and stripped iteratively so stacked
+ * salt tokens ("drug sodium phosphate") reduce fully to the base name.
+ */
+const SALT_SUFFIX_TOKENS: ReadonlySet<string> = new Set([
+  'mesylate',
+  'methanesulfonate',
+  'fumarate',
+  'tosylate',
+  'hydrochloride',
+  'hcl',
+  'sulfate',
+  'sodium',
+  'phosphate',
+  'citrate',
+  'tartrate',
+  'maleate',
+  'succinate',
+  'acetate',
+  'besylate',
+]);
+
+/**
+ * Strip trailing whole-word salt/counterion tokens from a drug name
+ * (case-insensitive, iterated). At least one token is always kept — a name
+ * made solely of salt tokens is never reduced to an empty string.
+ */
+function stripSaltSuffixTokens(name: string): string {
+  const tokens = name.trim().split(/\s+/);
+  while (tokens.length > 1 && SALT_SUFFIX_TOKENS.has(tokens[tokens.length - 1]!.toLowerCase())) {
+    tokens.pop();
+  }
+  return tokens.join(' ');
+}
+
+/**
+ * Stable identity key for a drug row: ChEMBL id if present, else InChIKey,
+ * else the case-normalized, salt-stripped name. Rows sharing a key are the
+ * same chemical entity for dedup purposes — case variants and salt/ester
+ * forms of one base name collapse onto a single key, while two different
+ * ChEMBL ids never do. Exported for reuse by the cross-entity layer.
+ */
+export function drugIdentityKey(
+  drug: { name?: string; chembl_id?: string; inchi_key?: string }
+): string {
+  const chemblId = drug.chembl_id?.trim().toLowerCase();
+  if (chemblId) return chemblId;
+  const inchiKey = drug.inchi_key?.trim().toUpperCase();
+  if (inchiKey) return inchiKey;
+  return stripSaltSuffixTokens((drug.name ?? '').trim().toLowerCase());
+}
+
+function countNonEmptyDrugFields(drug: DrugSearchResult): number {
+  let count = 0;
+  if (drug.chembl_id) count++;
+  if (drug.inchi_key) count++;
+  if (drug.chebi_id) count++;
+  if (drug.unii) count++;
+  if (drug.molecular_formula) count++;
+  if (drug.molecular_weight !== undefined) count++;
+  if (drug.synonyms && drug.synonyms.length > 0) count++;
+  return count;
+}
+
+/**
+ * Pick the row with the richest identity to survive a collapse: ChEMBL id
+ * present, then InChIKey present, then more populated fields; deterministic
+ * tie-breaks (shorter name, then lexicographic order) keep tests stable.
+ */
+function preferRicherDrugRow(a: DrugSearchResult, b: DrugSearchResult): DrugSearchResult {
+  const idRank = (d: DrugSearchResult) => (d.chembl_id ? 2 : 0) + (d.inchi_key ? 1 : 0);
+  const rankA = idRank(a);
+  const rankB = idRank(b);
+  if (rankA !== rankB) return rankA > rankB ? a : b;
+  const fieldsA = countNonEmptyDrugFields(a);
+  const fieldsB = countNonEmptyDrugFields(b);
+  if (fieldsA !== fieldsB) return fieldsA > fieldsB ? a : b;
+  if (a.name.length !== b.name.length) return a.name.length < b.name.length ? a : b;
+  return a.name <= b.name ? a : b;
+}
+
+/**
+ * Normalize and deduplicate drug search rows: drop rows whose name is empty
+ * or whitespace (e.g. MyChem records whose only annotation is an FDA orphan
+ * designation without a generic name), then collapse case variants and
+ * salt/ester forms onto a single row keyed by {@link drugIdentityKey},
+ * keeping the record with the richest identity. Never refetches to refill a
+ * limit — returning fewer rows than requested is accepted. Exported for
+ * reuse by the cross-entity layer.
+ */
+export function collapseSaltVariants(rows: DrugSearchResult[]): DrugSearchResult[] {
+  const byKey = new Map<string, DrugSearchResult>();
+  for (const row of rows) {
+    if (!row.name || !row.name.trim()) continue;
+    const key = drugIdentityKey(row);
+    const existing = byKey.get(key);
+    byKey.set(key, existing ? preferRicherDrugRow(existing, row) : row);
+  }
+  return [...byKey.values()];
+}
+
 export async function drugSearch(
   query: string,
   options: DrugSearchOptions = {}
@@ -54,14 +157,14 @@ export async function drugSearch(
 
   const queryParams = new URLSearchParams({
     q: query,
-    fields: 'chebi.name,chebi.id,chebi.formula,chebi.mass,chebi.inchikey,unii.smiles,unii.molecular_formula,unii.display_name,unii.registry_number,unichem.chembl,chembl.pref_name,chembl.molecule_chembl_id,chembl.inchi_key,chembl.molecule_properties,ndc.nonproprietaryname,ndc.substancename',
+    fields: 'chebi.name,chebi.id,chebi.formula,chebi.mass,chebi.inchikey,unii.smiles,unii.molecular_formula,unii.display_name,unii.registry_number,unichem.chembl,chembl.pref_name,chembl.molecule_chembl_id,chembl.inchi_key,chembl.molecule_properties,ndc.nonproprietaryname,ndc.substancename,fda_orphan_drug',
     size: String(limit),
     from: String(offset),
   });
 
   const response = await conn.request(`/query?${queryParams.toString()}`) as MyChemSearchResponse;
 
-  return (response.hits || []).map(transformMyChemHit);
+  return collapseSaltVariants((response.hits || []).map(transformMyChemHit));
 }
 
 export interface BestMatchResult {
@@ -496,6 +599,22 @@ interface OpenFDAResponse {
   }>;
 }
 
+/**
+ * First `generic_name` across an `fda_orphan_drug` annotation (an array of
+ * orphan-designation records; a single object is tolerated defensively).
+ * `trade_name` is deliberately unused — the search `name` field prefers
+ * generic identity over brand names.
+ */
+function orphanGenericName(raw: unknown): string {
+  const entries = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? [raw] : [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') continue;
+    const genericName = (entry as Record<string, unknown>).generic_name;
+    if (typeof genericName === 'string' && genericName.trim()) return genericName.trim();
+  }
+  return '';
+}
+
 export function transformMyChemHit(hit: Record<string, unknown>): DrugSearchResult {
   const chebi = hit.chebi as Record<string, unknown> | undefined;
   const unii = hit.unii as Record<string, unknown> | undefined;
@@ -504,8 +623,13 @@ export function transformMyChemHit(hit: Record<string, unknown>): DrugSearchResu
   const chembl = hit.chembl as Record<string, unknown> | undefined;
   const chemblProps = chembl?.molecule_properties as Record<string, unknown> | undefined;
 
+  // Name fallback chain, strongest identity source first. The orphan
+  // designation's generic_name sits after the curated ChEBI/UNII/ChEMBL/NDC
+  // names and before the UNII registry number: orphan designation is a
+  // weaker identity source than any curated name, but far better than a
+  // CAS-style registry number (and than shipping a name-less row).
   return {
-    name: (chebi?.name || unii?.display_name || chembl?.pref_name || ndc?.nonproprietaryname || ndc?.substancename || unii?.registry_number || '') as string,
+    name: (chebi?.name || unii?.display_name || chembl?.pref_name || ndc?.nonproprietaryname || ndc?.substancename || orphanGenericName(hit.fda_orphan_drug) || unii?.registry_number || '') as string,
     chembl_id: (unichem?.chembl as string) || (chembl?.molecule_chembl_id as string) || undefined,
     inchi_key: (chebi?.inchikey as string) || (chembl?.inchi_key as string) || undefined,
     molecular_formula: (chebi?.formula as string) || (unii?.molecular_formula as string) || (chemblProps?.full_molformula as string) || undefined,
