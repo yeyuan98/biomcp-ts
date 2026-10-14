@@ -192,6 +192,104 @@ describe('GraphQLConnection', () => {
     expect(result).toEqual({ data: { gene: null } });
   });
 
+  describe('transport-level fetch rejections', () => {
+    test('fetch rejection with a cause code wraps into a status-less retryable HttpConnectionError', async () => {
+      const original = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
+      global.fetch = jest.fn().mockRejectedValue(original) as any;
+
+      const conn = new GraphQLConnection(baseOptions);
+      try {
+        await conn.request('{ gene { name } }');
+        fail('Expected an error to be thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(HttpConnectionError);
+        const err = error as HttpConnectionError;
+        expect(err.status).toBeUndefined();
+        expect(err.retryable).toBe(true);
+        expect(err.message).toBe('fetch failed (ECONNREFUSED)');
+        expect(err.cause).toBe(original);
+      }
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    test('fetch rejection without cause keeps the raw message verbatim (never "(undefined)")', async () => {
+      global.fetch = jest.fn().mockRejectedValue(new TypeError('fetch failed')) as any;
+
+      const conn = new GraphQLConnection(baseOptions);
+      try {
+        await conn.request('{ gene { name } }');
+        fail('Expected an error to be thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(HttpConnectionError);
+        const err = error as HttpConnectionError;
+        expect(err.status).toBeUndefined();
+        expect(err.message).toBe('fetch failed');
+        expect(err.cause).toBeInstanceOf(TypeError);
+      }
+    });
+
+    test('timeout/abort rejection passes through untouched (callers pin name + /abort|timeout/ message)', async () => {
+      // What AbortSignal.timeout + undici reject with today: a DOMException
+      // whose name ('TimeoutError') and message downstream consumers pin
+      // (geneGet matches `name === 'AbortError'`; cross-entity, server/errors
+      // and fetch-utils string-match the message). The wrap must leave it
+      // exactly as-is.
+      const timeoutError = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      global.fetch = jest.fn().mockRejectedValue(timeoutError) as any;
+
+      const conn = new GraphQLConnection(baseOptions);
+      try {
+        await conn.request('{ gene { name } }');
+        fail('Expected an error to be thrown');
+      } catch (error) {
+        expect(error).toBe(timeoutError);
+        expect((error as DOMException).name).toBe('TimeoutError');
+        expect((error as DOMException).message).toBe('The operation was aborted due to timeout');
+        expect(/abort|timeout/i.test((error as Error).message)).toBe(true);
+      }
+    });
+
+    test('caller-cancelled AbortError also passes through untouched', async () => {
+      const abortError = new DOMException('The operation was aborted', 'AbortError');
+      global.fetch = jest.fn().mockRejectedValue(abortError) as any;
+
+      const conn = new GraphQLConnection(baseOptions);
+      await expect(conn.request('{ gene { name } }')).rejects.toBe(abortError);
+    });
+
+    test('rejections without a network signature pass through raw (retry classification unchanged)', async () => {
+      const original = new Error('PPR citation endpoints exploded');
+      global.fetch = jest.fn().mockRejectedValue(original) as any;
+
+      const conn = new GraphQLConnection({ ...baseOptions, retry: { attempts: 3, backoffMs: 1 } });
+      await expect(conn.request('{ gene { name } }')).rejects.toBe(original);
+      expect(global.fetch).toHaveBeenCalledTimes(1); // non-retryable: no retry fired
+    });
+
+    test('transport rejection inside a retried source still retries and then succeeds', async () => {
+      global.fetch = jest.fn()
+        .mockRejectedValueOnce(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }))
+        .mockRejectedValueOnce(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ETIMEDOUT' } }))
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: { gene: { name: 'BRCA1' } } }) }) as any;
+
+      const conn = new GraphQLConnection({ ...baseOptions, retry: { attempts: 3, backoffMs: 1 } });
+      const result = await conn.request('{ gene { name } }') as any;
+
+      expect(result.data.gene.name).toBe('BRCA1');
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+    });
+
+    test('all-attempt transport rejections surface the wrapped error after exhausting retries', async () => {
+      global.fetch = jest.fn().mockRejectedValue(
+        Object.assign(new TypeError('fetch failed'), { cause: { code: 'ETIMEDOUT' } })
+      ) as any;
+
+      const conn = new GraphQLConnection({ ...baseOptions, retry: { attempts: 3, backoffMs: 1 } });
+      await expect(conn.request('{ gene { name } }')).rejects.toThrow('fetch failed (ETIMEDOUT)');
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+    });
+  });
+
   describe('registry-driven retry', () => {
     const retryOptions: ConnectionOptions = {
       ...baseOptions,
