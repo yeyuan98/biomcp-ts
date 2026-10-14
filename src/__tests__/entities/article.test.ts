@@ -2047,7 +2047,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     expect(url).toContain('cursorMark=*');
 
     expect(result).toHaveLength(10);
-    expect(result[0].publication_types).toEqual(['Preprint']);
+    expect(result[0].publication_types).toEqual(['preprint']);
     expect(result[0].abstract).toBe('Abstract 0');
     expect(result[0].journal).toBe('bioRxiv');
     expect(result[0].preprint_server).toBe('bioRxiv');

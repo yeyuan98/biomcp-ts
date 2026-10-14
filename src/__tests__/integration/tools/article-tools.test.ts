@@ -54,7 +54,7 @@ describe('article_search preprint_only (bioRxiv + medRxiv)', () => {
     expectArticleSearchResult(results);
     expect(results.length).toBeGreaterThan(0);
     for (const r of results) {
-      expect(r.publication_types).toContain('Preprint');
+      expect(r.publication_types).toContain('preprint');
       expect(['bioRxiv', 'medRxiv']).toContain(r.journal);
       expect(r.abstract).toBeTruthy();
       expect(r.source).toBe('preprint_only');

@@ -13,7 +13,7 @@ export function transformPreprint(a: EuropePMCPreprintRecord): Article {
     publication_date: a.firstPublicationDate,
     cited_by: a.citedByCount,
     is_open_access: a.isOpenAccess === 'Y',
-    publication_types: ['Preprint'],
+    publication_types: ['preprint'],
     source: 'preprint_only',
     preprint_server: server,
     ppr_id: a.id,
