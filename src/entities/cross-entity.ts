@@ -380,71 +380,160 @@ export interface DiscoverResult {
   entity_type: string;
   identifier: string;
   name: string;
+  /** Why this record was selected: 'exact' or 'first' (see DiscoverMatchRule). */
+  matched_on?: DiscoverMatchRule;
   source?: string;
   description?: string;
   matches?: Array<{ type: string; id: string; name: string; score: number }>;
 }
 
+/**
+ * Why a discover record was selected from its backend's candidates:
+ * - 'exact': the record's symbol/name/label equals the query verbatim
+ *   (case-insensitive, whitespace-trimmed).
+ * - 'first': no exact match existed, so the backend's first candidate with a
+ *   non-empty name or identifier was used (the pre-ranking default).
+ */
+export type DiscoverMatchRule = 'exact' | 'first';
+
+/** How many candidates discover asks each backend for (best-of-N selection). */
+const DISCOVER_CANDIDATE_LIMIT = 5;
+
+/** Name-ish fields of a candidate compared against the query, plus its identifier. */
+interface CandidateAccessors<T> {
+  nameFields: (candidate: T) => Array<string | undefined>;
+  identifier: (candidate: T) => string | undefined;
+}
+
+function normalizeForMatch(value: string | undefined): string {
+  return (value || '').trim().toLowerCase();
+}
+
+/**
+ * Pick the best candidate for a free-text query from a backend's hit list.
+ * - 'exact': the first candidate whose name/symbol/label equals the query
+ *   (case-insensitive, whitespace-trimmed) wins, even when substring matches
+ *   rank higher in the backend's default order.
+ * - 'first': the backend's first candidate with a non-empty name OR identifier
+ *   (candidates empty on BOTH fields are skipped — discover never emits
+ *   empty records).
+ * Returns null when every candidate is empty (or the list is empty).
+ */
+function pickBestMatch<T>(
+  query: string,
+  candidates: T[],
+  accessors: CandidateAccessors<T>
+): { candidate: T; rule: DiscoverMatchRule } | null {
+  const wanted = normalizeForMatch(query);
+  let fallback: { candidate: T; rule: DiscoverMatchRule } | null = null;
+
+  for (const candidate of candidates.slice(0, DISCOVER_CANDIDATE_LIMIT)) {
+    const identifier = accessors.identifier(candidate) || '';
+    const names = accessors.nameFields(candidate).map(n => n || '');
+    if (names.every(n => n.trim() === '') && identifier.trim() === '') {
+      continue; // neither a name nor an identifier — not emittable
+    }
+    if (!fallback) {
+      fallback = { candidate, rule: 'first' };
+    }
+    if (wanted !== '' && names.some(n => normalizeForMatch(n) === wanted)) {
+      return { candidate, rule: 'exact' };
+    }
+  }
+
+  return fallback;
+}
+
 export async function discover(query: string): Promise<DiscoverResult[]> {
   const results: DiscoverResult[] = [];
-  
+
   const [geneResults, variantResults, drugResults, diseaseResults] = await Promise.allSettled([
-    geneSearch(query, { limit: 3 }),
-    variantSearch({ query, limit: 3 }),
-    drugSearch(query, { limit: 3 }),
-    diseaseSearch(query, { limit: 3 }),
+    geneSearch(query, { limit: DISCOVER_CANDIDATE_LIMIT }),
+    variantSearch({ query, limit: DISCOVER_CANDIDATE_LIMIT }),
+    drugSearch(query, { limit: DISCOVER_CANDIDATE_LIMIT }),
+    diseaseSearch(query, { limit: DISCOVER_CANDIDATE_LIMIT }),
   ]);
-  
-  if (geneResults.status === 'fulfilled' && geneResults.value.length > 0) {
-    results.push({
-      entity_type: 'gene',
-      identifier: geneResults.value[0].symbol,
-      name: geneResults.value[0].name,
-      source: 'mygene',
+
+  if (geneResults.status === 'fulfilled') {
+    const pick = pickBestMatch(query, geneResults.value, {
+      nameFields: (c: GeneSearchResult) => [c.symbol, c.name],
+      identifier: (c: GeneSearchResult) => c.symbol,
     });
+    if (pick) {
+      results.push({
+        entity_type: 'gene',
+        identifier: pick.candidate.symbol,
+        name: pick.candidate.name,
+        source: 'mygene',
+        matched_on: pick.rule,
+      });
+    }
   }
-  
-  if (variantResults.status === 'fulfilled' && variantResults.value.length > 0) {
-    results.push({
-      entity_type: 'variant',
-      identifier: variantResults.value[0].id,
-      name: variantResults.value[0].id,
-      source: 'myvariant',
+
+  if (variantResults.status === 'fulfilled') {
+    const pick = pickBestMatch(query, variantResults.value, {
+      nameFields: (c: VariantSearchResult) => [c.id],
+      identifier: (c: VariantSearchResult) => c.id,
     });
+    if (pick) {
+      results.push({
+        entity_type: 'variant',
+        identifier: pick.candidate.id,
+        name: pick.candidate.id,
+        source: 'myvariant',
+        matched_on: pick.rule,
+      });
+    }
   }
-  
-  if (drugResults.status === 'fulfilled' && drugResults.value.length > 0) {
-    results.push({
-      entity_type: 'drug',
-      identifier: drugResults.value[0].name,
-      name: drugResults.value[0].name,
-      source: 'mychem',
+
+  if (drugResults.status === 'fulfilled') {
+    const pick = pickBestMatch(query, drugResults.value, {
+      nameFields: (c: DrugSearchResult) => [c.name],
+      identifier: (c: DrugSearchResult) => c.name,
     });
+    if (pick) {
+      results.push({
+        entity_type: 'drug',
+        identifier: pick.candidate.name,
+        name: pick.candidate.name,
+        source: 'mychem',
+        matched_on: pick.rule,
+      });
+    }
   }
-  
-  if (diseaseResults.status === 'fulfilled' && diseaseResults.value.length > 0) {
-    results.push({
-      entity_type: 'disease',
-      identifier: diseaseResults.value[0].disease_id,
-      name: diseaseResults.value[0].name,
-      source: 'mydisease',
+
+  if (diseaseResults.status === 'fulfilled') {
+    const pick = pickBestMatch(query, diseaseResults.value, {
+      nameFields: (c: DiseaseSearchResult) => [c.name],
+      identifier: (c: DiseaseSearchResult) => c.disease_id,
     });
+    if (pick) {
+      results.push({
+        entity_type: 'disease',
+        identifier: pick.candidate.disease_id,
+        name: pick.candidate.name,
+        source: 'mydisease',
+        matched_on: pick.rule,
+      });
+    }
   }
-  
+
   if (results.length === 0) {
     try {
       const conn = connectionManager.getConnection('ols4');
       const response = await conn.request(
         `/api/search?q=${encodeURIComponent(query)}&size=3`
       ) as OLSResponse;
-      
+
       if (response.response?.docs?.length) {
+        const wanted = normalizeForMatch(query);
         for (const doc of response.response.docs) {
           results.push({
             entity_type: doc.type || 'unknown',
             identifier: doc.iri || doc.obo_id || '',
             name: doc.label || query,
             source: doc.ontology_name || 'ols',
+            matched_on: wanted !== '' && normalizeForMatch(doc.label) === wanted ? 'exact' : 'first',
           });
         }
       }
@@ -452,7 +541,7 @@ export async function discover(query: string): Promise<DiscoverResult[]> {
       console.error('[discover/ols4] Error:', error);
     }
   }
-  
+
   return results;
 }
 
