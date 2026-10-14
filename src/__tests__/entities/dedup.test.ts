@@ -50,6 +50,33 @@ describe('deduplicateAndRank', () => {
     expect(result[0].title).toBe('First');
   });
 
+  test('deduplicates by DOI case-insensitively (arXiv submitter casing vs registry casing)', () => {
+    // Issue #46: arXiv echoes the submitter's DOI casing (10.1109/ICASSP...),
+    // while Europe PMC/Semantic Scholar carry registry (lowercase) casing.
+    const articles = [
+      { doi: '10.1109/icassp.2022.9747221', title: 'Registry row', source: 'europepmc' },
+      { doi: '10.1109/ICASSP.2022.9747221', title: 'arXiv row', source: 'arxiv', journal: 'arXiv', publication_types: ['preprint'] },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result).toHaveLength(1);
+    // First-seen display casing survives — only the key is lowercased
+    expect(result[0].doi).toBe('10.1109/icassp.2022.9747221');
+    expect(result[0].source).toBe('europepmc');
+    // Fill-merge semantics preserved: missing fields filled from the twin
+    expect(result[0].title).toBe('Registry row');
+    expect(result[0].journal).toBe('arXiv');
+    expect(result[0].publication_types).toEqual(['preprint']);
+  });
+
+  test('trims surrounding whitespace from the DOI before case-folding the key', () => {
+    const articles = [
+      { doi: ' 10.1109/ICASSP.2022.9747221 ', title: 'Padded' },
+      { doi: '10.1109/icassp.2022.9747221', title: 'Clean' },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result).toHaveLength(1);
+  });
+
   test('deduplicates by arxiv_id (most arXiv preprints have no pmid/pmcid/doi)', () => {
     const articles = [
       { arxiv_id: '1706.03762', title: 'First', source: 'arxiv' },
@@ -79,6 +106,47 @@ describe('deduplicateAndRank', () => {
     expect(result[0].pmid).toBe('12345');
     // First occurrence kept
     expect(result[0].pmcid).toBe('PMC001');
+  });
+
+  test('PMID key takes priority over DOI even when the DOI casing differs', () => {
+    const articles = [
+      { pmid: '12345', doi: '10.1109/ICASSP.2022.9747221', title: 'arXiv casing' },
+      { pmid: '12345', doi: '10.1109/icassp.2022.9747221', title: 'Registry casing' },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe('arXiv casing');
+  });
+
+  test('PMCID key takes priority over DOI even when the DOI casing differs', () => {
+    const articles = [
+      { pmcid: 'PMC001', doi: '10.1109/ICASSP.2022.9747221', title: 'First' },
+      { pmcid: 'PMC001', doi: '10.1109/icassp.2022.9747221', title: 'Second' },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe('First');
+  });
+
+  test('falls through to arxiv_id when the DOI field is whitespace-only', () => {
+    const articles = [
+      { doi: '   ', arxiv_id: '1706.03762', title: 'First' },
+      { arxiv_id: '1706.03762', title: 'Second' },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe('First');
+  });
+
+  test('keyless articles are dropped, never merged under an empty-string key', () => {
+    const articles = [
+      { title: 'No ID, first' },
+      { title: 'No ID, second', cited_by: 10 },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    // Existing semantics: keyless rows are skipped; crucially they do not
+    // collapse into one ''-keyed merged row.
+    expect(result).toHaveLength(0);
   });
 
   test('sorts by citation count descending', () => {
