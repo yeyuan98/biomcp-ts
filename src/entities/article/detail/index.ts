@@ -5,7 +5,7 @@ import type { ResolvedPmid } from './id-resolution.js';
 import { getPreprintArticle } from './preprint.js';
 import { fetchOpenAccess } from './open-access.js';
 import type { OpenAccessResult } from './open-access.js';
-import { fetchFullText, FULLTEXT_DEFAULT_MAX_CHARS, FULLTEXT_ALL_MODE_MAX_CHARS } from './fulltext.js';
+import { fetchFullText, FULLTEXT_DEFAULT_MAX_CHARS } from './fulltext.js';
 import { fetchAnnotations, fetchCitationGraph } from './annotations.js';
 import { getCitations } from '../citation/index.js';
 import type { ArticleId } from '../citation/types.js';
@@ -122,7 +122,9 @@ export async function articleGet(
   const doi = result.doi || resolvedIds?.doi;
 
   const wantsOa = sectionsToFetch.includes('oa') || sectionsToFetch.includes('all');
-  const wantsFullText = sectionsToFetch.includes('fulltext') || sectionsToFetch.includes('all');
+  // Full text is opt-in ONLY (explicit sections=["fulltext"]) — "all" never
+  // triggers the expensive XML fetch, and the reply must stay small.
+  const wantsFullText = sectionsToFetch.includes('fulltext');
 
   // One Europe PMC core record backs both the oa section and the fulltext
   // section (access classification + license header), so oa+fulltext and
@@ -149,21 +151,22 @@ export async function articleGet(
   }
 
   if (wantsFullText) {
-    // An explicit sections=["fulltext"] request gets the full cap; fulltext
-    // riding along in ["all"] gets the reduced preview cap (an explicit
-    // caller cap, e.g. batch_get's 10000, always wins as an upper bound).
-    const fulltextCap = Math.min(
-      sectionsToFetch.includes('fulltext')
-        ? (options?.fulltextMaxChars ?? FULLTEXT_DEFAULT_MAX_CHARS)
-        : FULLTEXT_ALL_MODE_MAX_CHARS,
-      options?.fulltextMaxChars ?? Number.MAX_SAFE_INTEGER
-    );
+    // The char cap applies to inline output only; file mode writes the
+    // complete text and returns a handle.
+    const fulltextCap = options?.fulltextMaxChars ?? FULLTEXT_DEFAULT_MAX_CHARS;
     sectionPromises.push(
       (async () => {
         const oa = await (oaRecordPromise
           ? oaRecordPromise.catch(() => null)
           : Promise.resolve(null));
-        const r = await fetchFullText(pmcid, { maxChars: fulltextCap, oa, doi });
+        const r = await fetchFullText(pmcid, {
+          maxChars: fulltextCap,
+          oa,
+          doi,
+          output: options?.fulltextOutput,
+          pmid,
+          title: result.title,
+        });
         result.sections = result.sections || {};
         (result.sections as Record<string, unknown>)['fulltext'] = r;
       })().catch(e => {

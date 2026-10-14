@@ -6,6 +6,10 @@ import { clearCitedInCache } from '../../entities/article/citation/pubmed.js';
 import { fetchOpenAccess, licenseToUrl } from '../../entities/article/detail/open-access.js';
 import type { OpenAccessResult } from '../../entities/article/detail/open-access.js';
 import { fetchFullText, parseFullTextJats, FULLTEXT_DEFAULT_MAX_CHARS } from '../../entities/article/detail/fulltext.js';
+import { writeFullTextFile } from '../../entities/article/detail/fulltext-store.js';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { getPreprintArticle } from '../../entities/article/detail/preprint.js';
 import { connectionManager } from '../../connections/manager.js';
 import { parseMockUrl } from '../helpers/mock-url.js';
@@ -1490,6 +1494,10 @@ describe('article', () => {
           }),
         }) as any;
 
+      // No PMCID in any fixture, so the unavailable envelope short-circuits
+      // before writeFullTextFile — no cache-dir isolation needed here; if the
+      // fixture ever gains a PMCID, move this into the isolated fulltext
+      // describe below.
       const result = await articleGet('12345', ['fulltext']);
 
       expect(global.fetch).toHaveBeenCalledTimes(2);
@@ -1502,7 +1510,7 @@ describe('article', () => {
       expect(result.sections?.open_access).toBeUndefined();
     });
 
-    test('articleGet() with sections=["all"] fetches all section types incl. capped fulltext', async () => {
+    test('articleGet() with sections=["all"] fetches all sections but NEVER fulltext', async () => {
       const emptyJsonResponse = {
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
@@ -1517,9 +1525,6 @@ describe('article', () => {
         if (hostname === 'www.ebi.ac.uk' && pathname.endsWith('/search')) {
           return Promise.resolve({ ok: true, headers: new Headers({ 'content-type': 'application/json' }), json: () => Promise.resolve(epmcSearchHit(epmcCoreRecord())) });
         }
-        if (hostname === 'www.ebi.ac.uk' && pathname.endsWith('/PMC9999999/fullTextXML')) {
-          return Promise.resolve({ ok: true, headers: new Headers({ 'content-type': 'text/xml' }), text: () => Promise.resolve(JATS_FULLTEXT_XML) });
-        }
         return Promise.resolve(emptyJsonResponse);
       }) as any;
 
@@ -1531,36 +1536,15 @@ describe('article', () => {
       expect(result.sections).toHaveProperty('annotations');
       expect(result.sections).toHaveProperty('citation_graph');
       expect(result.sections).toHaveProperty('citation');
-      const ft = result.sections?.fulltext as any;
-      expect(ft).toBeDefined();
-      expect(ft._error).toBeUndefined();
-      expect(ft.status).toBe('available');
-      expect(ft.source).toBe('europepmc');
-      expect(ft.max_chars).toBe(15000); // all-mode preview cap
-      expect(Array.isArray(ft.sections)).toBe(true);
+      // Full text is opt-in ONLY — "all" never triggers the XML fetch nor
+      // emits a fulltext section.
+      expect(result.sections.fulltext).toBeUndefined();
+      const fulltextCalls = (global.fetch as any).mock.calls.map(c => String(c[0])).filter(u => u.includes('fullTextXML') || u.includes('db=pmc'));
+      expect(fulltextCalls).toHaveLength(0);
     }, 30000);
 
-    test('articleGet() all-mode fulltext cap is clamped by an explicit caller cap (batch_get)', async () => {
-      global.fetch = jest.fn((url: unknown) => {
-        const { hostname, pathname } = parseMockUrl(url);
-        if (hostname === 'eutils.ncbi.nlm.nih.gov' && pathname.endsWith('/efetch.fcgi')) {
-          return Promise.resolve({ ok: true, headers: new Headers({ 'content-type': 'text/xml' }), text: () => Promise.resolve(SINGLE_ARTICLE_XML) });
-        }
-        if (hostname === 'www.ebi.ac.uk' && pathname.endsWith('/search')) {
-          return Promise.resolve({ ok: true, headers: new Headers({ 'content-type': 'application/json' }), json: () => Promise.resolve(epmcSearchHit(epmcCoreRecord())) });
-        }
-        if (hostname === 'www.ebi.ac.uk' && pathname.endsWith('/fullTextXML')) {
-          return Promise.resolve({ ok: true, headers: new Headers({ 'content-type': 'text/xml' }), text: () => Promise.resolve(JATS_FULLTEXT_XML) });
-        }
-        return Promise.resolve({ ok: true, headers: new Headers({ 'content-type': 'application/json' }), json: () => Promise.resolve({}) });
-      }) as any;
 
-      const result = await articleGet('12345', ['all'], { fulltextMaxChars: 10000 });
-
-      expect((result.sections?.fulltext as any).max_chars).toBe(10000);
-    }, 30000);
-
-    test('articleGet() with sections=["fulltext"] uses the full cap and shares the oa lookup', async () => {
+    test('articleGet() with sections=["fulltext"] inline mode uses the cap and shares the oa lookup', async () => {
       global.fetch = jest.fn((url: unknown) => {
         const { hostname, pathname } = parseMockUrl(url);
         if (hostname === 'eutils.ncbi.nlm.nih.gov' && pathname.endsWith('/efetch.fcgi')) {
@@ -1575,7 +1559,7 @@ describe('article', () => {
         return Promise.reject(new Error(`unexpected url ${url}`));
       }) as any;
 
-      const result = await articleGet('12345', ['fulltext'], { fulltextMaxChars: 5000 });
+      const result = await articleGet('12345', ['fulltext'], { fulltextMaxChars: 5000, fulltextOutput: 'inline' });
 
       expect(global.fetch).toHaveBeenCalledTimes(3);
       const ft = result.sections?.fulltext as any;
@@ -1645,6 +1629,24 @@ describe('article', () => {
   });
 
   describe('fulltext section', () => {
+    let fulltextCacheDir: string | undefined;
+
+    beforeEach(() => {
+      // File-mode writes must never touch the real ~/.cache/biomcp
+      fulltextCacheDir = process.env.BIOMCP_CACHE_DIR;
+      process.env.BIOMCP_CACHE_DIR = mkdtempSync(join(tmpdir(), 'biomcp-ft-'));
+    });
+
+    afterEach(() => {
+      if (fulltextCacheDir === undefined) delete process.env.BIOMCP_CACHE_DIR;
+      else process.env.BIOMCP_CACHE_DIR = fulltextCacheDir;
+      try {
+        rmSync(process.env.BIOMCP_CACHE_DIR ?? join(tmpdir(), 'biomcp-ft-'), { recursive: true, force: true });
+      } catch {
+        void 0;
+      }
+    });
+
     const xmlResponse = (xml: string) => ({
       ok: true,
       headers: new Headers({ 'content-type': 'text/xml' }),
@@ -1661,7 +1663,7 @@ describe('article', () => {
     test('fetchFullText fetches Europe PMC fullTextXML and parses sections', async () => {
       global.fetch = jest.fn().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
 
-      const result = await fetchFullText('PMC9999999', { oa: OA_OPEN });
+      const result = await fetchFullText('PMC9999999', { oa: OA_OPEN, output: 'inline' });
 
       expect(global.fetch).toHaveBeenCalledTimes(1);
       const url = (global.fetch as any).mock.calls[0][0] as string;
@@ -1691,7 +1693,7 @@ describe('article', () => {
         return Promise.reject(new Error(`unexpected url ${url}`));
       }) as any;
 
-      const result = await fetchFullText('PMC9999999', { oa: OA_OPEN });
+      const result = await fetchFullText('PMC9999999', { oa: OA_OPEN, output: 'inline' });
 
       const eutilsUrl = (global.fetch as any).mock.calls.map(c => String(c[0])).find(u => u.includes('efetch.fcgi'));
       expect(eutilsUrl).toContain('db=pmc');
@@ -1754,7 +1756,7 @@ describe('article', () => {
       global.fetch = jest.fn().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
 
       // Clamped to the 1000-char floor; the fixture introduction is ~1300 chars
-      const result = await fetchFullText('PMC9999999', { oa: OA_OPEN, maxChars: 250 });
+      const result = await fetchFullText('PMC9999999', { oa: OA_OPEN, maxChars: 250, output: 'inline' });
 
       expect(result.max_chars).toBe(1000);
       expect(result.truncated).toBe(true);
@@ -1764,6 +1766,143 @@ describe('article', () => {
       expect(result.sections?.[0].text.endsWith('…')).toBe(true);
       expect(result.omitted_sections).toEqual(['Results', 'Results — Mutation effects', 'Acknowledgments']);
       expect(result.note).toContain('fulltext_max_chars=200000');
+    });
+
+    test('fetchFullText file mode (default) writes markdown and returns a handle, never the body', async () => {
+      global.fetch = jest.fn().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
+
+      const result = await fetchFullText('PMC9999999', { oa: OA_OPEN, pmid: '12345', title: 'A test title' });
+
+      expect(result.mode).toBe('file');
+      expect(result.format).toBe('markdown');
+      expect(result.status).toBe('available');
+      expect(result.file_path).toBeDefined();
+      expect(existsSync(result.file_path!)).toBe(true);
+      expect(result.sections).toBeUndefined(); // the body never enters the reply
+      expect(result.max_chars).toBe(0);
+      expect(result.pmid).toBe('12345');
+      expect(result.title).toBe('A test title');
+      expect(result.note).toContain('fulltext_output="inline"');
+      expect(result.note).toContain('sections=["citation"]');
+      expect(result.note).toContain('offset/limit or grep');
+      expect(result.note).toContain('pruned after ~24h');
+
+      // The file: front matter, single-line title, headings at the outline lines
+      const content = readFileSync(result.file_path!, 'utf8');
+      expect(content.startsWith('---\n')).toBe(true);
+      expect(content).toContain('pmcid: PMC9999999');
+      expect(content).toContain('pmid: "12345"');
+      expect(content).toContain('title: "A test title"');
+      expect(content).toContain('# A test title');
+      const fileLines = content.split('\n');
+      for (const entry of result.outline ?? []) {
+        expect(fileLines[entry.line - 1]).toBe(`## ${entry.heading}`);
+        expect(entry.chars).toBeGreaterThan(0);
+      }
+      expect((result.outline ?? []).map(o => o.heading)).toEqual(
+        ['Introduction', 'Results', 'Results — Mutation effects', 'Acknowledgments']
+      );
+      // body wrapped for line-based agent tools
+      const maxLine = Math.max(...fileLines.filter(l => l.length > 0).map(l => l.length));
+      expect(maxLine).toBeLessThanOrEqual(130);
+    });
+
+    test('fetchFullText file mode normalizes the PMCID and overwrites on re-write', async () => {
+      const first = writeFullTextFile({
+        pmcid: 'pmc9999999',
+        source: 'eutils',
+        sections: [{ heading: 'S', text: 'first', truncated: false }],
+      });
+      expect(first.ok).toBe(true);
+      if (first.ok) expect(first.file_path.endsWith('PMC9999999.md')).toBe(true);
+
+      const second = writeFullTextFile({
+        pmcid: 'PMC9999999',
+        source: 'eutils',
+        sections: [{ heading: 'S', text: 'second version', truncated: false }],
+      });
+      expect(second.ok).toBe(true);
+      if (second.ok) expect(second.file_path).toBe(first.ok ? first.file_path : '');
+      expect(readdirSync(join(process.env.BIOMCP_CACHE_DIR!, 'fulltext'))).toHaveLength(1);
+      expect(readFileSync(join(process.env.BIOMCP_CACHE_DIR!, 'fulltext', 'PMC9999999.md'), 'utf8')).toContain('second version');
+    });
+
+    test('fetchFullText file mode falls back to inline when the cache dir is unwritable', async () => {
+      global.fetch = jest.fn().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
+      // Point the cache root at a regular file: every fs op under it fails
+      const notADir = join(tmpdir(), `biomcp-notadir-${process.pid}`);
+      writeFileSync(notADir, 'x');
+
+      const saved = process.env.BIOMCP_CACHE_DIR;
+      process.env.BIOMCP_CACHE_DIR = notADir;
+      try {
+        const result = await fetchFullText('PMC9999999', { oa: OA_OPEN });
+        expect(result.mode).toBe('inline');
+        expect(result.status).toBe('available');
+        expect(result.sections?.length).toBeGreaterThan(0);
+        expect(result.note).toContain('File output was requested but unavailable');
+      } finally {
+        if (saved === undefined) delete process.env.BIOMCP_CACHE_DIR;
+        else process.env.BIOMCP_CACHE_DIR = saved;
+        rmSync(notADir, { force: true });
+      }
+    });
+
+    test('articleGet() with sections=["fulltext"] file mode returns a handle for an existing file', async () => {
+      global.fetch = jest.fn((url: unknown) => {
+        const { hostname, pathname } = parseMockUrl(url);
+        if (hostname === 'eutils.ncbi.nlm.nih.gov' && pathname.endsWith('/efetch.fcgi')) {
+          return Promise.resolve({ ok: true, headers: new Headers({ 'content-type': 'text/xml' }), text: () => Promise.resolve(SINGLE_ARTICLE_XML) });
+        }
+        if (hostname === 'www.ebi.ac.uk' && pathname.endsWith('/search')) {
+          return Promise.resolve({ ok: true, headers: new Headers({ 'content-type': 'application/json' }), json: () => Promise.resolve(epmcSearchHit(epmcCoreRecord())) });
+        }
+        if (hostname === 'www.ebi.ac.uk' && pathname.endsWith('/fullTextXML')) {
+          return Promise.resolve({ ok: true, headers: new Headers({ 'content-type': 'text/xml' }), text: () => Promise.resolve(JATS_FULLTEXT_XML) });
+        }
+        return Promise.reject(new Error(`unexpected url ${url}`));
+      }) as any;
+
+      const result = await articleGet('12345', ['fulltext']);
+
+      const ft = result.sections?.fulltext as any;
+      expect(ft.mode).toBe('file');
+      expect(ft.status).toBe('available');
+      expect(existsSync(ft.file_path)).toBe(true);
+      expect(ft.outline.length).toBeGreaterThan(0);
+      expect(ft.sections).toBeUndefined();
+      expect(result.is_open_access).toBe(true);
+    });
+
+    test('file mode ignores fulltext_max_chars — the file carries the complete text', async () => {
+      global.fetch = jest.fn().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
+
+      const result = await fetchFullText('PMC9999999', { oa: OA_OPEN, maxChars: 1000 });
+
+      expect(result.mode).toBe('file');
+      expect(result.char_count).toBe(result.total_char_count);
+      expect(result.truncated).toBe(false);
+      // the fixture body (~1178 chars) exceeds the inline cap that file
+      // mode must ignore
+      expect(result.char_count).toBeGreaterThan(1000);
+    });
+
+    test('file->inline fallback clamps to the default cap even when a larger inline cap was passed', async () => {
+      global.fetch = jest.fn().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
+      const notADir = join(tmpdir(), `biomcp-notadir2-${process.pid}`);
+      writeFileSync(notADir, 'x');
+
+      const saved = process.env.BIOMCP_CACHE_DIR;
+      process.env.BIOMCP_CACHE_DIR = notADir;
+      try {
+        const result = await fetchFullText('PMC9999999', { oa: OA_OPEN, maxChars: 200000 });
+        expect(result.mode).toBe('inline');
+        expect(result.max_chars).toBeLessThanOrEqual(FULLTEXT_DEFAULT_MAX_CHARS);
+      } finally {
+        if (saved === undefined) delete process.env.BIOMCP_CACHE_DIR;
+        else process.env.BIOMCP_CACHE_DIR = saved;
+        rmSync(notADir, { force: true });
+      }
     });
 
     test('fetchFullText maps eutils error bodies to retryable fetch_failed, not no_machine_readable_xml', async () => {
@@ -2038,6 +2177,21 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     expect(ft).toMatchObject({ status: 'unavailable', reason: 'not_implemented_for_preprints' });
     expect(ft.links?.jatsxml_url).toContain('.source.xml');
     expect(ft.note).toContain('jatsxml_url');
+  });
+
+  test('articleGet on preprint DOI with sections=["all"] never emits a fulltext envelope', async () => {
+    global.fetch = jest.fn((url: unknown) => {
+      const u = String(url);
+      const { hostname, pathname } = parseMockUrl(u);
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/details/biorxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv')));
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
+      if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse(epmcCorePayload));
+      return Promise.reject(new Error(`unexpected url ${u}`));
+    }) as any;
+
+    const result = await articleGet('10.1101/2025.03.05.641768', ['all']);
+
+    expect(result.sections?.fulltext).toBeUndefined();
   });
 
   test('articleGet falls back to medrxiv server on biorxiv soft miss', async () => {

@@ -2,6 +2,9 @@ import { connectionManager } from '../../../connections/manager.js';
 import { withTimeout } from '../../../connections/fetch-utils.js';
 import { XMLParser } from 'fast-xml-parser';
 import type { OpenAccessResult } from './open-access.js';
+import { writeFullTextFile } from './fulltext-store.js';
+import { FULLTEXT_MAX_FILE_CHARS } from './fulltext-store.js';
+import type { OutlineEntry } from './fulltext-store.js';
 
 export type FullTextStatus = 'available' | 'unavailable';
 export type FullTextUnavailableReason =
@@ -29,13 +32,25 @@ export interface FullTextResult {
   status: FullTextStatus;
   reason?: FullTextUnavailableReason;
   pmcid?: string;
+  pmid?: string;
+  title?: string;
   is_open_access?: boolean;
   license?: string;
   source?: 'europepmc' | 'eutils';
-  format?: 'jats-xml';
+  format?: 'jats-xml' | 'markdown';
+  /** 'file' (default): body is on disk, reply carries the handle below.
+   *  'inline': body is in sections[]. Unavailable results carry neither
+   *  and are byte-identical in both modes. */
+  mode?: 'file' | 'inline';
+  /** file mode only: markdown file with the complete text */
+  file_path?: string;
+  /** file mode only: navigation for selective Read/Grep (line numbers
+   *  are exact for the written file) */
+  outline?: OutlineEntry[];
   sections?: FullTextSection[];
   char_count?: number;
   total_char_count?: number;
+  /** Inline-mode cap (0 = no cap applies, i.e. file mode). */
   max_chars: number;
   truncated?: boolean;
   omitted_sections?: string[];
@@ -49,12 +64,16 @@ export interface FullTextOptions {
   /** Shared oa lookup so oa+fulltext requests issue one Europe PMC search */
   oa?: OpenAccessResult | null;
   doi?: string;
+  /** 'file' (default): write markdown to the cache dir, return a handle;
+   *  'inline': return capped text sections in the reply. */
+  output?: 'file' | 'inline';
+  /** Correlation fields echoed on the file handle */
+  pmid?: string;
+  title?: string;
 }
 
-/** Cap for an explicit sections=["fulltext"] request. */
+/** Inline-mode cap for an explicit sections=["fulltext"] request. */
 export const FULLTEXT_DEFAULT_MAX_CHARS = 40000;
-/** Reduced cap when fulltext rides along in sections=["all"]. */
-export const FULLTEXT_ALL_MODE_MAX_CHARS = 15000;
 export const FULLTEXT_MAX_CHARS_LIMIT = 200000;
 
 /** Upper bound per upstream leg; keeps the fulltext section inside the
@@ -177,23 +196,95 @@ export async function fetchFullText(pmcid: string | undefined, options: FullText
     return buildUnavailable('fetch_failed', maxChars, { pmcid, oa: options.oa, doi: options.doi });
   }
 
-  const parsed = parseFullTextJats(xml, maxChars);
-  if (!parsed) {
+  const extracted = extractJatsSections(xml);
+  if (!extracted) {
     return buildUnavailable('no_machine_readable_xml', maxChars, { pmcid, oa: options.oa, doi: options.doi });
   }
 
-  const { hasReferences, ...parsedResult } = parsed;
+  const output = options.output ?? 'file';
+  const licenseNote = options.oa?.status === 'free_to_read'
+    ? ' Free to read under publisher copyright (no CC license) — reuse may be restricted.'
+    : '';
+  const referencesNote = extracted.hasReferences
+    ? ' The reference list is omitted; use sections=["citation"] (backward mode) for the references.'
+    : '';
+
+  let fileFallbackReason: string | undefined;
+  if (output === 'file') {
+    const write = writeFullTextFile({
+      pmcid,
+      pmid: options.pmid,
+      doi: options.doi,
+      title: options.title,
+      license: options.oa?.license,
+      is_open_access: options.oa?.is_open_access,
+      oa_status: options.oa?.status,
+      source,
+      sections: extracted.sections,
+    });
+    if (write.ok) {
+      const truncationNote = write.truncated
+        ? ` File truncated at the ${FULLTEXT_MAX_FILE_CHARS.toLocaleString('en-US')}-char safety cap (${write.char_count.toLocaleString('en-US')} of ${write.total_char_count.toLocaleString('en-US')} written); omitted: ${write.omitted_sections?.join(', ')}.`
+        : '';
+      return {
+        status: 'available',
+        mode: 'file',
+        pmcid,
+        pmid: options.pmid,
+        title: options.title,
+        is_open_access: options.oa?.is_open_access,
+        license: options.oa?.license,
+        source,
+        format: 'markdown',
+        file_path: write.file_path,
+        outline: write.outline,
+        char_count: write.char_count,
+        total_char_count: write.total_char_count,
+        truncated: write.truncated,
+        omitted_sections: write.omitted_sections,
+        max_chars: 0,
+        note: `Full text is in the file above (markdown; each section starts with "## <heading>" at the line numbers in outline — read with offset/limit or grep the file). Files are ephemeral (pruned after ~24h / 200 files); re-call to regenerate. The path is on the server host; re-call with fulltext_output="inline" if you cannot read it.${truncationNote}${referencesNote}${licenseNote}`,
+      };
+    }
+    // Cache trouble must never lose the text: fall back to inline at the
+    // default cap, disclosed in the note and logged per house style.
+    console.error('[fulltext] file store unavailable, falling back to inline:', write.reason);
+    fileFallbackReason = write.reason;
+  }
+
+  // The disclosed fallback honors the documented 40000 ceiling even when
+  // the caller passed a larger inline cap (caps are ignored in file mode).
+  const effectiveMax = fileFallbackReason
+    ? Math.min(maxChars, FULLTEXT_DEFAULT_MAX_CHARS)
+    : maxChars;
+  const parsed = applyCharBudget(extracted, effectiveMax);
+  const fallbackNote = fileFallbackReason
+    ? ` (File output was requested but unavailable — returning inline text instead: ${fileFallbackReason}.)`
+    : '';
   return {
     status: 'available',
+    mode: 'inline',
     pmcid,
+    pmid: options.pmid,
+    title: options.title,
     is_open_access: options.oa?.is_open_access,
     license: options.oa?.license,
     source,
     format: 'jats-xml',
-    max_chars: maxChars,
-    ...parsedResult,
-    note: buildAvailableNote(parsed, options.oa),
+    max_chars: effectiveMax,
+    sections: parsed.sections,
+    char_count: parsed.char_count,
+    total_char_count: parsed.total_char_count,
+    truncated: parsed.truncated,
+    omitted_sections: parsed.omitted_sections,
+    note: `${buildAvailableNote(parsed, options.oa)}${fallbackNote}`,
   };
+}
+
+interface ExtractedJats {
+  sections: FullTextSection[];
+  total_char_count: number;
+  hasReferences: boolean;
 }
 
 interface ParsedFullText {
@@ -203,6 +294,40 @@ interface ParsedFullText {
   truncated: boolean;
   omitted_sections?: string[];
   hasReferences: boolean;
+}
+
+/** Apply the inline char budget to extracted sections (truncation is
+ *  flagged honestly; empty sections carry nothing to omit). */
+function applyCharBudget(extracted: ExtractedJats, maxChars: number): ParsedFullText {
+  const out: FullTextSection[] = [];
+  const omitted: string[] = [];
+  let budget = maxChars;
+  let truncated = false;
+  for (const s of extracted.sections) {
+    if (!s.text) continue;
+    if (budget <= 0) {
+      omitted.push(s.heading);
+      truncated = true;
+      continue;
+    }
+    if (s.text.length <= budget) {
+      out.push(s);
+      budget -= s.text.length;
+    } else {
+      const cut = s.text.slice(0, budget).replace(/\s+\S*$/, '');
+      out.push({ heading: s.heading, text: cut ? `${cut}…` : '', truncated: true });
+      budget = 0;
+      truncated = true;
+    }
+  }
+  return {
+    sections: out,
+    char_count: out.reduce((sum, s) => sum + s.text.length, 0),
+    total_char_count: extracted.total_char_count,
+    truncated,
+    omitted_sections: omitted.length ? omitted : undefined,
+    hasReferences: extracted.hasReferences,
+  };
 }
 
 function buildAvailableNote(parsed: ParsedFullText, oa?: OpenAccessResult | null): string {
@@ -383,6 +508,18 @@ function walkSec(node: OrderedNode, parentHeading: string, out: FullTextSection[
  * (front-only PMC records have no machine-readable text).
  */
 export function parseFullTextJats(xml: string, maxChars: number): ParsedFullText | null {
+  const extracted = extractJatsSections(xml);
+  return extracted ? applyCharBudget(extracted, maxChars) : null;
+}
+
+/**
+ * Extract heading+text sections from a JATS full-text XML document (bare
+ * <article> from Europe PMC or <pmc-articleset>-wrapped from E-utilities)
+ * with NO char budget — file output writes the complete text. Returns
+ * null when the document carries no <body> (front-only PMC records have
+ * no machine-readable text).
+ */
+export function extractJatsSections(xml: string): ExtractedJats | null {
   try {
     const root = orderedParser.parse(xml) as OrderedNode[];
 
@@ -430,39 +567,13 @@ export function parseFullTextJats(xml: string, maxChars: number): ParsedFullText
       }
     }
 
-    const total = extracted.reduce((sum, s) => sum + s.text.length, 0);
-    const out: FullTextSection[] = [];
-    const omitted: string[] = [];
-    let budget = maxChars;
-    let truncated = false;
-    for (const s of extracted) {
-      if (!s.text) continue; // empty sections carry nothing to omit
-      if (budget <= 0) {
-        omitted.push(s.heading);
-        truncated = true;
-        continue;
-      }
-      if (s.text.length <= budget) {
-        out.push(s);
-        budget -= s.text.length;
-      } else {
-        const cut = s.text.slice(0, budget).replace(/\s+\S*$/, '');
-        out.push({ heading: s.heading, text: cut ? `${cut}…` : '', truncated: true });
-        budget = 0;
-        truncated = true;
-      }
-    }
-
     return {
-      sections: out,
-      char_count: out.reduce((sum, s) => sum + s.text.length, 0),
-      total_char_count: total,
-      truncated,
-      omitted_sections: omitted.length ? omitted : undefined,
+      sections: extracted,
+      total_char_count: extracted.reduce((sum, s) => sum + s.text.length, 0),
       hasReferences,
     };
   } catch (error) {
-    console.error('[parseFullTextJats] Error:', error);
+    console.error('[extractJatsSections] Error:', error);
     return null;
   }
 }

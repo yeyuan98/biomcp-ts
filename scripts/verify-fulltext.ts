@@ -2,11 +2,14 @@
  * Run: npx tsx scripts/verify-fulltext.ts (from repo root)
  * Covers the 25 user-reported PMIDs plus edge cases. */
 import { articleGet } from '../src/entities/article/index.js';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const REPORTED = `42796603 42683091 42123314 41181593 40813655 40236530 39547512 36669888 36227917 34985952 34445478 34433568 34301750 34140497 33038326 31009996 30867891 30602453 30121937 29865182 29330463 25875295 25250705 23631917 22027709`.split(/\s+/);
 
 async function one(pmid: string) {
-  const r = await articleGet(pmid, ['oa', 'fulltext'], { fulltextMaxChars: 60000 });
+  const r = await articleGet(pmid, ['oa', 'fulltext'], { fulltextMaxChars: 60000, fulltextOutput: 'inline' });
   const oa: any = r.sections?.open_access ?? {};
   const ft: any = r.sections?.fulltext ?? {};
   return {
@@ -53,6 +56,28 @@ async function main() {
     console.log('\nFAIL: not all reported PMIDs served full text');
     process.exit(1);
   }
+  // File mode spot check: one article, handle + real file on disk
+  const cacheDir = mkdtempSync(join(tmpdir(), 'biomcp-verify-'));
+  const saved = process.env.BIOMCP_CACHE_DIR;
+  process.env.BIOMCP_CACHE_DIR = cacheDir;
+  try {
+    const r: any = await articleGet('25875295', ['fulltext']);
+    const ft = r.sections?.fulltext ?? {};
+    console.log(`\nfile-mode check 25875295: mode=${ft.mode} path=${ft.file_path ?? 'NONE'} outline=${ft.outline?.length ?? 0} chars=${ft.char_count ?? 0}`);
+    if (ft.mode !== 'file' || !existsSync(ft.file_path)) {
+      console.log('FAIL: file mode did not produce a readable file');
+      process.exit(1);
+    }
+    if (ft.sections !== undefined) {
+      console.log('FAIL: file-mode reply contains body sections');
+      process.exit(1);
+    }
+  } finally {
+    if (saved === undefined) delete process.env.BIOMCP_CACHE_DIR;
+    else process.env.BIOMCP_CACHE_DIR = saved;
+    rmSync(cacheDir, { recursive: true, force: true });
+  }
+
   console.log('\nACCEPTANCE PASS');
 }
 

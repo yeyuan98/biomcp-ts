@@ -87,9 +87,12 @@ export interface ArticleGetOptions {
   limit?: number;
   citationMode?: 'fast' | 'full';
   citationDirection?: 'forward' | 'backward' | 'both';
-  /** Char cap for the fulltext section (explicit sections=["fulltext"];
-   *  "all" mode always uses the reduced preview cap). */
+  /** Inline-mode char cap for sections=["fulltext"] (file output, the
+   *  default, always writes the complete text). */
   fulltextMaxChars?: number;
+  /** 'file' (default): write full text to the cache dir, reply carries a
+   *  handle; 'inline': capped text sections in the reply. */
+  fulltextOutput?: 'file' | 'inline';
 }
 
 export interface ArticleResult extends Article {

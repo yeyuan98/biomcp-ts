@@ -2,15 +2,28 @@ import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { createMcpTestHarness } from '../../helpers/mcp-harness.js';
 import { expectArticleSearchResult, expectArticleGetResult, expectArticleOaSection, expectArticleFullTextSection, expectCitationSection } from '../../helpers/assertions.js';
 import { retryOnRateLimit } from '../../helpers/retry.js';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 let harness: Awaited<ReturnType<typeof createMcpTestHarness>>;
+let savedCacheDir: string | undefined;
+let cacheRoot: string;
 
 beforeAll(async () => {
   harness = await createMcpTestHarness();
+  // In-process harness: redirect fulltext file output away from the real
+  // ~/.cache/biomcp for the whole live suite.
+  savedCacheDir = process.env.BIOMCP_CACHE_DIR;
+  cacheRoot = mkdtempSync(join(tmpdir(), 'biomcp-ftint-'));
+  process.env.BIOMCP_CACHE_DIR = cacheRoot;
 }, 30000);
 
 afterAll(async () => {
   await harness.close();
+  if (savedCacheDir === undefined) delete process.env.BIOMCP_CACHE_DIR;
+  else process.env.BIOMCP_CACHE_DIR = savedCacheDir;
+  rmSync(cacheRoot, { recursive: true, force: true });
 });
 
 describe('article_search', () => {
@@ -197,13 +210,23 @@ describe('article_get sections', () => {
     expect(oa.full_text_available).toBe(true);
   }, 90000);
 
-  // Full text itself: the same CC-BY article must yield actual content
-  // (Europe PMC fullTextXML, or the eutils db=pmc fallback).
-  it('fulltext section returns the actual full text', async () => {
+  // Full text itself: the same CC-BY article must yield a FILE handle by
+  // default (Europe PMC fullTextXML, or the eutils db=pmc fallback leg).
+  it('fulltext section writes the actual full text to a markdown file and returns a handle', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('article_get', { id: '34265844', sections: ['fulltext'] }));
     expectArticleFullTextSection(result);
     const ft = (result as any)?.sections?.fulltext;
+    expect(ft.mode).toBe('file');
     expect(ft.char_count).toBeGreaterThan(5000);
+    expect(ft.sections).toBeUndefined(); // body never enters the reply
+    expect(existsSync(ft.file_path)).toBe(true);
+    // The file parses back: front matter, headings at the outlined lines
+    const content = readFileSync(ft.file_path, 'utf8');
+    expect(content.startsWith('---\n')).toBe(true);
+    const lines = content.split('\n');
+    for (const entry of ft.outline) {
+      expect(lines[entry.line - 1]).toBe(`## ${entry.heading}`);
+    }
     expect(result.is_open_access).toBe(true);
   }, 90000);
 

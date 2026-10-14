@@ -190,7 +190,8 @@ article/
 │   ├── id-resolution.ts  # parseArticleId(), resolveToPmid(), resolveDoiToPmid(), isPreprintDoi()
 │   ├── preprint.ts       # getPreprintArticle() — official api.biorxiv.org /details + /pubs ‖ Europe PMC PPR enrichment/citations
 │   ├── open-access.ts    # fetchOpenAccess(), licenseToUrl() — Europe PMC core-record OA classification (replaces retired NCBI oa.fcgi)
-│   ├── fulltext.ts       # fetchFullText(), parseFullTextJats() — EPMC fullTextXML ‖ eutils efetch db=pmc, JATS→sections, honest truncation
+│   ├── fulltext.ts       # fetchFullText(), extractJatsSections()/parseFullTextJats() — EPMC fullTextXML ‖ eutils efetch db=pmc, JATS→sections; file/inline output modes
+│   ├── fulltext-store.ts # writeFullTextFile(), purgeFullTextFiles() — markdown under cacheDir()/fulltext (atomic writes, 24h/200-file retention)
 │   └── annotations.ts    # fetchAnnotations(), fetchCitationGraph()
 ├── citation/             # Citation providers
 │   ├── index.ts          # getCitations() orchestrator (federated)
@@ -272,7 +273,7 @@ Citation records are deduplicated by PMID (primary), then DOI, then PMCID; for d
 | Section | Upstream API | Auth | Notes |
 |---------|-------------|------|-------|
 | `open_access` (alias `oa`) | Europe PMC search (`PMCID:<id>`, resultType=core) | None | Access classification (open_access/free_to_read/paywalled/not_in_pmc/unknown), license + license_url, links (pmc/pdf/epmc/doi). Replaces the retired NCBI oa.fcgi service (removed upstream 2026) |
-| `fulltext` | Europe PMC `/{PMCID}/fullTextXML` ‖ E-utilities `efetch db=pmc` | None | Actual full text as heading+text sections (nested `<sec>` flattened to "Parent — Child", figures/tables as `[Figure N]` placeholders, reference list dropped with a pointer to `citation`); char-capped (default 40000, `all` 15000) with per-section truncation flags and omitted-section lists |
+| `fulltext` | Europe PMC `/{PMCID}/fullTextXML` ‖ E-utilities `efetch db=pmc` | None | The article's complete text (nested `<sec>` flattened to "Parent — Child", figures/tables as `[Figure N]` placeholders, reference list dropped with a pointer to `citation`). Opt-in only (`all` never triggers it). Default output: markdown file under `BIOMCP_CACHE_DIR/fulltext/<PMCID>.md` (YAML front matter, ~110-col wrapped body, atomic writes, 24h/200-file retention) with the reply carrying a handle — `file_path`, outline (`{heading, chars, line}`), counts, and a self-correcting note; `fulltext_output="inline"` returns capped text sections (`fulltext_max_chars`, default 40000) with per-section truncation flags |
 | `annotations` | PubTator (BioC JSON) | None | NER annotations (genes, diseases, variants, etc.) with offset positions |
 | `citation_graph` (alias `graph`) | PubMed E-utilities (`elink`) | None | Forward citations and references as PMID lists. **Deprecated** — use `citation` |
 | `citation` | citation providers (federated) | `S2_API_KEY` optional | Rich citation data with metadata, counts from multiple sources, deduplicated |

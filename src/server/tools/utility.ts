@@ -25,7 +25,7 @@ export function registerUtilityTools(server: McpServer): void {
   server.registerTool(
     'batch_get',
     {
-      description: 'Get multiple entities in parallel. Note: article fulltext requests are capped at 10000 chars per article here; use article_get with sections=["fulltext"] and fulltext_max_chars for more',
+      description: 'Get multiple entities in parallel. Article fulltext is file-only here: each article returns a small handle (file_path + outline), never body text; for inline text use article_get with fulltext_output="inline"',
       inputSchema: {
         inputs: z.array(z.object({
           entity: z.enum(['gene', 'variant', 'drug', 'disease', 'trial', 'article', 'patent']),

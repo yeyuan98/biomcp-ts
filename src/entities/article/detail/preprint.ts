@@ -418,7 +418,8 @@ export async function getPreprintArticle(
     );
   }
 
-  const wantsFullText = options?.sections?.includes('fulltext') || options?.sections?.includes('all');
+  // Opt-in only, mirroring the journal-article path ("all" excludes fulltext).
+  const wantsFullText = options?.sections?.includes('fulltext');
   if (wantsFullText) {
     // Preprint JATS XML is deliberately served as a link only —
     // www.biorxiv.org throttles automated downloads (see jatsxml_url).

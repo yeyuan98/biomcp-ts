@@ -560,10 +560,10 @@ export async function batchGet(inputs: BatchGetInput[]): Promise<BatchGetResult[
         }
         case 'article': {
           const { articleGet } = await import('./article/index.js');
-          // Fulltext in batch mode is capped harder than the 40000-char
-          // article_get default: N articles × full text in one response
-          // would blow up the batch payload.
-          data = await articleGet(input.id, input.sections, { fulltextMaxChars: 10000 });
+          // Batch fulltext is file-only: each article returns a small
+          // handle (path + outline), never body text. Inline fulltext is
+          // available via article_get with fulltext_output="inline".
+          data = await articleGet(input.id, input.sections, { fulltextOutput: 'file' });
           break;
         }
         case 'patent': {

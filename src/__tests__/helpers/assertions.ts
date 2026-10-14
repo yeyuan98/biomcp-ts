@@ -220,14 +220,34 @@ export function expectArticleFullTextSection(data: unknown): void {
   expect(section._error).toBeUndefined();
   expect(section.status).toBe('available');
   expect(['europepmc', 'eutils']).toContain(section.source);
+  expect(section.char_count).toBeGreaterThan(0);
+  expect(typeof section.total_char_count).toBe('number');
+
+  if (section.mode === 'file') {
+    // File mode: handle only — the body must NOT be in the reply.
+    expect(typeof section.file_path).toBe('string');
+    expect(section.sections).toBeUndefined();
+    expect(section.max_chars).toBe(0);
+    expect(Array.isArray(section.outline)).toBe(true);
+    expect(section.outline.length).toBeGreaterThan(0);
+    for (const o of section.outline) {
+      expect(typeof o.heading).toBe('string');
+      expect(typeof o.chars).toBe('number');
+      expect(typeof o.line).toBe('number');
+    }
+    if (section.truncated) {
+      expect(section.char_count).toBeLessThanOrEqual(2_000_000);
+    }
+    return;
+  }
+
+  // Inline mode: capped text sections in the reply.
   expect(Array.isArray(section.sections)).toBe(true);
   expect(section.sections.length).toBeGreaterThan(0);
   for (const s of section.sections) {
     expect(typeof s.heading).toBe('string');
     expect(typeof s.text).toBe('string');
   }
-  expect(section.char_count).toBeGreaterThan(0);
-  expect(typeof section.total_char_count).toBe('number');
   expect(typeof section.max_chars).toBe('number');
   if (section.truncated) {
     expect(section.char_count).toBeLessThanOrEqual(section.max_chars + 200);
