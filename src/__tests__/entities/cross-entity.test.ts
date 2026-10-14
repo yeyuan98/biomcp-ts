@@ -5,6 +5,8 @@ import {
   drugToAdverseEvents, diseaseToDrugs, diseaseToGenes,
 } from '../../entities/cross-entity.js';
 import { connectionManager } from '../../connections/manager.js';
+import { HttpConnectionError } from '../../connections/errors.js';
+import { errorMessageWithCause, networkCauseCode } from '../../entities/errors.js';
 import { parseMockUrl, mockFetchRouter } from '../helpers/mock-url.js';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -1561,6 +1563,69 @@ describe('geneEnrichment additional tests', () => {
     expect(results).toHaveLength(1);
     expect((results[0] as any)._error).toContain('HTTP 500');
     expect((results[0] as any)._error).toContain('Internal Server Error');
+  });
+
+  // Issue #62: network-level failures must not blame the gene input.
+  test('network failure (raw fetch rejection, cause code) names the code and proxy env, not gene input', async () => {
+    global.fetch = jest.fn().mockRejectedValue(
+      Object.assign(new TypeError('fetch failed'), { cause: { code: 'ETIMEDOUT' } })
+    ) as any;
+
+    const results = await geneEnrichment(['BRCA1', 'TP53', 'ATM']);
+
+    expect(results).toHaveLength(1);
+    const err = (results[0] as any)._error as string;
+    expect(err).toContain('ETIMEDOUT');
+    expect(err).toContain('HTTPS_PROXY');
+    expect(err).toContain('Network error');
+    expect(err).not.toContain('Ensure at least 3 valid gene symbols');
+  });
+
+  test('network failure (HttpConnectionError already carrying the code) is classified the same', async () => {
+    // Post-PR-#69 shape: the transport layer already appended the cause code.
+    global.fetch = jest.fn().mockRejectedValue(
+      new HttpConnectionError('fetch failed (ECONNREFUSED)')
+    ) as any;
+
+    const results = await geneEnrichment(['BRCA1', 'TP53', 'ATM']);
+
+    expect(results).toHaveLength(1);
+    const err = (results[0] as any)._error as string;
+    expect(err).toContain('ECONNREFUSED');
+    expect(err).toContain('HTTPS_PROXY');
+    expect(err).toContain('Network error');
+    expect(err).not.toContain('Ensure at least 3 valid gene symbols');
+  });
+});
+
+// ============================================================
+// errorMessageWithCause / networkCauseCode helpers (entities/errors.ts)
+// ============================================================
+describe('errorMessageWithCause / networkCauseCode', () => {
+  test('appends cause code when the message lacks it', () => {
+    const raw = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ETIMEDOUT' } });
+    expect(errorMessageWithCause(raw)).toBe('fetch failed (ETIMEDOUT)');
+    expect(networkCauseCode(raw)).toBe('ETIMEDOUT');
+  });
+
+  test('does not duplicate a code the message already carries', () => {
+    const wrapped = new HttpConnectionError('fetch failed (ETIMEDOUT)');
+    expect(errorMessageWithCause(wrapped)).toBe('fetch failed (ETIMEDOUT)');
+  });
+
+  test('falls back to cause message for wrapped errors without a code', () => {
+    const wrapped = Object.assign(new Error('request failed'), {
+      cause: new Error('socket hang up'),
+    });
+    expect(errorMessageWithCause(wrapped)).toBe('request failed (socket hang up)');
+    expect(networkCauseCode(wrapped)).toBeUndefined();
+  });
+
+  test('leaves cause-less and non-error values alone', () => {
+    expect(errorMessageWithCause(new Error('plain'))).toBe('plain');
+    expect(errorMessageWithCause('boom')).toBe('boom');
+    expect(networkCauseCode(new Error('plain'))).toBeUndefined();
+    expect(networkCauseCode(null)).toBeUndefined();
   });
 });
 
