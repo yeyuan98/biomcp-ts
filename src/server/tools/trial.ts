@@ -58,7 +58,7 @@ export function registerTrialTools(server: McpServer): void {
           ? TRIAL_ALL_SECTIONS
           : (sections ?? []);
         if (result.sections) {
-          applyLimit(result.sections, requestedSections, TRIAL_STORAGE_KEYS, TRIAL_ARRAY_KEYS, limit);
+          result.sections = applyLimit(result.sections, requestedSections, TRIAL_STORAGE_KEYS, TRIAL_ARRAY_KEYS, limit);
         }
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       } catch (error) {

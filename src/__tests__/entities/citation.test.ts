@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { getCitations, fieldScore, recordKey, deduplicateRecords, clearCitationCache } from '../../entities/article/citation/index.js';
+import { getCitations, fieldScore, recordKey, deduplicateRecords, summarizeSourceResults, clearCitationCache } from '../../entities/article/citation/index.js';
 import * as europepmcProvider from '../../entities/article/citation/europepmc.js';
 import * as crossrefProvider from '../../entities/article/citation/crossref.js';
 import * as pubmedProvider from '../../entities/article/citation/pubmed.js';
@@ -7,6 +7,7 @@ import * as opencitationsProvider from '../../entities/article/citation/opencita
 import * as semanticScholarProvider from '../../entities/article/citation/semantic-scholar.js';
 import { transformCitationEntry } from '../../entities/article/europepmc-shared.js';
 import { connectionManager } from '../../connections/manager.js';
+import { mockFetchRouter } from '../helpers/mock-url.js';
 
 function mockJson(data: unknown) {
   return {
@@ -174,6 +175,67 @@ describe('citation module', () => {
     });
   });
 
+  describe('summarizeSourceResults', () => {
+    test('counts per-provider records and drops the record arrays', () => {
+      const summaries = summarizeSourceResults([
+        {
+          source_id: 'europepmc',
+          forward_citations: [{ pmid: '1', source: 'europepmc' }, { pmid: '2', source: 'europepmc' }],
+          backward_references: [{ pmid: '3', source: 'europepmc' }],
+        },
+        { source_id: 'semantic_scholar', forward_citations: [], backward_references: [] },
+      ]);
+      expect(summaries).toHaveLength(2);
+      expect(summaries[0]).toEqual({
+        source_id: 'europepmc',
+        source: 'Europe PMC',
+        forward_count: 2,
+        backward_count: 1,
+        total: 3,
+      });
+      expect(summaries[1]).toEqual({
+        source_id: 'semantic_scholar',
+        source: 'Semantic Scholar',
+        forward_count: 0,
+        backward_count: 0,
+        total: 0,
+      });
+      // No record arrays and no sample records survive summarization.
+      expect((summaries[0] as any).forward_citations).toBeUndefined();
+      expect((summaries[0] as any).backward_references).toBeUndefined();
+    });
+
+    test('preserves error rows verbatim', () => {
+      const summaries = summarizeSourceResults([
+        { source_id: 'crossref', forward_citations: [], backward_references: [], error: 'Rate limited by crossref' },
+      ]);
+      expect(summaries[0]).toEqual({
+        source_id: 'crossref',
+        source: 'Crossref',
+        forward_count: 0,
+        backward_count: 0,
+        total: 0,
+        error: 'Rate limited by crossref',
+      });
+    });
+
+    test('unknown provider ids fall back to the raw id as display name', () => {
+      const summaries = summarizeSourceResults([
+        { source_id: 'custom', forward_citations: [], backward_references: [] },
+      ]);
+      expect(summaries[0].source).toBe('custom');
+    });
+
+    test('pure function: input rows are not mutated', () => {
+      const rows = [
+        { source_id: 'europepmc', forward_citations: [{ pmid: '1', source: 'europepmc' }], backward_references: [] },
+      ];
+      const snapshot = JSON.parse(JSON.stringify(rows));
+      summarizeSourceResults(rows);
+      expect(rows).toEqual(snapshot);
+    });
+  });
+
   describe('getCitations', () => {
     beforeEach(() => {
       jest.useFakeTimers();
@@ -241,6 +303,183 @@ describe('citation module', () => {
       );
 
       expect(result.source_results[0].error).toContain('Unknown citation source');
+    });
+
+    test('source_results are per-provider summaries; dedup unions stay the single copy of records', async () => {
+      const epmcCitations = {
+        citationList: {
+          citation: [
+            { id: '101', source: 'MED', title: 'EPMC fwd 1' },
+            { id: '102', source: 'MED', title: 'EPMC fwd 2' },
+            { id: '103', source: 'MED', title: 'EPMC fwd 3' },
+          ],
+        },
+      };
+      const epmcReferences = {
+        referenceList: {
+          reference: [
+            { id: '201', source: 'MED', title: 'EPMC bwd 1' },
+            { id: '202', source: 'MED', title: 'EPMC bwd 2' },
+          ],
+        },
+      };
+      const crossrefWork = {
+        message: {
+          'is-referenced-by-count': 43,
+          reference: [
+            { DOI: '10.1/cr1', 'article-title': 'Crossref bwd 1' },
+            { DOI: '10.1/cr2', 'article-title': 'Crossref bwd 2' },
+          ],
+        },
+      };
+      const ocForward = [
+        { citing: 'doi:10.1/oc1', cited: 'doi:10.1/test' },
+        { citing: 'doi:10.1/oc2 pmid:777', cited: 'doi:10.1/test' },
+      ];
+
+      global.fetch = mockFetchRouter([
+        {
+          host: 'www.ebi.ac.uk',
+          reply: (url) => mockJson(
+            url.pathname.endsWith('/citations') ? epmcCitations
+              : url.pathname.endsWith('/references') ? epmcReferences
+                : {}
+          ),
+        },
+        { host: 'api.crossref.org', reply: () => mockJson(crossrefWork) },
+        { host: 'api.opencitations.net', path: '/index/v2/citations', reply: () => mockJson(ocForward) },
+        { host: 'api.opencitations.net', path: '/index/v2/references', reply: () => mockJson([]) },
+        { host: 'api.opencitations.net', reply: () => mockJson([{ count: '7' }]) },
+        { host: 'api.semanticscholar.org', reply: () => mockJson({}) },
+      ]) as any;
+
+      const result = await advanceUntilSettled(
+        getCitations({ pmid: '12345', doi: '10.1/test' }, { limit: 10 })
+      );
+
+      // One summary row per queried provider, in query order, exactly once each.
+      expect(result.source_results.map((r) => r.source_id)).toEqual(
+        ['europepmc', 'semantic_scholar', 'crossref', 'opencitations']
+      );
+
+      const bySource = new Map(result.source_results.map((r) => [r.source_id, r]));
+      expect(bySource.get('europepmc')).toEqual({
+        source_id: 'europepmc', source: 'Europe PMC', forward_count: 3, backward_count: 2, total: 5,
+      });
+      expect(bySource.get('semantic_scholar')).toEqual({
+        source_id: 'semantic_scholar', source: 'Semantic Scholar', forward_count: 0, backward_count: 0, total: 0,
+      });
+      expect(bySource.get('crossref')).toEqual({
+        source_id: 'crossref', source: 'Crossref', forward_count: 0, backward_count: 2, total: 2,
+      });
+      expect(bySource.get('opencitations')).toEqual({
+        source_id: 'opencitations', source: 'OpenCitations', forward_count: 2, backward_count: 0, total: 2,
+      });
+
+      // Summaries carry counts and errors only — no record arrays.
+      for (const row of result.source_results) {
+        expect((row as any).forward_citations).toBeUndefined();
+        expect((row as any).backward_references).toBeUndefined();
+      }
+
+      // The deduplicated top-level arrays hold exactly the provider records,
+      // once each, unchanged in content by summarization. (The second
+      // OpenCitations row carries both a PMID and a DOI — PMID is its
+      // canonical key, so it is identified by the PMID here.)
+      expect(result.forward_citations.map((r) => r.pmid ?? r.doi)).toEqual(
+        ['101', '102', '103', '10.1/oc1', '777']
+      );
+      expect(result.backward_references.map((r) => r.pmid ?? r.doi)).toEqual(
+        ['201', '202', '10.1/cr1', '10.1/cr2']
+      );
+      expect(result.citation_counts.map((c) => `${c.source}:${c.total}`)).toEqual(
+        expect.arrayContaining(['crossref:43', 'opencitations:7'])
+      );
+    });
+
+    test('cache key includes limit: a limit=5 call does not poison a limit=50 call', async () => {
+      const epmcCitations = {
+        citationList: {
+          citation: Array.from({ length: 60 }, (_, i) => ({
+            id: String(1000 + i),
+            source: 'MED',
+            title: `Cited ${i}`,
+          })),
+        },
+      };
+      let citationFetches = 0;
+      global.fetch = mockFetchRouter([
+        {
+          host: 'www.ebi.ac.uk',
+          reply: (url) => {
+            if (url.pathname.endsWith('/citations')) {
+              citationFetches++;
+              return mockJson(epmcCitations);
+            }
+            if (url.pathname.endsWith('/references')) {
+              return mockJson({ referenceList: { reference: [] } });
+            }
+            return mockJson({});
+          },
+        },
+        { host: 'api.semanticscholar.org', reply: () => mockJson({}) },
+      ]) as any;
+
+      const small = await advanceUntilSettled(getCitations({ pmid: '12345' }, { limit: 5 }));
+      expect(small.forward_citations).toHaveLength(5);
+
+      // Regression (BUG A): the cache key previously omitted `limit`, so this
+      // call was served the truncated limit=5 entry for the whole TTL.
+      const large = await advanceUntilSettled(getCitations({ pmid: '12345' }, { limit: 50 }));
+      expect(large.forward_citations).toHaveLength(50);
+      // Distinct cache keys mean the providers were queried again.
+      expect(citationFetches).toBe(2);
+    });
+
+    test('cached federation results are not shared with callers (caller slicing cannot corrupt the cache)', async () => {
+      const epmcCitations = {
+        citationList: {
+          citation: Array.from({ length: 60 }, (_, i) => ({
+            id: String(1000 + i),
+            source: 'MED',
+            title: `Cited ${i}`,
+          })),
+        },
+      };
+      let citationFetches = 0;
+      global.fetch = mockFetchRouter([
+        {
+          host: 'www.ebi.ac.uk',
+          reply: (url) => {
+            if (url.pathname.endsWith('/citations')) {
+              citationFetches++;
+              return mockJson(epmcCitations);
+            }
+            if (url.pathname.endsWith('/references')) {
+              return mockJson({ referenceList: { reference: [] } });
+            }
+            return mockJson({});
+          },
+        },
+        { host: 'api.semanticscholar.org', reply: () => mockJson({}) },
+      ]) as any;
+
+      const first = await advanceUntilSettled(getCitations({ pmid: '12345' }, { limit: 50 }));
+      expect(first.forward_citations).toHaveLength(50);
+
+      // Simulate the old tool-layer flow (BUG B): the caller slices the
+      // returned arrays in place, as applyLimit did before it became
+      // non-mutating. This must not reach the cache entry.
+      first.forward_citations = first.forward_citations.slice(0, 2);
+      first.backward_references.length = 0;
+
+      const fetchesBefore = citationFetches;
+      const second = await advanceUntilSettled(getCitations({ pmid: '12345' }, { limit: 50 }));
+      expect(second).not.toBe(first);
+      expect(second.forward_citations).toHaveLength(50);
+      expect(second.backward_references).toHaveLength(0);
+      // Served from the intact cache entry — providers were not re-queried.
+      expect(citationFetches).toBe(fetchesBefore);
     });
   });
 

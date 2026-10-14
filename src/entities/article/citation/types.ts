@@ -67,6 +67,30 @@ export interface SourceCitationResult {
 }
 
 /**
+ * Compact per-provider summary of what a citation source contributed.
+ *
+ * The records themselves live only once — in the deduplicated
+ * `forward_citations`/`backward_references` arrays of the federated result.
+ * Summaries carry counts and errors, never record arrays, so a citation
+ * reply does not ship every record twice (issue #60: the duplicated
+ * `source_results` arrays leaked large citation sections into context).
+ */
+export interface CitationSourceSummary {
+  /** Provider identifier (e.g. 'europepmc') */
+  source_id: string;
+  /** Human-readable provider name (e.g. 'Europe PMC') */
+  source: string;
+  /** Forward citation records the provider returned (pre-deduplication) */
+  forward_count: number;
+  /** Backward reference records the provider returned (pre-deduplication) */
+  backward_count: number;
+  /** Total records the provider returned (forward + backward, pre-dedup) */
+  total: number;
+  /** Error message if the provider query failed (verbatim) */
+  error?: string;
+}
+
+/**
  * Federated citation result aggregating data from multiple providers
  */
 export interface FederatedCitationResult {
@@ -78,8 +102,11 @@ export interface FederatedCitationResult {
   forward_citations: CitationRecord[];
   /** Deduplicated backward references */
   backward_references: CitationRecord[];
-  /** Individual provider results */
-  source_results: SourceCitationResult[];
+  /** Per-provider summaries (counts + verbatim errors). The federation path
+   *  always emits `CitationSourceSummary` rows; the legacy full
+   *  `SourceCitationResult` rows (preprint citation path) remain assignable
+   *  until that path migrates to `summarizeSourceResults()`. */
+  source_results: (CitationSourceSummary | SourceCitationResult)[];
   /** Whether any citation items were returned */
   items_available: boolean;
 }

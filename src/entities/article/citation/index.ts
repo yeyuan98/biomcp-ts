@@ -1,4 +1,4 @@
-import type { ArticleId, CitationRecord, CitationCount, SourceCitationResult, FederatedCitationResult } from './types.js';
+import type { ArticleId, CitationRecord, CitationCount, CitationSourceSummary, SourceCitationResult, FederatedCitationResult } from './types.js';
 import * as pubmedProvider from './pubmed.js';
 import * as europepmcProvider from './europepmc.js';
 import * as semanticScholarProvider from './semantic-scholar.js';
@@ -22,6 +22,52 @@ const ALL_PROVIDERS: CitationProvider[] = [
 ];
 
 const FAST_PROVIDER_IDS = ['europepmc', 'semantic_scholar', 'crossref', 'opencitations'] as const;
+
+const SOURCE_DISPLAY_NAMES: Record<string, string> = {
+  pubmed: 'PubMed',
+  europepmc: 'Europe PMC',
+  semantic_scholar: 'Semantic Scholar',
+  crossref: 'Crossref',
+  opencitations: 'OpenCitations',
+};
+
+/**
+ * Human-readable display name for a citation provider id.
+ * Unknown ids fall back to the raw id so ad-hoc rows (e.g. an unknown-source
+ * error row) still carry a name.
+ */
+export function sourceDisplayName(sourceId: string): string {
+  return SOURCE_DISPLAY_NAMES[sourceId] ?? sourceId;
+}
+
+/**
+ * Builds compact per-provider summaries from full per-provider results.
+ *
+ * Pure function: it counts the records each provider returned (before
+ * deduplication) and drops the record arrays — the deduplicated
+ * forward/backward arrays of the federated result are the single copy of
+ * each record. Error rows are preserved verbatim, so every queried provider
+ * keeps a row carrying either counts > 0 or its error (never silently
+ * empty). Exported so the preprint citation path can adopt the same shape.
+ *
+ * @param sourceResults - Full per-provider results (records + optional error)
+ * @returns One summary row per input row, in the same order
+ */
+export function summarizeSourceResults(sourceResults: SourceCitationResult[]): CitationSourceSummary[] {
+  return sourceResults.map((r) => {
+    const forwardCount = r.forward_citations.length;
+    const backwardCount = r.backward_references.length;
+    const summary: CitationSourceSummary = {
+      source_id: r.source_id,
+      source: sourceDisplayName(r.source_id),
+      forward_count: forwardCount,
+      backward_count: backwardCount,
+      total: forwardCount + backwardCount,
+    };
+    if (r.error !== undefined) summary.error = r.error;
+    return summary;
+  });
+}
 
 /**
  * Computes a completeness score for a citation record based on available fields
@@ -153,6 +199,27 @@ async function queryProvider(
 }
 
 /**
+ * Returns a federated result that shares no top-level arrays with `r`, so a
+ * caller (or the tool-layer section limiter) can never truncate what the
+ * cache serves to the next caller. Record objects and summary rows are
+ * treated as immutable and stay shared. Also backfills `items_available`
+ * for entries cached before that field existed.
+ */
+function copyFederatedResult(r: FederatedCitationResult): FederatedCitationResult {
+  const hasItems = typeof r.items_available === 'boolean'
+    ? r.items_available
+    : r.forward_citations.length > 0 || r.backward_references.length > 0;
+  return {
+    ...r,
+    citation_counts: [...r.citation_counts],
+    forward_citations: [...r.forward_citations],
+    backward_references: [...r.backward_references],
+    source_results: [...r.source_results],
+    items_available: hasItems,
+  };
+}
+
+/**
  * Fetches citation data from multiple providers with caching and deduplication
  * @param id - Article identifier (PMID, PMCID, or DOI)
  * @param options - Query options (direction, source, limit, full mode, articleYear)
@@ -173,15 +240,10 @@ export async function getCitations(
   const useFull = options?.full ?? false;
   const articleYear = options?.articleYear;
 
-  const cacheKey = buildCacheKey(id, { direction, source: options?.source, full: useFull, articleYear });
+  const cacheKey = buildCacheKey(id, { direction, source: options?.source, full: useFull, articleYear, limit });
   const cached = federatedCache.get<FederatedCitationResult>(cacheKey);
   if (cached) {
-    // Ensure cached results have items_available field (for backward compatibility)
-    if (typeof cached.items_available === 'undefined') {
-      const hasItems = cached.forward_citations.length > 0 || cached.backward_references.length > 0;
-      return { ...cached, items_available: hasItems };
-    }
-    return cached;
+    return copyFederatedResult(cached);
   }
 
   let sourceResults: SourceCitationResult[];
@@ -197,8 +259,10 @@ export async function getCitations(
         backward_references: [],
         source_results: [{
           source_id: options.source,
-          forward_citations: [],
-          backward_references: [],
+          source: sourceDisplayName(options.source),
+          forward_count: 0,
+          backward_count: 0,
+          total: 0,
           error: `Unknown citation source: ${options.source}`,
         }],
         items_available: false,
@@ -256,11 +320,13 @@ export async function getCitations(
     citation_counts: allCounts,
     forward_citations: deduplicateRecords(allForward),
     backward_references: deduplicateRecords(allBackward),
-    source_results: sourceResults,
+    source_results: summarizeSourceResults(sourceResults),
     items_available: hasAnyItems,
   };
 
-  federatedCache.set(cacheKey, result);
+  // Cache a private copy: the returned object is handed to callers (and
+  // stored in article_get sections), and must never alias the cache entry.
+  federatedCache.set(cacheKey, copyFederatedResult(result));
 
   return result;
 }

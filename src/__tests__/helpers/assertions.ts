@@ -256,9 +256,14 @@ export function expectArticleFullTextSection(data: unknown): void {
 
 /**
  * article_get `citation` section with the crossref invariant: a provider row
- * must never be silently empty — either data arrived or an explicit error is
+ * must never be silently empty — either records arrived (summary counts > 0),
+ * the provider contributed a positive citation count, or an explicit error is
  * recorded. Guards the bug where a transform TypeError zeroed crossref's
  * count and backward references without any error signal.
+ *
+ * `source_results` rows are per-provider summaries (counts + verbatim
+ * errors); the records themselves live only in the section's deduplicated
+ * forward/backward arrays, never duplicated inside provider rows.
  */
 export function expectCitationSection(data: unknown): void {
   const section = (data as any)?.sections?.citation;
@@ -267,11 +272,25 @@ export function expectCitationSection(data: unknown): void {
   expect(Array.isArray(section.source_results)).toBe(true);
   expect(section.citation_counts.length).toBeGreaterThan(0);
 
+  // Summary shape: every row is a compact provider summary — no record
+  // arrays (each record already lives in a deduplicated top-level array).
+  for (const row of section.source_results) {
+    expect(row.forward_citations).toBeUndefined();
+    expect(row.backward_references).toBeUndefined();
+    expect(typeof row.source_id).toBe('string');
+    expect(typeof row.total).toBe('number');
+  }
+
+  const countBySource = new Map<string, number>(
+    section.citation_counts.map((c: any) => [c.source as string, (c.total ?? 0) as number]),
+  );
+
   const crossref = section.source_results.find((s: any) => s.source_id === 'crossref');
   expect(crossref).toBeDefined();
-  const hasData = (crossref.citation_count?.total ?? 0) > 0 || (crossref.backward_references?.length ?? 0) > 0;
+  const hasRecords = (crossref.forward_count ?? 0) > 0 || (crossref.backward_count ?? 0) > 0;
+  const hasCount = (countBySource.get('crossref') ?? 0) > 0;
   const hasError = typeof crossref.error === 'string' && crossref.error.length > 0;
-  expect(hasData || hasError).toBe(true);
+  expect(hasRecords || hasCount || hasError).toBe(true);
 }
 
 /**

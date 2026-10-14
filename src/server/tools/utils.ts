@@ -20,26 +20,47 @@ export function withToolTimeout<T>(promise: Promise<T>, timeoutMs: number): Prom
   ]);
 }
 
+/**
+ * Limits top-level arrays in the requested sections and returns the limited
+ * sections object WITHOUT mutating the input (copy-on-write: only section
+ * entries that actually get an array sliced are replaced on a shallow copy of
+ * `sections`; untouched sections keep their identity). Mutating in place
+ * previously truncated arrays inside cached results — the federated citation
+ * result is shared with the article_get citation-section cache, so in-place
+ * slicing permanently corrupted what later callers received.
+ */
 export function applyLimit(
   sections: Record<string, unknown>,
   requestedNames: string[],
   storageKeyMap: Record<string, string>,
   arrayKeyMap: Record<string, string[]>,
   limit: number,
-): void {
+): Record<string, unknown> {
+  let result = sections;
   for (const name of requestedNames) {
     const storedKey = storageKeyMap[name] ?? name;
     const data = sections[storedKey];
     if (!data || typeof data !== 'object') continue;
 
     const keys = arrayKeyMap[name];
+    let replacement: unknown;
     if (Array.isArray(data)) {
-      sections[storedKey] = data.slice(0, limit);
+      replacement = data.slice(0, limit);
     } else if (keys) {
       const obj = data as Record<string, unknown>;
+      let copied: Record<string, unknown> | undefined;
       for (const k of keys) {
-        if (Array.isArray(obj[k])) obj[k] = obj[k].slice(0, limit);
+        if (Array.isArray(obj[k])) {
+          copied ??= { ...obj };
+          copied[k] = (obj[k] as unknown[]).slice(0, limit);
+        }
       }
+      replacement = copied;
+    }
+    if (replacement !== undefined) {
+      result = result === sections ? { ...sections } : result;
+      result[storedKey] = replacement;
     }
   }
+  return result;
 }
