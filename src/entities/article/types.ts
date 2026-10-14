@@ -85,6 +85,11 @@ export interface Article {
 export interface ArticleGetOptions {
   sections?: string[];
   limit?: number;
+  citationMode?: 'fast' | 'full';
+  citationDirection?: 'forward' | 'backward' | 'both';
+  /** Char cap for the fulltext section (explicit sections=["fulltext"];
+   *  "all" mode always uses the reduced preview cap). */
+  fulltextMaxChars?: number;
 }
 
 export interface ArticleResult extends Article {

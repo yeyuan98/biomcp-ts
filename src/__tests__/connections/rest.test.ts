@@ -64,21 +64,21 @@ describe('RestConnection', () => {
     expect((global.fetch as any).mock.calls[0][0]).toBe('https://mygene.info/v3/query?q=brca1');
   });
 
-  test('request() attaches query-only paths directly (pmc_oa: no separator before ?id=)', async () => {
+  test('request() attaches query-only paths directly (no separator before ?id=)', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'text/xml' }),
-      text: () => Promise.resolve('<OA/>'),
+      text: () => Promise.resolve('<ok/>'),
     }) as any;
 
     const conn = new RestConnection({
       ...baseOptions,
-      sourceId: 'pmc_oa',
-      baseUrl: 'https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi',
+      sourceId: 'query_only_fcgi',
+      baseUrl: 'https://example.org/tools/api/v1/lookup.fcgi',
     });
-    await conn.request('?id=PMC1234567');
+    await conn.request('?id=1234567');
 
-    expect((global.fetch as any).mock.calls[0][0]).toBe('https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi?id=PMC1234567');
+    expect((global.fetch as any).mock.calls[0][0]).toBe('https://example.org/tools/api/v1/lookup.fcgi?id=1234567');
   });
 
   test('request() strips trailing baseUrl slash for query-only paths (idconv)', async () => {

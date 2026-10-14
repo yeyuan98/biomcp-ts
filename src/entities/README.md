@@ -189,7 +189,8 @@ article/
 │   ├── index.ts          # articleGet() orchestrator (sections run via Promise.allSettled; preprint DOIs branch early)
 │   ├── id-resolution.ts  # parseArticleId(), resolveToPmid(), resolveDoiToPmid(), isPreprintDoi()
 │   ├── preprint.ts       # getPreprintArticle() — official api.biorxiv.org /details + /pubs ‖ Europe PMC PPR enrichment/citations
-│   ├── open-access.ts    # fetchOpenAccess(), parseOaXml()
+│   ├── open-access.ts    # fetchOpenAccess(), licenseToUrl() — Europe PMC core-record OA classification (replaces retired NCBI oa.fcgi)
+│   ├── fulltext.ts       # fetchFullText(), parseFullTextJats() — EPMC fullTextXML ‖ eutils efetch db=pmc, JATS→sections, honest truncation
 │   └── annotations.ts    # fetchAnnotations(), fetchCitationGraph()
 ├── citation/             # Citation providers
 │   ├── index.ts          # getCitations() orchestrator (federated)
@@ -270,7 +271,8 @@ Citation records are deduplicated by PMID (primary), then DOI, then PMCID; for d
 
 | Section | Upstream API | Auth | Notes |
 |---------|-------------|------|-------|
-| `open_access` (alias `oa`) | NCBI ID Converter + PMC OA | None | Resolves PMCID → parses OA XML for PDF URL |
+| `open_access` (alias `oa`) | Europe PMC search (`PMCID:<id>`, resultType=core) | None | Access classification (open_access/free_to_read/paywalled/not_in_pmc/unknown), license + license_url, links (pmc/pdf/epmc/doi). Replaces the retired NCBI oa.fcgi service (removed upstream 2026) |
+| `fulltext` | Europe PMC `/{PMCID}/fullTextXML` ‖ E-utilities `efetch db=pmc` | None | Actual full text as heading+text sections (nested `<sec>` flattened to "Parent — Child", figures/tables as `[Figure N]` placeholders, reference list dropped with a pointer to `citation`); char-capped (default 40000, `all` 15000) with per-section truncation flags and omitted-section lists |
 | `annotations` | PubTator (BioC JSON) | None | NER annotations (genes, diseases, variants, etc.) with offset positions |
 | `citation_graph` (alias `graph`) | PubMed E-utilities (`elink`) | None | Forward citations and references as PMID lists. **Deprecated** — use `citation` |
 | `citation` | citation providers (federated) | `S2_API_KEY` optional | Rich citation data with metadata, counts from multiple sources, deduplicated |

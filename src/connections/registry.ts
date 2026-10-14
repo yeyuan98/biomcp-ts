@@ -125,7 +125,7 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   },
 
   // ==========================================
-  // LITERATURE - REST (11 sources)
+  // LITERATURE - REST (10 sources)
   // ==========================================
   // Shared NCBI E-utilities connection: serves PubMed (article_*), GEO
   // (db=gds), SRA (db=sra), GenBank (db=nuccore) and BioSample lookups.
@@ -220,18 +220,6 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     },
     rateLimit: { intervalMs: 334 },
   },
-  pmc_oa: {
-    sourceId: 'pmc_oa',
-    baseUrl: 'https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi',
-    protocol: 'rest',
-    handling: { contentType: 'xml', timeoutMs: 15000 },
-    auth: {
-      envVar: 'NCBI_API_KEY',
-      required: false,
-      delivery: { type: 'query-param', name: 'api_key' },
-    },
-    rateLimit: { intervalMs: 334 },
-  },
   crossref: {
     sourceId: 'crossref',
     baseUrl: 'https://api.crossref.org',
@@ -283,7 +271,7 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     baseUrl: 'https://export.arxiv.org/api',
     protocol: 'rest',
     // arXiv always answers Atom XML — declare contentType so the Accept
-    // header stops claiming application/json (matches pmc_oa). timeoutMs
+    // header stops claiming application/json. timeoutMs
     // 10000: worst case = 3 s limiter spacing + 2×10 s timeouts + 3.5 s
     // retry backoff ≈ 26.5 s < the 30 s article_search tool cap, so an
     // arXiv outage surfaces as a friendly _error row instead of a tool
