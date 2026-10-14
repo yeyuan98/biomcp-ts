@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`discover` result ranking and empty-record emission** (`src/entities/cross-entity.ts`, `src/server/tools/utility.ts`) — the `discover` tool previously pushed each backend's first hit verbatim (mygene/myvariant/mychem/mydisease default order), so substring name matches won over canonical records (e.g. `discover("melanoma")` resolving to gene BAGE "B melanoma antigen" instead of a canonical hit) and a backend hit with neither a name nor an identifier was emitted as an empty record (`{"entity_type":"drug","identifier":"","name":"","source":"mychem"}`). Each backend arm now requests up to 5 candidates and selects via a local `pickBestMatch` helper: a candidate whose symbol/name/label equals the query exactly (case-insensitive, whitespace-trimmed) is preferred wherever it ranks in the list; otherwise the backend's first candidate with a non-empty name or identifier is used (the previous deterministic behavior, so multi-word queries do not regress); candidates empty on both fields are skipped, and a backend with no usable candidates (or an erroring one) is omitted silently — discover never emits empty records. Every record now carries a `matched_on` field documenting why it was selected: `"exact"` (name/symbol equals the query) or `"first"` (backend's first non-empty hit); the OLS4 fallback arm reports the same rule from its labels. The `discover` tool description documents the exact-match preference and the new field. Concept-splitting for `discover` remains out of scope here and is deferred (issue #65). Unit tests in `src/__tests__/entities/cross-entity.test.ts` cover exact-match preference over an earlier substring hit, the first-non-empty fallback for multi-word queries (including skipping a nameless first mychem hit), and the all-empty-candidates case emitting no record for that entity type.
+
 ## [1.5.1] - 2026-10-14
 
 ### Changed
