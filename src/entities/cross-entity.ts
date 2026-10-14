@@ -8,6 +8,7 @@ import { diseaseSearch, DiseaseSearchResult } from './disease.js';
 import { trialSearch } from './trial.js';
 import { articleSearch, Article } from './article/index.js';
 import { fetchDisgenetGdaSummary } from './disgenet.js';
+import { errorMessageWithCause, networkCauseCode } from './errors.js';
 
 const SECTION_TIMEOUT_MS = 8000;
 
@@ -458,9 +459,18 @@ export async function geneEnrichment(geneSymbols: string[]): Promise<PathwayEnri
       source: 'reactome',
     }));
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
+    // Cause-aware message: raw fetch rejections hide their errno code
+    // (ETIMEDOUT, ECONNREFUSED, ...) in error.cause — surface it (see
+    // src/entities/errors.ts) before classifying the failure.
+    const msg = errorMessageWithCause(error);
     if (msg.includes('abort') || msg.includes('timeout')) {
       return [{ _error: `Gene enrichment analysis failed (source: reactome): Request timed out after 15s. The Reactome AnalysisService may be temporarily unavailable. Try again later.` } as any];
+    }
+    // Network-level failure (issue #62): transport errors reaching this
+    // catch are connectivity problems, not bad gene input — never blame the
+    // user's symbols. Detected via cause code or a network message signature.
+    if (networkCauseCode(error) || /fetch failed|network|ECONN|ETIMEDOUT/i.test(msg)) {
+      return [{ _error: `Gene enrichment analysis failed (source: reactome): ${msg}. Network error reaching reactome.org — the service was not the problem; check connectivity (biomcp honors HTTPS_PROXY/HTTP_PROXY/NO_PROXY if you route through a proxy) and try again.` } as any];
     }
     return [{ _error: `Gene enrichment analysis failed (source: reactome): ${msg}. Ensure at least 3 valid gene symbols are provided, or try again later.` } as any];
   }
