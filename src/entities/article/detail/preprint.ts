@@ -15,7 +15,17 @@ import type {
   PreprintFunder,
   PreprintPublishedVersion,
 } from '../types.js';
-import type { FederatedCitationResult, CitationRecord } from '../citation/types.js';
+import { summarizeSourceResults } from '../citation/index.js';
+import type {
+  FederatedCitationResult,
+  CitationRecord,
+  CitationSourceSummary,
+  SourceCitationResult,
+} from '../citation/types.js';
+
+/** Citation directions the preprint PPR path honors, mirroring the journal
+ * path's `ArticleGetOptions.citationDirection`. */
+type PreprintCitationDirection = 'forward' | 'backward' | 'both';
 
 // ---- official api.biorxiv.org response types ----
 // All errors are HTTP 200 with a `messages[0].status` string
@@ -281,12 +291,19 @@ function publishedFromEpmc(rec?: EuropePMCPreprintRecord): PreprintPublishedVers
 
 /** Citation section for a preprint, reusing the FederatedCitationResult
  * SHAPE (so article_get consumers see one consistent envelope); the data
- * comes from Europe PMC's /PPR/ endpoints, not the PMID-based federation. */
+ * comes from Europe PMC's /PPR/ endpoints, not the PMID-based federation.
+ *
+ * `direction` gates which PPR endpoint is REQUESTED (not post-filtered —
+ * the skipped leg costs no network call), mirroring the journal path's
+ * per-direction provider gating. The skipped direction's array key stays
+ * present as `[]` so consumers (and the tool layer's applyLimit) see a
+ * stable envelope shape. */
 async function fetchPprCitationSection(
   doi: string,
   pprId: string | undefined,
   citedByCount: number | undefined,
-  limit: number
+  limit: number,
+  direction: PreprintCitationDirection
 ): Promise<FederatedCitationResult | { _error: string }> {
   try {
     let forward: CitationRecord[] = [];
@@ -296,17 +313,23 @@ async function fetchPprCitationSection(
     if (pprId) {
       const conn = connectionManager.getConnection('europepmc');
       const pageSize = Math.max(limit * 3, 10);
+      // Only construct the promise for the requested direction(s) — the
+      // skipped leg is never sent over the wire.
       const [fwdRes, bwdRes] = await Promise.all([
-        withTimeout(
-          conn.request(`/PPR/${pprId}/citations?format=json&pageSize=${pageSize}`) as Promise<EuropePMCCitationsResponse>,
-          DEFAULT_PROVIDER_TIMEOUT_MS,
-          { onTimeout: 'null' }
-        ),
-        withTimeout(
-          conn.request(`/PPR/${pprId}/references?format=json&pageSize=${pageSize}`) as Promise<EuropePMCReferencesResponse>,
-          DEFAULT_PROVIDER_TIMEOUT_MS,
-          { onTimeout: 'null' }
-        ),
+        direction === 'backward'
+          ? null
+          : withTimeout(
+            conn.request(`/PPR/${pprId}/citations?format=json&pageSize=${pageSize}`) as Promise<EuropePMCCitationsResponse>,
+            DEFAULT_PROVIDER_TIMEOUT_MS,
+            { onTimeout: 'null' }
+          ),
+        direction === 'forward'
+          ? null
+          : withTimeout(
+            conn.request(`/PPR/${pprId}/references?format=json&pageSize=${pageSize}`) as Promise<EuropePMCReferencesResponse>,
+            DEFAULT_PROVIDER_TIMEOUT_MS,
+            { onTimeout: 'null' }
+          ),
       ]);
       forward = (fwdRes?.citationList?.citation ?? fwdRes?.citationsArray?.citation ?? [])
         .filter(hit => hit.title || hit.id)
@@ -320,17 +343,22 @@ async function fetchPprCitationSection(
     }
 
     const total = citedByCount ?? fwdHitCount ?? forward.length;
+    // source_results carries the compact per-provider summary (counts +
+    // verbatim error), consistent with the journal federation path since
+    // PR #68 — the records live only in the arrays above, never duplicated.
+    const sourceRow: SourceCitationResult = {
+      source_id: 'europepmc',
+      citation_count: { total, source: 'europepmc' },
+      forward_citations: forward,
+      backward_references: backward,
+    };
+    const sourceSummaries: CitationSourceSummary[] = summarizeSourceResults([sourceRow]);
     return {
       article_id: { doi },
       citation_counts: [{ total, source: 'europepmc' }],
       forward_citations: forward,
       backward_references: backward,
-      source_results: [{
-        source_id: 'europepmc',
-        citation_count: { total, source: 'europepmc' },
-        forward_citations: forward,
-        backward_references: backward,
-      }],
+      source_results: sourceSummaries,
       items_available: forward.length > 0 || backward.length > 0 || total > 0,
     };
   } catch (error) {
@@ -349,10 +377,25 @@ async function fetchPprCitationSection(
  * unavailable). Step 2 (parallel): published-version mapping ‖ citations
  * (when requested). Every failure degrades one part of the result instead
  * of failing the call.
+ *
+ * `citationDirection` is honored by the PPR citation step (the skipped
+ * direction costs no request); `citationMode` is meaningless here (single
+ * Europe PMC source) and, when passed, is reported via `sections._note`
+ * instead of being silently dropped. The same `_note` names any requested
+ * sections this path cannot serve (`oa`/`annotations`/`graph`).
  */
 export async function getPreprintArticle(
   doi: string,
-  options?: { sections?: string[]; limit?: number }
+  options?: {
+    sections?: string[];
+    limit?: number;
+    /** Gates the PPR fetch: 'forward' → /citations only, 'backward' →
+     * /references only, 'both' (default) → both endpoints. */
+    citationDirection?: PreprintCitationDirection;
+    /** No preprint meaning (single Europe PMC source) — when set, a
+     * `sections._note` discloses that instead of a silent drop. */
+    citationMode?: 'fast' | 'full';
+  }
 ): Promise<ArticleResult> {
   const limit = options?.limit ?? 20;
 
@@ -390,6 +433,32 @@ export async function getPreprintArticle(
 
   const wantsCitation = options?.sections?.includes('citation') || options?.sections?.includes('all');
 
+  // Runtime disclosure notes (visible in the tool reply as `sections._note`
+  // — the preprint path has no other natural note slot). (a) sections this
+  // path cannot serve are named rather than silently ignored; (b) a
+  // citation_mode request is reported as meaningless for the single EPMC
+  // preprint source. `_note` survives the tool layer's applyLimit untouched
+  // (it only visits requested section keys).
+  const notes: string[] = [];
+  const unsupportedSections = (options?.sections ?? []).filter(
+    s => s === 'oa' || s === 'annotations' || s === 'graph'
+  );
+  if (unsupportedSections.length > 0) {
+    const listed = unsupportedSections.map(s => `"${s}"`).join(', ');
+    notes.push(
+      `sections ${listed} not supported for preprint DOIs and were ignored — ` +
+      'only "citation" (Europe PMC PPR citations/references), "fulltext" (link envelope), ' +
+      'and the core record are meaningful for preprints'
+    );
+  }
+  if (wantsCitation && options?.citationMode) {
+    notes.push(
+      `citation_mode="${options.citationMode}" has no effect on preprints — ` +
+      'the citation section always comes from the single Europe PMC PPR source ' +
+      '(no fast/full provider fan-out)'
+    );
+  }
+
   const step2: Promise<void>[] = [];
 
   if (official) {
@@ -411,7 +480,13 @@ export async function getPreprintArticle(
 
   if (wantsCitation) {
     step2.push(
-      fetchPprCitationSection(doi, result.ppr_id ?? epmc?.id, result.cited_by, limit).then(r => {
+      fetchPprCitationSection(
+        doi,
+        result.ppr_id ?? epmc?.id,
+        result.cited_by,
+        limit,
+        options?.citationDirection ?? 'both'
+      ).then(r => {
         result.sections = result.sections || {};
         (result.sections as Record<string, unknown>)['citation'] = r;
       })
@@ -436,6 +511,11 @@ export async function getPreprintArticle(
   }
 
   await Promise.allSettled(step2);
+
+  if (notes.length > 0) {
+    result.sections = result.sections || {};
+    (result.sections as Record<string, unknown>)['_note'] = notes.join(' ');
+  }
 
   return result;
 }

@@ -76,7 +76,7 @@ export function registerArticleTools(server: McpServer): void {
           'Fast: Europe PMC, Semantic Scholar, OpenCitations, Crossref counts/references (~4s). Full: All 5 providers incl. PubMed (~15-30s). ' +
           'Fast mode auto-falls back to PubMed when other providers return no items.'
         ),
-        citation_direction: z.enum(['forward', 'backward', 'both']).optional().default('both').describe('Citation direction: "forward" (articles citing this one), "backward" (references), "both" (default)'),
+        citation_direction: z.enum(['forward', 'backward', 'both']).optional().default('both').describe('Citation direction: "forward" (articles citing this one), "backward" (references), "both" (default); honored for preprint PPR citations too — the skipped direction returns an empty array'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },

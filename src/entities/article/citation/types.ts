@@ -102,11 +102,11 @@ export interface FederatedCitationResult {
   forward_citations: CitationRecord[];
   /** Deduplicated backward references */
   backward_references: CitationRecord[];
-  /** Per-provider summaries (counts + verbatim errors). The federation path
-   *  always emits `CitationSourceSummary` rows; the legacy full
-   *  `SourceCitationResult` rows (preprint citation path) remain assignable
-   *  until that path migrates to `summarizeSourceResults()`. */
-  source_results: (CitationSourceSummary | SourceCitationResult)[];
+  /** Per-provider summaries (counts + verbatim errors); built by
+   *  `summarizeSourceResults()` on both the federation path and the preprint
+   *  PPR path — the records themselves live only in the deduplicated
+   *  forward/backward arrays above, never duplicated per provider. */
+  source_results: CitationSourceSummary[];
   /** Whether any citation items were returned */
   items_available: boolean;
 }
