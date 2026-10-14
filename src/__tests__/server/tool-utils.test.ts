@@ -65,20 +65,23 @@ describe('sliceArraysRecursive', () => {
 // ---------------------------------------------------------------------------
 
 describe('applyLimit', () => {
-  test('limits arrays in sections by section name', () => {
+  test('limits arrays in sections by section name (return value, input untouched)', () => {
     const sections: Record<string, unknown> = {
       items: [1, 2, 3, 4, 5],
     };
-    applyLimit(sections, ['items'], {}, {}, 2);
-    expect(sections.items).toEqual([1, 2]);
+    const limited = applyLimit(sections, ['items'], {}, {}, 2);
+    expect(limited.items).toEqual([1, 2]);
+    // The input is never mutated — callers may be holding cached objects.
+    expect(sections.items).toEqual([1, 2, 3, 4, 5]);
   });
 
   test('respects storageKeyMap (maps section name to storage key)', () => {
     const sections: Record<string, unknown> = {
       civic: [1, 2, 3, 4],
     };
-    applyLimit(sections, ['clinical_evidence'], { clinical_evidence: 'civic' }, {}, 2);
-    expect(sections.civic).toEqual([1, 2]);
+    const limited = applyLimit(sections, ['clinical_evidence'], { clinical_evidence: 'civic' }, {}, 2);
+    expect(limited.civic).toEqual([1, 2]);
+    expect(sections.civic).toEqual([1, 2, 3, 4]);
   });
 
   test('respects arrayKeyMap (limits specific array keys within section objects)', () => {
@@ -89,17 +92,71 @@ describe('applyLimit', () => {
         meta: 'unchanged',
       },
     };
-    applyLimit(
+    const limited = applyLimit(
       sections,
       ['outcomes'],
       {},
       { outcomes: ['primary', 'secondary'] },
       1,
     );
-    const outcomes = sections.outcomes as Record<string, unknown>;
+    const outcomes = limited.outcomes as Record<string, unknown>;
     expect(outcomes.primary).toEqual(['p1']);
     expect(outcomes.secondary).toEqual(['s1']);
     expect(outcomes.meta).toBe('unchanged');
+    // Input deep-unchanged: neither the section object nor its arrays moved.
+    const inputOutcomes = sections.outcomes as Record<string, unknown>;
+    expect(inputOutcomes.primary).toEqual(['p1', 'p2', 'p3']);
+    expect(inputOutcomes.secondary).toEqual(['s1', 's2', 's3']);
+    expect(inputOutcomes.meta).toBe('unchanged');
+  });
+
+  test('does not mutate the input even when multiple sections are sliced', () => {
+    const sections: Record<string, unknown> = {
+      graph: { citations: [1, 2, 3, 4], references: [5, 6, 7, 8] },
+      annotations: [1, 2, 3],
+    };
+    const snapshot = JSON.parse(JSON.stringify(sections));
+    const limited = applyLimit(
+      sections,
+      ['graph', 'annotations'],
+      {},
+      { graph: ['citations', 'references'] },
+      2,
+    );
+    const graph = limited.graph as Record<string, unknown>;
+    expect(graph.citations).toEqual([1, 2]);
+    expect(graph.references).toEqual([5, 6]);
+    expect(limited.annotations).toEqual([1, 2]);
+    expect(sections).toEqual(snapshot);
+  });
+
+  test('non-cited sections keep their identity in the returned object', () => {
+    const untouched = { deep: [1, 2, 3] };
+    const sections: Record<string, unknown> = {
+      untouched,
+      items: [1, 2, 3, 4, 5],
+    };
+    const limited = applyLimit(sections, ['items'], {}, {}, 2);
+    expect(limited.untouched).toBe(untouched); // same reference, not a copy
+    expect(limited.items).toEqual([1, 2]);
+  });
+
+  test('returns the input object itself when nothing is sliced', () => {
+    const sections: Record<string, unknown> = {
+      foo: [1, 2, 3],
+    };
+    const limited = applyLimit(sections, ['bar'], { bar: 'baz' }, {}, 1);
+    expect(limited).toBe(sections);
+    expect(limited.foo).toEqual([1, 2, 3]);
+  });
+
+  test('object section without any arrayKeyMap arrays is not replaced', () => {
+    const sectionObj = { meta: 'keep' };
+    const sections: Record<string, unknown> = {
+      outcomes: sectionObj,
+    };
+    const limited = applyLimit(sections, ['outcomes'], {}, { outcomes: ['primary'] }, 1);
+    expect(limited.outcomes).toBe(sectionObj);
   });
 
   test('handles missing sections gracefully', () => {
@@ -118,16 +175,17 @@ describe('applyLimit', () => {
     const sections: Record<string, unknown> = {
       items: [10, 20, 30, 40],
     };
-    applyLimit(sections, ['items'], {}, { items: [] }, 2);
-    expect(sections.items).toEqual([10, 20]);
+    const limited = applyLimit(sections, ['items'], {}, { items: [] }, 2);
+    expect(limited.items).toEqual([10, 20]);
+    expect(sections.items).toEqual([10, 20, 30, 40]);
   });
 
   test('does nothing when no matching sections found', () => {
     const sections: Record<string, unknown> = {
       foo: [1, 2, 3],
     };
-    applyLimit(sections, ['bar'], { bar: 'baz' }, {}, 1);
-    expect(sections.foo).toEqual([1, 2, 3]);
+    const limited = applyLimit(sections, ['bar'], { bar: 'baz' }, {}, 1);
+    expect(limited.foo).toEqual([1, 2, 3]);
   });
 
   test('skips sections with non-object data', () => {
@@ -135,24 +193,27 @@ describe('applyLimit', () => {
       name: 'a string value',
       items: [1, 2, 3],
     };
-    applyLimit(sections, ['name', 'items'], {}, {}, 1);
-    expect(sections.name).toBe('a string value');
-    expect(sections.items).toEqual([1]);
+    const limited = applyLimit(sections, ['name', 'items'], {}, {}, 1);
+    expect(limited.name).toBe('a string value');
+    expect(limited.items).toEqual([1]);
+    expect(sections.items).toEqual([1, 2, 3]);
   });
 
   test('uses section name directly when not in storageKeyMap', () => {
     const sections: Record<string, unknown> = {
       pathways: [1, 2, 3, 4, 5],
     };
-    applyLimit(sections, ['pathways'], {}, {}, 3);
-    expect(sections.pathways).toEqual([1, 2, 3]);
+    const limited = applyLimit(sections, ['pathways'], {}, {}, 3);
+    expect(limited.pathways).toEqual([1, 2, 3]);
+    expect(sections.pathways).toEqual([1, 2, 3, 4, 5]);
   });
 
   test('arrayKeyMap with empty array falls back to array check', () => {
     const sections: Record<string, unknown> = {
       targets: [1, 2, 3],
     };
-    applyLimit(sections, ['targets'], {}, { targets: [] }, 1);
-    expect(sections.targets).toEqual([1]);
+    const limited = applyLimit(sections, ['targets'], {}, { targets: [] }, 1);
+    expect(limited.targets).toEqual([1]);
+    expect(sections.targets).toEqual([1, 2, 3]);
   });
 });

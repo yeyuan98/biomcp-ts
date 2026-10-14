@@ -90,7 +90,7 @@ export function registerArticleTools(server: McpServer): void {
           ? ARTICLE_ALL_SECTIONS
           : (sections ?? []);
         if (result.sections) {
-          applyLimit(result.sections, requestedSections, ARTICLE_STORAGE_KEYS, ARTICLE_ARRAY_KEYS, limit);
+          result.sections = applyLimit(result.sections, requestedSections, ARTICLE_STORAGE_KEYS, ARTICLE_ARRAY_KEYS, limit);
         }
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       } catch (error) {

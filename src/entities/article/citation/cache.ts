@@ -63,7 +63,7 @@ class FederatedCache {
   }
 }
 
-function buildCacheKey(id: { pmid?: string; doi?: string; pmcid?: string }, options: { direction?: string; source?: string; full?: boolean; articleYear?: number }): string {
+function buildCacheKey(id: { pmid?: string; doi?: string; pmcid?: string }, options: { direction?: string; source?: string; full?: boolean; articleYear?: number; limit?: number }): string {
   // Canonical ID: PMID first, then DOI, then PMCID
   const canonicalId = id.pmid || id.doi || id.pmcid || '';
   const parts = [
@@ -71,6 +71,11 @@ function buildCacheKey(id: { pmid?: string; doi?: string; pmcid?: string }, opti
     options.direction || 'both',
     options.source || (options.full ? 'full' : 'fast'),
     options.articleYear !== undefined ? `y${options.articleYear}` : undefined,
+    // The stored result size depends on the requested limit, so different
+    // limits must never share an entry — a small-limit call would poison
+    // later larger-limit calls for the whole TTL. getCitations always passes
+    // its resolved limit; omitting it keeps the legacy key shape.
+    options.limit !== undefined ? `l${options.limit}` : undefined,
   ].filter(Boolean);
   return parts.join('|');
 }

@@ -81,7 +81,7 @@ export function registerGeneTools(server: McpServer): void {
           ? GENE_ALL_SECTIONS
           : (sections ?? []);
         if (result.sections) {
-          applyLimit(result.sections, requestedSections, GENE_STORAGE_KEYS, GENE_ARRAY_KEYS, limit);
+          result.sections = applyLimit(result.sections, requestedSections, GENE_STORAGE_KEYS, GENE_ARRAY_KEYS, limit);
         }
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       } catch (error) {
