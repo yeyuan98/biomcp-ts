@@ -418,6 +418,23 @@ export async function getPreprintArticle(
     );
   }
 
+  // Opt-in only, mirroring the journal-article path ("all" excludes fulltext).
+  const wantsFullText = options?.sections?.includes('fulltext');
+  if (wantsFullText) {
+    // Preprint JATS XML is deliberately served as a link only —
+    // www.biorxiv.org throttles automated downloads (see jatsxml_url).
+    (result.sections = result.sections || {})['fulltext'] = {
+      status: 'unavailable',
+      reason: 'not_implemented_for_preprints',
+      max_chars: 0,
+      links: result.jatsxml_url ? { jatsxml_url: result.jatsxml_url } : undefined,
+      note: 'Full-text retrieval is not implemented for preprints (www.biorxiv.org throttles automated downloads). '
+        + (result.jatsxml_url
+          ? 'Fetch links.jatsxml_url directly for the JATS XML, or use article_get on the published version of record.'
+          : 'No JATS XML URL is available for this preprint.'),
+    };
+  }
+
   await Promise.allSettled(step2);
 
   return result;

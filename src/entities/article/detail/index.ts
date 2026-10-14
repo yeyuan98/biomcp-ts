@@ -4,16 +4,12 @@ import { parseArticleId, resolveToPmid, resolveDoiToPmid, isPreprintDoi } from '
 import type { ResolvedPmid } from './id-resolution.js';
 import { getPreprintArticle } from './preprint.js';
 import { fetchOpenAccess } from './open-access.js';
+import type { OpenAccessResult } from './open-access.js';
+import { fetchFullText, FULLTEXT_DEFAULT_MAX_CHARS } from './fulltext.js';
 import { fetchAnnotations, fetchCitationGraph } from './annotations.js';
 import { getCitations } from '../citation/index.js';
 import type { ArticleId } from '../citation/types.js';
-import type { Article, ArticleResult } from '../types.js';
-
-interface CitationOptions {
-  citationMode?: 'fast' | 'full';
-  citationDirection?: 'forward' | 'backward' | 'both';
-  limit?: number;
-}
+import type { Article, ArticleResult, ArticleGetOptions } from '../types.js';
 
 async function fetchPubMedArticle(pmid: string): Promise<Article> {
   try {
@@ -55,7 +51,7 @@ async function resolvePmidToIds(pmid: string): Promise<ResolvedPmid | undefined>
 export async function articleGet(
   identifier: string,
   sections?: string[],
-  options?: CitationOptions
+  options?: ArticleGetOptions
 ): Promise<ArticleResult> {
   const parsed = parseArticleId(identifier);
 
@@ -93,13 +89,6 @@ export async function articleGet(
     throw new Error(`Could not resolve pmid '${pmid}'. The article may not exist in PubMed.`);
   }
 
-  if (!resolvedIds && parsed.type === 'pmid') {
-    const needsCitation = sections?.includes('citation') || sections?.includes('all');
-    if (needsCitation) {
-      resolvedIds = await resolvePmidToIds(pmid);
-    }
-  }
-
   if (resolvedIds) {
     if (!result.pmid) result.pmid = resolvedIds.pmid;
     if (!result.pmcid && resolvedIds.pmcid) result.pmcid = resolvedIds.pmcid;
@@ -109,16 +98,80 @@ export async function articleGet(
   const sectionsToFetch = sections?.filter(s => s !== 'core') || [];
   const limit = options?.limit ?? 20;
 
+  // oa/fulltext need a PMCID; citation resolution benefits from the same
+  // idconv answer. One lookup serves every section (the DOI→esearch
+  // fallback path returns resolvedIds WITHOUT a pmcid, hence the pmcid
+  // check rather than a resolvedIds check).
+  const needsPmcid = sectionsToFetch.some(s => s === 'oa' || s === 'fulltext' || s === 'citation' || s === 'all');
+  if (needsPmcid && !resolvedIds?.pmcid && !result.pmcid) {
+    const lateIds = await resolvePmidToIds(pmid);
+    if (lateIds) {
+      // Pick defined values explicitly: a spread would let an explicit
+      // undefined from the earlier resolution overwrite the late pmcid.
+      resolvedIds = {
+        pmid,
+        pmcid: resolvedIds?.pmcid ?? lateIds.pmcid,
+        doi: resolvedIds?.doi ?? lateIds.doi,
+      };
+      if (!result.pmcid && lateIds.pmcid) result.pmcid = lateIds.pmcid;
+      if (!result.doi && lateIds.doi) result.doi = lateIds.doi;
+    }
+  }
+
+  const pmcid = resolvedIds?.pmcid || result.pmcid;
+  const doi = result.doi || resolvedIds?.doi;
+
+  const wantsOa = sectionsToFetch.includes('oa') || sectionsToFetch.includes('all');
+  // Full text is opt-in ONLY (explicit sections=["fulltext"]) — "all" never
+  // triggers the expensive XML fetch, and the reply must stay small.
+  const wantsFullText = sectionsToFetch.includes('fulltext');
+
+  // One Europe PMC core record backs both the oa section and the fulltext
+  // section (access classification + license header), so oa+fulltext and
+  // all-mode requests issue a single search.
+  const oaRecordPromise: Promise<OpenAccessResult> | null = (wantsOa || wantsFullText)
+    ? fetchOpenAccess(pmcid, doi)
+    : null;
+
   const sectionPromises: Promise<void>[] = [];
 
-  if (sectionsToFetch.includes('oa') || sectionsToFetch.includes('all')) {
+  if (oaRecordPromise) {
     sectionPromises.push(
-      fetchOpenAccess(pmid, resolvedIds?.pmcid).then(r => {
-        result.sections = result.sections || {};
-        (result.sections as Record<string, unknown>)['open_access'] = r;
+      oaRecordPromise.then(r => {
+        if (r.is_open_access !== undefined) result.is_open_access = r.is_open_access;
+        if (wantsOa) {
+          result.sections = result.sections || {};
+          (result.sections as Record<string, unknown>)['open_access'] = r;
+        }
       }).catch(e => {
         result.sections = result.sections || {};
         (result.sections as Record<string, unknown>)['open_access'] = { _error: String(e) };
+      })
+    );
+  }
+
+  if (wantsFullText) {
+    // The char cap applies to inline output only; file mode writes the
+    // complete text and returns a handle.
+    const fulltextCap = options?.fulltextMaxChars ?? FULLTEXT_DEFAULT_MAX_CHARS;
+    sectionPromises.push(
+      (async () => {
+        const oa = await (oaRecordPromise
+          ? oaRecordPromise.catch(() => null)
+          : Promise.resolve(null));
+        const r = await fetchFullText(pmcid, {
+          maxChars: fulltextCap,
+          oa,
+          doi,
+          output: options?.fulltextOutput,
+          pmid,
+          title: result.title,
+        });
+        result.sections = result.sections || {};
+        (result.sections as Record<string, unknown>)['fulltext'] = r;
+      })().catch(e => {
+        result.sections = result.sections || {};
+        (result.sections as Record<string, unknown>)['fulltext'] = { _error: String(e) };
       })
     );
   }
@@ -150,7 +203,7 @@ export async function articleGet(
   if (sectionsToFetch.includes('citation') || sectionsToFetch.includes('all')) {
     sectionPromises.push(
       (async () => {
-        const articleId: ArticleId = { pmid, pmcid: resolvedIds?.pmcid || result.pmcid, doi: result.doi || resolvedIds?.doi };
+        const articleId: ArticleId = { pmid, pmcid, doi };
         const r = await getCitations(articleId, {
           direction: options?.citationDirection ?? 'both',
           full: options?.citationMode === 'full',

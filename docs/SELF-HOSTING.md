@@ -2,6 +2,8 @@
 
 BioMCP can be self-hosted as a remote, multi-tenant MCP server over HTTPS using the modern **Streamable HTTP** transport (MCP specification `2025-11-25`).
 
+> **Full-text files:** `article_get` with `sections=["fulltext"]` writes markdown files to the server's `BIOMCP_CACHE_DIR/fulltext/` and returns the path. Remote clients whose agents cannot read server-side paths should call with `fulltext_output="inline"` (the tool reply's note says the same). Files are purged after 24 hours or 200 files.
+
 This allows operators to centrally configure upstream biomedical API keys (NCBI, Semantic Scholar, OpenFDA, OncoKB, DisGeNET, CrossRef, EPO, USPTO, and local database backends) and share a fast, authenticated endpoint with team members or agent harnesses without requiring individual API key setups.
 
 ---

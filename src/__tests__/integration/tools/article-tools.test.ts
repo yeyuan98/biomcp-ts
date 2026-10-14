@@ -1,16 +1,29 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { createMcpTestHarness } from '../../helpers/mcp-harness.js';
-import { expectArticleSearchResult, expectArticleGetResult, expectArticleOaSection, expectCitationSection } from '../../helpers/assertions.js';
+import { expectArticleSearchResult, expectArticleGetResult, expectArticleOaSection, expectArticleFullTextSection, expectCitationSection } from '../../helpers/assertions.js';
 import { retryOnRateLimit } from '../../helpers/retry.js';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 let harness: Awaited<ReturnType<typeof createMcpTestHarness>>;
+let savedCacheDir: string | undefined;
+let cacheRoot: string;
 
 beforeAll(async () => {
   harness = await createMcpTestHarness();
+  // In-process harness: redirect fulltext file output away from the real
+  // ~/.cache/biomcp for the whole live suite.
+  savedCacheDir = process.env.BIOMCP_CACHE_DIR;
+  cacheRoot = mkdtempSync(join(tmpdir(), 'biomcp-ftint-'));
+  process.env.BIOMCP_CACHE_DIR = cacheRoot;
 }, 30000);
 
 afterAll(async () => {
   await harness.close();
+  if (savedCacheDir === undefined) delete process.env.BIOMCP_CACHE_DIR;
+  else process.env.BIOMCP_CACHE_DIR = savedCacheDir;
+  rmSync(cacheRoot, { recursive: true, force: true });
 });
 
 describe('article_search', () => {
@@ -186,12 +199,63 @@ describe('article_get preprint DOIs (bioRxiv/medRxiv)', () => {
 });
 
 describe('article_get sections', () => {
-  // PMID 34265844 = AlphaFold (CC-BY, guaranteed OA). The pmc_oa leg is
-  // unreachable from some networks (datacenter-IP 404s); the europepmc
-  // fallback must still deliver license metadata either way.
-  it('oa section returns license/PDF metadata without error', async () => {
+  // PMID 34265844 = AlphaFold (CC-BY, guaranteed OA). NCBI's oa.fcgi was
+  // retired upstream (2026); oa metadata now comes from the Europe PMC
+  // core record and must classify this as open_access.
+  it('oa section returns license/access metadata without error', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('article_get', { id: '34265844', sections: ['oa'] }));
     expectArticleOaSection(result);
+    const oa = (result as any)?.sections?.open_access;
+    expect(oa.status).toBe('open_access');
+    expect(oa.full_text_available).toBe(true);
+  }, 90000);
+
+  // Full text itself: the same CC-BY article must yield a FILE handle by
+  // default (Europe PMC fullTextXML, or the eutils db=pmc fallback leg).
+  it('fulltext section writes the actual full text to a markdown file and returns a handle', async () => {
+    const result = await retryOnRateLimit(() => harness.callTool('article_get', { id: '34265844', sections: ['fulltext'] }));
+    expectArticleFullTextSection(result);
+    const ft = (result as any)?.sections?.fulltext;
+    expect(ft.mode).toBe('file');
+    expect(ft.char_count).toBeGreaterThan(5000);
+    expect(ft.sections).toBeUndefined(); // body never enters the reply
+    expect(existsSync(ft.file_path)).toBe(true);
+    // The file parses back: front matter, headings at the outlined lines
+    const content = readFileSync(ft.file_path, 'utf8');
+    expect(content.startsWith('---\n')).toBe(true);
+    const lines = content.split('\n');
+    for (const entry of ft.outline) {
+      expect(lines[entry.line - 1]).toBe(`## ${entry.heading}`);
+    }
+    expect(result.is_open_access).toBe(true);
+  }, 90000);
+
+  // Free-to-read but not OA (Cell 2025 author manuscript, isOpenAccess=N):
+  // Europe PMC fullTextXML 500s for this record — the eutils db=pmc leg is
+  // load-bearing here.
+  it('fulltext section fetches free-to-read (non-OA) text via the eutils fallback', async () => {
+    const result = await retryOnRateLimit(() => harness.callTool('article_get', { id: '41478284', sections: ['fulltext'] }));
+    const ft = (result as any)?.sections?.fulltext;
+    expect(ft).toBeDefined();
+    expect(ft._error).toBeUndefined();
+    if (ft.status === 'available') {
+      expect(ft.char_count).toBeGreaterThan(1000);
+    } else {
+      expect(['paywalled', 'no_machine_readable_xml', 'fetch_failed']).toContain(ft.reason);
+    }
+  }, 90000);
+
+  // Not in PMC at all (Nature career column): honest unavailable envelope,
+  // never a crash and never a silent empty.
+  it('fulltext section reports not_in_pmc honestly for a non-PMC article', async () => {
+    const result = await retryOnRateLimit(() => harness.callTool('article_get', { id: '42864440', sections: ['fulltext', 'oa'] }));
+    const ft = (result as any)?.sections?.fulltext;
+    expect(ft.status).toBe('unavailable');
+    expect(ft.reason).toBe('no_pmcid');
+    expect(ft.note).toContain('abstract');
+    expect(ft.links?.doi_url).toMatch(/^https:\/\/doi\.org\//);
+    const oa = (result as any)?.sections?.open_access;
+    expect(oa.status).toBe('not_in_pmc');
   }, 90000);
 
   it('annotations section returns PubTator annotations', async () => {

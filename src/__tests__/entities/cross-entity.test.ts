@@ -6,6 +6,9 @@ import {
 } from '../../entities/cross-entity.js';
 import { connectionManager } from '../../connections/manager.js';
 import { parseMockUrl, mockFetchRouter } from '../helpers/mock-url.js';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 describe('cross-entity', () => {
   let originalFetch: typeof global.fetch;
@@ -99,6 +102,69 @@ describe('cross-entity', () => {
     expect(results[0].success).toBe(true);
     expect(results[1].entity).toBe('drug');
     expect(results[1].id).toBe('Aspirin');
+  });
+
+  test('batchGet() article fulltext is file-only: handles, never body text', async () => {
+    // Route mocks for articleGet(12345, ['fulltext']): PubMed efetch XML
+    // (carries the PMCID), one Europe PMC core search (oa), and the
+    // fullTextXML body. Sections run in parallel — route by hostname/path.
+    global.fetch = jest.fn((url: unknown) => {
+      const { hostname, pathname } = parseMockUrl(url);
+      if (hostname === 'eutils.ncbi.nlm.nih.gov' && pathname.endsWith('/efetch.fcgi')) {
+        return Promise.resolve({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(`<?xml version="1.0"?>
+<PubmedArticleSet><PubmedArticle>
+<MedlineCitation Status="MEDLINE" Owner="NLM"><PMID Version="1">12345</PMID>
+<Article PubModel="Electronic"><Journal><Title>T</Title><ISOAbbreviation>T</ISOAbbreviation></Journal>
+<ArticleTitle>Batched article</ArticleTitle></Article></MedlineCitation>
+<PubmedData><ArticleIdList><ArticleId IdType="pubmed">12345</ArticleId>
+<ArticleId IdType="doi">10.1234/test.2018</ArticleId><ArticleId IdType="pmc">PMC9999999</ArticleId></ArticleIdList>
+</PubmedData></PubmedArticle></PubmedArticleSet>`),
+        });
+      }
+      if (hostname === 'www.ebi.ac.uk' && pathname.endsWith('/search')) {
+        return Promise.resolve({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ hitCount: 1, resultList: { result: [{
+            pmcid: 'PMC9999999', doi: '10.1234/test.2018', isOpenAccess: 'Y', inPMC: 'Y', inEPMC: 'Y', license: 'cc by',
+            fullTextUrlList: { fullTextUrl: [] },
+          }] } }),
+        });
+      }
+      if (hostname === 'www.ebi.ac.uk' && pathname.endsWith('/fullTextXML')) {
+        return Promise.resolve({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve('<?xml version="1.0"?><article><body><sec><title>Intro</title><p>The body must not appear in the batch reply.</p></sec></body><back><ref-list/></back></article>'),
+        });
+      }
+      return Promise.reject(new Error(`unexpected url ${url}`));
+    }) as any;
+
+    // File-mode writes must stay out of the real cache dir
+    const savedCache = process.env.BIOMCP_CACHE_DIR;
+    const cacheRoot = mkdtempSync(join(tmpdir(), 'biomcp-batch-'));
+    process.env.BIOMCP_CACHE_DIR = cacheRoot;
+    try {
+      const results = await batchGet([{ entity: 'article', id: '12345', sections: ['fulltext'] }]);
+
+      expect(results).toHaveLength(1);
+      expect(results[0].success).toBe(true);
+      const ft = (results[0].data as any)?.sections?.fulltext;
+      expect(ft.mode).toBe('file');
+      expect(ft.status).toBe('available');
+      expect(ft.sections).toBeUndefined(); // never body text in batch replies
+      expect(ft.outline.length).toBeGreaterThan(0);
+      expect(existsSync(ft.file_path)).toBe(true);
+      expect(readFileSync(ft.file_path, 'utf8')).toContain('The body must not appear in the batch reply.');
+    } finally {
+      if (savedCache === undefined) delete process.env.BIOMCP_CACHE_DIR;
+      else process.env.BIOMCP_CACHE_DIR = savedCache;
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
   });
 
   test('batchGet() supports patent entity with invalid-id error capture', async () => {

@@ -189,18 +189,69 @@ export function expectBatchGetRows(data: unknown, expectedCount: number): void {
 }
 
 /**
- * article_get `oa` section: must be a non-error result carrying OA metadata
- * from either source (pmc_oa primary, europepmc fallback) — a `_error` here
- * means both OA lookup legs failed.
+ * article_get `oa` section: must be a non-error result with an explicit
+ * access status derived from the Europe PMC core record (the retired
+ * NCBI oa.fcgi service's replacement). A `_error` here means the Europe
+ * PMC lookup itself failed at transport level.
  */
 export function expectArticleOaSection(data: unknown): void {
   const section = (data as any)?.sections?.open_access;
   expect(section).toBeDefined();
   expect(section._error).toBeUndefined();
-  expect(['pmc_oa', 'europepmc']).toContain(section.source);
-  expect(typeof section.pmcid).toBe('string');
-  const hasOaSignal = section.license !== undefined || section.pdf_url !== undefined;
-  expect(hasOaSignal).toBe(true);
+  expect(section.source).toBe('europepmc');
+  expect(['open_access', 'free_to_read', 'paywalled', 'not_in_pmc', 'unknown']).toContain(section.status);
+  expect(typeof section.full_text_available).toBe('boolean');
+  expect(typeof section.note).toBe('string');
+  expect(section.note.length).toBeGreaterThan(0);
+  if (section.status === 'open_access') {
+    expect(section.full_text_available).toBe(true);
+    expect(section.is_open_access).toBe(true);
+  }
+}
+
+/**
+ * article_get `fulltext` section for a known free-to-read PMC article:
+ * must return actual content sections, honestly truncated, with the
+ * machine-readable source recorded.
+ */
+export function expectArticleFullTextSection(data: unknown): void {
+  const section = (data as any)?.sections?.fulltext;
+  expect(section).toBeDefined();
+  expect(section._error).toBeUndefined();
+  expect(section.status).toBe('available');
+  expect(['europepmc', 'eutils']).toContain(section.source);
+  expect(section.char_count).toBeGreaterThan(0);
+  expect(typeof section.total_char_count).toBe('number');
+
+  if (section.mode === 'file') {
+    // File mode: handle only — the body must NOT be in the reply.
+    expect(typeof section.file_path).toBe('string');
+    expect(section.sections).toBeUndefined();
+    expect(section.max_chars).toBe(0);
+    expect(Array.isArray(section.outline)).toBe(true);
+    expect(section.outline.length).toBeGreaterThan(0);
+    for (const o of section.outline) {
+      expect(typeof o.heading).toBe('string');
+      expect(typeof o.chars).toBe('number');
+      expect(typeof o.line).toBe('number');
+    }
+    if (section.truncated) {
+      expect(section.char_count).toBeLessThanOrEqual(2_000_000);
+    }
+    return;
+  }
+
+  // Inline mode: capped text sections in the reply.
+  expect(Array.isArray(section.sections)).toBe(true);
+  expect(section.sections.length).toBeGreaterThan(0);
+  for (const s of section.sections) {
+    expect(typeof s.heading).toBe('string');
+    expect(typeof s.text).toBe('string');
+  }
+  expect(typeof section.max_chars).toBe('number');
+  if (section.truncated) {
+    expect(section.char_count).toBeLessThanOrEqual(section.max_chars + 200);
+  }
 }
 
 /**

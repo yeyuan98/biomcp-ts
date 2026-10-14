@@ -4,6 +4,7 @@ import { SessionManager } from './session.js';
 import { Tracer } from './tracer.js';
 import { handleCorsPreflight, parseAuthTokens, setCorsHeaders, verifyBearerToken } from './auth.js';
 import { artifactCount, purgeArtifactsOlderThan } from '../biowasm/artifacts.js';
+import { purgeFullTextFiles } from '../entities/article/detail/fulltext-store.js';
 import { shutdownDbBackend } from '../server/tools/db.js';
 import { shutdownREngine } from '../server/tools/ranalysis.js';
 import { shutdownBiowasmEngine } from '../server/tools/biowasm.js';
@@ -97,6 +98,7 @@ export async function startRemoteServer(options?: RemoteServerOptions): Promise<
   const purgeInterval = setInterval(() => {
     try {
       purgeArtifactsOlderThan(24 * 60 * 60 * 1000);
+      purgeFullTextFiles();
     } catch {
       // Ignore background purge error
     }

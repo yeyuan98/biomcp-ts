@@ -15,13 +15,14 @@ function withToolTimeout<T>(promise: Promise<T>, timeoutMs = TOOL_TIMEOUT_MS): P
   ]);
 }
 
-const ARTICLE_SECTIONS = ['core', 'oa', 'annotations', 'graph', 'citation', 'all'] as const;
+const ARTICLE_SECTIONS = ['core', 'oa', 'fulltext', 'annotations', 'graph', 'citation', 'all'] as const;
 
 const ARTICLE_ALL_SECTIONS = ['oa', 'annotations', 'graph', 'citation'];
 const ARTICLE_STORAGE_KEYS: Record<string, string> = {
   graph: 'citation_graph',
   oa: 'open_access',
   citation: 'citation',
+  fulltext: 'fulltext',
 };
 const ARTICLE_ARRAY_KEYS: Record<string, string[]> = {
   annotations: [],
@@ -64,11 +65,13 @@ export function registerArticleTools(server: McpServer): void {
   server.registerTool(
     'article_get',
     {
-      description: 'Get article by PMID/PMCID/DOI. Preprint DOIs (bioRxiv/medRxiv, e.g. "10.1101/2025.03.05.641768" or new prefix "10.64898/...") return the preprint record: all versions, license, category, funders, JATS full-text URL, published-version mapping, and (with sections=["citation"]) Europe PMC preprint citations. Journal-article citation: fast mode (~4s, 4 providers, auto-fallback to PubMed) or full mode (~15-30s, all 5 providers incl. PubMed). Forward citation lists come from Europe PMC, Semantic Scholar, and OpenCitations; Crossref provides counts and references only.',
+      description: 'Get article by PMID/PMCID/DOI. Preprint DOIs (bioRxiv/medRxiv, e.g. "10.1101/2025.03.05.641768" or new prefix "10.64898/...") return the preprint record: all versions, license, category, funders, JATS full-text URL, published-version mapping, and (with sections=["citation"]) Europe PMC preprint citations. Journal articles: sections=["fulltext"] returns the ACTUAL full text when freely readable in PMC/Europe PMC (open-access AND free-to-read; check fulltext.status — paywalled/unavailable results carry the reason and alternatives, e.g. links.doi_url). Default (fulltext_output="file"): the complete text is written to a server-side markdown file and the reply carries file_path plus an outline with per-section line numbers and char counts — Read/Grep the file selectively instead of loading it into context; fulltext_output="inline" returns text sections inline capped by fulltext_max_chars (use only if you cannot read server-side files). sections=["oa"] returns license/access metadata and links ONLY (status: open_access|free_to_read|paywalled|not_in_pmc|unknown; pdf_url presence does not by itself mean the text is fetchable — use fulltext for content). "all" = oa+annotations+graph+citation WITHOUT fulltext (request ["fulltext"] separately). oa/fulltext do not apply to preprints (see the jatsxml_url link). Journal-article citation: fast mode (~4s, 4 providers, auto-fallback to PubMed) or full mode (~15-30s, all 5 providers incl. PubMed). Forward citation lists come from Europe PMC, Semantic Scholar, and OpenCitations; Crossref provides counts and references only.',
       inputSchema: {
         id: z.string().describe('Article identifier: PMID (numeric, e.g. "12345"), PMCID (e.g. "PMC1234567"), DOI (e.g. "10.1038/s41586-021-03819-2"), or preprint DOI (e.g. "10.1101/2021.10.25.465764", "10.64898/2026.08.11.744243")'),
-        sections: z.array(z.enum(ARTICLE_SECTIONS)).optional().describe('Sections to include. Use ["citation"] for citation data, ["all"] for everything.'),
+        sections: z.array(z.enum(ARTICLE_SECTIONS)).optional().describe('Sections to include. ["fulltext"] = the complete article text (written to a file by default; see fulltext_output). ["oa"] = license/access metadata and links. ["citation"] = citation data. ["all"] = oa+annotations+graph+citation — fulltext is NOT included; request ["fulltext"] separately.'),
         limit: z.number().int().min(1).max(100).default(20).describe('Maximum items per section (e.g., 20 citations)'),
+        fulltext_max_chars: z.number().int().min(1000).max(200000).optional().describe('Inline-mode only (fulltext_output="inline"); default 40000. Ignored in file mode — files carry the complete text (2MB safety cap). Truncation is flagged honestly with omitted section names.'),
+        fulltext_output: z.enum(['file', 'inline']).optional().describe('Output mode for sections=["fulltext"]. "file" (default): complete text written to a server-side markdown file; the reply carries file_path + outline (headings with line numbers and char counts) — Read/Grep the file selectively. "inline": text returned inline, capped by fulltext_max_chars; use only if you cannot read server-side files.'),
         citation_mode: z.enum(['fast', 'full']).optional().default('fast').describe(
           'Fast: Europe PMC, Semantic Scholar, OpenCitations, Crossref counts/references (~4s). Full: All 5 providers incl. PubMed (~15-30s). ' +
           'Fast mode auto-falls back to PubMed when other providers return no items.'
@@ -77,12 +80,12 @@ export function registerArticleTools(server: McpServer): void {
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
-    async ({ id, sections, limit, citation_mode, citation_direction }) => {
+    async ({ id, sections, limit, fulltext_max_chars, fulltext_output, citation_mode, citation_direction }) => {
       try {
         // 60s (vs 30s default): the preprint branch may hit api.biorxiv.org
         // twice (biorxiv miss → medrxiv) with per-attempt timeouts + retries;
         // journal paths finish well within this budget regardless.
-        const result = await withToolTimeout(articleGet(id, sections, { citationMode: citation_mode, citationDirection: citation_direction, limit }), 60000);
+        const result = await withToolTimeout(articleGet(id, sections, { citationMode: citation_mode, citationDirection: citation_direction, limit, fulltextMaxChars: fulltext_max_chars, fulltextOutput: fulltext_output }), 60000);
         const requestedSections = (sections ?? []).includes('all')
           ? ARTICLE_ALL_SECTIONS
           : (sections ?? []);

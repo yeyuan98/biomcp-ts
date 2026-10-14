@@ -178,7 +178,7 @@ export class RestConnection implements IConnection<string, unknown> {
   private buildUrl(path: string, query?: Record<string, string>): string {
     // Query-string-only paths (`?id=…`) attach directly to the endpoint URL:
     // inserting a path separator would produce `file.cgi/?id=…`, which strict
-    // endpoints (e.g. NCBI PMC oa.fcgi) reject with 404.
+    // endpoints reject with 404.
     const queryOnly = path.startsWith('?') || path.startsWith('#');
     let base = this.options.baseUrl;
     if (queryOnly) {

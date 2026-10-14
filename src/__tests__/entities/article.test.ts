@@ -1,9 +1,15 @@
 import { jest } from '@jest/globals';
-import { articleSearch, articleGet, transformPubTator, transformLitSense, transformEuropePMC, transformSemanticScholar, transformPreprint, parseDateRange, parseArticleId, isPreprintDoi, parseOaXml } from '../../entities/article.js';
+import { articleSearch, articleGet, transformPubTator, transformLitSense, transformEuropePMC, transformSemanticScholar, transformPreprint, parseDateRange, parseArticleId, isPreprintDoi } from '../../entities/article.js';
 import { clearCitationCache } from '../../entities/article/citation/index.js';
 import { clearWorkCache } from '../../entities/article/citation/crossref.js';
 import { clearCitedInCache } from '../../entities/article/citation/pubmed.js';
-import { fetchOpenAccess } from '../../entities/article/detail/open-access.js';
+import { fetchOpenAccess, licenseToUrl } from '../../entities/article/detail/open-access.js';
+import type { OpenAccessResult } from '../../entities/article/detail/open-access.js';
+import { fetchFullText, parseFullTextJats, FULLTEXT_DEFAULT_MAX_CHARS } from '../../entities/article/detail/fulltext.js';
+import { writeFullTextFile } from '../../entities/article/detail/fulltext-store.js';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { getPreprintArticle } from '../../entities/article/detail/preprint.js';
 import { connectionManager } from '../../connections/manager.js';
 import { parseMockUrl } from '../helpers/mock-url.js';
@@ -45,6 +51,80 @@ const SINGLE_ARTICLE_XML = `<?xml version="1.0"?>
 </PubmedData>
 </PubmedArticle>
 </PubmedArticleSet>`;
+
+const MINIMAL_ARTICLE_XML_NO_PMC = `<?xml version="1.0"?>
+<PubmedArticleSet>
+<PubmedArticle>
+<MedlineCitation Status="MEDLINE" Owner="NLM">
+<PMID Version="1">12345</PMID>
+<Article PubModel="Electronic">
+<Journal><Title>Nature</Title><ISOAbbreviation>Nature</ISOAbbreviation></Journal>
+<ArticleTitle>Test</ArticleTitle>
+</Article>
+</MedlineCitation>
+<PubmedData>
+<ArticleIdList>
+<ArticleId IdType="pubmed">12345</ArticleId>
+<ArticleId IdType="doi">10.1234/test.2018</ArticleId>
+</ArticleIdList>
+</PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>`;
+
+// Europe PMC core-record payload, live-verified shape: the link list lives
+// at fullTextUrlList.fullTextUrl (NOT fullTextUrlList.fullTextUrlList) and
+// availability is one of 'Open access' | 'Free' | 'Subscription required'.
+const epmcCoreRecord = (overrides: Record<string, unknown> = {}) => ({
+  pmcid: 'PMC9999999',
+  doi: '10.1234/test.2018',
+  isOpenAccess: 'Y',
+  inPMC: 'Y',
+  inEPMC: 'Y',
+  license: 'cc by',
+  fullTextUrlList: {
+    fullTextUrl: [
+      { availability: 'Open access', availabilityCode: 'OA', documentStyle: 'pdf', site: 'Unpaywall', url: 'https://example.com/paper.pdf' },
+      { availability: 'Subscription required', availabilityCode: 'S', documentStyle: 'doi', site: 'DOI', url: 'https://doi.org/10.1234/test.2018' },
+      { availability: 'Open access', availabilityCode: 'OA', documentStyle: 'html', site: 'Europe_PMC', url: 'https://europepmc.org/articles/PMC9999999' },
+      { availability: 'Open access', availabilityCode: 'OA', documentStyle: 'pdf', site: 'Europe_PMC', url: 'https://europepmc.org/articles/PMC9999999?pdf=render' },
+    ],
+  },
+  ...overrides,
+});
+
+const epmcSearchHit = (record: unknown) => ({ hitCount: 1, resultList: { result: [record] } });
+
+// JATS full-text fixture (Europe PMC bare <article> form). The introduction
+// paragraph is deliberately long so truncation tests can exercise the cap.
+const LONG_INTRO = 'Diphtheria toxin inserts its T domain into endosomal membranes under acidic conditions. '.repeat(12);
+const JATS_FULLTEXT_XML = `<?xml version="1.0"?>
+<article article-type="research-article">
+<body>
+<sec><title>Introduction</title><p>${LONG_INTRO}Concentrations of H<sup>+</sup> up to 4 <italic>&#956;</italic>M were tested.</p></sec>
+<sec><title>Results</title>
+<p>First result paragraph.</p>
+<sec><title>Mutation effects</title><p>Nested section text.</p></sec>
+<fig><label>Figure 1</label><caption><p>Cartoon of the T domain.</p></caption></fig>
+</sec>
+</body>
+<back>
+<sec><title>Acknowledgments</title><p>We thank the funders.</p></sec>
+<ref-list><ref><label>1</label></ref></ref-list>
+</back>
+</article>`;
+
+const PMC_ARTICLESET_XML = `<?xml version="1.0"?>
+<pmc-articleset>${JATS_FULLTEXT_XML}</pmc-articleset>`;
+
+const OA_OPEN: OpenAccessResult = {
+  pmcid: 'PMC9999999',
+  status: 'open_access',
+  full_text_available: true,
+  is_open_access: true,
+  license: 'cc by',
+  note: 'test fixture',
+  source: 'europepmc',
+};
 
 const europepmcLitePage = (n: number) => ({
   resultList: {
@@ -938,12 +1018,12 @@ describe('article', () => {
       await expect(articleGet('PMC99999999')).rejects.toThrow('Could not resolve pmcid');
     });
 
-    test('articleGet() with PMID and oa section returns empty when IDConv has error record', async () => {
+    test('articleGet() with PMID and oa section reports not_in_pmc when the article is not in PMC', async () => {
       global.fetch = jest.fn()
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'text/xml' }),
-          text: () => Promise.resolve(SINGLE_ARTICLE_XML),
+          text: () => Promise.resolve(MINIMAL_ARTICLE_XML_NO_PMC),
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -956,8 +1036,15 @@ describe('article', () => {
 
       const result = await articleGet('12345', ['oa']);
 
+      // efetch + failed idconv only — without a PMCID there is no Europe PMC call
       expect(global.fetch).toHaveBeenCalledTimes(2);
-      expect(result.sections?.open_access).toEqual({});
+      expect(result.sections?.open_access).toEqual({
+        status: 'not_in_pmc',
+        full_text_available: false,
+        links: { doi_url: 'https://doi.org/10.1234/test.2018' },
+        note: expect.stringContaining('No PMC record'),
+        source: 'europepmc',
+      });
     });
 
     test('articleGet() with PMCID resolves to PMID then fetches', async () => {
@@ -1050,7 +1137,7 @@ describe('article', () => {
       await expect(articleGet('not-a-valid-id')).rejects.toThrow('Unrecognized identifier format');
     });
 
-    test('articleGet() with DOI and oa section avoids double IDConv call', async () => {
+    test('articleGet() with DOI and oa section reads the Europe PMC core record', async () => {
       global.fetch = jest.fn()
         .mockResolvedValueOnce({
           ok: true,
@@ -1067,8 +1154,8 @@ describe('article', () => {
         })
         .mockResolvedValueOnce({
           ok: true,
-          headers: new Headers({ 'content-type': 'text/xml' }),
-          text: () => Promise.resolve('<OA><records><record><link format="pdf">https://example.com/paper.pdf</link></record><record/></records></OA>'),
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve(epmcSearchHit(epmcCoreRecord())),
         }) as any;
 
       const result = await articleGet('10.1234/test.2018', ['oa']);
@@ -1080,20 +1167,58 @@ describe('article', () => {
       const efetchUrl = (global.fetch as any).mock.calls[1][0] as string;
       expect(efetchUrl).toContain('efetch.fcgi');
 
-      const oaUrl = (global.fetch as any).mock.calls[2][0] as string;
-      expect(oaUrl).toContain('oa.fcgi');
-      expect(oaUrl).toContain('PMC9999999');
-      expect(oaUrl).not.toContain('.fcgi/?');
+      const epmcUrl = (global.fetch as any).mock.calls[2][0] as string;
+      expect(epmcUrl).toContain('europepmc');
+      expect(epmcUrl).toContain('PMCID%3APMC9999999');
 
-      expect(result.sections?.open_access).toEqual({ pmcid: 'PMC9999999', pdf_url: 'https://example.com/paper.pdf', source: 'pmc_oa' });
+      expect(result.sections?.open_access).toEqual({
+        pmcid: 'PMC9999999',
+        status: 'open_access',
+        full_text_available: true,
+        is_open_access: true,
+        license: 'cc by',
+        license_url: 'https://creativecommons.org/licenses/by/4.0/',
+        links: {
+          pmc_url: 'https://pmc.ncbi.nlm.nih.gov/articles/PMC9999999/',
+          pdf_url: 'https://example.com/paper.pdf',
+          epmc_url: 'https://europepmc.org/articles/PMC9999999',
+          doi_url: 'https://doi.org/10.1234/test.2018',
+        },
+        note: expect.any(String),
+        source: 'europepmc',
+      });
+      expect(result.is_open_access).toBe(true);
     });
 
-    test('articleGet() with PMID and oa section uses IDConv to get PMCID', async () => {
+    test('articleGet() with PMID and oa section reuses the PMCID from the PubMed XML (no IDConv call)', async () => {
       global.fetch = jest.fn()
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'text/xml' }),
           text: () => Promise.resolve(SINGLE_ARTICLE_XML),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve(epmcSearchHit(epmcCoreRecord())),
+        }) as any;
+
+      const result = await articleGet('12345', ['oa']);
+
+      // The PubMed XML carries ArticleId IdType="pmc" — IDConv is skipped
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      const epmcUrl = (global.fetch as any).mock.calls[1][0] as string;
+      expect(epmcUrl).toContain('PMCID%3APMC9999999');
+
+      expect(result.sections?.open_access).toMatchObject({ status: 'open_access', pmcid: 'PMC9999999' });
+    });
+
+    test('articleGet() with PMID and oa section resolves the PMCID via IDConv when the PubMed XML lacks it', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(MINIMAL_ARTICLE_XML_NO_PMC),
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -1105,8 +1230,8 @@ describe('article', () => {
         })
         .mockResolvedValueOnce({
           ok: true,
-          headers: new Headers({ 'content-type': 'text/xml' }),
-          text: () => Promise.resolve('<OA><records><record><link format="pdf">https://example.com/paper.pdf</link></record><record/></records></OA>'),
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve(epmcSearchHit(epmcCoreRecord())),
         }) as any;
 
       const result = await articleGet('12345', ['oa']);
@@ -1116,84 +1241,134 @@ describe('article', () => {
       expect(idConvUrl).toContain('ids=12345');
       expect(idConvUrl).toContain('idconv');
 
-      expect(result.sections?.open_access).toEqual({ pmcid: 'PMC9999999', pdf_url: 'https://example.com/paper.pdf', source: 'pmc_oa' });
+      expect(result.sections?.open_access).toMatchObject({ status: 'open_access', pmcid: 'PMC9999999' });
     });
 
-    test('fetchOpenAccess falls back to Europe PMC when pmc_oa is unavailable', async () => {
+    test('fetchOpenAccess classifies open_access records and keeps only machine-fetchable PDFs', async () => {
       global.fetch = jest.fn()
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 404,
-          statusText: 'Not Found',
-          headers: new Headers({ 'content-type': 'text/html' }),
-          text: () => Promise.resolve('blocked'),
-        })
-        .mockResolvedValueOnce({
+        .mockResolvedValue({
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
-          json: () => Promise.resolve({
-            resultList: {
-              result: [{
-                license: 'cc by',
-                isOpenAccess: 'Y',
-                fullTextUrlList: {
-                  fullTextUrlList: [
-                    { documentStyle: 'pdf', availability: 'Open access', url: 'https://europepmc.org/backend/ptpmcrender.fcgi?accid=PMC9999999' },
-                    { documentStyle: 'html', availability: 'Open access', url: 'https://europepmc.org/articles/PMC9999999' },
-                  ],
-                },
-              }],
-            },
-          }),
+          json: () => Promise.resolve(epmcSearchHit(epmcCoreRecord())),
         }) as any;
 
-      const result = await fetchOpenAccess('12345', 'PMC9999999');
+      const result = await fetchOpenAccess('PMC9999999', '10.1234/test.2018');
 
-      expect(global.fetch).toHaveBeenCalledTimes(2);
-      const pmcOaUrl = (global.fetch as any).mock.calls[0][0] as string;
-      expect(pmcOaUrl).toBe('https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi?id=PMC9999999');
-      const epmcUrl = (global.fetch as any).mock.calls[1][0] as string;
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      const epmcUrl = (global.fetch as any).mock.calls[0][0] as string;
       expect(epmcUrl).toContain('europepmc');
       expect(epmcUrl).toContain('PMCID%3APMC9999999');
 
-      expect(result).toEqual({
-        pmcid: 'PMC9999999',
-        pdf_url: 'https://europepmc.org/backend/ptpmcrender.fcgi?accid=PMC9999999',
-        license: 'cc by',
-        license_url: 'https://creativecommons.org/licenses/by/4.0/',
-        source: 'europepmc',
-      });
+      // Unpaywall pdf kept; the bot-gated Europe_PMC ?pdf=render link must
+      // NOT become pdf_url (it 403s non-browser clients — live-verified).
+      expect(result.links?.pdf_url).toBe('https://example.com/paper.pdf');
+      expect(result.status).toBe('open_access');
+      expect(result.full_text_available).toBe(true);
+      expect(result.is_open_access).toBe(true);
+      expect(result.license).toBe('cc by');
+      expect(result.license_url).toBe('https://creativecommons.org/licenses/by/4.0/');
+      expect(result.links?.pmc_url).toBe('https://pmc.ncbi.nlm.nih.gov/articles/PMC9999999/');
+      expect(result.links?.doi_url).toBe('https://doi.org/10.1234/test.2018');
     });
 
-    test('fetchOpenAccess surfaces _error when both pmc_oa and Europe PMC fail', async () => {
+    test('fetchOpenAccess classifies free-to-read records (isOpenAccess=N, no license)', async () => {
+      // Live-verified Cell 2025 shape: Free links but isOpenAccess N, and
+      // the only pdf link is the bot-gated Europe PMC render.
+      const freeRecord = {
+        pmcid: 'PMC12774453',
+        isOpenAccess: 'N',
+        inPMC: 'Y',
+        inEPMC: 'Y',
+        fullTextUrlList: {
+          fullTextUrl: [
+            { availability: 'Subscription required', documentStyle: 'doi', site: 'DOI', url: 'https://doi.org/10.1016/j.cell.2025.11.036' },
+            { availability: 'Free', documentStyle: 'html', site: 'Europe_PMC', url: 'https://europepmc.org/articles/PMC12774453' },
+            { availability: 'Free', documentStyle: 'pdf', site: 'Europe_PMC', url: 'https://europepmc.org/articles/PMC12774453?pdf=render' },
+          ],
+        },
+      };
       global.fetch = jest.fn()
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 404,
-          statusText: 'Not Found',
-          headers: new Headers({ 'content-type': 'text/html' }),
-          text: () => Promise.resolve('blocked'),
-        })
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 503,
-          statusText: 'Service Unavailable',
-          headers: new Headers({ 'content-type': 'text/html' }),
-          text: () => Promise.resolve('down'),
+        .mockResolvedValue({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve(epmcSearchHit(freeRecord)),
         }) as any;
 
-      const result = await fetchOpenAccess('12345', 'PMC9999999');
+      const result = await fetchOpenAccess('PMC12774453', '10.1016/j.cell.2025.11.036');
 
-      expect((result as any)._error).toContain('Open access lookup failed');
-      expect((result as any)._error).toContain('404');
+      expect(result.status).toBe('free_to_read');
+      expect(result.full_text_available).toBe(true);
+      expect(result.is_open_access).toBe(false);
+      expect(result.license).toBeUndefined();
+      // Europe_PMC render links are browser-only: no pdf_url here
+      expect(result.links?.pdf_url).toBeUndefined();
+      expect(result.note).toContain('publisher copyright');
     });
 
-    test('fetchOpenAccess returns empty when no PMCID found', async () => {
+    test('fetchOpenAccess reports paywalled for in-PMC records without free links', async () => {
+      const paywalledRecord = {
+        pmcid: 'PMC9999999',
+        isOpenAccess: 'N',
+        inPMC: 'Y',
+        inEPMC: 'Y',
+        fullTextUrlList: {
+          fullTextUrl: [{ availability: 'Subscription required', documentStyle: 'doi', site: 'DOI', url: 'https://doi.org/10.1/x' }],
+        },
+      };
+      global.fetch = jest.fn()
+        .mockResolvedValue({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve(epmcSearchHit(paywalledRecord)),
+        }) as any;
+
+      const result = await fetchOpenAccess('PMC9999999');
+
+      expect(result.status).toBe('paywalled');
+      expect(result.full_text_available).toBe(false);
+      expect(result.note).toContain('not free to read');
+    });
+
+    test('fetchOpenAccess reports unknown when Europe PMC has no record for a valid PMCID', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValue({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ hitCount: 0, resultList: { result: [] } }),
+        }) as any;
+
+      const result = await fetchOpenAccess('PMC9999999');
+
+      // PMCID verified upstream, so this is a data gap — never not_in_pmc
+      expect(result.status).toBe('unknown');
+      expect(result.full_text_available).toBe(false);
+      expect(result._error).toBeUndefined();
+      expect(result.links?.pmc_url).toBeDefined();
+    });
+
+    test('fetchOpenAccess surfaces _error when the Europe PMC search fails at transport level', async () => {
+      // Persistent failure mock: the europepmc connection retries 5xx
+      // (3 attempts), so mockResolvedValueOnce chains would be consumed.
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+        headers: new Headers({ 'content-type': 'text/html' }),
+        text: () => Promise.resolve('down'),
+      }) as any;
+
+      const result = await fetchOpenAccess('PMC9999999');
+
+      expect((result as any)._error).toContain('Open access lookup failed');
+      expect((result as any)._error).toContain('503');
+    }, 30000);
+
+    test('articleGet() with oa section reports not_in_pmc when neither PubMed XML nor IDConv has a PMCID', async () => {
       global.fetch = jest.fn()
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'text/xml' }),
-          text: () => Promise.resolve(SINGLE_ARTICLE_XML),
+          text: () => Promise.resolve(MINIMAL_ARTICLE_XML_NO_PMC),
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -1207,7 +1382,8 @@ describe('article', () => {
       const result = await articleGet('12345', ['oa']);
 
       expect(global.fetch).toHaveBeenCalledTimes(2);
-      expect(result.sections?.open_access).toEqual({});
+      expect(result.sections?.open_access).toMatchObject({ status: 'not_in_pmc', full_text_available: false });
+      expect(result.is_open_access).toBeUndefined();
     });
 
     test('articleGet() with doi: prefix resolves correctly', async () => {
@@ -1302,12 +1478,12 @@ describe('article', () => {
       await expect(articleGet('10.9999/nonexistent')).rejects.toThrow('Could not resolve doi');
     });
 
-    test('articleGet() with PMID and oa section returns empty when IDConv returns error record', async () => {
+    test('articleGet() with fulltext section reports no_pmcid honestly when the article is not in PMC', async () => {
       global.fetch = jest.fn()
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'text/xml' }),
-          text: () => Promise.resolve(SINGLE_ARTICLE_XML),
+          text: () => Promise.resolve(MINIMAL_ARTICLE_XML_NO_PMC),
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -1318,63 +1494,82 @@ describe('article', () => {
           }),
         }) as any;
 
-      const result = await articleGet('12345', ['oa']);
+      // No PMCID in any fixture, so the unavailable envelope short-circuits
+      // before writeFullTextFile — no cache-dir isolation needed here; if the
+      // fixture ever gains a PMCID, move this into the isolated fulltext
+      // describe below.
+      const result = await articleGet('12345', ['fulltext']);
 
       expect(global.fetch).toHaveBeenCalledTimes(2);
-      expect(result.sections?.open_access).toEqual({});
+      const ft = result.sections?.fulltext as any;
+      expect(ft).toMatchObject({ status: 'unavailable', reason: 'no_pmcid' });
+      expect(ft.links?.doi_url).toBe('https://doi.org/10.1234/test.2018');
+      expect(ft.note).toContain('abstract');
+      // fulltext implies the oa metadata lookup, but no open_access section
+      // is stored unless explicitly requested
+      expect(result.sections?.open_access).toBeUndefined();
     });
 
-    test('articleGet() with sections=["all"] fetches all section types', async () => {
+    test('articleGet() with sections=["all"] fetches all sections but NEVER fulltext', async () => {
       const emptyJsonResponse = {
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: () => Promise.resolve({}),
       };
-      global.fetch = jest.fn()
-        .mockResolvedValueOnce({
-          ok: true,
-          headers: new Headers({ 'content-type': 'text/xml' }),
-          text: () => Promise.resolve(SINGLE_ARTICLE_XML),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          headers: new Headers({ 'content-type': 'application/json' }),
-          json: () => Promise.resolve({
-            status: 'ok',
-            records: [{ pmcid: 'PMC9999999', pmid: 12345 }],
-          }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          headers: new Headers({ 'content-type': 'text/xml' }),
-          text: () => Promise.resolve('<OA><records><record><link format="pdf">https://example.com/paper.pdf</link></record><record/></records></OA>'),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          headers: new Headers({ 'content-type': 'application/json' }),
-          json: () => Promise.resolve({ PubTator3: [{ passages: [{ text: 'test', annotations: [] }] }] }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          headers: new Headers({ 'content-type': 'application/json' }),
-          json: () => Promise.resolve({ linksets: [{ linksetdbs: [{ linkname: 'pubmed_pubmed_citedin', links: ['111', '222'] }] }] }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          headers: new Headers({ 'content-type': 'application/json' }),
-          json: () => Promise.resolve({ linksets: [{ linksetdbs: [{ linkname: 'pubmed_pubmed_refs', links: ['333', '444'] }] }] }),
-        })
-        .mockResolvedValue(emptyJsonResponse) as any;
+      // Sections run in parallel — route by hostname/path, never by call order.
+      global.fetch = jest.fn((url: unknown) => {
+        const { hostname, pathname, searchParams } = parseMockUrl(url);
+        if (hostname === 'eutils.ncbi.nlm.nih.gov' && pathname.endsWith('/efetch.fcgi') && searchParams.get('db') === 'pubmed') {
+          return Promise.resolve({ ok: true, headers: new Headers({ 'content-type': 'text/xml' }), text: () => Promise.resolve(SINGLE_ARTICLE_XML) });
+        }
+        if (hostname === 'www.ebi.ac.uk' && pathname.endsWith('/search')) {
+          return Promise.resolve({ ok: true, headers: new Headers({ 'content-type': 'application/json' }), json: () => Promise.resolve(epmcSearchHit(epmcCoreRecord())) });
+        }
+        return Promise.resolve(emptyJsonResponse);
+      }) as any;
 
       const result = await articleGet('12345', ['all']);
 
-      expect(global.fetch.mock.calls.length).toBeGreaterThanOrEqual(6);
+      expect(global.fetch.mock.calls.length).toBeGreaterThanOrEqual(5);
       expect(result.sections).toBeDefined();
       expect(result.sections).toHaveProperty('open_access');
       expect(result.sections).toHaveProperty('annotations');
       expect(result.sections).toHaveProperty('citation_graph');
       expect(result.sections).toHaveProperty('citation');
+      // Full text is opt-in ONLY — "all" never triggers the XML fetch nor
+      // emits a fulltext section.
+      expect(result.sections.fulltext).toBeUndefined();
+      const fulltextCalls = (global.fetch as any).mock.calls.map(c => String(c[0])).filter(u => u.includes('fullTextXML') || u.includes('db=pmc'));
+      expect(fulltextCalls).toHaveLength(0);
     }, 30000);
+
+
+    test('articleGet() with sections=["fulltext"] inline mode uses the cap and shares the oa lookup', async () => {
+      global.fetch = jest.fn((url: unknown) => {
+        const { hostname, pathname } = parseMockUrl(url);
+        if (hostname === 'eutils.ncbi.nlm.nih.gov' && pathname.endsWith('/efetch.fcgi')) {
+          return Promise.resolve({ ok: true, headers: new Headers({ 'content-type': 'text/xml' }), text: () => Promise.resolve(SINGLE_ARTICLE_XML) });
+        }
+        if (hostname === 'www.ebi.ac.uk' && pathname.endsWith('/search')) {
+          return Promise.resolve({ ok: true, headers: new Headers({ 'content-type': 'application/json' }), json: () => Promise.resolve(epmcSearchHit(epmcCoreRecord())) });
+        }
+        if (hostname === 'www.ebi.ac.uk' && pathname.endsWith('/fullTextXML')) {
+          return Promise.resolve({ ok: true, headers: new Headers({ 'content-type': 'text/xml' }), text: () => Promise.resolve(JATS_FULLTEXT_XML) });
+        }
+        return Promise.reject(new Error(`unexpected url ${url}`));
+      }) as any;
+
+      const result = await articleGet('12345', ['fulltext'], { fulltextMaxChars: 5000, fulltextOutput: 'inline' });
+
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+      const ft = result.sections?.fulltext as any;
+      expect(ft.status).toBe('available');
+      expect(ft.max_chars).toBe(5000);
+      expect(ft.is_open_access).toBe(true);
+      // one shared Europe PMC search backs oa metadata + fulltext header
+      expect(result.sections?.open_access).toBeUndefined();
+      expect(result.is_open_access).toBe(true);
+    });
 
     test('articleGet() with DOI where IDConv record has no pmid throws', async () => {
       global.fetch = jest.fn().mockResolvedValue({
@@ -1389,19 +1584,7 @@ describe('article', () => {
       await expect(articleGet('10.9999/x')).rejects.toThrow('Could not resolve doi');
     });
 
-    test('articleGet() with oa section returns license information', async () => {
-      const OA_XML_WITH_LICENSE = `<?xml version="1.0"?>
-      <OA>
-        <responseDate>2019-01-28 10:41:16</responseDate>
-        <request id="PMC5334499">https://www.ncbi.nlm.nih.gov/utils/oa/oa.fcgi?id=PMC5334499</request>
-        <records returned-count="1" total-count="1">
-          <record id="PMC5334499" citation="World J Radiol. 2017 Feb 28; 9(2):27-33" license="CC BY-NC" retracted="no">
-            <link format="tgz" updated="2017-03-17 13:10:45" href="ftp://ftp.ncbi.nlm.nih.gov/pub/pmc/oa_package/8e/71/PMC5334499.tar.gz"/>
-            <link format="pdf" updated="2017-03-03 06:05:17" href="ftp://ftp.ncbi.nlm.nih.gov/pub/pmc/oa_pdf/8e/71/WJR-9-27.PMC5334499.pdf"/>
-          </record>
-        </records>
-      </OA>`;
-
+    test('articleGet() with oa section returns license information from the Europe PMC record', async () => {
       global.fetch = jest.fn()
         .mockResolvedValueOnce({
           ok: true,
@@ -1411,136 +1594,364 @@ describe('article', () => {
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
-          json: () => Promise.resolve({
-            status: 'ok',
-            records: [{ pmcid: 'PMC5334499', pmid: 12345 }],
-          }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          headers: new Headers({ 'content-type': 'text/xml' }),
-          text: () => Promise.resolve(OA_XML_WITH_LICENSE),
+          json: () => Promise.resolve(epmcSearchHit(epmcCoreRecord({ license: 'cc by-nc' }))),
         }) as any;
 
       const result = await articleGet('12345', ['oa']);
 
-      expect(result.sections?.open_access).toEqual({
-        pmcid: 'PMC5334499',
-        pdf_url: 'ftp://ftp.ncbi.nlm.nih.gov/pub/pmc/oa_pdf/8e/71/WJR-9-27.PMC5334499.pdf',
-        license: 'CC BY-NC',
+      expect(result.sections?.open_access).toMatchObject({
+        pmcid: 'PMC9999999',
+        license: 'cc by-nc',
         license_url: 'https://creativecommons.org/licenses/by-nc/4.0/',
-        source: 'pmc_oa',
+        status: 'open_access',
       });
     });
   });
 
-  describe('parseOaXml', () => {
-    test('parseOaXml extracts license from record attribute', () => {
-      const OA_XML = `<?xml version="1.0"?>
-      <OA>
-        <records returned-count="1" total-count="1">
-          <record id="PMC5334499" license="CC BY-NC" retracted="no">
-            <link format="pdf" href="https://example.com/paper.pdf"/>
-          </record>
-        </records>
-      </OA>`;
-
-      const result = parseOaXml(OA_XML);
-
-      expect(result.license).toBe('CC BY-NC');
-      expect(result.license_url).toBe('https://creativecommons.org/licenses/by-nc/4.0/');
-      expect(result.pdf_url).toBe('https://example.com/paper.pdf');
+  describe('licenseToUrl', () => {
+    test('maps CC license names to their 4.0 URLs by default', () => {
+      const licenses = ['cc0', 'cc by', 'cc by-nc', 'cc by-nc-nd', 'cc by-nc-sa', 'cc by-nd', 'cc by-sa'];
+      for (const license of licenses) {
+        expect(licenseToUrl(license)).toBeDefined();
+      }
+      expect(licenseToUrl('cc by')).toBe('https://creativecommons.org/licenses/by/4.0/');
+      expect(licenseToUrl('CC BY-NC')).toBe('https://creativecommons.org/licenses/by-nc/4.0/');
     });
 
-    test('parseOaXml handles various CC license types', () => {
-      const licenses = [
-        'CC0',
-        'CC BY',
-        'CC BY-NC',
-        'CC BY-NC-ND',
-        'CC BY-NC-SA',
-        'CC BY-ND',
-        'CC BY-SA',
-      ];
+    test('keeps the declared license version when present', () => {
+      expect(licenseToUrl('CC BY 3.0')).toBe('https://creativecommons.org/licenses/by/3.0/');
+      expect(licenseToUrl('cc by-nc-sa 2.5')).toBe('https://creativecommons.org/licenses/by-nc-sa/2.5/');
+    });
 
-      for (const license of licenses) {
-        const OA_XML = `<?xml version="1.0"?>
-        <OA>
-          <records>
-            <record license="${license}">
-              <link format="pdf" href="https://example.com/paper.pdf"/>
-            </record>
-          </records>
-        </OA>`;
+    test('returns undefined for unknown license strings', () => {
+      expect(licenseToUrl('some publisher agreement')).toBeUndefined();
+    });
+  });
 
-        const result = parseOaXml(OA_XML);
-        expect(result.license).toBe(license);
-        expect(result.license_url).toBeDefined();
+  describe('fulltext section', () => {
+    let fulltextCacheDir: string | undefined;
+
+    beforeEach(() => {
+      // File-mode writes must never touch the real ~/.cache/biomcp
+      fulltextCacheDir = process.env.BIOMCP_CACHE_DIR;
+      process.env.BIOMCP_CACHE_DIR = mkdtempSync(join(tmpdir(), 'biomcp-ft-'));
+    });
+
+    afterEach(() => {
+      if (fulltextCacheDir === undefined) delete process.env.BIOMCP_CACHE_DIR;
+      else process.env.BIOMCP_CACHE_DIR = fulltextCacheDir;
+      try {
+        rmSync(process.env.BIOMCP_CACHE_DIR ?? join(tmpdir(), 'biomcp-ft-'), { recursive: true, force: true });
+      } catch {
+        void 0;
       }
     });
 
-    test('parseOaXml returns undefined for license when not present', () => {
-      const OA_XML = `<?xml version="1.0"?>
-      <OA>
-        <records>
-          <record id="PMC123">
-            <link format="pdf" href="https://example.com/paper.pdf"/>
-          </record>
-        </records>
-      </OA>`;
-
-      const result = parseOaXml(OA_XML);
-
-      expect(result.license).toBeUndefined();
-      expect(result.license_url).toBeUndefined();
-      expect(result.pdf_url).toBe('https://example.com/paper.pdf');
+    const xmlResponse = (xml: string) => ({
+      ok: true,
+      headers: new Headers({ 'content-type': 'text/xml' }),
+      text: () => Promise.resolve(xml),
+    });
+    const failingResponse = (status: number) => ({
+      ok: false,
+      status,
+      statusText: 'Error',
+      headers: new Headers({ 'content-type': 'text/html' }),
+      text: () => Promise.resolve('error'),
     });
 
-    test('parseOaXml handles alternative record location', () => {
-      const OA_XML = `<?xml version="1.0"?>
-      <OA>
-        <record license="CC BY">
-          <link format="pdf" href="https://example.com/paper.pdf"/>
-        </record>
-      </OA>`;
+    test('fetchFullText fetches Europe PMC fullTextXML and parses sections', async () => {
+      global.fetch = jest.fn().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
 
-      const result = parseOaXml(OA_XML);
+      const result = await fetchFullText('PMC9999999', { oa: OA_OPEN, output: 'inline' });
 
-      expect(result.license).toBe('CC BY');
-      expect(result.license_url).toBe('https://creativecommons.org/licenses/by/4.0/');
-      expect(result.pdf_url).toBe('https://example.com/paper.pdf');
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      const url = (global.fetch as any).mock.calls[0][0] as string;
+      expect(url).toContain('/PMC9999999/fullTextXML');
+      expect(result.status).toBe('available');
+      expect(result.source).toBe('europepmc');
+      expect(result.format).toBe('jats-xml');
+      expect(result.is_open_access).toBe(true);
+      expect(result.license).toBe('cc by');
+      expect(result.truncated).toBe(false);
+      const headings = (result.sections ?? []).map(s => s.heading);
+      expect(headings).toEqual(['Introduction', 'Results', 'Results — Mutation effects', 'Acknowledgments']);
+      expect(result.sections?.[0].text).toContain('H(+)'); // <sup> -> parentheses
+      expect(result.sections?.[0].text).toContain('4 μM');
+      expect(result.sections?.[1].text).toContain('[Figure 1]'); // fig -> placeholder
+      // reference list dropped; note points at the citation section
+      expect(result.note).toContain('sections=["citation"]');
     });
 
-    test('parseOaXml handles case-insensitive license matching', () => {
-      const OA_XML = `<?xml version="1.0"?>
-      <OA>
-        <records>
-          <record license="cc by-nc">
-            <link format="pdf" href="https://example.com/paper.pdf"/>
-          </record>
-        </records>
-      </OA>`;
+    test('fetchFullText falls back to eutils efetch db=pmc when Europe PMC fails', async () => {
+      // Live-verified: Europe PMC answers HTTP 500 (deterministic) for
+      // free-to-read records its fullTextXML endpoint cannot serve.
+      global.fetch = jest.fn((url: unknown) => {
+        const { hostname } = parseMockUrl(url);
+        if (hostname === 'www.ebi.ac.uk') return Promise.resolve(failingResponse(500));
+        if (hostname === 'eutils.ncbi.nlm.nih.gov') return Promise.resolve(xmlResponse(PMC_ARTICLESET_XML));
+        return Promise.reject(new Error(`unexpected url ${url}`));
+      }) as any;
 
-      const result = parseOaXml(OA_XML);
+      const result = await fetchFullText('PMC9999999', { oa: OA_OPEN, output: 'inline' });
 
-      expect(result.license).toBe('cc by-nc');
-      expect(result.license_url).toBe('https://creativecommons.org/licenses/by-nc/4.0/');
+      const eutilsUrl = (global.fetch as any).mock.calls.map(c => String(c[0])).find(u => u.includes('efetch.fcgi'));
+      expect(eutilsUrl).toContain('db=pmc');
+      expect(eutilsUrl).toContain('id=9999999'); // PMC prefix stripped
+      expect(result.status).toBe('available');
+      expect(result.source).toBe('eutils');
+      expect(result.sections?.length).toBeGreaterThan(0);
+    }, 30000);
+
+    test('fetchFullText reports fetch_failed when both legs fail', async () => {
+      global.fetch = jest.fn().mockResolvedValue(failingResponse(500)) as any;
+
+      const result = await fetchFullText('PMC9999999', { oa: OA_OPEN });
+
+      expect(result.status).toBe('unavailable');
+      expect(result.reason).toBe('fetch_failed');
+      expect(result.note).toContain('retry');
+      expect(result._error).toBeUndefined();
+    }, 30000);
+
+    test('fetchFullText skips upstream calls for paywalled records', async () => {
+      global.fetch = jest.fn() as any;
+
+      const result = await fetchFullText('PMC9999999', { oa: { ...OA_OPEN, status: 'paywalled', full_text_available: false } });
+
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(result.status).toBe('unavailable');
+      expect(result.reason).toBe('paywalled');
+      expect(result.note).toContain('not free to read');
+      // no DOI known -> the note must not point at a nonexistent links.doi_url
+      expect(result.note).not.toContain('doi_url');
+
+      const withDoi = await fetchFullText('PMC9999999', { oa: { ...OA_OPEN, status: 'paywalled', full_text_available: false }, doi: '10.1234/x' });
+      expect(withDoi.note).toContain('doi_url');
+      expect(withDoi.links?.doi_url).toBe('https://doi.org/10.1234/x');
     });
 
-    test('parseOaXml handles license with version number', () => {
-      const OA_XML = `<?xml version="1.0"?>
-      <OA>
-        <records>
-          <record license="CC BY 4.0">
-            <link format="pdf" href="https://example.com/paper.pdf"/>
-          </record>
-        </records>
-      </OA>`;
+    test('fetchFullText reports no_pmcid without upstream calls', async () => {
+      global.fetch = jest.fn() as any;
 
-      const result = parseOaXml(OA_XML);
+      const result = await fetchFullText(undefined, { doi: '10.1234/x' });
 
-      expect(result.license).toBe('CC BY 4.0');
-      expect(result.license_url).toBe('https://creativecommons.org/licenses/by/4.0/');
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(result.status).toBe('unavailable');
+      expect(result.reason).toBe('no_pmcid');
+      expect(result.links?.doi_url).toBe('https://doi.org/10.1234/x');
+    });
+
+    test('fetchFullText reports no_machine_readable_xml for front-only records', async () => {
+      const frontOnly = '<?xml version="1.0"?><article><front><article-meta><title>x</title></article-meta></front></article>';
+      global.fetch = jest.fn().mockResolvedValue(xmlResponse(frontOnly)) as any;
+
+      const result = await fetchFullText('PMC9999999', { oa: OA_OPEN });
+
+      expect(result.status).toBe('unavailable');
+      expect(result.reason).toBe('no_machine_readable_xml');
+    });
+
+    test('fetchFullText truncates honestly with per-section flags and omitted sections', async () => {
+      global.fetch = jest.fn().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
+
+      // Clamped to the 1000-char floor; the fixture introduction is ~1300 chars
+      const result = await fetchFullText('PMC9999999', { oa: OA_OPEN, maxChars: 250, output: 'inline' });
+
+      expect(result.max_chars).toBe(1000);
+      expect(result.truncated).toBe(true);
+      expect(result.total_char_count).toBeGreaterThan(result.char_count!);
+      expect(result.sections?.length).toBe(1);
+      expect(result.sections?.[0].truncated).toBe(true);
+      expect(result.sections?.[0].text.endsWith('…')).toBe(true);
+      expect(result.omitted_sections).toEqual(['Results', 'Results — Mutation effects', 'Acknowledgments']);
+      expect(result.note).toContain('fulltext_max_chars=200000');
+    });
+
+    test('fetchFullText file mode (default) writes markdown and returns a handle, never the body', async () => {
+      global.fetch = jest.fn().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
+
+      const result = await fetchFullText('PMC9999999', { oa: OA_OPEN, pmid: '12345', title: 'A test title' });
+
+      expect(result.mode).toBe('file');
+      expect(result.format).toBe('markdown');
+      expect(result.status).toBe('available');
+      expect(result.file_path).toBeDefined();
+      expect(existsSync(result.file_path!)).toBe(true);
+      expect(result.sections).toBeUndefined(); // the body never enters the reply
+      expect(result.max_chars).toBe(0);
+      expect(result.pmid).toBe('12345');
+      expect(result.title).toBe('A test title');
+      expect(result.note).toContain('fulltext_output="inline"');
+      expect(result.note).toContain('sections=["citation"]');
+      expect(result.note).toContain('offset/limit or grep');
+      expect(result.note).toContain('pruned after ~24h');
+
+      // The file: front matter, single-line title, headings at the outline lines
+      const content = readFileSync(result.file_path!, 'utf8');
+      expect(content.startsWith('---\n')).toBe(true);
+      expect(content).toContain('pmcid: PMC9999999');
+      expect(content).toContain('pmid: "12345"');
+      expect(content).toContain('title: "A test title"');
+      expect(content).toContain('# A test title');
+      const fileLines = content.split('\n');
+      for (const entry of result.outline ?? []) {
+        expect(fileLines[entry.line - 1]).toBe(`## ${entry.heading}`);
+        expect(entry.chars).toBeGreaterThan(0);
+      }
+      expect((result.outline ?? []).map(o => o.heading)).toEqual(
+        ['Introduction', 'Results', 'Results — Mutation effects', 'Acknowledgments']
+      );
+      // body wrapped for line-based agent tools
+      const maxLine = Math.max(...fileLines.filter(l => l.length > 0).map(l => l.length));
+      expect(maxLine).toBeLessThanOrEqual(130);
+    });
+
+    test('fetchFullText file mode normalizes the PMCID and overwrites on re-write', async () => {
+      const first = writeFullTextFile({
+        pmcid: 'pmc9999999',
+        source: 'eutils',
+        sections: [{ heading: 'S', text: 'first', truncated: false }],
+      });
+      expect(first.ok).toBe(true);
+      if (first.ok) expect(first.file_path.endsWith('PMC9999999.md')).toBe(true);
+
+      const second = writeFullTextFile({
+        pmcid: 'PMC9999999',
+        source: 'eutils',
+        sections: [{ heading: 'S', text: 'second version', truncated: false }],
+      });
+      expect(second.ok).toBe(true);
+      if (second.ok) expect(second.file_path).toBe(first.ok ? first.file_path : '');
+      expect(readdirSync(join(process.env.BIOMCP_CACHE_DIR!, 'fulltext'))).toHaveLength(1);
+      expect(readFileSync(join(process.env.BIOMCP_CACHE_DIR!, 'fulltext', 'PMC9999999.md'), 'utf8')).toContain('second version');
+    });
+
+    test('fetchFullText file mode falls back to inline when the cache dir is unwritable', async () => {
+      global.fetch = jest.fn().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
+      // Point the cache root at a regular file: every fs op under it fails
+      const notADir = join(tmpdir(), `biomcp-notadir-${process.pid}`);
+      writeFileSync(notADir, 'x');
+
+      const saved = process.env.BIOMCP_CACHE_DIR;
+      process.env.BIOMCP_CACHE_DIR = notADir;
+      try {
+        const result = await fetchFullText('PMC9999999', { oa: OA_OPEN });
+        expect(result.mode).toBe('inline');
+        expect(result.status).toBe('available');
+        expect(result.sections?.length).toBeGreaterThan(0);
+        expect(result.note).toContain('File output was requested but unavailable');
+      } finally {
+        if (saved === undefined) delete process.env.BIOMCP_CACHE_DIR;
+        else process.env.BIOMCP_CACHE_DIR = saved;
+        rmSync(notADir, { force: true });
+      }
+    });
+
+    test('articleGet() with sections=["fulltext"] file mode returns a handle for an existing file', async () => {
+      global.fetch = jest.fn((url: unknown) => {
+        const { hostname, pathname } = parseMockUrl(url);
+        if (hostname === 'eutils.ncbi.nlm.nih.gov' && pathname.endsWith('/efetch.fcgi')) {
+          return Promise.resolve({ ok: true, headers: new Headers({ 'content-type': 'text/xml' }), text: () => Promise.resolve(SINGLE_ARTICLE_XML) });
+        }
+        if (hostname === 'www.ebi.ac.uk' && pathname.endsWith('/search')) {
+          return Promise.resolve({ ok: true, headers: new Headers({ 'content-type': 'application/json' }), json: () => Promise.resolve(epmcSearchHit(epmcCoreRecord())) });
+        }
+        if (hostname === 'www.ebi.ac.uk' && pathname.endsWith('/fullTextXML')) {
+          return Promise.resolve({ ok: true, headers: new Headers({ 'content-type': 'text/xml' }), text: () => Promise.resolve(JATS_FULLTEXT_XML) });
+        }
+        return Promise.reject(new Error(`unexpected url ${url}`));
+      }) as any;
+
+      const result = await articleGet('12345', ['fulltext']);
+
+      const ft = result.sections?.fulltext as any;
+      expect(ft.mode).toBe('file');
+      expect(ft.status).toBe('available');
+      expect(existsSync(ft.file_path)).toBe(true);
+      expect(ft.outline.length).toBeGreaterThan(0);
+      expect(ft.sections).toBeUndefined();
+      expect(result.is_open_access).toBe(true);
+    });
+
+    test('file mode ignores fulltext_max_chars — the file carries the complete text', async () => {
+      global.fetch = jest.fn().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
+
+      const result = await fetchFullText('PMC9999999', { oa: OA_OPEN, maxChars: 1000 });
+
+      expect(result.mode).toBe('file');
+      expect(result.char_count).toBe(result.total_char_count);
+      expect(result.truncated).toBe(false);
+      // the fixture body (~1178 chars) exceeds the inline cap that file
+      // mode must ignore
+      expect(result.char_count).toBeGreaterThan(1000);
+    });
+
+    test('file->inline fallback clamps to the default cap even when a larger inline cap was passed', async () => {
+      global.fetch = jest.fn().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
+      const notADir = join(tmpdir(), `biomcp-notadir2-${process.pid}`);
+      writeFileSync(notADir, 'x');
+
+      const saved = process.env.BIOMCP_CACHE_DIR;
+      process.env.BIOMCP_CACHE_DIR = notADir;
+      try {
+        const result = await fetchFullText('PMC9999999', { oa: OA_OPEN, maxChars: 200000 });
+        expect(result.mode).toBe('inline');
+        expect(result.max_chars).toBeLessThanOrEqual(FULLTEXT_DEFAULT_MAX_CHARS);
+      } finally {
+        if (saved === undefined) delete process.env.BIOMCP_CACHE_DIR;
+        else process.env.BIOMCP_CACHE_DIR = saved;
+        rmSync(notADir, { force: true });
+      }
+    });
+
+    test('fetchFullText maps eutils error bodies to retryable fetch_failed, not no_machine_readable_xml', async () => {
+      // E-utilities answers some failures HTTP 200 with <eFetchResult><ERROR>
+      // (e.g. rate limiting) — that is an upstream failure, not a missing body.
+      const eutilError = '<?xml version="1.0"?><eFetchResult><ERROR>Agent exceeded rate limit</ERROR></eFetchResult>';
+      global.fetch = jest.fn((url: unknown) => {
+        const { hostname } = parseMockUrl(url);
+        if (hostname === 'www.ebi.ac.uk') return Promise.resolve(failingResponse(500));
+        if (hostname === 'eutils.ncbi.nlm.nih.gov') {
+          return Promise.resolve({ ok: true, headers: new Headers({ 'content-type': 'text/xml' }), text: () => Promise.resolve(eutilError) });
+        }
+        return Promise.reject(new Error(`unexpected url ${url}`));
+      }) as any;
+
+      const result = await fetchFullText('PMC9999999', { oa: OA_OPEN });
+
+      expect(result.status).toBe('unavailable');
+      expect(result.reason).toBe('fetch_failed');
+      expect(result.note).toContain('retry');
+    }, 30000);
+
+    test('parseFullTextJats keeps boolean text nodes', () => {
+      // preserveOrder converts "true"/"false" text to booleans — paragraphs
+      // must not silently vanish.
+      const xml = '<?xml version="1.0"?><article><body><sec><title>Flags</title><p>true</p><p>false</p><p>real text</p></sec></body></article>';
+      const result = parseFullTextJats(xml, FULLTEXT_DEFAULT_MAX_CHARS);
+      expect(result?.sections[0].text).toBe('true\n\nfalse\n\nreal text');
+    });
+
+    test('parseFullTextJats keeps numeric citation markers inside xref', () => {
+      // preserveOrder mode hands numeric text nodes back as numbers
+      // ({"#text": 1}) — they must be stringified, not dropped.
+      const xml = '<?xml version="1.0"?><article><body><sec><title>T</title><p>such as diphtheria [<xref rid="B1" ref-type="bibr">1</xref>], botulinum [<xref rid="B2" ref-type="bibr">2</xref>].</p></sec></body></article>';
+      const result = parseFullTextJats(xml, FULLTEXT_DEFAULT_MAX_CHARS);
+      expect(result?.sections[0].text).toBe('such as diphtheria [1], botulinum [2].');
+    });
+
+    test('parseFullTextJats handles the eutils pmc-articleset wrapper', () => {
+      const result = parseFullTextJats(PMC_ARTICLESET_XML, FULLTEXT_DEFAULT_MAX_CHARS);
+      expect(result).not.toBeNull();
+      expect(result!.sections.map(s => s.heading)).toContain('Introduction');
+      expect(result!.hasReferences).toBe(true);
+    });
+
+    test('parseFullTextJats returns null for error payloads and body-less documents', () => {
+      const err = '<?xml version="1.0"?><eFetchResult><ERROR>Supplied id parameter is empty.</ERROR></eFetchResult>';
+      expect(parseFullTextJats(err, FULLTEXT_DEFAULT_MAX_CHARS)).toBeNull();
+      expect(parseFullTextJats('<?xml version="1.0"?><article><front/></article>', FULLTEXT_DEFAULT_MAX_CHARS)).toBeNull();
     });
   });
 });
@@ -1748,6 +2159,39 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     expect(result.published?.journal).toBe('Frontiers in Bioinformatics');
     // no sections requested → none attached
     expect(result.sections).toBeUndefined();
+  });
+
+  test('articleGet on preprint DOI with sections=["fulltext"] returns the honest link-only envelope', async () => {
+    global.fetch = jest.fn((url: unknown) => {
+      const u = String(url);
+      const { hostname, pathname } = parseMockUrl(u);
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/details/biorxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv')));
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
+      if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse(epmcCorePayload));
+      return Promise.reject(new Error(`unexpected url ${u}`));
+    }) as any;
+
+    const result = await articleGet('10.1101/2025.03.05.641768', ['fulltext']);
+
+    const ft = result.sections?.fulltext as any;
+    expect(ft).toMatchObject({ status: 'unavailable', reason: 'not_implemented_for_preprints' });
+    expect(ft.links?.jatsxml_url).toContain('.source.xml');
+    expect(ft.note).toContain('jatsxml_url');
+  });
+
+  test('articleGet on preprint DOI with sections=["all"] never emits a fulltext envelope', async () => {
+    global.fetch = jest.fn((url: unknown) => {
+      const u = String(url);
+      const { hostname, pathname } = parseMockUrl(u);
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/details/biorxiv/')) return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv')));
+      if (hostname === 'api.biorxiv.org' && pathname.startsWith('/pubs/')) return Promise.resolve(jsonResponse({ messages: [{ status: 'no posts found' }], collection: [] }));
+      if (hostname === 'www.ebi.ac.uk') return Promise.resolve(jsonResponse(epmcCorePayload));
+      return Promise.reject(new Error(`unexpected url ${u}`));
+    }) as any;
+
+    const result = await articleGet('10.1101/2025.03.05.641768', ['all']);
+
+    expect(result.sections?.fulltext).toBeUndefined();
   });
 
   test('articleGet falls back to medrxiv server on biorxiv soft miss', async () => {

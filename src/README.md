@@ -71,7 +71,7 @@ entityGet(id, sections?)      → { ...core, sections: Record<string, unknown> }
 | `variant.ts` | 4 + stub (core, frequency, predictions, clinical; `alphagenome_scores` currently returns an error stub pending reimplementation) | MyVariant.info, CIViC, OncoKB |
 | `drug.ts` | 7 (us_regulatory, eu_regulatory, who_regulatory, safety, targets, indications, adverse_events) | MyChem.info, OpenFDA, OpenTargets |
 | `disease.ts` | 3 (gene_associations, phenotypes, pathways) | MyDisease.info, DisGeNET, Monarch, Reactome |
-| `article/` | 4 (open_access, annotations, citation_graph, citation) | PubMed, Europe PMC, Semantic Scholar, PubTator, LitSense, NCBI ID Converter, PMC OA, Crossref, OpenCitations |
+| `article/` | 5 (open_access, fulltext, annotations, citation_graph, citation) | PubMed (incl. efetch db=pmc full text), Europe PMC (incl. fullTextXML), Semantic Scholar, PubTator, LitSense, NCBI ID Converter, Crossref, OpenCitations; fulltext written as markdown under BIOMCP_CACHE_DIR/fulltext |
 | `trial.ts` | 3 (eligibility, locations, outcomes) | ClinicalTrials.gov |
 | `pdb.ts` | 5 (polymer_entities, ligands, assembly, experiment, citation) | RCSB PDB (Data API, Search API, File Download) |
 | `patent/` | 6 (core, abstract, claims, citations, family, classifications) | EPO OPS, USPTO ODP, USPTO PPUBS, Google Patents (+ Wayback fallback) |
