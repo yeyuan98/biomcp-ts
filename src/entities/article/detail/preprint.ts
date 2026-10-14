@@ -15,7 +15,17 @@ import type {
   PreprintFunder,
   PreprintPublishedVersion,
 } from '../types.js';
-import type { FederatedCitationResult, CitationRecord } from '../citation/types.js';
+import { summarizeSourceResults } from '../citation/index.js';
+import type {
+  FederatedCitationResult,
+  CitationRecord,
+  CitationSourceSummary,
+  SourceCitationResult,
+} from '../citation/types.js';
+
+/** Citation directions the preprint PPR path honors, mirroring the journal
+ * path's `ArticleGetOptions.citationDirection`. */
+type PreprintCitationDirection = 'forward' | 'backward' | 'both';
 
 // ---- official api.biorxiv.org response types ----
 // All errors are HTTP 200 with a `messages[0].status` string
@@ -109,6 +119,22 @@ function encodeDoiPath(doi: string): string {
   return doi.split('/').map(encodeURIComponent).join('/');
 }
 
+/** Tool-level timeout budget article_get runs under (server/tools/article.ts
+ * caps the tool at 60 s via withToolTimeout). Exported — mirroring the
+ * patent-search precedent PATENT_SEARCH_TOOL_BUDGET_MS — so the cap the
+ * preprint path schedules itself against is referenceable in one place. */
+export const PREPRINT_TOOL_BUDGET_MS = 60_000;
+
+/** Elapsed-time threshold past which the step-2 /pubs call is skipped.
+ * Arithmetic: a /pubs call on the slow-host worst case costs ~32.2 s
+ * (2 attempts × 15 s timeout + ~1.15 s retry backoff + ~1 s limiter
+ * spacing), so gating at 20 s bounds the theoretical total at
+ * 20 s (step 1) + 32.2 s (/pubs) ≈ 52.2 s — under the 60 s tool cap with
+ * ~8 s of serialization/transport margin. Step-1 worst cases ABOVE 20 s
+ * (biorxiv probe chain, EPMC) skip /pubs and degrade to the
+ * published-version fallback chain with a note on `published`. */
+export const PREPRINT_PUBS_SKIP_THRESHOLD_MS = 20_000;
+
 /** /details/{server}/{doi} returns one record per version; the DOI's prefix
  * cannot tell biorxiv from medrxiv (10.1101 is shared with CSHL Press
  * journals and the new 10.64898 prefix is shared by both preprint servers),
@@ -121,11 +147,17 @@ function encodeDoiPath(doi: string): string {
  * the failure. Worst case is therefore one server's transport failure
  * (~31 s: 2 attempts × 15 s + 1 s backoff) and no /pubs call
  * (getPreprintArticle skips it when the official API is unreachable).
- * The Europe PMC leg runs in parallel and is untouched. Residual exposure:
- * in the pathological slow-but-succeeding-host case (not an outage — those
- * fast-skip), step 2's /pubs call can still add up to ~31 s after step 1,
- * pushing the theoretical total past the 60 s article_get cap; the tool
- * timeout then surfaces as an error rather than a hang. */
+ * The Europe PMC leg runs in parallel and is untouched. The residual
+ * slow-but-succeeding-host exposure (not an outage — those fast-skip) is
+ * bounded by the /pubs budget guard: getPreprintArticle records its start
+ * time and skips /pubs once step 1 has consumed more than
+ * PREPRINT_PUBS_SKIP_THRESHOLD_MS (20 s) — 20 s + /pubs' ~32.2 s worst ≈
+ * 52.2 s stays under PREPRINT_TOOL_BUDGET_MS (60 s) with ~8 s of margin,
+ * and the published mapping falls back to Europe PMC's "Preprint of" link
+ * or the /details `published` DOI field with a note on `published`. The
+ * PPR citation leg is not the binding constraint (10 s-capped via
+ * DEFAULT_PROVIDER_TIMEOUT_MS). No AbortSignal plumbing — skip-and-note
+ * suffices because every /pubs consumer has a fallback. */
 async function fetchOfficialDetails(
   doi: string
 ): Promise<{ server: 'biorxiv' | 'medrxiv'; records: BiorxivDetailsRecord[] } | undefined> {
@@ -281,12 +313,19 @@ function publishedFromEpmc(rec?: EuropePMCPreprintRecord): PreprintPublishedVers
 
 /** Citation section for a preprint, reusing the FederatedCitationResult
  * SHAPE (so article_get consumers see one consistent envelope); the data
- * comes from Europe PMC's /PPR/ endpoints, not the PMID-based federation. */
+ * comes from Europe PMC's /PPR/ endpoints, not the PMID-based federation.
+ *
+ * `direction` gates which PPR endpoint is REQUESTED (not post-filtered —
+ * the skipped leg costs no network call), mirroring the journal path's
+ * per-direction provider gating. The skipped direction's array key stays
+ * present as `[]` so consumers (and the tool layer's applyLimit) see a
+ * stable envelope shape. */
 async function fetchPprCitationSection(
   doi: string,
   pprId: string | undefined,
   citedByCount: number | undefined,
-  limit: number
+  limit: number,
+  direction: PreprintCitationDirection
 ): Promise<FederatedCitationResult | { _error: string }> {
   try {
     let forward: CitationRecord[] = [];
@@ -296,17 +335,23 @@ async function fetchPprCitationSection(
     if (pprId) {
       const conn = connectionManager.getConnection('europepmc');
       const pageSize = Math.max(limit * 3, 10);
+      // Only construct the promise for the requested direction(s) — the
+      // skipped leg is never sent over the wire.
       const [fwdRes, bwdRes] = await Promise.all([
-        withTimeout(
-          conn.request(`/PPR/${pprId}/citations?format=json&pageSize=${pageSize}`) as Promise<EuropePMCCitationsResponse>,
-          DEFAULT_PROVIDER_TIMEOUT_MS,
-          { onTimeout: 'null' }
-        ),
-        withTimeout(
-          conn.request(`/PPR/${pprId}/references?format=json&pageSize=${pageSize}`) as Promise<EuropePMCReferencesResponse>,
-          DEFAULT_PROVIDER_TIMEOUT_MS,
-          { onTimeout: 'null' }
-        ),
+        direction === 'backward'
+          ? null
+          : withTimeout(
+            conn.request(`/PPR/${pprId}/citations?format=json&pageSize=${pageSize}`) as Promise<EuropePMCCitationsResponse>,
+            DEFAULT_PROVIDER_TIMEOUT_MS,
+            { onTimeout: 'null' }
+          ),
+        direction === 'forward'
+          ? null
+          : withTimeout(
+            conn.request(`/PPR/${pprId}/references?format=json&pageSize=${pageSize}`) as Promise<EuropePMCReferencesResponse>,
+            DEFAULT_PROVIDER_TIMEOUT_MS,
+            { onTimeout: 'null' }
+          ),
       ]);
       forward = (fwdRes?.citationList?.citation ?? fwdRes?.citationsArray?.citation ?? [])
         .filter(hit => hit.title || hit.id)
@@ -320,17 +365,22 @@ async function fetchPprCitationSection(
     }
 
     const total = citedByCount ?? fwdHitCount ?? forward.length;
+    // source_results carries the compact per-provider summary (counts +
+    // verbatim error), consistent with the journal federation path since
+    // PR #68 — the records live only in the arrays above, never duplicated.
+    const sourceRow: SourceCitationResult = {
+      source_id: 'europepmc',
+      citation_count: { total, source: 'europepmc' },
+      forward_citations: forward,
+      backward_references: backward,
+    };
+    const sourceSummaries: CitationSourceSummary[] = summarizeSourceResults([sourceRow]);
     return {
       article_id: { doi },
       citation_counts: [{ total, source: 'europepmc' }],
       forward_citations: forward,
       backward_references: backward,
-      source_results: [{
-        source_id: 'europepmc',
-        citation_count: { total, source: 'europepmc' },
-        forward_citations: forward,
-        backward_references: backward,
-      }],
+      source_results: sourceSummaries,
       items_available: forward.length > 0 || backward.length > 0 || total > 0,
     };
   } catch (error) {
@@ -349,12 +399,31 @@ async function fetchPprCitationSection(
  * unavailable). Step 2 (parallel): published-version mapping ‖ citations
  * (when requested). Every failure degrades one part of the result instead
  * of failing the call.
+ *
+ * `citationDirection` is honored by the PPR citation step (the skipped
+ * direction costs no request); `citationMode` is meaningless here (single
+ * Europe PMC source) and, when passed, is reported via `sections._note`
+ * instead of being silently dropped. The same `_note` names any requested
+ * sections this path cannot serve (`oa`/`annotations`/`graph`).
  */
 export async function getPreprintArticle(
   doi: string,
-  options?: { sections?: string[]; limit?: number }
+  options?: {
+    sections?: string[];
+    limit?: number;
+    /** Gates the PPR fetch: 'forward' → /citations only, 'backward' →
+     * /references only, 'both' (default) → both endpoints. */
+    citationDirection?: PreprintCitationDirection;
+    /** No preprint meaning (single Europe PMC source) — when set, a
+     * `sections._note` discloses that instead of a silent drop. */
+    citationMode?: 'fast' | 'full';
+  }
 ): Promise<ArticleResult> {
   const limit = options?.limit ?? 20;
+  // Budget anchor for the /pubs skip gate (issue #51): measures step-1
+  // latency so a slow-but-succeeding official API cannot push step 2 past
+  // the 60 s article_get tool cap.
+  const startedAt = Date.now();
 
   const [official, epmc] = await Promise.all([
     fetchOfficialDetails(doi),
@@ -390,18 +459,67 @@ export async function getPreprintArticle(
 
   const wantsCitation = options?.sections?.includes('citation') || options?.sections?.includes('all');
 
+  // Runtime disclosure notes (visible in the tool reply as `sections._note`
+  // — the preprint path has no other natural note slot). (a) sections this
+  // path cannot serve are named rather than silently ignored; (b) a
+  // citation_mode request is reported as meaningless for the single EPMC
+  // preprint source. `_note` survives the tool layer's applyLimit untouched
+  // (it only visits requested section keys).
+  const notes: string[] = [];
+  const unsupportedSections = (options?.sections ?? []).filter(
+    s => s === 'oa' || s === 'annotations' || s === 'graph'
+  );
+  if (unsupportedSections.length > 0) {
+    const listed = unsupportedSections.map(s => `"${s}"`).join(', ');
+    notes.push(
+      `sections ${listed} not supported for preprint DOIs and were ignored — ` +
+      'only "citation" (Europe PMC PPR citations/references), "fulltext" (link envelope), ' +
+      'and the core record are meaningful for preprints'
+    );
+  }
+  if (wantsCitation && options?.citationMode) {
+    notes.push(
+      `citation_mode="${options.citationMode}" has no effect on preprints — ` +
+      'the citation section always comes from the single Europe PMC PPR source ' +
+      '(no fast/full provider fan-out)'
+    );
+  }
+
   const step2: Promise<void>[] = [];
 
   if (official) {
-    step2.push(
-      fetchPublishedVersion(server, doi).then(p => {
-        // Fallback chain: official /pubs mapping → EPMC "Preprint of" link →
-        // the official /details `published` DOI field → null.
-        result.published = p
-          ?? publishedFromEpmc(epmc)
-          ?? (officialPublishedDoi ? { doi: officialPublishedDoi, source: 'biorxiv_details' } : null);
-      })
-    );
+    const elapsed = Date.now() - startedAt;
+    if (elapsed > PREPRINT_PUBS_SKIP_THRESHOLD_MS) {
+      // Budget guard (issue #51): step 1 was slow-but-succeeding (an outage
+      // fast-skips above), so a /pubs call — worst case ~32.2 s on the same
+      // slow host — risks blowing the 60 s article_get cap. Skip it and
+      // serve the published mapping from the fallback chain over data
+      // already in hand, with a note disclosing the skip.
+      const fallback = publishedFromEpmc(epmc)
+        ?? (officialPublishedDoi ? { doi: officialPublishedDoi, source: 'biorxiv_details' as const } : null);
+      // PreprintPublishedVersion (article/types.ts) has no note field and
+      // that module is outside this change; the intersection types the
+      // runtime disclosure without widening the shared shape.
+      const published: (PreprintPublishedVersion & { note?: string }) | null = fallback
+        ? {
+          ...fallback,
+          note: `biorxiv /pubs skipped — step-1 latency consumed the tool budget `
+            + `(${Math.round(elapsed / 1000)}s already spent); published mapping from the `
+            + 'Europe PMC / biorxiv-details fallback',
+        }
+        : null;
+      result.published = published;
+    } else {
+      step2.push(
+        fetchPublishedVersion(server, doi).then(p => {
+          // Fallback chain: official /pubs mapping → EPMC "Preprint of" link →
+          // the official /details `published` DOI field → null.
+          result.published = p
+            ?? publishedFromEpmc(epmc)
+            ?? (officialPublishedDoi ? { doi: officialPublishedDoi, source: 'biorxiv_details' } : null);
+        })
+      );
+    }
   } else {
     // Official API unreachable → /pubs on the same host is also unreachable;
     // calling it is pure wasted latency. officialPublishedDoi is undefined
@@ -411,7 +529,13 @@ export async function getPreprintArticle(
 
   if (wantsCitation) {
     step2.push(
-      fetchPprCitationSection(doi, result.ppr_id ?? epmc?.id, result.cited_by, limit).then(r => {
+      fetchPprCitationSection(
+        doi,
+        result.ppr_id ?? epmc?.id,
+        result.cited_by,
+        limit,
+        options?.citationDirection ?? 'both'
+      ).then(r => {
         result.sections = result.sections || {};
         (result.sections as Record<string, unknown>)['citation'] = r;
       })
@@ -436,6 +560,11 @@ export async function getPreprintArticle(
   }
 
   await Promise.allSettled(step2);
+
+  if (notes.length > 0) {
+    result.sections = result.sections || {};
+    (result.sections as Record<string, unknown>)['_note'] = notes.join(' ');
+  }
 
   return result;
 }
