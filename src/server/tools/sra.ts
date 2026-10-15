@@ -13,7 +13,7 @@ export function registerSraTools(server: McpServer): void {
 
 The query may be free text, an accession (SRP study, SRX experiment, SRR run, SRS sample), or NCBI field syntax ("RNA-SEQ AND Homo sapiens[Organism]"). Results list experiment/study/sample accessions, organism, library strategy, run count, and first_run_accession for chaining into sra_get.`,
       inputSchema: {
-        query: z.string().describe('Free text or accession — SRP study, SRX experiment, SRR run, SRS sample, or terms like "RNA-SEQ AND Homo sapiens[Organism]"'),
+        query: z.string().trim().min(1, 'Query must be a non-empty string after trimming').describe('Free text or accession — SRP study, SRX experiment, SRR run, SRS sample, or terms like "RNA-SEQ AND Homo sapiens[Organism]"'),
         limit: z.number().int().min(1).max(50).default(10).describe('Maximum results'),
         offset: z.number().int().min(0).default(0).describe('Result offset for pagination'),
       },

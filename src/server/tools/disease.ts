@@ -42,7 +42,7 @@ export function registerDiseaseTools(server: McpServer): void {
     {
       description: 'Search for diseases by name, phenotype, or keyword',
       inputSchema: {
-        query: z.string().describe('Disease name, phenotype, or keyword to search for'),
+        query: z.string().trim().min(1, 'Query must be a non-empty string after trimming').describe('Disease name, phenotype, or keyword to search for'),
         limit: z.number().int().min(1).max(50).default(10).describe('Maximum results'),
         offset: z.number().int().min(0).default(0).describe('Result offset'),
       },

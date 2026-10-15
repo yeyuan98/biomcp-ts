@@ -33,7 +33,7 @@ export function registerPatentTools(server: McpServer): void {
         'Foundational prior art is auto-discovered via co-citation mining of the top results and returned in seminal_prior_art ' +
         '(surfaces seminal documents whose own vocabulary predates the query concept).',
       inputSchema: {
-        query: z.string().describe('Free-text query; quote exact multi-word concepts like "mRNA display" for precise matching'),
+        query: z.string().trim().min(1, 'Query must be a non-empty string after trimming').describe('Free-text query; quote exact multi-word concepts like "mRNA display" for precise matching'),
         assignee: z.string().optional().describe('Filter by assignee/applicant organization, e.g. "Moderna"'),
         inventor: z.string().optional().describe('Filter by inventor name'),
         cpc: z.string().optional().describe('Filter by CPC classification symbol (full symbol, e.g. "C12N15/11")'),

@@ -43,6 +43,12 @@ jobs:
       - name: Unit tests (mocked; integration excluded by npm test)
         run: npm test
 
+      # Keyless live-API suites (jest.integration.config.ts, --runInBand).
+      # Env-gated suites (db, biowasm/ranalysis mirror, depmap) self-skip via
+      # describe.skip when their env vars are absent, so no CI gating is needed.
+      - name: Integration tests (live keyless APIs; env-gated suites self-skip)
+        run: npm run test:integration
+
       - name: Build bundles
         run: npm run build
 
