@@ -18,7 +18,7 @@ export function registerTrialTools(server: McpServer): void {
     {
       description: 'Search clinical trials by condition, intervention, or keyword',
       inputSchema: {
-        query: z.string().describe('Condition, intervention, or keyword to search for'),
+        query: z.string().trim().min(1, 'Query must be a non-empty string after trimming').describe('Condition, intervention, or keyword to search for'),
         status: z.string().optional().describe('Filter by status (Recruiting, Completed, etc.)'),
         phase: z.string().optional().describe('Filter by phase (Phase 1, Phase 2, etc.)'),
         intervention_type: z.string().optional().describe('Filter by intervention type (Drug, Device, etc.)'),

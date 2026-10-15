@@ -27,7 +27,7 @@ export function registerGenbankTools(server: McpServer): void {
 
 Queries may be plain terms, an accession, or NCBI field syntax ("TP53[Gene Name] AND Homo sapiens[Organism]", "BRCA1[Gene Name]"). Results include accession.version, definition, length_bp, organism, and topology — chain accessions into genbank_get or genbank_genes.`,
       inputSchema: {
-        query: z.string().describe('Nucleotide query, e.g. "TP53[Gene Name] AND Homo sapiens[Organism]" or an accession'),
+        query: z.string().trim().min(1, 'Query must be a non-empty string after trimming').describe('Nucleotide query, e.g. "TP53[Gene Name] AND Homo sapiens[Organism]" or an accession'),
         organism: z.string().optional().describe('Filter by organism (e.g. "Homo sapiens")'),
         limit: z.number().int().min(1).max(50).default(10).describe('Maximum results'),
         offset: z.number().int().min(0).default(0).describe('Result offset for pagination'),

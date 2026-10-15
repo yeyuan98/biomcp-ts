@@ -23,7 +23,7 @@ export function registerDrugTools(server: McpServer): void {
     {
       description: 'Search for drugs by name, mechanism, or keyword',
       inputSchema: {
-        query: z.string().describe('Drug name, mechanism, or keyword to search'),
+        query: z.string().trim().min(1, 'Query must be a non-empty string after trimming').describe('Drug name, mechanism, or keyword to search'),
         limit: z.number().int().min(1).max(50).default(10).describe('Maximum results'),
         offset: z.number().int().min(0).default(0).describe('Result offset'),
       },

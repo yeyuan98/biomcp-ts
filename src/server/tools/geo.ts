@@ -10,7 +10,7 @@ export function registerGeoTools(server: McpServer): void {
 
 Queries accept plain terms ("breast cancer RNA-seq", "melanoma single cell") or NCBI field syntax ("GSE183947[Accession]"). Each result carries cross-links for chaining: sra_project → sra_get, bioproject, pubmed_ids → article_get, and accession → geo_get for full details.`,
       inputSchema: {
-        query: z.string().describe('Free-text GEO search terms, e.g. "breast cancer RNA-seq", "melanoma single cell"'),
+        query: z.string().trim().min(1, 'Query must be a non-empty string after trimming').describe('Free-text GEO search terms, e.g. "breast cancer RNA-seq", "melanoma single cell"'),
         entry_type: z.enum(['gse', 'gsm', 'gpl', 'gds']).optional().describe('GEO entry type — gse=study (default), gsm=sample, gpl=platform, gds=curated dataset'),
         organism: z.string().optional().describe('Filter by organism (e.g. "Homo sapiens", "Mus musculus")'),
         limit: z.number().int().min(1).max(50).default(10).describe('Maximum results'),
