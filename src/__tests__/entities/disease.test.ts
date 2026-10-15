@@ -60,13 +60,82 @@ describe('disease', () => {
       }),
     }) as any;
 
-    await diseaseGet('C0006142');
+    await diseaseGet('MONDO:0007254');
 
     expect(global.fetch).toHaveBeenCalled();
     const callUrl = (global.fetch as any).mock.calls[0][0] as string;
     expect(callUrl).toContain('mydisease.info');
     expect(callUrl).toContain('/disease/');
-    expect(callUrl).toContain('C0006142');
+    expect(callUrl).toContain('MONDO');
+  });
+
+  test('diseaseGet() resolves a UMLS CUI to its document id, then fetches that id', async () => {
+    // CUIs are not servable by /disease/{id} (404 live); the resolver must
+    // query umls.umls (exactly that field path — plain `umls:"..."` and
+    // mondo.xrefs.umls_cui return 0 hits) and fetch the resolved id.
+    let callCount = 0;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        // Resolution query
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ hits: [{ _id: 'MONDO:0007254' }] }),
+        });
+      }
+      // Direct fetch of the resolved id
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          _id: 'MONDO:0007254',
+          mondo: { label: 'Breast Cancer' },
+        }),
+      });
+    }) as any;
+
+    const result = await diseaseGet('C0006142');
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    const resolveUrl = decodeURIComponent((global.fetch as any).mock.calls[0][0] as string).replace(/\+/g, ' ');
+    expect(resolveUrl).toContain('/query?');
+    expect(resolveUrl).toContain('umls.umls:"C0006142"');
+    expect(resolveUrl).toContain('fields=_id');
+    expect(resolveUrl).toContain('size=1');
+    const fetchUrl = (global.fetch as any).mock.calls[1][0] as string;
+    expect(fetchUrl).toContain('/disease/MONDO%3A0007254');
+    expect(result.disease_id).toBe('MONDO:0007254');
+    expect(result.name).toBe('Breast Cancer');
+  });
+
+  test('diseaseGet() falls back to the umls: curie when the resolved id is not servable by /disease/', async () => {
+    // Live shape of the docstring's golden example: C0018794 resolves to
+    // HP:0012722, a UMLS-sourced document whose own id /disease/ will not
+    // serve (404) — the `umls:{cui}` curie form fetches the same document.
+    global.fetch = jest.fn<(...args: any[]) => any>()
+      .mockImplementationOnce(() => Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ hits: [{ _id: 'HP:0012722' }] }),
+      }))
+      .mockImplementationOnce(() => Promise.resolve({ ok: false, status: 404 }))
+      .mockImplementationOnce(() => Promise.resolve({ ok: false, status: 404 }))
+      .mockImplementationOnce(() => Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          _id: 'HP:0012722',
+          original_id: 'UMLS:C0018794',
+          umls: { umls: 'C0018794' },
+        }),
+      })) as any;
+
+    const result = await diseaseGet('C0018794');
+
+    const urls = (global.fetch as any).mock.calls.map((c: any[]) => String(c[0]));
+    expect(urls[0]).toContain('umls.umls');
+    // Resolved id + its alt separator form both tried before the curie.
+    expect(urls[1]).toContain('/disease/HP%3A0012722');
+    expect(urls[2]).toContain('/disease/HP_0012722');
+    expect(urls[3]).toContain('/disease/umls%3AC0018794');
+    expect(result.disease_id).toBe('HP:0012722');
   });
 
   test('diseaseGet() retries the alternate curie form when the primary lookup fails', async () => {
@@ -102,6 +171,21 @@ describe('disease', () => {
     await expect(diseaseGet('MONDO_9999999')).rejects.toThrow(/not found/);
     // Both separator forms attempted.
     expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test('diseaseGet() error lists UMLS CUI among the supported ID formats', async () => {
+    // A CUI the resolver cannot resolve: resolution query misses, the umls:
+    // curie fetch also 404s — the error must now advertise UMLS CUIs.
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((rawUrl: string) => {
+      if (rawUrl.includes('/query')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ hits: [] }) });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    }) as any;
+
+    await expect(diseaseGet('C9999999')).rejects.toThrow(
+      /Supported ID formats: MONDO:XXXXXXX, DOID:XXXXXXX, OMIM:XXXXXX, UMLS CUI \(e\.g\. C0018794\)/
+    );
   });
 
   test('transformMyDiseaseResponse() maps fields correctly', () => {

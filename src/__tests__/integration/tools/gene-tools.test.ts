@@ -49,6 +49,18 @@ describe('gene_search', () => {
     expectGeneSearchResult(results);
     expect(results.length).toBeLessThanOrEqual(2);
   }, 60000);
+
+  it('chromosome filter returns only Y-mapped genes', async () => {
+    const results = await retryOnRateLimit(() => harness.callTool('gene_search', { query: 'ribosomal protein', chromosome: 'Y', limit: 10 }));
+    expectGeneSearchResult(results);
+    expect(results.length).toBeGreaterThan(0);
+    // mygene /query has no `chr` param — the filter rides in q as a genome-
+    // interval clause, so every returned row must map to chromosome Y
+    // (multi-mapping PAR genes display the Y coordinates).
+    for (const r of results) {
+      expect((r as Record<string, any>).genomic_coordinates?.chromosome).toBe('Y');
+    }
+  }, 60000);
 });
 
 describe('gene_get', () => {

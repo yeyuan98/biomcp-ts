@@ -25,13 +25,13 @@ Do NOT use compound free-text like "BRAF V600E" — use separate gene and hgvsp 
       inputSchema: {
         query: z.string().optional().describe('Variant query (rsid or HGVS notation). Avoid compound queries like "BRAF V600E" — use gene + hgvsp parameters instead.'),
         gene: z.string().optional().describe('Filter by gene symbol (e.g., "BRAF"). Use together with hgvsp for protein change queries.'),
-        significance: z.enum(['benign', 'likely_benign', 'pathogenic', 'likely_pathogenic', 'uncertain']).optional(),
+        significance: z.enum(['benign', 'likely_benign', 'pathogenic', 'likely_pathogenic', 'uncertain']).optional().describe('ClinVar significance category, matched exactly — records displayed as "Pathogenic/Likely pathogenic" match both pathogenic and likely_pathogenic; "Conflicting interpretations of pathogenicity" matches none of these'),
         max_frequency: z.number().optional().describe('Maximum allele frequency (0-1)'),
         min_cadd: z.number().optional().describe('Minimum CADD score'),
         consequence: z.string().optional().describe('Variant consequence (e.g., missense, synonymous)'),
         rsid: z.string().optional().describe('dbSNP rsID'),
         hgvsp: z.string().optional().describe('Protein change (e.g., V600E). Use with gene parameter for compound queries.'),
-        hgvsc: z.string().optional().describe('cDNA change'),
+        hgvsc: z.string().optional().describe('cDNA change — bare c. notation (e.g., c.1799T>A) or full HGVS (e.g., NM_004333.4:c.1799T>A)'),
         limit: z.number().int().min(1).max(50).default(10).describe('Maximum results'),
         offset: z.number().int().min(0).default(0).describe('Result offset'),
       },
@@ -44,12 +44,19 @@ Do NOT use compound free-text like "BRAF V600E" — use separate gene and hgvsp 
         let searchHgvsp = hgvsp;
         let searchHgvsc = hgvsc;
 
-        if (!searchQuery && !searchGene && (rsid || hgvsp || hgvsc)) {
+        if (!searchQuery && !searchGene && (rsid || hgvsp)) {
+          // Compose the free-text query from the structured id filters, then
+          // clear them so variantSearch does not double-push the same clauses
+          // (mirrors the gene+hgvsp branch below). hgvsc deliberately stays
+          // out of this composition: the entity layer routes it through the
+          // HGVS rewrite, splitting full NM_...:c.... strings across
+          // snpeff.ann.feature_id / snpeff.ann.hgvs_c — quoting them whole
+          // matches nothing.
           const parts: string[] = [];
           if (rsid) parts.push(`dbsnp.rsid:${rsid}`);
           if (hgvsp) parts.push(`dbnsfp.hgvsp:*${hgvsp}*`);
-          if (hgvsc) parts.push(`snpeff.ann.hgvs_c:"${hgvsc}"`);
           searchQuery = parts.join(' AND ');
+          searchHgvsp = undefined;
         }
 
         if (!searchQuery && !rsid && !hgvsc && searchGene && searchHgvsp) {
@@ -89,7 +96,7 @@ Do NOT use compound free-text like "BRAF V600E" — use separate gene and hgvsp 
     {
       description: 'Get detailed variant information with optional sections. Core data (id, gene, rsid, significance) is always returned at the top level. Use sections to request additional data.',
       inputSchema: {
-        id: z.string().describe('Variant ID (rsid, HGVS, or ClinVar ID)'),
+        id: z.string().describe('Variant ID (rsid e.g. rs113488022, HGVS e.g. NM_004333.4:c.1799T>A, ClinVar ID e.g. 13961 / clinvar_13961 / VCV0000013961)'),
         sections: z.array(z.enum(VARIANT_GET_SECTIONS)).optional().describe('Sections to include: core, frequency, predictions, clinical, alphagenome_scores (currently unavailable — returns an error stub pending AlphaGenome gRPC reimplementation)'),
         limit: z.number().int().min(1).max(100).default(20),
       },

@@ -43,6 +43,30 @@ describe('variant_search', () => {
     expectVariantSearchResult(results);
     expect(results.length).toBeLessThanOrEqual(2);
   }, 60000);
+
+  it('significance filter never displays Conflicting/Benign/Uncertain significances', async () => {
+    const results = await retryOnRateLimit(() => harness.callTool('variant_search', { gene: 'BRCA1', significance: 'pathogenic', limit: 10 }));
+    expectVariantSearchResult(results);
+    expect(results.length).toBeGreaterThan(0);
+    // Phrase-quoted clause + exact-category post-filter: the displayed
+    // (primary RCV) significance must be Pathogenic or Pathogenic/Likely
+    // pathogenic — never a substring leak like "Conflicting interpretations
+    // of pathogenicity".
+    for (const r of results) {
+      const sig = String(r.significance || '').toLowerCase();
+      expect(sig).not.toContain('conflicting');
+      expect(sig).not.toContain('benign');
+      expect(sig).not.toContain('uncertain');
+    }
+  }, 60000);
+
+  it('full-HGVS hgvsc returns the BRAF V600E variant', async () => {
+    const results = await retryOnRateLimit(() => harness.callTool('variant_search', { hgvsc: 'NM_004333.4:c.1799T>A' }));
+    expectVariantSearchResult(results);
+    expect(results.length).toBeGreaterThan(0);
+    const hit = results.find((r: any) => r.id === 'rs113488022');
+    expect(hit).toBeDefined();
+  }, 60000);
 });
 
 describe('variant_get', () => {
@@ -50,6 +74,16 @@ describe('variant_get', () => {
     const result = await retryOnRateLimit(() => harness.callTool('variant_get', { id: 'rs113488022' }));
     expectVariantGetResult(result);
     expect(result.id).toContain('rs113488022');
+  }, 60000);
+
+  it('resolves a ClinVar numeric id to the BRAF V600E record', async () => {
+    // /variant/13961 404s live — the ClinVar id must resolve via the
+    // clinvar.variant_id query before the fetch.
+    const result = await retryOnRateLimit(() => harness.callTool('variant_get', { id: '13961', sections: ['core'] }));
+    expectVariantGetResult(result);
+    expect(result.id).toBe('rs113488022');
+    expect(result.gene).toBe('BRAF');
+    expect(result.hgvs_p).toBe('V600E');
   }, 60000);
 
   it('throws for invalid variant ID', async () => {

@@ -15,6 +15,24 @@ export interface GeneSearchOptions {
   offset?: number;
 }
 
+/**
+ * Normalize a user-supplied chromosome name for mygene's genome-interval
+ * query syntax (`chr${norm}:1-999999999`). Accepts an optional `chr`/`CHR`
+ * prefix and the values 1-22, X, Y, and M/MT (mitochondrial), case-
+ * insensitively. mygene keys the mitochondrial chromosome as `MT` (live-
+ * verified: `chrM:...` returns 0 hits, `chrMT:...` works), so `M` is mapped
+ * to `MT`. Anything else throws a validation error listing valid values.
+ */
+function normalizeChromosome(input: string): string {
+  const stripped = input.trim().replace(/^chr/i, '').toUpperCase();
+  if (/^(?:[1-9]|1[0-9]|2[0-2]|X|Y|MT|M)$/.test(stripped)) {
+    return stripped === 'M' ? 'MT' : stripped;
+  }
+  throw new Error(
+    `Invalid chromosome '${input}'. Valid values are 1-22, X, Y, and M (or MT) for mitochondrial, with an optional 'chr' prefix.`
+  );
+}
+
 export interface GeneSearchResult {
   symbol: string;
   name: string;
@@ -49,21 +67,29 @@ export async function geneSearch(
 
   const conn = connectionManager.getConnection('mygene');
 
+  // mygene's /query endpoint has no `chr` URL parameter (it is silently
+  // ignored), so the chromosome filter must ride inside the `q` string as a
+  // genome-interval clause (live-verified: `... AND chrY:1-999999999`).
+  let normalizedChr: string | undefined;
+  let q = query;
+  if (chromosome) {
+    normalizedChr = normalizeChromosome(chromosome);
+    q = `${query} AND chr${normalizedChr}:1-999999999`;
+  }
+
   const queryParams = new URLSearchParams({
-    q: query,
+    q,
     species: 'human',
     fields: 'symbol,name,entrezgene,genomic_pos,uniprot,omim',
     size: String(limit),
     from: String(offset),
   });
 
-  if (chromosome) {
-    queryParams.set('chr', chromosome);
-  }
-  
   const response = await conn.request(`/query?${queryParams.toString()}`) as MyGeneSearchResponse;
-  
-  return (response.hits || []).map(transformMyGeneHit);
+
+  // Pass the filtered chromosome so multi-mapping hits (PAR genes etc.)
+  // display the coordinates the user filtered by.
+  return (response.hits || []).map(hit => transformMyGeneHit(hit, normalizedChr));
 }
 
 async function resolveGeneAlias(query: string, signal?: AbortSignal): Promise<string | null> {
@@ -668,8 +694,11 @@ interface MyGeneSearchResponse {
     symbol: string;
     name: string;
     entrezgene?: number;
-    genomic_pos?: Array<{ chr: string; start: number; end: number }>;
-    uniprot?: string[];
+    // mygene returns a plain object when a gene maps to one genome position
+    // (live: TP53) and an array only for multi-mappings; same for uniprot
+    // ({SwissProt: "..."} object vs string array depending on fields).
+    genomic_pos?: { chr: string; start: number; end: number } | Array<{ chr: string; start: number; end: number }>;
+    uniprot?: string[] | { SwissProt: string };
     omim?: number[];
   }>;
 }

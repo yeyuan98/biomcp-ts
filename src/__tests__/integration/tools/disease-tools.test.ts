@@ -47,6 +47,22 @@ describe('disease_get', () => {
     expect((result.name as string).toLowerCase()).toContain('breast');
   }, 60000);
 
+  it('resolves a UMLS CUI to its MONDO document (C0006142)', async () => {
+    const result = await retryOnRateLimit(() => harness.callTool('disease_get', { disease_id: 'C0006142' }));
+    expectDiseaseGetResult(result);
+    expect(result.disease_id).toBe('MONDO:0007254');
+    expect((result.name as string).toLowerCase()).toContain('breast');
+  }, 60000);
+
+  it('accepts the docstring UMLS CUI example (C0018794)', async () => {
+    // The docstring's golden example: previously rejected with "Supported ID
+    // formats: MONDO/DOID/OMIM". C0018794 resolves to the UMLS-sourced
+    // HP:0012722 document via the umls: curie fallback.
+    const result = await retryOnRateLimit(() => harness.callTool('disease_get', { disease_id: 'C0018794' }));
+    expectDiseaseGetResult(result);
+    expect(result.disease_id).toBe('HP:0012722');
+  }, 60000);
+
   it('throws for invalid disease ID', async () => {
     await expect(
       harness.callTool('disease_get', { disease_id: 'MONDO:9999999' })

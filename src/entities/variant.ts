@@ -148,9 +148,13 @@ export async function variantSearch(
   }
 
   if (hgvsc) {
-    qParts.push(`snpeff.ann.hgvs_c:"${hgvsc}"`);
+    // A bare "c.1799T>A" goes through verbatim, while a full HGVS string
+    // ("NM_004333.4:c.1799T>A") must be split: snpeff.ann.hgvs_c stores only
+    // the c. portion (the transcript lives in snpeff.ann.feature_id), so
+    // quoting the full string matches nothing (live: 0 hits).
+    qParts.push(rewriteVariantQuery(hgvsc));
   }
-  
+
   if (significance) {
     const sigMap: Record<string, string> = {
       pathogenic: 'pathogenic',
@@ -159,7 +163,11 @@ export async function variantSearch(
       likely_benign: 'likely benign',
       uncertain: 'uncertain significance',
     };
-    qParts.push(`clinvar.rcv.clinical_significance:*${sigMap[significance] || significance}*`);
+    // Quoted PHRASE (token match), never a wildcard substring: `*pathogenic*`
+    // also matched "Conflicting interpretations of pathogenicity" (live:
+    // BRCA1 + *pathogenic* → 2678 hits including Conflicting rows, phrase →
+    // 861 pathogenic-only rows).
+    qParts.push(`clinvar.rcv.clinical_significance:"${sigMap[significance] || significance}"`);
   }
 
   if (consequence) {
@@ -190,11 +198,29 @@ export async function variantSearch(
   }
   
   const response = await conn.request(`/query?${queryParams.toString()}`) as MyVariantSearchResponse;
-  
-  return (response.hits || []).map(transformMyVariantHit);
+
+  let hits = response.hits || [];
+
+  // Harden the significance filter: clinvar.rcv is an ARRAY, so the ANY-match
+  // query clause admits records whose displayed (primary) RCV significance is
+  // a different category — e.g. a "Conflicting interpretations of
+  // pathogenicity" record that carries one pathogenic RCV still matches the
+  // phrase clause. Drop hits whose displayed-significance category does not
+  // include the requested one (unknown requested values were never mapped and
+  // pass through to the query clause only).
+  if (significance && SIGNIFICANCE_CATEGORIES.has(significance)) {
+    hits = hits.filter(hit =>
+      clinvarCategories(extractClinvarSignificance(hit.clinvar)).has(significance)
+    );
+  }
+
+  return hits.map(transformMyVariantHit);
 }
 
 const HGVS_PATTERN = /^(NM_|NR_|ENST)\d+\.\d+:c\./;
+
+/** Bare / clinvar_-prefixed / VCV-accessioned ClinVar variant ids, captures the digits. */
+const CLINVAR_ID_PATTERN = /^(?:(?:clinvar|vcv)[_:]?)?(\d+)$/i;
 
 async function resolveHgvsToGenomicId(hgvsId: string, conn: any): Promise<string> {
   const colonIdx = hgvsId.indexOf(':');
@@ -215,6 +241,28 @@ async function resolveHgvsToGenomicId(hgvsId: string, conn: any): Promise<string
   return genomicId;
 }
 
+/**
+ * Resolve a ClinVar numeric variant id (13961, clinvar_13961, VCV0000013961)
+ * to the genomic id MyVariant.info keys documents by — `/variant/13961`
+ * 404s (live-verified) while the query on `clinvar.variant_id` resolves
+ * (13961 → chr7:g.140453136A>T). The `_clinvarVariantId` field suggested in
+ * the issue returns 0 hits and is NOT used.
+ */
+async function resolveClinvarId(clinvarId: string, conn: any): Promise<string> {
+  const queryParams = new URLSearchParams({
+    q: `clinvar.variant_id:${clinvarId}`,
+    fields: '_id',
+    size: '1',
+  });
+
+  const response = await conn.request(`/query?${queryParams.toString()}`) as { hits?: Array<{ _id: string }> };
+  const genomicId = response.hits?.[0]?._id;
+  if (!genomicId) {
+    throw new Error(`ClinVar variant '${clinvarId}' not found (ClinVar ID could not be resolved to a MyVariant.info variant)`);
+  }
+  return genomicId;
+}
+
 export async function variantGet(
   id: string,
   sections?: string[]
@@ -230,6 +278,14 @@ export async function variantGet(
   let resolvedId = id;
   if (HGVS_PATTERN.test(id)) {
     resolvedId = await resolveHgvsToGenomicId(id, conn);
+  } else {
+    // ClinVar numeric ids (13961 / clinvar_13961 / VCV0000013961) are not
+    // document keys — resolve via the query API first. Leading zeros from
+    // VCV accessions are normalized away.
+    const clinvarMatch = CLINVAR_ID_PATTERN.exec(id.trim());
+    if (clinvarMatch) {
+      resolvedId = await resolveClinvarId(String(Number(clinvarMatch[1])), conn);
+    }
   }
 
   let rawResponse = await conn.request(
@@ -709,6 +765,49 @@ function extractClinvarSignificance(clinvar: any): string | undefined {
   const rcv = asArray(clinvar.rcv);
   const main = rcv.find((r: any) => r.clinical_significance && r.clinical_significance !== 'not provided') || rcv[0];
   return main?.clinical_significance;
+}
+
+/** The variant_search significance values that have an exact ClinVar category. */
+const SIGNIFICANCE_CATEGORIES = new Set([
+  'pathogenic', 'likely_pathogenic', 'benign', 'likely_benign', 'uncertain',
+] as const);
+
+/**
+ * Normalize a displayed ClinVar significance string into the zero or more
+ * requested-significance categories it satisfies. "Pathogenic/Likely
+ * pathogenic" (ClinVar's combined category) satisfies BOTH pathogenic and
+ * likely_pathogenic; "Conflicting interpretations of pathogenicity" is its
+ * own category (`conflicting`) that no requested value ever matches; anything
+ * unrecognized satisfies nothing.
+ */
+function clinvarCategories(displayed: string | undefined): Set<string> {
+  const categories = new Set<string>();
+  if (!displayed) return categories;
+  switch (displayed.trim().toLowerCase().replace(/\s+/g, ' ')) {
+    case 'pathogenic':
+      categories.add('pathogenic');
+      break;
+    case 'likely pathogenic':
+      categories.add('likely_pathogenic');
+      break;
+    case 'pathogenic/likely pathogenic':
+    case 'pathogenic/likely_pathogenic':
+      categories.add('pathogenic');
+      categories.add('likely_pathogenic');
+      break;
+    case 'benign':
+      categories.add('benign');
+      break;
+    case 'likely benign':
+      categories.add('likely_benign');
+      break;
+    case 'uncertain significance':
+      categories.add('uncertain');
+      break;
+    // 'conflicting interpretations of pathogenicity' and exotic values
+    // ('drug response', 'risk factor', 'not provided', ...) map to nothing.
+  }
+  return categories;
 }
 
 function extractConditionNames(conditions: any): string[] {
