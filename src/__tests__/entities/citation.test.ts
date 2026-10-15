@@ -8,6 +8,7 @@ import * as semanticScholarProvider from '../../entities/article/citation/semant
 import { transformCitationEntry } from '../../entities/article/europepmc-shared.js';
 import { connectionManager } from '../../connections/manager.js';
 import { mockFetchRouter } from '../helpers/mock-url.js';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 function mockJson(data: unknown) {
   return {
@@ -47,11 +48,10 @@ async function advanceUntilSettled<T>(p: Promise<T>): Promise<T> {
 jest.setTimeout(30000);
 
 describe('citation module', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
     clearCitationCache();
     crossrefProvider.clearWorkCache();
@@ -59,7 +59,6 @@ describe('citation module', () => {
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     clearCitationCache();
   });
 

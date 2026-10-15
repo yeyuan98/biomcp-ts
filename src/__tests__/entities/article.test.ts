@@ -14,6 +14,7 @@ import { getPreprintArticle } from '../../entities/article/detail/preprint.js';
 import { applyLimit } from '../../server/tools/utils.js';
 import { connectionManager } from '../../connections/manager.js';
 import { parseMockUrl } from '../helpers/mock-url.js';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 // Fake-timer helpers (patent.test.ts convention, see src/__tests__/README.md):
 // limiters only refill when the clock moves forward, so any fake-timer
@@ -149,17 +150,15 @@ const europepmcLitePage = (n: number) => ({
 });
 
 describe('article', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
     process.env.NCBI_API_KEY = '';
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     delete process.env.NCBI_API_KEY;
     clearCitationCache();
     clearWorkCache();
@@ -2252,17 +2251,15 @@ describe('article', () => {
 });
 
 describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
     process.env.NCBI_API_KEY = '';
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     delete process.env.NCBI_API_KEY;
   });
 

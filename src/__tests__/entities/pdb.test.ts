@@ -2,6 +2,7 @@ import { jest } from '@jest/globals';
 import { validatePdbId, formatFileSize, pdbSearch, pdbGet, pdbDownload } from '../../entities/pdb.js';
 import { connectionManager } from '../../connections/manager.js';
 import { existsSync, unlinkSync, rmSync } from 'node:fs';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 // Helper to create a mock connection object
 function createMockConnection(methods: Record<string, any> = {}) {
@@ -89,20 +90,18 @@ describe('formatFileSize boundary values', () => {
 });
 
 describe('pdbSearch', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
   let mockPost: jest.Mock<(...args: any[]) => any>;
   let mockRequest: jest.Mock<(...args: any[]) => any>;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
     mockPost = jest.fn();
     mockRequest = jest.fn();
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     connectionManager.closeAll();
   });
 
@@ -216,18 +215,16 @@ describe('pdbSearch', () => {
 });
 
 describe('pdbGet', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
   let mockRequest: jest.Mock<(...args: any[]) => any>;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
     mockRequest = jest.fn();
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     connectionManager.closeAll();
   });
 
@@ -399,20 +396,18 @@ describe('pdbGet', () => {
 });
 
 describe('pdbDownload', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
   let mockRequest: jest.Mock<(...args: any[]) => any>;
   let tempFiles: string[] = [];
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
     mockRequest = jest.fn();
     tempFiles = [];
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     connectionManager.closeAll();
     // Clean up any temp files
     for (const f of tempFiles) {

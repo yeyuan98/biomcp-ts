@@ -1,7 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
+import { describe, it, expect, beforeAll, afterAll, jest } from '@jest/globals';
 import { createMcpTestHarness } from '../../helpers/mcp-harness.js';
 import { expectVariantSearchResult, expectVariantGetResult, expectCrossEntityTrialRows } from '../../helpers/assertions.js';
 import { retryOnRateLimit } from '../../helpers/retry.js';
+
+jest.setTimeout(60000); // measured p95 ≈ 29 s (cross-entity trial legs); 60 s also matches the MCP client request cap
 
 let harness: Awaited<ReturnType<typeof createMcpTestHarness>>;
 

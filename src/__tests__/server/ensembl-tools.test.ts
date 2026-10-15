@@ -1,6 +1,7 @@
 import { jest, describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 import { connectionManager } from '../../connections/manager.js';
 import { createMcpTestHarness, type McpTestHarness } from '../helpers/mcp-harness.js';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 const LOOKUP_BRAF = {
   id: 'ENSG00000157764',
@@ -80,7 +81,7 @@ function fetchUrls(): string[] {
 
 describe('ensembl tools', () => {
   let harness: McpTestHarness;
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeAll(async () => {
     harness = await createMcpTestHarness();
@@ -91,12 +92,7 @@ describe('ensembl tools', () => {
   });
 
   beforeEach(() => {
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   it('ensembl_lookup resolves a symbol to Ensembl metadata', async () => {

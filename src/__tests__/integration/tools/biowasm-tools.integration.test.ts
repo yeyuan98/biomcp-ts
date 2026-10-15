@@ -9,7 +9,7 @@ import { biowasmEngine, shutdownBiowasmEngine } from '../../../biowasm/engine.js
 import { canonicalizeSource } from '../../../biowasm/validate.js';
 import { runBamViewRegion } from '../../../biowasm/analyzers.js';
 
-jest.setTimeout(600_000);
+jest.setTimeout(240_000); // mirror-gated heavy tier: wasm/R download+boot can take minutes; 4 min cap
 
 // Same skip pattern as the ranalysis / biowasm engine integration suites: run
 // only when a mirror is configured or the asset cache is already populated.

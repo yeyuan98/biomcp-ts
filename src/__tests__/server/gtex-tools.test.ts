@@ -1,6 +1,7 @@
 import { jest, describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 import { connectionManager } from '../../connections/manager.js';
 import { createMcpTestHarness, type McpTestHarness } from '../helpers/mcp-harness.js';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 const DATASETS = [
   {
@@ -91,7 +92,7 @@ function fetchUrls(): string[] {
 
 describe('gtex tools', () => {
   let harness: McpTestHarness;
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeAll(async () => {
     harness = await createMcpTestHarness();
@@ -103,12 +104,7 @@ describe('gtex tools', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   it('gtex_expression returns tissues sorted by descending median TPM', async () => {

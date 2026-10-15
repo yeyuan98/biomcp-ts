@@ -6,7 +6,7 @@ import { registerAnalysisRTools, shutdownREngine } from '../../../server/tools/r
 import { gunzipSync } from 'node:zlib';
 import { existsSync } from 'node:fs';
 
-jest.setTimeout(600_000);
+jest.setTimeout(240_000); // mirror-gated heavy tier: wasm/R download+boot can take minutes; 4 min cap
 
 const MIRROR_DIR = process.env.ANALYSIS_R_MIRROR_URL ?? '';
 

@@ -1,18 +1,14 @@
 import { jest } from '@jest/globals';
 import { trialSearch, trialGet, transformTrialResponse } from '../../entities/trial.js';
 import { connectionManager } from '../../connections/manager.js';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 describe('trial', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('trialSearch() calls connection with correct clinicaltrials endpoint', async () => {

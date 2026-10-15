@@ -2,6 +2,7 @@ import { jest, describe, it, expect, beforeAll, afterAll, beforeEach, afterEach 
 import { connectionManager } from '../../connections/manager.js';
 import { createMcpTestHarness, type McpTestHarness } from '../helpers/mcp-harness.js';
 import { parseMockUrl } from '../helpers/mock-url.js';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 const EUTILS = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
 const GEO_ACC = 'https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi';
@@ -122,7 +123,7 @@ function fetchUrls(): string[] {
 
 describe('geo tools', () => {
   let harness: McpTestHarness;
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeAll(async () => {
     harness = await createMcpTestHarness();
@@ -134,12 +135,7 @@ describe('geo tools', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   it('geo_search maps esummary entries and applies the default gse entry_type', async () => {

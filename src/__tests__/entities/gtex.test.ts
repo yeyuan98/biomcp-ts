@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals';
 import { connectionManager } from '../../connections/manager.js';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 const DATASETS = [
   {
@@ -138,16 +139,11 @@ function urlsContaining(fragment: string): string[] {
 }
 
 describe('gtex dataset metadata', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('getGtexDatasets() maps metadata and caches — second call does not re-fetch', async () => {
@@ -181,16 +177,11 @@ describe('gtex dataset metadata', () => {
 });
 
 describe('gtex resolveGencodeId', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('symbol query filters exact match from fuzzy prefix results', async () => {
@@ -283,16 +274,11 @@ describe('gtex resolveGencodeId', () => {
 });
 
 describe('gtexMedianExpression', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('resolves versioned gencodeId and queries gtex_v10', async () => {
@@ -357,16 +343,11 @@ describe('gtexMedianExpression', () => {
 });
 
 describe('gtexEqtl', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('invalid tissue throws with hint listing valid tissue count', async () => {
@@ -426,16 +407,11 @@ describe('gtexEqtl', () => {
 });
 
 describe('getGtexTissues', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('returns tissue details and caches across calls', async () => {
