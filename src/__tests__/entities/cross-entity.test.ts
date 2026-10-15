@@ -10,9 +10,12 @@ import { HttpConnectionError } from '../../connections/errors.js';
 import { errorMessageWithCause, networkCauseCode } from '../../entities/errors.js';
 import { parseMockUrl, mockFetchRouter } from '../helpers/mock-url.js';
 import { createMcpTestHarness, type McpTestHarness } from '../helpers/mcp-harness.js';
+import { brca1MinimalHit } from '../fixtures/mygene.js';
+import { rs113488022ShorthandHit, rs113488022ThreeLetterHit } from '../fixtures/myvariant.js';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 /** Extract the `_error` message from a geneEnrichment error-row result. */
 function enrichError(result: GeneEnrichmentResult | Array<{ _error: string }>): string {
@@ -23,17 +26,15 @@ function enrichError(result: GeneEnrichmentResult | Array<{ _error: string }>): 
 }
 
 describe('cross-entity', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
     process.env.NCBI_API_KEY = '';
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     delete process.env.NCBI_API_KEY;
   });
 
@@ -117,7 +118,7 @@ describe('cross-entity', () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
-        hits: [{ symbol: 'BRCA1', name: 'BRCA1' }],
+        hits: [brca1MinimalHit],
       }),
     }) as any;
 
@@ -371,16 +372,11 @@ describe('cross-entity', () => {
 });
 
 describe('variantToTrials', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('resolves variant to gene + protein change and searches trials', async () => {
@@ -392,12 +388,7 @@ describe('variantToTrials', () => {
       if (callCount === 1) {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({
-            _id: 'rs113488022',
-            dbsnp: { rsid: 'rs113488022' },
-            snpeff: { ann: [{ genename: 'BRAF', hgvs_p: 'p.V600E' }] },
-            clinvar: { rcv: [{ clinical_significance: 'Pathogenic' }] },
-          }),
+          json: () => Promise.resolve(rs113488022ShorthandHit),
         });
       }
       // trialSearch call
@@ -493,12 +484,7 @@ describe('variantToTrials', () => {
       if (callCount === 1) {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({
-            _id: 'rs113488022',
-            dbsnp: { rsid: 'rs113488022' },
-            snpeff: { ann: [{ genename: 'BRAF', hgvs_p: 'p.Val600Glu' }] },
-            clinvar: { rcv: [{ clinical_significance: 'Pathogenic' }] },
-          }),
+          json: () => Promise.resolve(rs113488022ThreeLetterHit),
         });
       }
       // trialSearch call
@@ -617,16 +603,11 @@ describe('variantToTrials', () => {
 // geneToDrugs
 // ============================================================
 describe('geneToDrugs', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('returns drugs for a known gene', async () => {
@@ -787,16 +768,11 @@ describe('geneToDrugs', () => {
 // geneToTrials
 // ============================================================
 describe('geneToTrials', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('delegates to trialSearch and maps results', async () => {
@@ -840,16 +816,11 @@ describe('geneToTrials', () => {
 // drugToGenes
 // ============================================================
 describe('drugToGenes', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('returns gene targets for a known drug', async () => {
@@ -968,16 +939,11 @@ describe('drugToGenes', () => {
 // drugToTrials
 // ============================================================
 describe('drugToTrials', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('passes searchType=intervention to trialSearch', async () => {
@@ -1012,16 +978,11 @@ describe('drugToTrials', () => {
 // drugToAdverseEvents (FDA FAERS via openFDA, aggregated counts)
 // ============================================================
 describe('drugToAdverseEvents', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('returns ranked FAERS reactions via fully-qualified substance_name search', async () => {
@@ -1144,16 +1105,11 @@ describe('drugToAdverseEvents', () => {
 // diseaseToDrugs
 // ============================================================
 describe('diseaseToDrugs', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('resolves MONDO ID via mydisease then queries OpenTargets', async () => {
@@ -1439,19 +1395,17 @@ describe('diseaseToDrugs', () => {
 // diseaseToGenes (DisGeNET gda/summary)
 // ============================================================
 describe('diseaseToGenes', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
   let originalEnv: string | undefined;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     originalEnv = process.env.DISGENET_API_KEY;
     process.env.DISGENET_API_KEY = 'test-disgenet-key';
     connectionManager.closeAll();
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     if (originalEnv !== undefined) {
       process.env.DISGENET_API_KEY = originalEnv;
     } else {
@@ -1524,16 +1478,11 @@ describe('diseaseToGenes', () => {
 // geneEnrichment (additional tests)
 // ============================================================
 describe('geneEnrichment additional tests', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('returns the enrichment envelope: pathways page, total_reported, truncated=false', async () => {
@@ -1693,7 +1642,7 @@ describe('geneEnrichment additional tests', () => {
 // ============================================================
 describe('gene_enrich tool contract', () => {
   let harness: McpTestHarness;
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeAll(async () => {
     harness = await createMcpTestHarness();
@@ -1704,12 +1653,7 @@ describe('gene_enrich tool contract', () => {
   });
 
   beforeEach(() => {
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('schema rejects fewer than 3 genes before any request runs', async () => {
@@ -1800,16 +1744,11 @@ describe('errorMessageWithCause / networkCauseCode', () => {
 // batchGet (additional tests)
 // ============================================================
 describe('batchGet additional tests', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('returns error for unknown entity type', async () => {
@@ -1833,7 +1772,7 @@ describe('batchGet additional tests', () => {
         // geneGet succeeds
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ hits: [{ symbol: 'BRCA1', name: 'BRCA1' }] }),
+          json: () => Promise.resolve({ hits: [brca1MinimalHit] }),
         });
       }
       // drugGet fails
@@ -1883,23 +1822,18 @@ describe('batchGet additional tests', () => {
 // searchAll (additional tests)
 // ============================================================
 describe('searchAll additional tests', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('with entity filter searches only specified entities', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
-        hits: [{ symbol: 'BRCA1', name: 'BRCA1' }],
+        hits: [brca1MinimalHit],
       }),
     }) as any;
 

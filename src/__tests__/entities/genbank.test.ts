@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals';
 import { connectionManager } from '../../connections/manager.js';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 const GB_TEXT = [
   'LOCUS       NG_017013            32772 bp    DNA     linear   CON 07-APR-2010',
@@ -186,17 +187,15 @@ function urlsContaining(fragment: string): string[] {
 }
 
 describe('genbankGet', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
   });
 
   afterEach(() => {
     connectionManager.closeAll();
-    global.fetch = originalFetch;
   });
 
   test('rejects a clearly invalid accession without any HTTP call', async () => {
@@ -373,17 +372,15 @@ describe('genbankGet', () => {
 });
 
 describe('genbankSearch', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
   });
 
   afterEach(() => {
     connectionManager.closeAll();
-    global.fetch = originalFetch;
   });
 
   test('composes the term with organism and queries nuccore esearch', async () => {
@@ -449,17 +446,15 @@ describe('genbankSearch', () => {
 });
 
 describe('genbankToGeneIds', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
   });
 
   afterEach(() => {
     connectionManager.closeAll();
-    global.fetch = originalFetch;
   });
 
   test('parses elink gene ids as numbers', async () => {

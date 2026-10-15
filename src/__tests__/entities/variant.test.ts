@@ -1,18 +1,15 @@
 import { jest } from '@jest/globals';
 import { variantSearch, variantGet, transformMyVariantHit, getVariantSearchFilters, getVariantGetSections, fetchOncoKbAnnotation, normalizeProteinChange } from '../../entities/variant.js';
 import { connectionManager } from '../../connections/manager.js';
+import { vcf123BrafV600eHit } from '../fixtures/myvariant.js';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 describe('variant', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   // ========== Existing tests (kept unchanged) ==========
@@ -36,13 +33,7 @@ describe('variant', () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
-        hits: [{
-          _id: 'vcf123',
-          dbsnp: { rsid: 'rs123', gene: { symbol: 'BRCA1' } },
-          snpeff: { ann: [{ hgvs_p: 'p.Val600Glu', hgvs_c: 'c.1799T>A', genename: 'BRCA1' }] },
-          clinvar: { rcv: [{ clinical_significance: 'Pathogenic', review_status: 'reviewed by expert panel' }] },
-          gnomad_exome: { af: { af: 0.001 } },
-        }],
+        hits: [vcf123BrafV600eHit],
       }),
     }) as any;
 
@@ -75,13 +66,7 @@ describe('variant', () => {
   });
 
   test('transformMyVariantHit() maps fields correctly', () => {
-    const input = {
-      _id: 'vcf123',
-      dbsnp: { rsid: 'rs123', gene: { symbol: 'BRCA1' } },
-      snpeff: { ann: [{ hgvs_p: 'p.Val600Glu', hgvs_c: 'c.1799T>A', genename: 'BRCA1' }] },
-      clinvar: { rcv: [{ clinical_significance: 'Pathogenic', review_status: 'reviewed by expert panel' }] },
-      gnomad_exome: { af: { af: 0.001 } },
-    };
+    const input = vcf123BrafV600eHit;
 
     const result = transformMyVariantHit(input);
 
@@ -710,17 +695,15 @@ describe('variant', () => {
 // variantGet clinical section — CIViC lookup (schema-valid query)
 // ============================================================
 describe('variantGet clinical section — CIViC lookup', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
   });
 
   afterEach(() => {
     jest.restoreAllMocks();
-    global.fetch = originalFetch;
   });
 
   function mockConnections(civicResponse: unknown) {
@@ -812,12 +795,11 @@ describe('variantGet clinical section — CIViC lookup', () => {
 // OncoKB annotation (hugoSymbol params + IndicatorAnnotationResp mapping)
 // ============================================================
 describe('fetchOncoKbAnnotation', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
   const originalToken = process.env.ONCOKB_TOKEN;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
     process.env.ONCOKB_TOKEN = 'test-token';
   });
@@ -825,7 +807,6 @@ describe('fetchOncoKbAnnotation', () => {
   afterEach(() => {
     if (originalToken) process.env.ONCOKB_TOKEN = originalToken;
     else delete process.env.ONCOKB_TOKEN;
-    global.fetch = originalFetch;
   });
 
   test('sends hugoSymbol + normalized alteration, never legacy gene/byProteinChange params', async () => {

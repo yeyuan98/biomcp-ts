@@ -12,19 +12,18 @@ import type { DrugSearchResult } from '../../entities/drug.js';
 import { connectionManager } from '../../connections/manager.js';
 import { parseMockUrl } from '../helpers/mock-url.js';
 import { createMcpTestHarness, type McpTestHarness } from '../helpers/mcp-harness.js';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 describe('drug', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
     process.env.MYCHEM_API_KEY = '';
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     delete process.env.MYCHEM_API_KEY;
   });
 
@@ -669,7 +668,7 @@ describe('drug', () => {
 // ============================================================
 describe('drug_search tool envelope (issue #83)', () => {
   let harness: McpTestHarness;
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeAll(async () => {
     harness = await createMcpTestHarness();
@@ -681,12 +680,7 @@ describe('drug_search tool envelope (issue #83)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('wraps results in the { results } envelope on matches', async () => {

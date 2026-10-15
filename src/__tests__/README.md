@@ -22,9 +22,12 @@ npm run test:coverage    # Unit tests with coverage
 > genbank, gene, disease, drug, variant, utility, article, pdb) finish in
 > roughly 1–2 minutes total. The gated suites are slow when their environment
 > is present: `biowasm-engine`/`biowasm-tools` and `ranalysis` download and
-> boot real wasm/R runtimes (multi-minute, per-test caps of 120–300s) and
-> `patent` seminal mining is capped at 180s. In a bare environment these
-> suites **skip silently** (see gating table below).
+> boot real wasm/R runtimes (per-test cap of 240 s) and `patent` searches are
+> capped at 60 s. In a bare environment these suites **skip silently** (see
+> gating table below). Per-test caps were measured empirically
+> (observed p95 + ~50%, min 15 s, max 60 s); 60 s is also the in-process MCP
+> client's per-request cap, so larger jest timeouts only ever benefit the
+> `retryOnRateLimit` wrapper, never a single slow call.
 
 > **Always run tests via the npm scripts or `make` targets.** This is a native-ESM
 > project (`"type": "module"` + ts-jest ESM), so jest must be launched with
@@ -45,10 +48,14 @@ npm run test:coverage    # Unit tests with coverage
 
 ```
 src/__tests__/
+  fixtures/             # shared typed fixtures for repeated API payload shapes
+    mygene.ts           #   BRCA1/TP53 mygene /query hits (byte-frozen variants)
+    myvariant.ts        #   BRAF V600E myvariant hits (vcf123 + rs113488022)
   helpers/
     mcp-harness.ts       # In-process MCP client harness (InMemoryTransport)
     assertions.ts        # Type-guard validators (expectGeneSearchResult, ...)
     mock-url.ts          # parseMockUrl + mockFetchRouter: exact-hostname fetch-mock routing
+    mock-fetch.ts        # mockGlobalFetch(): global.fetch save/restore hooks per describe
     retry.ts             # retryOnRateLimit for integration tests
   biowasm/               # biowasm analyzers, artifacts, engine, registry, schemas, validation
   config/
@@ -102,10 +109,10 @@ src/__tests__/
       utility-tools.test.ts
       variant-tools.test.ts
     depmap/
-      manifest.test.ts
+      manifest-live.test.ts
   ranalysis/             # R engine, mirror, render, input validation
   scripts/
-    depmap/              # ETL script unit tests (csv, datasets, ingest, manifest, staging)
+    depmap/              # ETL script unit tests (csv, datasets, ingest, manifest-parse, staging)
   server/
     biowasm-tools.test.ts
     configure-tools.test.ts     # biomcp_configure MCP tool over a real McpServer (tmp cwd)
@@ -131,8 +138,8 @@ src/__tests__/
 
 Counts below are refresh-when-touched — update them when you add suites to the touched area.
 
-- **Unit:** 86 suites / 1448 tests (`npm test`)
-- **Integration:** 19 files / 191 declared tests (`npm run test:integration`)
+- **Unit:** 88 suites / 1621 tests (`npm test`)
+- **Integration:** 19 files / 207 declared tests (`npm run test:integration`)
 
 ## Integration Suite Gating
 
@@ -145,7 +152,7 @@ Gated suites **skip silently** when their environment is absent — a green
 | ranalysis-tools | R mirror is provisioned | `ANALYSIS_R_MIRROR_URL` env or existing `~/.cache/biomcp/r-wasm-mirror-state.json` |
 | patent OPS / ODP describes | credentials set | `EPO_OPS_CONSUMER_KEY`/`EPO_OPS_CONSUMER_SECRET`, `USPTO_API_KEY` |
 | db (MySQL / SQLite) | targets configured | `BIOMCP_DB_IT_HOST`…, `BIOMCP_DB_IT_SQLITE_PATH` (see Database Tests below) |
-| depmap manifest | opt-in flag set | `BIOMCP_DEPMAP_IT` |
+| depmap manifest (live) | opt-in flag set | `BIOMCP_DEPMAP_IT` |
 | variant OncoKB `it.skip` | token set | `ONCOKB_TOKEN` |
 
 ## Testing Approach
@@ -170,6 +177,18 @@ e.g. `ppubs.uspto.gov` in `src/entities/patent/ppubs-client.ts`,
 `archive.org`/`web.archive.org` in `src/entities/patent/detail/wayback.ts`).
 Path/content substring checks (`esearch`, `/api/search`, `V600E`, …) are not
 host checks and remain plain `includes`.
+
+**Fetch save/restore (`helpers/mock-fetch.ts`):** describes that mock
+`global.fetch` call `mockGlobalFetch();` once at the top instead of
+hand-rolling `let originalFetch` + beforeEach save + afterEach restore. Extra
+hook logic (mock clears, `connectionManager.closeAll()`, env save/restore)
+stays in the suite's own hooks.
+
+**Shared fixtures (`fixtures/`):** repeated inline API payload literals
+(mygene BRCA1/TP53 hits, myvariant BRAF V600E hits) live in
+`fixtures/mygene.ts` / `fixtures/myvariant.ts` as typed, byte-frozen named
+exports — where two tests used slightly different variants of the same hit,
+both variants are exported separately; do not unify them.
 
 - **Connections:** URL construction, auth headers, rate limiting, retry logic, content-type handling, proxy dispatcher self-initialization
 - **Entities:** API endpoint correctness, query parameter construction, field mapping transforms, citation orchestration, deduplication, ID resolution

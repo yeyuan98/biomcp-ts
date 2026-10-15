@@ -2,6 +2,7 @@ import { jest } from '@jest/globals';
 import { GraphQLConnection } from '../../connections/graphql.js';
 import { HttpConnectionError } from '../../connections/errors.js';
 import type { ConnectionOptions } from '../../connections/base.js';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 jest.mock('../../connections/rate-limiter.js', () => ({
   TokenBucketRateLimiter: jest.fn<(...args: any[]) => any>().mockImplementation(() => ({
@@ -21,15 +22,10 @@ const baseOptions: ConnectionOptions = {
 };
 
 describe('GraphQLConnection', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('request() sends POST with GraphQL query in body', async () => {

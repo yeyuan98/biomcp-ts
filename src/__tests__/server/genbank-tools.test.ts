@@ -1,6 +1,7 @@
 import { jest, describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 import { connectionManager } from '../../connections/manager.js';
 import { createMcpTestHarness, type McpTestHarness } from '../helpers/mcp-harness.js';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 const EUTILS = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
 
@@ -104,7 +105,7 @@ function fetchUrls(): string[] {
 
 describe('genbank tools', () => {
   let harness: McpTestHarness;
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeAll(async () => {
     harness = await createMcpTestHarness();
@@ -116,12 +117,7 @@ describe('genbank tools', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   it('genbank_search maps nuccore esummary docs', async () => {

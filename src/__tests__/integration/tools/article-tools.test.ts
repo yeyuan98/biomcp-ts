@@ -6,6 +6,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+// Per-test caps: measured p95 ≈ 30 s (federated searches hit the arXiv leg's
+// real request pacing), so 60 s is ~2× p95 headroom. Larger values are dead
+// weight — the in-process MCP client caps each request at 60 s anyway.
+
 let harness: Awaited<ReturnType<typeof createMcpTestHarness>>;
 let savedCacheDir: string | undefined;
 let cacheRoot: string;
@@ -61,7 +65,7 @@ describe('article_search', () => {
     expect(Array.isArray(response.warnings)).toBe(true);
     expect((response.warnings as string[]).some(w => w.includes('PubMed ignored all meaningful terms'))).toBe(true);
     expect(response.results.some((r: Record<string, unknown>) => r._error !== undefined)).toBe(false);
-  }, 90000);
+  }, 60000);
 
   // Issue #87: LitSense rows used to carry only pmid/score — no metadata.
   // Now each row keeps the matched sentence and is PubMed-enriched with a
@@ -83,7 +87,7 @@ describe('article_search', () => {
     } else {
       console.warn('[article-search-litsense] enrichment unavailable this run; sparse rows + warning asserted');
     }
-  }, 90000);
+  }, 60000);
 });
 
 describe('article_search preprint_only (bioRxiv + medRxiv)', () => {
@@ -160,7 +164,7 @@ describe('article_search arxiv source', () => {
     } else {
       console.warn('[article-search-arxiv] federated run had no arXiv rows (legitimate timeout/absence); other sources delivered');
     }
-  }, 90000);
+  }, 60000);
 });
 
 describe('article_get', () => {
@@ -239,7 +243,7 @@ describe('article_get preprint DOIs (bioRxiv/medRxiv)', () => {
     expect(Array.isArray(citation.citation_counts)).toBe(true);
     expect(citation.citation_counts[0]?.total ?? 0).toBeGreaterThan(0);
     expect(Array.isArray(citation.backward_references)).toBe(true);
-  }, 90000);
+  }, 60000);
 });
 
 describe('article_get sections', () => {
@@ -252,7 +256,7 @@ describe('article_get sections', () => {
     const oa = (result as any)?.sections?.open_access;
     expect(oa.status).toBe('open_access');
     expect(oa.full_text_available).toBe(true);
-  }, 90000);
+  }, 60000);
 
   // Full text itself: the same CC-BY article must yield a FILE handle by
   // default (Europe PMC fullTextXML, or the eutils db=pmc fallback leg).
@@ -272,7 +276,7 @@ describe('article_get sections', () => {
       expect(lines[entry.line - 1]).toBe(`## ${entry.heading}`);
     }
     expect(result.is_open_access).toBe(true);
-  }, 90000);
+  }, 60000);
 
   // Free-to-read but not OA (Cell 2025 author manuscript, isOpenAccess=N):
   // Europe PMC fullTextXML 500s for this record — the eutils db=pmc leg is
@@ -287,7 +291,7 @@ describe('article_get sections', () => {
     } else {
       expect(['paywalled', 'no_machine_readable_xml', 'fetch_failed']).toContain(ft.reason);
     }
-  }, 90000);
+  }, 60000);
 
   // Not in PMC at all (Nature career column): honest unavailable envelope,
   // never a crash and never a silent empty.
@@ -300,7 +304,7 @@ describe('article_get sections', () => {
     expect(ft.links?.doi_url).toMatch(/^https:\/\/doi\.org\//);
     const oa = (result as any)?.sections?.open_access;
     expect(oa.status).toBe('not_in_pmc');
-  }, 90000);
+  }, 60000);
 
   it('annotations section returns PubTator annotations', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('article_get', { id: '25333279', sections: ['annotations'] }));

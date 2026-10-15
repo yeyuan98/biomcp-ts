@@ -1,6 +1,7 @@
 import { jest, describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 import { connectionManager } from '../../connections/manager.js';
 import { createMcpTestHarness, type McpTestHarness } from '../helpers/mcp-harness.js';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 /**
  * Schema-level rejection of empty / whitespace-only free-text queries
@@ -45,7 +46,7 @@ const VALID_QUERIES: Record<ToolName, string> = {
 
 describe('free-text search query validation (issue #79)', () => {
   let harness: McpTestHarness;
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
   let fetchSentinel: jest.Mock;
 
   beforeAll(async () => {
@@ -57,7 +58,6 @@ describe('free-text search query validation (issue #79)', () => {
   });
 
   beforeEach(() => {
-    originalFetch = global.fetch;
     connectionManager.closeAll();
     // Rejecting sentinel: any handler that runs past schema validation will
     // reach the network layer and fail fast/gracefully — the tests below only
@@ -66,10 +66,6 @@ describe('free-text search query validation (issue #79)', () => {
     // connection retry layer classifies it non-retryable (no backoff sleeps).
     fetchSentinel = jest.fn(() => Promise.reject(new Error('schema test sentinel: upstream disabled')));
     global.fetch = fetchSentinel as unknown as typeof global.fetch;
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   it.each(FREE_TEXT_SEARCH_TOOLS)('%s rejects an empty query at the schema level', async (tool) => {

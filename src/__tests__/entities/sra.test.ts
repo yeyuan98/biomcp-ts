@@ -2,6 +2,7 @@ import { jest } from '@jest/globals';
 import { connectionManager } from '../../connections/manager.js';
 import { parseExperimentPackageSet } from '../../entities/sra/transform/experiment-package.js';
 import { sraSearch, sraGet } from '../../entities/sra/index.js';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 // Verified EXPERIMENT_PACKAGE_SET shape (element-attribute accessions,
 // one package per experiment, RUN stats as attributes).
@@ -308,12 +309,11 @@ describe('parseExperimentPackageSet', () => {
 });
 
 describe('sraSearch', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
   let envBackup: Record<string, string | undefined>;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     envBackup = {
       NCBI_API_KEY: process.env.NCBI_API_KEY,
       NCBI_EMAIL: process.env.NCBI_EMAIL,
@@ -324,7 +324,6 @@ describe('sraSearch', () => {
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     for (const [key, value] of Object.entries(envBackup)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -398,12 +397,11 @@ describe('sraSearch', () => {
 });
 
 describe('sraGet', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
   let envBackup: Record<string, string | undefined>;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     envBackup = {
       NCBI_API_KEY: process.env.NCBI_API_KEY,
       NCBI_EMAIL: process.env.NCBI_EMAIL,
@@ -414,7 +412,6 @@ describe('sraGet', () => {
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     for (const [key, value] of Object.entries(envBackup)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;

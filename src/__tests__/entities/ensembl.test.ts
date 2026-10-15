@@ -1,5 +1,6 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { connectionManager } from '../../connections/manager.js';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 const LOOKUP_BRAF = {
   id: 'ENSG00000157764',
@@ -157,15 +158,10 @@ function fetchInits(): RequestInit[] {
 }
 
 describe('ensembl entity', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   describe('ensemblLookup', () => {

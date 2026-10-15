@@ -3,6 +3,9 @@ import { createMcpTestHarness } from '../../helpers/mcp-harness.js';
 import { retryOnRateLimit } from '../../helpers/retry.js';
 import { unlinkSync, existsSync, readFileSync, rmSync } from 'node:fs';
 
+// Per-test caps: measured p95 ≈ 11 s, max ≈ 20 s (multi-section fetches) →
+// 30 s for network tests, 15 s for validation-only rejection tests.
+
 let harness: Awaited<ReturnType<typeof createMcpTestHarness>>;
 
 beforeAll(async () => {
@@ -22,18 +25,22 @@ describe('pdb search mode', () => {
     expect(results[0].pdb_id.length).toBe(4);
     expect(results[0].summary).toBeDefined();
     expect(results[0].summary.title).toBeTruthy();
-  }, 60000);
+    // Stable identity: the top-5 full-text hits for "crambin" are dominated
+    // by titled crambin structures (e.g. 1EJG "CRAMBIN AT ULTRA-HIGH
+    // RESOLUTION"; homologs like hellethionin may also rank).
+    expect(results.filter((r: any) => /crambin/i.test(String(r.summary.title || ''))).length).toBeGreaterThanOrEqual(1);
+  }, 30000);
 
   it('returns empty for nonsense query', async () => {
     const results = await retryOnRateLimit(() => harness.callTool('pdb', { query: 'ZZZZNOTAPROTEIN99999', limit: 5 }));
     expect(Array.isArray(results)).toBe(true);
     expect(results.length).toBe(0);
-  }, 60000);
+  }, 30000);
 
   it('respects limit parameter', async () => {
     const results = await retryOnRateLimit(() => harness.callTool('pdb', { query: 'hemoglobin', limit: 2 }));
     expect(results.length).toBeLessThanOrEqual(2);
-  }, 60000);
+  }, 30000);
 
   it('search results include key metadata fields', async () => {
     const results = await retryOnRateLimit(() => harness.callTool('pdb', { query: 'hemoglobin', limit: 1 }));
@@ -46,7 +53,7 @@ describe('pdb search mode', () => {
     expect(r.summary.resolution).toBeDefined();
     expect(r.summary.deposition_date).toBeDefined();
     expect(r.summary.release_date).toBeDefined();
-  }, 60000);
+  }, 30000);
 });
 
 describe('pdb get mode', () => {
@@ -55,10 +62,12 @@ describe('pdb get mode', () => {
     expect(result.pdb_id).toBe('1CRN');
     expect(result.summary).toBeDefined();
     expect(result.summary.title).toBeTruthy();
-    // Stable identity: 1CRN is crambin (Teeter & Hendrickson).
+    // Stable identity: 1CRN is crambin (Teeter & Hendrickson), solved by
+    // X-ray diffraction at 1.5 Å — immutable deposited experiment facts.
     expect(result.summary.title).toMatch(/crambin/i);
-    expect(result.summary.experimental_method).toBeTruthy();
-  }, 60000);
+    expect(result.summary.experimental_method).toBe('X-RAY DIFFRACTION');
+    expect(result.summary.resolution).toBe(1.5);
+  }, 30000);
 
   it('returns 4HHB with specific sections', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '4HHB', sections: ['polymer_entities', 'experiment'] }));
@@ -67,9 +76,14 @@ describe('pdb get mode', () => {
     expect(result.sections).toBeDefined();
     expect(result.sections).toHaveProperty('polymer_entities');
     expect(result.sections).toHaveProperty('experiment');
-    expect(result.sections.polymer_entities.length).toBeGreaterThan(0);
-    expect(result.sections.experiment.methods).toBeDefined();
-  }, 60000);
+    // 4HHB deposits exactly two polymer entities: hemoglobin alpha
+    // (chains A/C) and beta (chains B/D).
+    expect(result.sections.polymer_entities).toHaveLength(2);
+    expect(result.sections.polymer_entities.map(
+      (e: any) => e.rcsb_polymer_entity_container_identifiers?.auth_asym_ids
+    )).toEqual([['A', 'C'], ['B', 'D']]);
+    expect(result.sections.experiment.methods).toEqual(['X-RAY DIFFRACTION']);
+  }, 30000);
 
   it('returns 1CRN with all sections', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '1CRN', sections: ['all'] }));
@@ -81,67 +95,81 @@ describe('pdb get mode', () => {
     expect(result.sections).toHaveProperty('assembly');
     expect(result.sections).toHaveProperty('experiment');
     expect(result.sections).toHaveProperty('citation');
-  }, 60000);
+    // Crambin is a single-chain entry: one polymer entity, one assembly.
+    expect(result.sections.polymer_entities).toHaveLength(1);
+    expect(result.sections.assembly).toHaveLength(1);
+  }, 30000);
 
   it('polymer_entities section returns array with entity data', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '4HHB', sections: ['polymer_entities'] }));
     const entities = result.sections.polymer_entities;
     expect(Array.isArray(entities)).toBe(true);
-    expect(entities.length).toBeGreaterThan(0);
+    expect(entities).toHaveLength(2);
     for (const entity of entities) {
       expect(entity).toBeDefined();
       expect(entity._error).toBeUndefined();
+      // Each entity identifies its authorized chains (A/C and B/D).
+      const asymIds = entity.rcsb_polymer_entity_container_identifiers?.auth_asym_ids;
+      expect(Array.isArray(asymIds)).toBe(true);
+      expect(asymIds.length).toBeGreaterThan(0);
     }
-  }, 60000);
+  }, 30000);
 
   it('ligands section returns array for entries with ligands', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '4HHB', sections: ['ligands'] }));
     const ligands = result.sections.ligands;
     expect(Array.isArray(ligands)).toBe(true);
-    expect(ligands.length).toBeGreaterThan(0);
+    // 4HHB deposits two non-polymer entities (the heme groups).
+    expect(ligands).toHaveLength(2);
     for (const lig of ligands) {
       expect(lig._error).toBeUndefined();
     }
-  }, 60000);
+  }, 30000);
 
   it('ligands section returns empty array for entries without ligands', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '1CRN', sections: ['ligands'] }));
     const ligands = result.sections.ligands;
     expect(Array.isArray(ligands)).toBe(true);
     expect(ligands.length).toBe(0);
-  }, 60000);
+  }, 30000);
 
   it('assembly section returns array with assembly data', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '1CRN', sections: ['assembly'] }));
     const assemblies = result.sections.assembly;
     expect(Array.isArray(assemblies)).toBe(true);
-    expect(assemblies.length).toBeGreaterThan(0);
+    expect(assemblies).toHaveLength(1);
     for (const asm of assemblies) {
       expect(asm._error).toBeUndefined();
     }
-  }, 60000);
+  }, 30000);
 
   it('citation section returns publication data', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '1CRN', sections: ['citation'] }));
     const citation = result.sections.citation;
     expect(citation).toBeDefined();
     expect(citation._error).toBeUndefined();
-  }, 60000);
+    // Stable identity: 1CRN's primary citation is the 1984 PNAS crambin
+    // water-structure paper (Teeter & Hendrickson).
+    expect(citation.title).toMatch(/crambin/i);
+    expect(citation.year).toBe(1984);
+    expect(citation.journal).toBe('Proc.Natl.Acad.Sci.Usa');
+  }, 30000);
 
   it('experiment section returns methods and refinement', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '1CRN', sections: ['experiment'] }));
     const exp = result.sections.experiment;
     expect(exp).toBeDefined();
     expect(exp._error).toBeUndefined();
-    expect(exp.methods).toBeDefined();
-  }, 60000);
+    expect(exp.methods).toEqual(['X-RAY DIFFRACTION']);
+    expect(exp.refinement?.[0]?.resolution_high).toBe(1.5);
+  }, 30000);
 
   it('returns metadata without sections when sections omitted', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '1CRN' }));
     expect(result.pdb_id).toBe('1CRN');
     expect(result.summary).toBeDefined();
     expect(result.sections).toBeUndefined();
-  }, 60000);
+  }, 30000);
 
   it('returns 4HHB with all section data having no _error fields', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '4HHB', sections: ['all'] }));
@@ -154,25 +182,25 @@ describe('pdb get mode', () => {
         expect(data._error).toBeUndefined();
       }
     }
-  }, 60000);
+  }, 30000);
 
   it('rejects invalid PDB ID format', async () => {
     await expect(
       harness.callTool('pdb', { pdb_id: 'INVALID' })
     ).rejects.toThrow();
-  }, 30000);
+  }, 15000);
 
   it('rejects AlphaFold ID', async () => {
     await expect(
       harness.callTool('pdb', { pdb_id: 'AF_AFP68871F1' })
     ).rejects.toThrow();
-  }, 30000);
+  }, 15000);
 
   it('returns 404 for nonexistent PDB ID', async () => {
     await expect(
       harness.callTool('pdb', { pdb_id: 'ZZZZ' })
     ).rejects.toThrow(/404|not found/i);
-  }, 30000);
+  }, 15000);
 });
 
 describe('pdb download mode', () => {
@@ -186,11 +214,12 @@ describe('pdb download mode', () => {
     expect(existsSync(result.file.file_path)).toBe(true);
 
     const content = readFileSync(result.file.file_path, 'utf-8');
-    expect(content).toContain('data_');
+    // mmCIF files open with the entry's data block.
+    expect(content).toContain('data_1CRN');
     unlinkSync(result.file.file_path);
     const parentDir = result.file.file_path.substring(0, result.file.file_path.lastIndexOf('/'));
     try { rmSync(parentDir, { recursive: true }); } catch {}
-  }, 60000);
+  }, 30000);
 
   it('downloads 1CRN in pdb format with valid content', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '1CRN', download: true, format: 'pdb' }));
@@ -203,7 +232,7 @@ describe('pdb download mode', () => {
     unlinkSync(result.file.file_path);
     const parentDir = result.file.file_path.substring(0, result.file.file_path.lastIndexOf('/'));
     try { rmSync(parentDir, { recursive: true }); } catch {}
-  }, 60000);
+  }, 30000);
 
   it('includes file size in human-readable format', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '1CRN', download: true, format: 'cif' }));
@@ -211,7 +240,7 @@ describe('pdb download mode', () => {
     unlinkSync(result.file.file_path);
     const parentDir = result.file.file_path.substring(0, result.file.file_path.lastIndexOf('/'));
     try { rmSync(parentDir, { recursive: true }); } catch {}
-  }, 60000);
+  }, 30000);
 
   it('returns metadata and file when downloading with sections', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('pdb', { pdb_id: '1CRN', download: true, format: 'cif', sections: ['experiment'] }));
@@ -224,7 +253,7 @@ describe('pdb download mode', () => {
     unlinkSync(result.file.file_path);
     const parentDir = result.file.file_path.substring(0, result.file.file_path.lastIndexOf('/'));
     try { rmSync(parentDir, { recursive: true }); } catch {}
-  }, 60000);
+  }, 30000);
 });
 
 describe('pdb pagination', () => {
@@ -241,12 +270,12 @@ describe('pdb pagination', () => {
     expect(ids2.length).toBe(2);
     expect(ids2[0]).toBe(ids1[1]);
     expect(ids2[1]).not.toBe(ids1[1]);
-  }, 60000);
+  }, 30000);
 
   it('respects limit parameter across pages', async () => {
     const results = await retryOnRateLimit(() => harness.callTool('pdb', { query: 'protein', limit: 1 }));
     expect(results.length).toBeLessThanOrEqual(1);
-  }, 60000);
+  }, 30000);
 });
 
 describe('pdb error handling', () => {
@@ -254,5 +283,5 @@ describe('pdb error handling', () => {
     await expect(
       harness.callTool('pdb', {})
     ).rejects.toThrow();
-  }, 30000);
+  }, 15000);
 });

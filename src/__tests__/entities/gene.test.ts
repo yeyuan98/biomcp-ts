@@ -3,24 +3,23 @@ import { geneSearch, geneGet, transformMyGeneResponse } from '../../entities/gen
 import { connectionManager } from '../../connections/manager.js';
 import { parseMockUrl } from '../helpers/mock-url.js';
 import { createMcpTestHarness, type McpTestHarness } from '../helpers/mcp-harness.js';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
+import {
+  brca1MinimalHit, brca1DnaRepairHit, brca1DnaRepairGeneHit, tp53TumorSuppressorHit,
+} from '../fixtures/mygene.js';
 
 describe('gene', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneSearch() calls connection with correct mygene search endpoint', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ hits: [{ symbol: 'BRCA1', name: 'BRCA1' }] }),
+      json: () => Promise.resolve({ hits: [brca1MinimalHit] }),
     }) as any;
 
     await geneSearch('brca1');
@@ -65,38 +64,17 @@ describe('gene', () => {
     expect(callUrl).toContain('symbol');
     expect(callUrl).toContain('BRCA1');
   });
-
-  test('transformMyGeneResponse() maps fields correctly', () => {
-    const input = {
-      symbol: 'BRCA1',
-      name: 'BRCA1 DNA repair',
-      summary: 'This gene encodes a protein that functions in DNA repair.',
-    };
-
-    const result = transformMyGeneResponse(input);
-
-    expect(result).toEqual({
-      symbol: 'BRCA1',
-      name: 'BRCA1 DNA repair',
-      summary: 'This gene encodes a protein that functions in DNA repair.',
-    });
-  });
 });
 
 // ============================================================
 // geneSearch with options
 // ============================================================
 describe('geneSearch with options', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneSearch() appends the chromosome filter as a genome-interval clause in q', async () => {
@@ -194,16 +172,11 @@ describe('geneSearch with options', () => {
 // geneSearch empty results
 // ============================================================
 describe('geneSearch empty results', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneSearch() returns empty array when API returns empty hits', async () => {
@@ -231,16 +204,11 @@ describe('geneSearch empty results', () => {
 // geneSearch with genomic_pos handling
 // ============================================================
 describe('geneSearch genomic_pos transformation', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneSearch() transforms genomic_pos into genomic_coordinates', async () => {
@@ -385,16 +353,11 @@ describe('geneSearch genomic_pos transformation', () => {
 // geneGet with sections
 // ============================================================
 describe('geneGet with sections', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneGet() with pathways section triggers section fetch', async () => {
@@ -436,8 +399,8 @@ describe('geneGet with sections', () => {
     const result = await geneGet('BRCA1', ['pathways']);
 
     expect(result.symbol).toBe('BRCA1');
-    expect(result.sections).toBeDefined();
-    expect(result.sections!.pathways).toBeDefined();
+    expect(Object.keys(result.sections!)).toEqual(['pathways']);
+    expect(result.sections!.pathways).toHaveLength(1);
     expect((result.sections!.pathways as any[])[0].name).toBe('HDR through Homologous Recombination');
     expect((result.sections!.pathways as any[])[0].source).toBe('reactome');
   });
@@ -450,11 +413,7 @@ describe('geneGet with sections', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            hits: [{
-              symbol: 'TP53',
-              name: 'Tumor protein p53',
-              summary: 'Tumor suppressor.',
-            }],
+            hits: [tp53TumorSuppressorHit],
           }),
           headers: new Headers({ 'content-type': 'application/json' }),
         });
@@ -476,8 +435,7 @@ describe('geneGet with sections', () => {
 
     const result = await geneGet('TP53', ['protein']);
 
-    expect(result.sections).toBeDefined();
-    expect(result.sections!.protein).toBeDefined();
+    expect(Object.keys(result.sections!)).toEqual(['protein']);
     expect((result.sections!.protein as any).accession).toBe('P04637');
     expect((result.sections!.protein as any).name).toBe('Cellular tumor antigen p53');
   });
@@ -490,11 +448,7 @@ describe('geneGet with sections', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            hits: [{
-              symbol: 'BRCA1',
-              name: 'BRCA1 DNA repair',
-              summary: 'DNA repair.',
-            }],
+            hits: [brca1DnaRepairHit],
           }),
           headers: new Headers({ 'content-type': 'application/json' }),
         });
@@ -509,10 +463,9 @@ describe('geneGet with sections', () => {
 
     const result = await geneGet('BRCA1', ['pathways', 'protein']);
 
-    expect(result.sections).toBeDefined();
-    // Both sections should be present (even if empty data from generic mock)
-    expect(result.sections!.pathways).toBeDefined();
-    expect(result.sections!.protein).toBeDefined();
+    // Both sections should be present (even if empty data from generic mock);
+    // parallel fetch completion order is nondeterministic, so compare sorted.
+    expect(Object.keys(result.sections!).sort()).toEqual(['pathways', 'protein']);
     // Should have made more than one fetch call
     expect(global.fetch).toHaveBeenCalledTimes(3); // 1 gene lookup + 2 section fetches
   });
@@ -522,16 +475,11 @@ describe('geneGet with sections', () => {
 // geneGet with smart=true and alias resolution
 // ============================================================
 describe('geneGet with smart alias resolution', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneGet() smart=true resolves alias when exact match fails', async () => {
@@ -564,11 +512,7 @@ describe('geneGet with smart alias resolution', () => {
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve({
-          hits: [{
-            symbol: 'BRCA1',
-            name: 'BRCA1 DNA repair',
-            summary: 'DNA repair gene.',
-          }],
+          hits: [brca1DnaRepairGeneHit],
         }),
         headers: new Headers({ 'content-type': 'application/json' }),
       });
@@ -610,16 +554,11 @@ describe('geneGet with smart alias resolution', () => {
 // geneGet with smart=false, no hits
 // ============================================================
 describe('geneGet without smart mode', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneGet() smart=false, no hits throws error suggesting smart=true', async () => {
@@ -649,11 +588,10 @@ describe('geneGet without smart mode', () => {
 // geneGet error in section fetch
 // ============================================================
 describe('geneGet section fetch error handling', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
   });
 
@@ -666,11 +604,7 @@ describe('geneGet section fetch error handling', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            hits: [{
-              symbol: 'BRCA1',
-              name: 'BRCA1 DNA repair',
-              summary: 'DNA repair gene.',
-            }],
+            hits: [brca1DnaRepairGeneHit],
           }),
           headers: new Headers({ 'content-type': 'application/json' }),
         });
@@ -690,12 +624,11 @@ describe('geneGet section fetch error handling', () => {
     const result = await geneGet('BRCA1', ['pathways']);
 
     expect(result.symbol).toBe('BRCA1');
-    expect(result.sections).toBeDefined();
+    expect(Object.keys(result.sections!)).toEqual(['pathways']);
     // Failed section should have an error entry (fetchPathways catches internally)
-    expect(result.sections!.pathways).toBeDefined();
     // fetchPathways catches errors and returns an array with _error
     const pathwaysData = result.sections!.pathways as Array<{ _error: string }>;
-    expect(pathwaysData[0]._error).toBeDefined();
+    expect(pathwaysData).toHaveLength(1);
     expect(pathwaysData[0]._error).toContain('Pathway lookup failed');
   });
 });
@@ -704,11 +637,10 @@ describe('geneGet section fetch error handling', () => {
 // geneGet with 'all' sections
 // ============================================================
 describe('geneGet with all sections', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
   });
 
@@ -720,11 +652,7 @@ describe('geneGet with all sections', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            hits: [{
-              symbol: 'TP53',
-              name: 'Tumor protein p53',
-              summary: 'Tumor suppressor.',
-            }],
+            hits: [tp53TumorSuppressorHit],
           }),
           headers: new Headers({ 'content-type': 'application/json' }),
         });
@@ -760,16 +688,11 @@ describe('geneGet with all sections', () => {
 // geneGet abort/timeout handling
 // ============================================================
 describe('geneGet abort/timeout handling', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneGet() handles AbortError from fetch', async () => {
@@ -789,16 +712,11 @@ describe('geneGet abort/timeout handling', () => {
 // geneGet with genomic_pos transformation
 // ============================================================
 describe('geneGet genomic_pos handling', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneGet() sets chromosome and position from genomic_pos', async () => {
@@ -864,16 +782,11 @@ describe('geneGet genomic_pos handling', () => {
 // geneGet section aliases
 // ============================================================
 describe('geneGet section aliases', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneGet() maps dosage_sensitivity alias to clingen', async () => {
@@ -884,11 +797,7 @@ describe('geneGet section aliases', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            hits: [{
-              symbol: 'BRCA1',
-              name: 'BRCA1 DNA repair',
-              summary: 'DNA repair.',
-            }],
+            hits: [brca1DnaRepairHit],
           }),
           headers: new Headers({ 'content-type': 'application/json' }),
         });
@@ -903,10 +812,9 @@ describe('geneGet section aliases', () => {
 
     const result = await geneGet('BRCA1', ['dosage_sensitivity']);
 
-    expect(result.sections).toBeDefined();
+    expect(Object.keys(result.sections!)).toEqual(['clingen']);
     // clingen returns an error object about no public API
-    expect(result.sections!.clingen).toBeDefined();
-    expect((result.sections!.clingen as any)._error).toContain('ClinGen');
+    expect(result.sections!.clingen).toMatchObject({ _error: expect.stringContaining('ClinGen') });
   });
 
   test('geneGet() maps protein_atlas alias to hpa', async () => {
@@ -944,8 +852,14 @@ describe('geneGet section aliases', () => {
 
     const result = await geneGet('BRCA1', ['protein_atlas']);
 
-    expect(result.sections).toBeDefined();
-    expect(result.sections!.hpa).toBeDefined();
+    expect(Object.keys(result.sections!)).toEqual(['hpa']);
+    // The mocked HPA row maps to approved subcellular locations verbatim.
+    expect(result.sections!.hpa).toEqual({
+      subcellular: [
+        { location: 'Nucleus', confidence: 'approved' },
+        { location: 'Cytoplasm', confidence: 'approved' },
+      ],
+    });
   });
 });
 
@@ -953,16 +867,11 @@ describe('geneGet section aliases', () => {
 // resolveGeneAlias - case-exact match priority
 // ============================================================
 describe('resolveGeneAlias via geneGet smart', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneGet() smart mode prefers case-exact alias match', async () => {
@@ -1047,11 +956,7 @@ describe('resolveGeneAlias via geneGet smart', () => {
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve({
-          hits: [{
-            symbol: 'BRCA1',
-            name: 'BRCA1 DNA repair',
-            summary: 'DNA repair.',
-          }],
+          hits: [brca1DnaRepairHit],
         }),
         headers: new Headers({ 'content-type': 'application/json' }),
       });
@@ -1092,11 +997,7 @@ describe('resolveGeneAlias via geneGet smart', () => {
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve({
-          hits: [{
-            symbol: 'BRCA1',
-            name: 'BRCA1 DNA repair',
-            summary: 'DNA repair.',
-          }],
+          hits: [brca1DnaRepairHit],
         }),
         headers: new Headers({ 'content-type': 'application/json' }),
       });
@@ -1165,16 +1066,11 @@ describe('resolveGeneAlias via geneGet smart', () => {
 // geneGet core only (no sections)
 // ============================================================
 describe('geneGet core only', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneGet() without sections returns core fields only', async () => {
@@ -1203,16 +1099,11 @@ describe('geneGet core only', () => {
 // geneGet with GO section
 // ============================================================
 describe('geneGet with GO section', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneGet() fetches GO terms and categorizes by aspect', async () => {
@@ -1223,11 +1114,7 @@ describe('geneGet with GO section', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            hits: [{
-              symbol: 'TP53',
-              name: 'Tumor protein p53',
-              summary: 'Tumor suppressor.',
-            }],
+            hits: [tp53TumorSuppressorHit],
           }),
           headers: new Headers({ 'content-type': 'application/json' }),
         });
@@ -1257,8 +1144,7 @@ describe('geneGet with GO section', () => {
 
     const result = await geneGet('TP53', ['go']);
 
-    expect(result.sections).toBeDefined();
-    expect(result.sections!.go).toBeDefined();
+    expect(Object.keys(result.sections!)).toEqual(['go']);
     const goTerms = result.sections!.go as Array<{ id: string; term: string; aspect: string }>;
     expect(goTerms.length).toBe(4);
     expect(goTerms.some(t => t.aspect === 'BP')).toBe(true);
@@ -1271,16 +1157,11 @@ describe('geneGet with GO section', () => {
 // geneGet with interactions section
 // ============================================================
 describe('geneGet with interactions section', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneGet() fetches protein-protein interactions from STRING', async () => {
@@ -1291,11 +1172,7 @@ describe('geneGet with interactions section', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            hits: [{
-              symbol: 'TP53',
-              name: 'Tumor protein p53',
-              summary: 'Tumor suppressor.',
-            }],
+            hits: [tp53TumorSuppressorHit],
           }),
           headers: new Headers({ 'content-type': 'application/json' }),
         });
@@ -1326,16 +1203,11 @@ describe('geneGet with interactions section', () => {
 // geneGet with civic section
 // ============================================================
 describe('geneGet with civic section', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneGet() fetches CIViC clinical variants', async () => {
@@ -1378,11 +1250,10 @@ describe('geneGet with civic section', () => {
 
     const result = await geneGet('BRAF', ['civic']);
 
-    expect(result.sections).toBeDefined();
+    expect(Object.keys(result.sections!)).toEqual(['civic']);
     const civic = result.sections!.civic as { variants: Array<{ name: string }> };
-    expect(civic.variants).toBeDefined();
-    expect(civic.variants.length).toBe(2);
-    expect(civic.variants[0].name).toBe('V600E');
+    expect(civic.variants).toHaveLength(2);
+    expect(civic.variants.map(v => v.name)).toEqual(['V600E', 'K601E']);
   });
 });
 
@@ -1390,27 +1261,18 @@ describe('geneGet with civic section', () => {
 // geneGet with unknown section
 // ============================================================
 describe('geneGet with unknown section', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneGet() handles unknown section name gracefully', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
-        hits: [{
-          symbol: 'TP53',
-          name: 'Tumor protein p53',
-          summary: 'Tumor suppressor.',
-        }],
+        hits: [tp53TumorSuppressorHit],
       }),
       headers: new Headers({ 'content-type': 'application/json' }),
     }) as any;
@@ -1428,37 +1290,28 @@ describe('geneGet with unknown section', () => {
 // geneGet with clingen section (stub)
 // ============================================================
 describe('geneGet with clingen section', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneGet() clingen returns error about no public API', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
-        hits: [{
-          symbol: 'BRCA1',
-          name: 'BRCA1 DNA repair',
-          summary: 'DNA repair.',
-        }],
+        hits: [brca1DnaRepairHit],
       }),
       headers: new Headers({ 'content-type': 'application/json' }),
     }) as any;
 
     const result = await geneGet('BRCA1', ['clingen']);
 
-    expect(result.sections).toBeDefined();
-    expect(result.sections!.clingen).toBeDefined();
-    expect((result.sections!.clingen as any)._error).toContain('ClinGen');
-    expect((result.sections!.clingen as any)._error).toContain('not available via public API');
+    expect(Object.keys(result.sections!)).toEqual(['clingen']);
+    expect(result.sections!.clingen).toMatchObject({
+      _error: expect.stringMatching(/ClinGen.*not available via public API/s),
+    });
   });
 });
 
@@ -1466,16 +1319,11 @@ describe('geneGet with clingen section', () => {
 // geneGet with constraint section (gnomad)
 // ============================================================
 describe('geneGet with constraint section', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneGet() fetches gnomAD constraint scores', async () => {
@@ -1486,11 +1334,7 @@ describe('geneGet with constraint section', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            hits: [{
-              symbol: 'TP53',
-              name: 'Tumor protein p53',
-              summary: 'Tumor suppressor.',
-            }],
+            hits: [tp53TumorSuppressorHit],
           }),
           headers: new Headers({ 'content-type': 'application/json' }),
         });
@@ -1516,14 +1360,10 @@ describe('geneGet with constraint section', () => {
 
     const result = await geneGet('TP53', ['constraint']);
 
-    expect(result.sections).toBeDefined();
+    expect(Object.keys(result.sections!)).toEqual(['constraint']);
     const constraint = result.sections!.constraint as any;
-    expect(constraint.lof).toBeDefined();
-    expect(constraint.lof.oe_score).toBe(0.08);
-    expect(constraint.lof.oe_lof_upper).toBe(0.12);
-    expect(constraint.lof.mis_bad_loe).toBe(0.76);
-    expect(constraint.syn).toBeDefined();
-    expect(constraint.syn.oe_score).toBe(0.98);
+    expect(constraint.lof).toEqual({ oe_score: 0.08, oe_lof_upper: 0.12, mis_bad_loe: 0.76 });
+    expect(constraint.syn).toEqual({ oe_score: 0.98 });
   });
 });
 
@@ -1531,19 +1371,17 @@ describe('geneGet with constraint section', () => {
 // geneGet with disgenet section (no API key)
 // ============================================================
 describe('geneGet with disgenet section', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
   let originalEnv: string | undefined;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     originalEnv = process.env.DISGENET_API_KEY;
     delete process.env.DISGENET_API_KEY;
     connectionManager.closeAll();
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     if (originalEnv !== undefined) {
       process.env.DISGENET_API_KEY = originalEnv;
     }
@@ -1553,11 +1391,7 @@ describe('geneGet with disgenet section', () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
-        hits: [{
-          symbol: 'BRCA1',
-          name: 'BRCA1 DNA repair',
-          summary: 'DNA repair.',
-        }],
+        hits: [brca1DnaRepairHit],
       }),
       headers: new Headers({ 'content-type': 'application/json' }),
     }) as any;
@@ -1579,7 +1413,7 @@ describe('geneGet with disgenet section', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            hits: [{ symbol: 'TP53', name: 'Tumor protein p53', summary: 'Tumor suppressor.' }],
+            hits: [tp53TumorSuppressorHit],
           }),
           headers: new Headers({ 'content-type': 'application/json' }),
         });
@@ -1602,7 +1436,7 @@ describe('geneGet with disgenet section', () => {
 // ============================================================
 describe('gene_diseases tool fallback contract (issue #84)', () => {
   let harness: McpTestHarness;
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
   let originalEnv: string | undefined;
 
   beforeAll(async () => {
@@ -1615,14 +1449,12 @@ describe('gene_diseases tool fallback contract (issue #84)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     originalEnv = process.env.DISGENET_API_KEY;
     delete process.env.DISGENET_API_KEY;
     connectionManager.closeAll();
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     if (originalEnv !== undefined) {
       process.env.DISGENET_API_KEY = originalEnv;
     } else {
@@ -1637,7 +1469,7 @@ describe('gene_diseases tool fallback contract (issue #84)', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            hits: [{ symbol: 'TP53', name: 'Tumor protein p53', summary: 'Tumor suppressor.' }],
+            hits: [tp53TumorSuppressorHit],
           }),
           headers: new Headers({ 'content-type': 'application/json' }),
         });
@@ -1681,7 +1513,7 @@ describe('gene_diseases tool fallback contract (issue #84)', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            hits: [{ symbol: 'TP53', name: 'Tumor protein p53', summary: 'Tumor suppressor.' }],
+            hits: [tp53TumorSuppressorHit],
           }),
           headers: new Headers({ 'content-type': 'application/json' }),
         });
@@ -1702,7 +1534,7 @@ describe('gene_diseases tool fallback contract (issue #84)', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            hits: [{ symbol: 'TP53', name: 'Tumor protein p53', summary: 'Tumor suppressor.' }],
+            hits: [tp53TumorSuppressorHit],
           }),
           headers: new Headers({ 'content-type': 'application/json' }),
         });
@@ -1734,19 +1566,17 @@ describe('gene_diseases tool fallback contract (issue #84)', () => {
 // geneGet with disgenet section (keyed)
 // ============================================================
 describe('geneGet with disgenet section (keyed)', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
   let originalEnv: string | undefined;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     originalEnv = process.env.DISGENET_API_KEY;
     process.env.DISGENET_API_KEY = 'test-disgenet-key';
     connectionManager.closeAll();
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     if (originalEnv !== undefined) {
       process.env.DISGENET_API_KEY = originalEnv;
     } else {
@@ -1763,11 +1593,7 @@ describe('geneGet with disgenet section (keyed)', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            hits: [{
-              symbol: 'BRCA1',
-              name: 'BRCA1 DNA repair',
-              summary: 'DNA repair.',
-            }],
+            hits: [brca1DnaRepairHit],
           }),
           headers: new Headers({ 'content-type': 'application/json' }),
         });
@@ -1818,16 +1644,11 @@ describe('geneGet with disgenet section (keyed)', () => {
 // geneGet with ontology section
 // ============================================================
 describe('geneGet with ontology section', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneGet() fetches ontology enrichment data', async () => {
@@ -1838,11 +1659,7 @@ describe('geneGet with ontology section', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            hits: [{
-              symbol: 'TP53',
-              name: 'Tumor protein p53',
-              summary: 'Tumor suppressor.',
-            }],
+            hits: [tp53TumorSuppressorHit],
           }),
           headers: new Headers({ 'content-type': 'application/json' }),
         });
@@ -1871,10 +1688,11 @@ describe('geneGet with ontology section', () => {
 
     const result = await geneGet('TP53', ['ontology']);
 
-    expect(result.sections).toBeDefined();
-    const ontology = result.sections!.ontology as any;
-    expect(ontology.go_enrichment).toBeDefined();
-    expect(ontology.go_enrichment.length).toBe(3);
+    expect(Object.keys(result.sections!)).toEqual(['ontology']);
+    const ontology = result.sections!.ontology as { go_enrichment: Array<{ id: string; term: string }> };
+    expect(ontology.go_enrichment).toHaveLength(3);
+    // BP/MF/CC each contribute their single mocked term, in category order.
+    expect(ontology.go_enrichment.map(t => t.id)).toEqual(['GO:0006915', 'GO:0003700', 'GO:0005634']);
   });
 });
 
@@ -1882,16 +1700,11 @@ describe('geneGet with ontology section', () => {
 // geneGet multiple sections with partial failure
 // ============================================================
 describe('geneGet multiple sections with partial success and failure', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneGet() returns mix of successful and failed sections', async () => {
@@ -1903,11 +1716,7 @@ describe('geneGet multiple sections with partial success and failure', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            hits: [{
-              symbol: 'BRCA1',
-              name: 'BRCA1 DNA repair',
-              summary: 'DNA repair.',
-            }],
+            hits: [brca1DnaRepairHit],
           }),
           headers: new Headers({ 'content-type': 'application/json' }),
         });
@@ -1934,16 +1743,13 @@ describe('geneGet multiple sections with partial success and failure', () => {
 
     const result = await geneGet('BRCA1', ['pathways', 'protein']);
 
-    expect(result.sections).toBeDefined();
     // Pathways should succeed
-    expect(result.sections!.pathways).toBeDefined();
     const pathways = result.sections!.pathways as Array<{ id: string; name: string; source: string }>;
+    expect(pathways).toHaveLength(1);
     expect(pathways[0].name).toBe('Test Pathway');
 
     // Protein should have error (fetchProtein catches internally and returns { _error })
-    expect(result.sections!.protein).toBeDefined();
     const proteinError = result.sections!.protein as { _error: string };
-    expect(proteinError._error).toBeDefined();
     expect(proteinError._error).toContain('Protein lookup failed');
   });
 });
@@ -1963,7 +1769,7 @@ describe('transformMyGeneResponse edge cases', () => {
 // geneGet with expression section (GTEx v10)
 // ============================================================
 describe('geneGet with expression section', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   const GTEx_DATASETS = [
     { datasetId: 'gtex_v8', displayName: 'GTEx Analysis v8', gencodeVersion: 'v26', genomeBuild: 'GRCh38/hg38' },
@@ -1996,19 +1802,14 @@ describe('geneGet with expression section', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('geneGet() expression section returns GTEx tissues as {tissue, tpm}', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((rawUrl: string) => {
       if (parseMockUrl(rawUrl).hostname === 'mygene.info') {
         return Promise.resolve(okJson({
-          hits: [{ symbol: 'TP53', name: 'Tumor protein p53', summary: 'Tumor suppressor.' }],
+          hits: [tp53TumorSuppressorHit],
         }));
       }
       if (rawUrl.includes('metadata/dataset')) return Promise.resolve(okJson(GTEx_DATASETS));
@@ -2055,7 +1856,7 @@ describe('geneGet with expression section', () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((rawUrl: string) => {
       if (parseMockUrl(rawUrl).hostname === 'mygene.info') {
         return Promise.resolve(okJson({
-          hits: [{ symbol: 'TP53', name: 'Tumor protein p53', summary: 'Tumor suppressor.' }],
+          hits: [tp53TumorSuppressorHit],
         }));
       }
       if (rawUrl.includes('metadata/dataset')) return Promise.resolve(okJson(GTEx_DATASETS));

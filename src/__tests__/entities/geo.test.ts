@@ -3,6 +3,7 @@ import { connectionManager } from '../../connections/manager.js';
 import { parseMockUrl } from '../helpers/mock-url.js';
 import { readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 const EUTILS = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
 const GEO_ACC = 'https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi';
@@ -259,16 +260,11 @@ function eutilsUrls(): string[] {
 }
 
 describe('geoSearch', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('composes ETYP and ORGN term filters with capped retmax', async () => {
@@ -352,16 +348,11 @@ describe('geoSearch', () => {
 });
 
 describe('geoGet validation', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('GDS accessions are rejected with a helpful error', async () => {
@@ -383,16 +374,11 @@ describe('geoGet validation', () => {
 });
 
 describe('geoGet series detail', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('merges SOFT detail with esummary enrichment (samples capped at 20)', async () => {
@@ -468,16 +454,11 @@ describe('geoGet series detail', () => {
 });
 
 describe('geoGet sample detail', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('maps sample-shaped SOFT fields', async () => {
@@ -500,16 +481,11 @@ describe('geoGet sample detail', () => {
 });
 
 describe('geoGet supplementary download', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('downloads the .gz file verbatim over https into a temp dir', async () => {
@@ -605,16 +581,11 @@ describe('geoGet supplementary download', () => {
 });
 
 describe('geoGet platform detail', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('maps Platform_organism (live SOFT emits no _ch1 suffix on GPL records)', async () => {
@@ -631,16 +602,11 @@ describe('geoGet platform detail', () => {
 });
 
 describe('geoToSraAccessions', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('SOFT relations take priority — no eutils calls when SRP is embedded', async () => {

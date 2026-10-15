@@ -2,18 +2,14 @@ import { jest } from '@jest/globals';
 import { diseaseSearch, diseaseGet, transformMyDiseaseResponse } from '../../entities/disease.js';
 import { connectionManager } from '../../connections/manager.js';
 import { parseMockUrl } from '../helpers/mock-url.js';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 describe('disease', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('diseaseSearch() calls connection with correct mydisease endpoint', async () => {
@@ -210,19 +206,17 @@ describe('disease', () => {
 // diseaseGet gene_associations section (DisGeNET gda/summary)
 // ============================================================
 describe('diseaseGet gene_associations section (DisGeNET)', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
   let originalEnv: string | undefined;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     originalEnv = process.env.DISGENET_API_KEY;
     process.env.DISGENET_API_KEY = 'test-disgenet-key';
     connectionManager.closeAll();
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     if (originalEnv !== undefined) {
       process.env.DISGENET_API_KEY = originalEnv;
     } else {
@@ -324,7 +318,7 @@ describe('diseaseGet gene_associations section (DisGeNET)', () => {
 // diseaseGet gene_associations OpenTargets fallback (issue #84)
 // ============================================================
 describe('diseaseGet gene_associations OpenTargets fallback (issue #84)', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
   let originalEnv: string | undefined;
 
   const MY_DISEASE_DOC = {
@@ -344,14 +338,12 @@ describe('diseaseGet gene_associations OpenTargets fallback (issue #84)', () => 
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     originalEnv = process.env.DISGENET_API_KEY;
     delete process.env.DISGENET_API_KEY;
     connectionManager.closeAll();
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     if (originalEnv !== undefined) {
       process.env.DISGENET_API_KEY = originalEnv;
     } else {

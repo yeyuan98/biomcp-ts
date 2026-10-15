@@ -2,6 +2,7 @@ import { jest } from '@jest/globals';
 import { articleSearch, searchArxiv, parseArxivAtomXml } from '../../entities/article/index.js';
 import { parseMockUrl } from '../helpers/mock-url.js';
 import { connectionManager } from '../../connections/manager.js';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 // The 'arxiv' registry source enforces the arXiv Terms-of-Use rate (1
 // request / 3 s) via a capacity-1 token bucket and retries 429s after a
@@ -258,16 +259,11 @@ describe('parseArxivAtomXml', () => {
 });
 
 describe('searchArxiv', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('builds query URL with sanitized terms (quotes/parens stripped, field prefixes neutralized)', async () => {
@@ -301,7 +297,7 @@ describe('searchArxiv', () => {
     expect(openToEnd).toContain('+AND+submittedDate:%22202001010000+TO+209912312359%22');
     const openFromStart = (global.fetch as any).mock.calls[1][0] as string;
     expect(openFromStart).toContain('+AND+submittedDate:%22199107010000+TO+202012312359%22');
-  });
+  }, 60000); // real arXiv request pacing between the two calls — clock-skew headroom
 
   test('both-bounds dateRange sends submittedDate:"A TO B" with no sentinel bounds', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(atomResponse(EMPTY_FEED_XML)) as any;
@@ -335,7 +331,7 @@ describe('searchArxiv', () => {
     url = (global.fetch as any).mock.calls[2][0] as string;
     expect(url).toContain('&start=29950&max_results=50&');
     expect(url).not.toContain('999999');
-  });
+  }, 60000); // real arXiv request pacing between the three calls — clock-skew headroom
 
   test('empty feed resolves to [] (not an error result)', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(atomResponse(EMPTY_FEED_XML)) as any;
@@ -375,7 +371,9 @@ describe('searchArxiv', () => {
   test('HTTP 429: retried exactly once (2 fetches), then surfaces _error', async () => {
     // NB: this test intentionally sleeps through the real ~3.5 s retry
     // backoff (registry retry: { attempts: 2, backoffMs: 3500 }) — only the
-    // rate limiter is mocked (see file header).
+    // rate limiter is mocked (see file header). Generous per-test timeout:
+    // real-timer sleeps on clock-skewed dev boxes (WSL2) occasionally trip
+    // the 30 s default with spurious timeouts; assertions are unchanged.
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({ ok: false, status: 429, statusText: 'Too Many Requests' }) as any;
 
     const result = await searchArxiv('electron', 10, 0);
@@ -386,7 +384,7 @@ describe('searchArxiv', () => {
     expect(result[0]._error).toContain('HTTP 429');
     expect(result[0]._error).toContain('shared `biomcp serve` daemon');
     expect(result[0]._error).not.toContain('API key');
-  });
+  }, 60000);
 
   test('query reduced to nothing by sanitization returns [] without a network call', async () => {
     global.fetch = jest.fn() as any;
@@ -401,7 +399,8 @@ describe('searchArxiv', () => {
     // 'fetch failed' matches the connection-layer network signature, so the
     // registry retry policy fires first (attempts: 2 → exactly 2 fetches);
     // NB: this test sleeps through one real ~3.5 s retry backoff like the
-    // 429 test above (only the rate limiter is mocked — see file header).
+    // 429 test above (only the rate limiter is mocked — see file header);
+    // 60 s cap for the same clock-skew reason as that test.
     global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(new TypeError('fetch failed')) as any;
 
     const result = await searchArxiv('electron', 10, 0);
@@ -412,7 +411,7 @@ describe('searchArxiv', () => {
     expect(result[0]._error).toBe(
       'searchArxiv failed: fetch failed. This may be a temporary data source issue. Try again or use a different source.'
     );
-  });
+  }, 60000);
 
   test('truncated mid-entry XML fails parsing and surfaces as an _error row', async () => {
     // Passes the feed sniff (<?xml + <feed>), then the parser hits the
@@ -455,5 +454,5 @@ describe('searchArxiv', () => {
     expect(result.some(r => Boolean(r._error))).toBe(false);
     expect(result).toHaveLength(2);
     expect(result.map(r => r.pmid)).toEqual(['41721000', '41721001']);
-  });
+  }, 60000); // arXiv leg sleeps through one real ~3.5 s retry backoff — clock-skew headroom
 });

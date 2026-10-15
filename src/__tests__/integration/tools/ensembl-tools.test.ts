@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, jest } from '@jest/globals';
 import { createMcpTestHarness } from '../../helpers/mcp-harness.js';
 import { retryOnRateLimit } from '../../helpers/retry.js';
 
-jest.setTimeout(60000);
+jest.setTimeout(30000); // measured p95 ≈ 8 s, max ≈ 19 s (homology) → 30 s
 
 let harness: Awaited<ReturnType<typeof createMcpTestHarness>>;
 

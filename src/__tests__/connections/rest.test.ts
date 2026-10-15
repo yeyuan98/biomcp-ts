@@ -2,6 +2,7 @@ import { jest } from '@jest/globals';
 import { RestConnection } from '../../connections/rest.js';
 import { HttpConnectionError } from '../../connections/errors.js';
 import type { ConnectionOptions } from '../../connections/base.js';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 jest.mock('../../connections/rate-limiter.js', () => ({
   TokenBucketRateLimiter: jest.fn<(...args: any[]) => any>().mockImplementation(() => ({
@@ -21,15 +22,7 @@ const baseOptions: ConnectionOptions = {
 };
 
 describe('RestConnection', () => {
-  let originalFetch: typeof global.fetch;
-
-  beforeEach(() => {
-    originalFetch = global.fetch;
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
-  });
+  mockGlobalFetch();
 
   test('constructor sets sourceId and protocol from options', () => {
     const conn = new RestConnection(baseOptions);

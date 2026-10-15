@@ -1,6 +1,7 @@
 import { jest } from '@jest/globals';
 import { parseArticleId, resolveToPmid, resolveDoiToPmid } from '../../entities/article/detail/id-resolution.js';
 import { connectionManager } from '../../connections/manager.js';
+import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 describe('parseArticleId', () => {
   test('parses numeric PMID', () => {
@@ -63,16 +64,11 @@ describe('parseArticleId', () => {
 });
 
 describe('resolveToPmid', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('resolves DOI to PMID via NCBI IDConv', async () => {
@@ -158,16 +154,11 @@ describe('resolveToPmid', () => {
 });
 
 describe('resolveDoiToPmid', () => {
-  let originalFetch: typeof global.fetch;
+  mockGlobalFetch();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    originalFetch = global.fetch;
     connectionManager.closeAll();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
   });
 
   test('resolves DOI to PMID via PubMed ESearch', async () => {

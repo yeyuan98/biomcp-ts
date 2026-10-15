@@ -6,6 +6,13 @@ import { ppubsClient, opsClient } from '../../../entities/patent/index.js';
 
 let harness: Awaited<ReturnType<typeof createMcpTestHarness>>;
 
+// Per-test caps: 60 s everywhere. The in-process MCP client caps each request
+// at 60 s, so larger jest timeouts only ever benefit the retryOnRateLimit
+// wrapper — measured p95 of passing searches is far below this on CI.
+// Tests not targeting seminal mining pass `seminal: false` so they skip the
+// expensive citation-graph mining pass; the seminal contract is covered by
+// the dedicated Szostak test below.
+
 beforeAll(async () => {
   harness = await createMcpTestHarness();
 }, 30000);
@@ -29,7 +36,7 @@ describe('patent_search', () => {
       expect(p).not.toHaveProperty('_error');
       expect(p).not.toHaveProperty('_hint');
     }
-  }, 120000);
+  }, 60000);
 
   it('returns US results via keyless ppubs source', async () => {
     const response = await retryOnRateLimit(() =>
@@ -38,14 +45,14 @@ describe('patent_search', () => {
     expect(response.patents.length).toBeGreaterThan(0);
     expect(response.patents[0].source).toBe('ppubs');
     expect(String(response.patents[0].publication_number)).toMatch(/^US/);
-  }, 120000);
+  }, 60000);
 
   it('applies assignee filter (stable identity: Moderna crispr filings exist)', async () => {
     const response = await retryOnRateLimit(() =>
       harness.callTool('patent_search', { query: 'crispr', assignee: 'Moderna', source: 'ppubs', limit: 5, seminal: false }));
     expectPatentSearchResult(response);
     expect(response.patents.length).toBeGreaterThan(0);
-  }, 120000);
+  }, 60000);
 
   it('respects limit parameter', async () => {
     const response = await retryOnRateLimit(() =>
@@ -53,11 +60,11 @@ describe('patent_search', () => {
     expectPatentSearchResult(response);
     expect(response.patents.length).toBeLessThanOrEqual(2);
     expect((response as any).seminal_prior_art).toBeUndefined();
-  }, 120000);
+  }, 60000);
 
   it('ranks a quoted biotech concept by relevance on ppubs (mRNA display)', async () => {
     const response = await retryOnRateLimit(() =>
-      harness.callTool('patent_search', { query: '"mRNA display"', source: 'ppubs', limit: 5 }));
+      harness.callTool('patent_search', { query: '"mRNA display"', source: 'ppubs', limit: 5, seminal: false }));
     expectPatentSearchResult(response);
     const real = response.patents;
     expect(real.length).toBeGreaterThan(0);
@@ -69,7 +76,7 @@ describe('patent_search', () => {
     expect(real.some((p: Record<string, unknown>) => typeof p.relevance_score === 'number')).toBe(true);
     expect(response.total_hits?.ppubs).toBeDefined();
     expect((response as any).total_hits_basis?.ppubs).toContain('families');
-  }, 120000);
+  }, 60000);
 
   it('falls back to recency sort when sort_by=recency', async () => {
     const response = await retryOnRateLimit(() =>
@@ -80,7 +87,7 @@ describe('patent_search', () => {
     expect(dates.length).toBeGreaterThan(0);
     const sorted = [...dates].sort().reverse();
     expect(dates).toEqual(sorted);
-  }, 120000);
+  }, 60000);
 
   it('discovers seminal prior art for a vocabulary-mismatched concept (mRNA display → Szostak)', async () => {
     const response = await retryOnRateLimit(() =>
@@ -106,7 +113,7 @@ describe('patent_search', () => {
       // A thin pool must still be EXPLAINED, never silently empty.
       expect(String((response as any).seminal_note)).toMatch(/too few|no commonly-cited|skipped|deadline/);
     }
-  }, 180000);
+  }, 60000);
 });
 
 describe('patent_get', () => {
@@ -135,12 +142,12 @@ describe('patent_get', () => {
         expect(Array.isArray((citations as any).backward)).toBe(true);
       }
     }
-  }, 120000);
+  }, 60000);
 
   it('rejects invalid patent ids', async () => {
     await expect(harness.callTool('patent_get', { patent_id: 'not-a-patent' }))
       .rejects.toThrow(/Invalid patent number/i);
-  }, 60000);
+  }, 15000);
 });
 
 // Keyed live tests: skipped automatically when credentials are absent.
@@ -154,7 +161,7 @@ opsDescribe('patent_search (EPO OPS, keyed)', () => {
       expectPatentSearchResult(response);
       expect(response.patents.length).toBeGreaterThan(0);
       expect(response.patents[0].source).toBe('ops');
-    }, 120000);
+    }, 60000);
 
     it('fetches worldwide (non-US) patent core', async () => {
       const result = await retryOnRateLimit(() =>
@@ -162,7 +169,7 @@ opsDescribe('patent_search (EPO OPS, keyed)', () => {
       expectPatentGetResult(result);
       expect(String(result.publication_number)).toMatch(/^EP/);
       expect(result.title).toBeTruthy();
-    }, 120000);
+    }, 60000);
 
     it('fetches claims for an EP patent (OPS fulltext authority)', async () => {
       const result = await retryOnRateLimit(() =>
@@ -172,7 +179,7 @@ opsDescribe('patent_search (EPO OPS, keyed)', () => {
       expect(claims).toBeDefined();
       expect((claims as any)?.error).toBeUndefined();
       expect(Array.isArray((claims as any)?.claims)).toBe(true);
-    }, 120000);
+    }, 60000);
 });
 
 odpDescribe('patent_get (USPTO ODP, keyed)', () => {
@@ -181,7 +188,7 @@ odpDescribe('patent_get (USPTO ODP, keyed)', () => {
       harness.callTool('patent_get', { patent_id: 'US11027025B2' }));
     expectPatentGetResult(result);
     expect(String(result.publication_number)).toMatch(/^US11027025/);
-  }, 120000);
+  }, 60000);
 });
 
 describe('patent_search resilience (live)', () => {
@@ -222,5 +229,5 @@ describe('patent_search resilience (live)', () => {
       resetOpsBackoff();
       opsClient.close();
     }
-  }, 180000);
+  }, 60000);
 });
