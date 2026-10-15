@@ -45,9 +45,13 @@ jobs:
 
       # Keyless live-API suites (jest.integration.config.ts, --runInBand).
       # Env-gated suites (db, biowasm/ranalysis mirror, depmap) self-skip via
-      # describe.skip when their env vars are absent, so no CI gating is needed.
-      - name: Integration tests (live keyless APIs; env-gated suites self-skip)
+      # describe.skip when their env vars are absent. Non-blocking: shared
+      # GitHub runner IPs get rate-limited/geo-blocked by upstream APIs
+      # intermittently, so failures here are surfaced for review but do not
+      # block merges (unit tests above remain the required gate).
+      - name: Integration tests (live keyless APIs; non-blocking)
         run: npm run test:integration
+        continue-on-error: true
 
       - name: Build bundles
         run: npm run build
