@@ -319,3 +319,198 @@ describe('diseaseGet gene_associations section (DisGeNET)', () => {
     expect(url.searchParams.get('disease')).toBe('MONDO_0007254');
   });
 });
+
+// ============================================================
+// diseaseGet gene_associations OpenTargets fallback (issue #84)
+// ============================================================
+describe('diseaseGet gene_associations OpenTargets fallback (issue #84)', () => {
+  let originalFetch: typeof global.fetch;
+  let originalEnv: string | undefined;
+
+  const MY_DISEASE_DOC = {
+    _id: 'MONDO:0005105',
+    mondo: { label: 'melanoma' },
+  };
+
+  function otAssociatedTargetsReply(rows: unknown[], disease: Record<string, unknown> = { id: 'MONDO_0005105', name: 'melanoma' }) {
+    return {
+      ok: true,
+      json: () => Promise.resolve({
+        data: { disease: { ...disease, associatedTargets: { rows } } },
+      }),
+      headers: new Headers({ 'content-type': 'application/json' }),
+    };
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    originalFetch = global.fetch;
+    originalEnv = process.env.DISGENET_API_KEY;
+    delete process.env.DISGENET_API_KEY;
+    connectionManager.closeAll();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    if (originalEnv !== undefined) {
+      process.env.DISGENET_API_KEY = originalEnv;
+    } else {
+      delete process.env.DISGENET_API_KEY;
+    }
+  });
+
+  test('keyless: falls back to OpenTargets associatedTargets and tags rows opentargets', async () => {
+    const otRows = [
+      { target: { id: 'ENSG00000157764', approvedSymbol: 'BRAF' }, score: 0.92 },
+      { target: { id: 'ENSG00000141510', approvedSymbol: 'TP53' }, score: 0.71 },
+    ];
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((input: any) => {
+      const url = parseMockUrl(input);
+      if (url.hostname === 'mydisease.info') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(MY_DISEASE_DOC),
+          headers: new Headers({ 'content-type': 'application/json' }),
+        });
+      }
+      if (url.hostname === 'api.platform.opentargets.org') {
+        return Promise.resolve(otAssociatedTargetsReply(otRows));
+      }
+      return Promise.reject(new Error(`unexpected url ${url.href}`));
+    }) as any;
+
+    const result = await diseaseGet('MONDO:0005105', ['gene_associations']);
+
+    // DisGeNET is never called without a key.
+    const calls = (global.fetch as any).mock.calls;
+    expect(calls.some((c: any[]) => parseMockUrl(c[0]).hostname === 'api.disgenet.com')).toBe(false);
+
+    // OT accepts the MONDO id directly in underscore efoId form.
+    const otCalls = calls.filter((c: any[]) => parseMockUrl(c[0]).hostname === 'api.platform.opentargets.org');
+    expect(otCalls).toHaveLength(1);
+    const otBody = JSON.parse(otCalls[0][1].body as string);
+    expect(otBody.variables).toEqual({ efoId: 'MONDO_0005105' });
+    expect(otBody.query).toContain('associatedTargets');
+
+    const associations = result.sections!.gene_associations as any[];
+    expect(associations).toEqual([
+      { gene_symbol: 'BRAF', name: 'BRAF', disease_name: 'melanoma', score: 0.92, source: 'opentargets' },
+      { gene_symbol: 'TP53', name: 'TP53', disease_name: 'melanoma', score: 0.71, source: 'opentargets' },
+    ]);
+  });
+
+  test('keyless + OT failing: honest combined error naming both reasons', async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((input: any) => {
+      const url = parseMockUrl(input);
+      if (url.hostname === 'mydisease.info') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(MY_DISEASE_DOC),
+          headers: new Headers({ 'content-type': 'application/json' }),
+        });
+      }
+      if (url.hostname === 'api.platform.opentargets.org') {
+        return Promise.reject(new Error('OT is down'));
+      }
+      return Promise.reject(new Error(`unexpected url ${url.href}`));
+    }) as any;
+
+    const result = await diseaseGet('MONDO:0005105', ['gene_associations']);
+
+    const associations = result.sections!.gene_associations as any[];
+    expect(associations).toHaveLength(1);
+    expect(associations[0]._error).toContain('DisGeNET unavailable (');
+    expect(associations[0]._error).toContain('DISGENET_API_KEY');
+    expect(associations[0]._error).toContain('OpenTargets fallback also failed (');
+    expect(associations[0]._error).toContain('OT is down');
+  });
+
+  test('keyed + DisGeNET erroring: still falls back to OpenTargets', async () => {
+    process.env.DISGENET_API_KEY = 'test-disgenet-key';
+    const otRows = [
+      { target: { id: 'ENSG00000157764', approvedSymbol: 'BRAF' }, score: 0.9 },
+    ];
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((input: any) => {
+      const url = parseMockUrl(input);
+      if (url.hostname === 'mydisease.info') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(MY_DISEASE_DOC),
+          headers: new Headers({ 'content-type': 'application/json' }),
+        });
+      }
+      if (url.hostname === 'api.disgenet.com') {
+        return Promise.resolve({ ok: false, status: 503, statusText: 'Service Unavailable' });
+      }
+      if (url.hostname === 'api.platform.opentargets.org') {
+        return Promise.resolve(otAssociatedTargetsReply(otRows));
+      }
+      return Promise.reject(new Error(`unexpected url ${url.href}`));
+    }) as any;
+
+    const result = await diseaseGet('MONDO:0005105', ['gene_associations']);
+
+    const associations = result.sections!.gene_associations as any[];
+    expect(associations).toHaveLength(1);
+    expect(associations[0].gene_symbol).toBe('BRAF');
+    expect(associations[0].source).toBe('opentargets');
+  });
+
+  test('unresolvable id falls back to an OT disease-name search before associatedTargets', async () => {
+    // A mydisease id OT's efoId argument does not accept directly: the
+    // direct disease lookup returns null, so the resolved disease name
+    // drives an OT search whose hit id feeds the associatedTargets query.
+    const otRows = [
+      { target: { id: 'ENSG00000141510', approvedSymbol: 'TP53' }, score: 0.4 },
+    ];
+    const otBodies: Array<Record<string, unknown>> = [];
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((input: any, init?: any) => {
+      const url = parseMockUrl(input);
+      if (url.hostname === 'mydisease.info') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ _id: 'DOID:9999', disease_ontology: { name: 'rare melanocytic neoplasm' } }),
+          headers: new Headers({ 'content-type': 'application/json' }),
+        });
+      }
+      if (url.hostname === 'api.platform.opentargets.org') {
+        const body = JSON.parse(String(init?.body)) as { query?: string; variables?: Record<string, unknown> };
+        otBodies.push(body as Record<string, unknown>);
+        if (typeof body.query === 'string' && body.query.includes('search(')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({
+              data: { search: { hits: [{ id: 'EFO_0000616', name: 'melanoma', entity: 'disease' }] } },
+            }),
+            headers: new Headers({ 'content-type': 'application/json' }),
+          });
+        }
+        // Direct efoId probe for the unknown id finds nothing; the probe for
+        // the search-resolved id returns the associated targets.
+        if (body.variables?.efoId === 'DOID_9999') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ data: { disease: null } }),
+            headers: new Headers({ 'content-type': 'application/json' }),
+          });
+        }
+
+        return Promise.resolve(otAssociatedTargetsReply(otRows, { id: 'EFO_0000616', name: 'melanoma' }));
+      }
+      return Promise.reject(new Error(`unexpected url ${url.href}`));
+    }) as any;
+
+    const result = await diseaseGet('DOID:9999', ['gene_associations']);
+
+    const associations = result.sections!.gene_associations as any[];
+    expect(associations).toHaveLength(1);
+    expect(associations[0].gene_symbol).toBe('TP53');
+    expect(associations[0].source).toBe('opentargets');
+    // Call 1: direct efoId probe (DOID_9999, colon→underscore); call 2: name
+    // search; call 3: associatedTargets on the search-resolved id.
+    expect(otBodies).toHaveLength(3);
+    expect(otBodies[0].variables).toEqual({ efoId: 'DOID_9999' });
+    expect(otBodies[1].variables).toEqual({ name: 'rare melanocytic neoplasm' });
+    expect(otBodies[2].variables).toEqual({ efoId: 'EFO_0000616' });
+  });
+});

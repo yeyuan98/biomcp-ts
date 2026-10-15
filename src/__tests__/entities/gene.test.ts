@@ -2,6 +2,7 @@ import { jest } from '@jest/globals';
 import { geneSearch, geneGet, transformMyGeneResponse } from '../../entities/gene.js';
 import { connectionManager } from '../../connections/manager.js';
 import { parseMockUrl } from '../helpers/mock-url.js';
+import { createMcpTestHarness, type McpTestHarness } from '../helpers/mcp-harness.js';
 
 describe('gene', () => {
   let originalFetch: typeof global.fetch;
@@ -1566,6 +1567,166 @@ describe('geneGet with disgenet section', () => {
     expect(result.sections).toBeDefined();
     const disgenet = result.sections!.disgenet as any;
     expect(disgenet._error).toContain('DISGENET_API_KEY');
+  });
+
+  test('geneGet() diseases section surfaces _error (underscore shape) when OpenTargets fails', async () => {
+    // Section-level failures must land as `{ _error }` — the underscore-less
+    // `{ error }` writer shape escaped every `'_error' in section` check
+    // (issue #84).
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((input: any) => {
+      const url = parseMockUrl(input);
+      if (url.hostname === 'mygene.info') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            hits: [{ symbol: 'TP53', name: 'Tumor protein p53', summary: 'Tumor suppressor.' }],
+          }),
+          headers: new Headers({ 'content-type': 'application/json' }),
+        });
+      }
+      return Promise.reject(new Error('OpenTargets unreachable'));
+    }) as any;
+
+    const result = await geneGet('TP53', ['diseases']);
+
+    expect(result.sections).toBeDefined();
+    const diseases = result.sections!.diseases as { _error: string };
+    expect(diseases._error).toBeDefined();
+    expect(diseases._error).toContain('Disease association lookup failed');
+    expect(diseases._error).toContain('OpenTargets unreachable');
+  });
+});
+
+// ============================================================
+// gene_diseases tool: OpenTargets fallback contract (issue #84)
+// ============================================================
+describe('gene_diseases tool fallback contract (issue #84)', () => {
+  let harness: McpTestHarness;
+  let originalFetch: typeof global.fetch;
+  let originalEnv: string | undefined;
+
+  beforeAll(async () => {
+    harness = await createMcpTestHarness();
+  });
+
+  afterAll(async () => {
+    await harness.close();
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    originalFetch = global.fetch;
+    originalEnv = process.env.DISGENET_API_KEY;
+    delete process.env.DISGENET_API_KEY;
+    connectionManager.closeAll();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    if (originalEnv !== undefined) {
+      process.env.DISGENET_API_KEY = originalEnv;
+    } else {
+      delete process.env.DISGENET_API_KEY;
+    }
+  });
+
+  test('keyless: returns OpenTargets-sourced diseases via the fallback', async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((input: any) => {
+      const url = parseMockUrl(input);
+      if (url.hostname === 'mygene.info') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            hits: [{ symbol: 'TP53', name: 'Tumor protein p53', summary: 'Tumor suppressor.' }],
+          }),
+          headers: new Headers({ 'content-type': 'application/json' }),
+        });
+      }
+      if (url.hostname === 'api.platform.opentargets.org') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            data: {
+              search: { hits: [{ id: 'ENSG00000141510', name: 'TP53', entity: 'target' }] },
+              target: {
+                associatedDiseases: {
+                  rows: [
+                    { disease: { id: 'MONDO:0002051', name: 'squamous cell carcinoma' }, score: 0.9 },
+                    { disease: { id: 'MONDO:0004989', name: 'colorectal cancer' }, score: 0.8 },
+                  ],
+                },
+              },
+            },
+          }),
+          headers: new Headers({ 'content-type': 'application/json' }),
+        });
+      }
+      return Promise.reject(new Error(`unexpected url ${url.href}`));
+    }) as any;
+
+    const result = await harness.callTool('gene_diseases', { symbol: 'TP53' });
+
+    expect(result).toEqual([
+      { name: 'squamous cell carcinoma', source: 'opentargets' },
+      { name: 'colorectal cancer', source: 'opentargets' },
+    ]);
+  });
+
+  test('keyless + OpenTargets failing: isError names BOTH failure reasons', async () => {
+    // Error swallowing fix (issue #84): when both legs fail, the reply must
+    // combine the DisGeNET and OpenTargets reasons — never drop the OT one.
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((input: any) => {
+      const url = parseMockUrl(input);
+      if (url.hostname === 'mygene.info') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            hits: [{ symbol: 'TP53', name: 'Tumor protein p53', summary: 'Tumor suppressor.' }],
+          }),
+          headers: new Headers({ 'content-type': 'application/json' }),
+        });
+      }
+      return Promise.reject(new Error('OpenTargets unreachable'));
+    }) as any;
+
+    await expect(harness.callTool('gene_diseases', { symbol: 'TP53' })).rejects.toThrow(
+      /DisGeNET unavailable \(.*DISGENET_API_KEY.*\); OpenTargets fallback also failed \(.*OpenTargets unreachable.*\)/s
+    );
+  });
+
+  test('keyed: DisGeNET associations win when present (no fallback)', async () => {
+    process.env.DISGENET_API_KEY = 'test-disgenet-key';
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((input: any) => {
+      const url = parseMockUrl(input);
+      if (url.hostname === 'mygene.info') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            hits: [{ symbol: 'TP53', name: 'Tumor protein p53', summary: 'Tumor suppressor.' }],
+          }),
+          headers: new Headers({ 'content-type': 'application/json' }),
+        });
+      }
+      if (url.hostname === 'api.disgenet.com') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            payload: [{ symbolOfGene: 'TP53', diseaseName: 'Breast carcinoma', score: 0.9, numPMIDs: 12 }],
+            warnings: [],
+            pageNum: 0,
+            pageSize: 10,
+            pageCount: 1,
+            totalEntries: 1,
+          }),
+          headers: new Headers({ 'content-type': 'application/json' }),
+        });
+      }
+      return Promise.reject(new Error(`unexpected url ${url.href}`));
+    }) as any;
+
+    const result = await harness.callTool('gene_diseases', { symbol: 'TP53' });
+
+    expect(result).toEqual(['Breast carcinoma']);
   });
 });
 

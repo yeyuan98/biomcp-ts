@@ -1,6 +1,7 @@
 import { connectionManager } from '../connections/manager.js';
 import { fetchWithTimeout } from '../connections/fetch-utils.js';
 import { fetchDisgenetGdaSummary } from './disgenet.js';
+import { otGenesForDisease } from './opentargets.js';
 
 const SECTION_TIMEOUT_MS = 8000;
 
@@ -160,7 +161,7 @@ export async function diseaseGet(
     const sectionPromises = sectionsToFetch.map(section => {
       return fetchWithTimeout(async () => {
         switch (section) {
-          case 'gene_associations': return { section: 'gene_associations', data: await fetchGeneAssociations(disease.diseaseid) };
+          case 'gene_associations': return { section: 'gene_associations', data: await fetchGeneAssociations(disease.diseaseid, disease.name) };
           case 'phenotypes': return { section: 'phenotypes', data: await fetchPhenotypes(disease.diseaseid) };
           case 'pathways': return { section: 'pathways', data: await fetchPathways(disease.diseaseid) };
           default: return { section, data: null };
@@ -178,13 +179,13 @@ export async function diseaseGet(
         (result.sections as Record<string, unknown>)[sectionData.section] = sectionData.data;
       } else if (settled.status === 'fulfilled' && settled.value.error) {
         const sectionResult = settled.value as { error?: string };
-        (result.sections as Record<string, unknown>)[sectionsToFetch[si]] = { 
-          error: sectionResult.error 
+        (result.sections as Record<string, unknown>)[sectionsToFetch[si]] = {
+          _error: sectionResult.error
         };
       } else if (settled.status === 'rejected') {
         const reason = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
         (result.sections as Record<string, unknown>)[sectionsToFetch[si]] = {
-          error: `Section '${sectionsToFetch[si]}' fetch failed: ${reason}. The data source may be temporarily unavailable.`
+          _error: `Section '${sectionsToFetch[si]}' fetch failed: ${reason}. The data source may be temporarily unavailable.`
         };
       }
     }
@@ -193,25 +194,45 @@ export async function diseaseGet(
   return result;
 }
 
-async function fetchGeneAssociations(diseaseId: string): Promise<Array<{ gene_symbol: string; name: string; disease_name?: string; score?: number; pmids?: number; source: string }>> {
-  try {
-    if (!process.env.DISGENET_API_KEY) {
-      return [{ _error: `Gene association lookup failed (source: disgenet): DISGENET_API_KEY environment variable is not set. DisGeNET requires an API key for gene-disease associations. Obtain one at https://www.disgenet.org/ and set it in your environment.` } as any];
+/**
+ * Gene associations for a disease with a keyless OpenTargets fallback
+ * (issue #84): DisGeNET when an API key is configured, else — or when the
+ * DisGeNET leg fails — OpenTargets' reverse `associatedTargets` association.
+ * When BOTH legs fail the error row names both reasons instead of silently
+ * dropping the OpenTargets failure.
+ */
+async function fetchGeneAssociations(
+  diseaseId: string,
+  diseaseName?: string
+): Promise<Array<{ gene_symbol: string; name: string; disease_name?: string; score?: number; pmids?: number; source: string }>> {
+  let disgenetReason: string | undefined =
+    'DISGENET_API_KEY environment variable is not set. DisGeNET requires an API key for gene-disease associations. Obtain one at https://www.disgenet.org/ and set it in your environment.';
+
+  if (process.env.DISGENET_API_KEY) {
+    try {
+      const rows = await fetchDisgenetGdaSummary({ disease: diseaseId });
+
+      return rows.slice(0, 20).map(r => ({
+        gene_symbol: r.gene_symbol || '',
+        name: r.gene_symbol || '',
+        disease_name: r.disease_name,
+        score: r.score,
+        pmids: r.pmids,
+        source: 'disgenet',
+      }));
+    } catch (error) {
+      disgenetReason = error instanceof Error ? error.message : String(error);
+      // Fall through to the OpenTargets leg, keeping the failure reason.
     }
+  }
 
-    const rows = await fetchDisgenetGdaSummary({ disease: diseaseId });
-
-    return rows.slice(0, 20).map(r => ({
-      gene_symbol: r.gene_symbol || '',
-      name: r.gene_symbol || '',
-      disease_name: r.disease_name,
-      score: r.score,
-      pmids: r.pmids,
-      source: 'disgenet',
-    }));
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return [{ _error: `Gene association lookup failed (source: disgenet): ${msg}. The data source may be temporarily unavailable.` } as any];
+  try {
+    return (await otGenesForDisease(diseaseId, diseaseName)).slice(0, 20);
+  } catch (otError) {
+    const otMsg = otError instanceof Error ? otError.message : String(otError);
+    return [{
+      _error: `Gene association lookup failed: DisGeNET unavailable (${disgenetReason}); OpenTargets fallback also failed (${otMsg}). The data source may be temporarily unavailable.`,
+    } as any];
   }
 }
 

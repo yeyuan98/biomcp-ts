@@ -108,11 +108,20 @@ export function registerGeneTools(server: McpServer): void {
         const result = await geneGet(symbol, ['disgenet', 'diseases']);
         const disgenetData = result.sections?.disgenet;
         if (disgenetData && typeof disgenetData === 'object' && '_error' in disgenetData) {
+          const disgenetReason = (disgenetData as { _error: string })._error;
           const diseaseData = result.sections?.diseases;
           if (diseaseData && typeof diseaseData === 'object' && !('_error' in diseaseData) && Array.isArray((diseaseData as any).diseases)) {
             return { content: [{ type: 'text', text: JSON.stringify((diseaseData as any).diseases.slice(0, limit)) }] };
           }
-          return { content: [{ type: 'text', text: JSON.stringify(disgenetData) }], isError: true };
+          // Both legs failed (or the fallback produced no usable data):
+          // name BOTH reasons — never silently drop the OpenTargets failure.
+          const otReason = diseaseData && typeof diseaseData === 'object' && '_error' in diseaseData
+            ? (diseaseData as { _error: string })._error
+            : 'no disease data returned';
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ _error: `DisGeNET unavailable (${disgenetReason}); OpenTargets fallback also failed (${otReason})` }) }],
+            isError: true,
+          };
         }
         const associations = (disgenetData as any)?.associations;
         const diseases = (Array.isArray(associations) ? associations : []).slice(0, limit).map((d: any) => d.disease_name) || [];
@@ -183,16 +192,17 @@ export function registerGeneTools(server: McpServer): void {
   server.registerTool(
     'gene_enrich',
     {
-      description: 'Perform pathway enrichment analysis for a gene list',
+      description: 'Perform pathway enrichment analysis for a gene list (Reactome over-representation). Requires at least 3 genes; the list is deduplicated (case-insensitive) before submission, and the reply reports how many pathways Reactome found in total alongside the returned page.',
       inputSchema: {
-        genes: z.array(z.string()).describe('List of HGNC gene symbols'),
+        genes: z.array(z.string()).min(3, 'Gene enrichment requires at least 3 genes').describe('List of HGNC gene symbols (minimum 3; duplicates and case variants are collapsed before submission)'),
+        limit: z.number().int().min(1).max(100).default(30).describe('Maximum pathways to return (1-100; Reactome reports up to ~100)'),
       },
       annotations: { readOnlyHint: true }
     },
-    async ({ genes }) => {
+    async ({ genes, limit }) => {
       try {
-        const results = await geneEnrichment(genes);
-        if (results.length === 1 && results[0] && '_error' in results[0]) {
+        const results = await geneEnrichment(genes, limit);
+        if (Array.isArray(results) && results.length === 1 && '_error' in results[0]) {
           return { content: [{ type: 'text', text: JSON.stringify(results[0]) }], isError: true };
         }
         return { content: [{ type: 'text', text: JSON.stringify(results) }] };
