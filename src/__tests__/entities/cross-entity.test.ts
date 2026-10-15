@@ -4,13 +4,23 @@ import {
   geneToDrugs, geneToTrials, drugToGenes, drugToTrials,
   drugToAdverseEvents, diseaseToDrugs, diseaseToGenes,
 } from '../../entities/cross-entity.js';
+import type { GeneEnrichmentResult } from '../../entities/cross-entity.js';
 import { connectionManager } from '../../connections/manager.js';
 import { HttpConnectionError } from '../../connections/errors.js';
 import { errorMessageWithCause, networkCauseCode } from '../../entities/errors.js';
 import { parseMockUrl, mockFetchRouter } from '../helpers/mock-url.js';
+import { createMcpTestHarness, type McpTestHarness } from '../helpers/mcp-harness.js';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+/** Extract the `_error` message from a geneEnrichment error-row result. */
+function enrichError(result: GeneEnrichmentResult | Array<{ _error: string }>): string {
+  expect(Array.isArray(result)).toBe(true);
+  if (!Array.isArray(result)) throw new Error('unreachable');
+  expect(result).toHaveLength(1);
+  return result[0]._error;
+}
 
 describe('cross-entity', () => {
   let originalFetch: typeof global.fetch;
@@ -34,6 +44,24 @@ describe('cross-entity', () => {
     await expect(geneEnrichment([])).rejects.toThrow(
       'Gene enrichment requires at least 3 genes'
     );
+  });
+
+  test('geneEnrichment applies the 3-gene minimum to the UNIQUE symbol set (issue #85)', async () => {
+    // Reactome counts submitted identifier lines — duplicates and case
+    // variants collapse before submission, so 3 raw entries that reduce to
+    // 2 unique genes must fail the minimum up front, not after a wasted call.
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ pathways: [] }),
+    }) as any;
+
+    await expect(geneEnrichment(['TP53', 'tp53', ' BRCA1 '])).rejects.toThrow(
+      'Gene enrichment requires at least 3 genes'
+    );
+    await expect(geneEnrichment(['TP53', 'TP53', 'TP53', ''])).rejects.toThrow(
+      'Gene enrichment requires at least 3 genes'
+    );
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   test('discover() calls geneSearch + drugSearch + diseaseSearch', async () => {
@@ -1508,7 +1536,7 @@ describe('geneEnrichment additional tests', () => {
     global.fetch = originalFetch;
   });
 
-  test('returns pathway enrichment results', async () => {
+  test('returns the enrichment envelope: pathways page, total_reported, truncated=false', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
@@ -1527,10 +1555,10 @@ describe('geneEnrichment additional tests', () => {
       }),
     }) as any;
 
-    const results = await geneEnrichment(['BRCA1', 'TP53', 'RB1', 'CHEK2', 'ATM']);
+    const result = (await geneEnrichment(['BRCA1', 'TP53', 'RB1', 'CHEK2', 'ATM'])) as GeneEnrichmentResult;
 
-    expect(results).toHaveLength(2);
-    expect(results[0]).toEqual({
+    expect(result.pathways).toHaveLength(2);
+    expect(result.pathways[0]).toEqual({
       pathway_id: 'R-HSA-1640170',
       name: 'Cell Cycle',
       p_value: 0.001,
@@ -1538,7 +1566,75 @@ describe('geneEnrichment additional tests', () => {
       genes_total: 100,
       source: 'reactome',
     });
-    expect(results[1].pathway_id).toBe('R-HSA-73894');
+    expect(result.pathways[1].pathway_id).toBe('R-HSA-73894');
+    expect(result.total_reported).toBe(2);
+    expect(result.truncated).toBe(false);
+  });
+
+  test('deduplicates, uppercases, and drops empties before submission (issue #85)', async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ pathways: [] }),
+    }) as any;
+
+    const result = (await geneEnrichment(['BRCA1', 'brca1', 'TP53', 'TP53', 'atm', '  '])) as GeneEnrichmentResult;
+
+    expect(result).toEqual({ pathways: [], total_reported: 0, truncated: false });
+    // The posted identifier list must contain each unique symbol exactly
+    // once — Reactome counts every submitted line, so duplicates would
+    // inflate genes_overlap beyond the real input size.
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const call = (global.fetch as any).mock.calls[0];
+    expect(String(call[0])).toContain('reactome.org/AnalysisService/identifiers/projection');
+    expect(call[1].body).toBe('BRCA1\nTP53\nATM');
+  });
+
+  test('applies the caller limit and reports truncation honestly (issue #85)', async () => {
+    const manyPathways = Array.from({ length: 45 }, (_, i) => ({
+      stId: `R-HSA-${i}`,
+      name: `Pathway ${i}`,
+      entities: { pValue: 0.01, found: 3, total: 100 },
+    }));
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ pathways: manyPathways }),
+    }) as any;
+
+    // Default limit 30: page truncated, total reported.
+    const def = (await geneEnrichment(['A1', 'A2', 'A3'])) as GeneEnrichmentResult;
+    expect(def.pathways).toHaveLength(30);
+    expect(def.total_reported).toBe(45);
+    expect(def.truncated).toBe(true);
+
+    // Caller limit above the result count: no truncation.
+    const wide = (await geneEnrichment(['A1', 'A2', 'A3'], 100)) as GeneEnrichmentResult;
+    expect(wide.pathways).toHaveLength(45);
+    expect(wide.total_reported).toBe(45);
+    expect(wide.truncated).toBe(false);
+
+    // Explicit small limit.
+    const small = (await geneEnrichment(['A1', 'A2', 'A3'], 5)) as GeneEnrichmentResult;
+    expect(small.pathways).toHaveLength(5);
+    expect(small.total_reported).toBe(45);
+    expect(small.truncated).toBe(true);
+  });
+
+  test('genes_overlap is Reactome-reported passthrough, never clamped (issue #85 invariant)', async () => {
+    // Mocked upstream absurdity (found far above the unique input size):
+    // post-dedup the invariant should hold for real responses, but what we
+    // emit must always equal what Reactome reported — honesty over clamping.
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        pathways: [
+          { stId: 'R-HSA-1', name: 'Odd pathway', entities: { pValue: 0.5, found: 99, total: 100 } },
+        ],
+      }),
+    }) as any;
+
+    const result = (await geneEnrichment(['BRCA1', 'TP53', 'ATM'])) as GeneEnrichmentResult;
+
+    expect(result.pathways[0].genes_overlap).toBe(99);
   });
 
   test('handles timeout with AbortError', async () => {
@@ -1547,8 +1643,7 @@ describe('geneEnrichment additional tests', () => {
 
     const results = await geneEnrichment(['BRCA1', 'TP53', 'ATM']);
 
-    expect(results).toHaveLength(1);
-    expect((results[0] as any)._error).toContain('Request timed out');
+    expect(enrichError(results)).toContain('Request timed out');
   });
 
   test('handles HTTP error response', async () => {
@@ -1558,11 +1653,10 @@ describe('geneEnrichment additional tests', () => {
       statusText: 'Internal Server Error',
     }) as any;
 
-    const results = await geneEnrichment(['BRCA1', 'TP53', 'ATM']);
+    const err = enrichError(await geneEnrichment(['BRCA1', 'TP53', 'ATM']));
 
-    expect(results).toHaveLength(1);
-    expect((results[0] as any)._error).toContain('HTTP 500');
-    expect((results[0] as any)._error).toContain('Internal Server Error');
+    expect(err).toContain('HTTP 500');
+    expect(err).toContain('Internal Server Error');
   });
 
   // Issue #62: network-level failures must not blame the gene input.
@@ -1571,10 +1665,8 @@ describe('geneEnrichment additional tests', () => {
       Object.assign(new TypeError('fetch failed'), { cause: { code: 'ETIMEDOUT' } })
     ) as any;
 
-    const results = await geneEnrichment(['BRCA1', 'TP53', 'ATM']);
+    const err = enrichError(await geneEnrichment(['BRCA1', 'TP53', 'ATM']));
 
-    expect(results).toHaveLength(1);
-    const err = (results[0] as any)._error as string;
     expect(err).toContain('ETIMEDOUT');
     expect(err).toContain('HTTPS_PROXY');
     expect(err).toContain('Network error');
@@ -1587,14 +1679,89 @@ describe('geneEnrichment additional tests', () => {
       new HttpConnectionError('fetch failed (ECONNREFUSED)')
     ) as any;
 
-    const results = await geneEnrichment(['BRCA1', 'TP53', 'ATM']);
+    const err = enrichError(await geneEnrichment(['BRCA1', 'TP53', 'ATM']));
 
-    expect(results).toHaveLength(1);
-    const err = (results[0] as any)._error as string;
     expect(err).toContain('ECONNREFUSED');
     expect(err).toContain('HTTPS_PROXY');
     expect(err).toContain('Network error');
     expect(err).not.toContain('Ensure at least 3 valid gene symbols');
+  });
+});
+
+// ============================================================
+// gene_enrich tool contract (schema + serialization, issue #85)
+// ============================================================
+describe('gene_enrich tool contract', () => {
+  let harness: McpTestHarness;
+  let originalFetch: typeof global.fetch;
+
+  beforeAll(async () => {
+    harness = await createMcpTestHarness();
+  });
+
+  afterAll(async () => {
+    await harness.close();
+  });
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+    connectionManager.closeAll();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  test('schema rejects fewer than 3 genes before any request runs', async () => {
+    const fetchMock = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ pathways: [] }),
+    });
+    global.fetch = fetchMock as any;
+
+    await expect(harness.callTool('gene_enrich', { genes: ['BRCA1', 'TP53'] })).rejects.toThrow(
+      /at least 3 genes/
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test('serializes the envelope (pathways, total_reported, truncated) and passes limit through', async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        pathways: Array.from({ length: 4 }, (_, i) => ({
+          stId: `R-HSA-${i}`,
+          name: `Pathway ${i}`,
+          entities: { pValue: 0.01, found: 2, total: 50 },
+        })),
+      }),
+    }) as any;
+
+    const result = await harness.callTool('gene_enrich', {
+      genes: ['BRCA1', 'TP53', 'ATM'],
+      limit: 2,
+    });
+
+    expect(result).toEqual({
+      pathways: [
+        expect.objectContaining({ pathway_id: 'R-HSA-0' }),
+        expect.objectContaining({ pathway_id: 'R-HSA-1' }),
+      ],
+      total_reported: 4,
+      truncated: true,
+    });
+  });
+
+  test('isError surfaces the _error row JSON on upstream failure', async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: false,
+      status: 503,
+      statusText: 'Service Unavailable',
+    }) as any;
+
+    await expect(
+      harness.callTool('gene_enrich', { genes: ['BRCA1', 'TP53', 'ATM'] })
+    ).rejects.toThrow(/HTTP 503/);
   });
 });
 

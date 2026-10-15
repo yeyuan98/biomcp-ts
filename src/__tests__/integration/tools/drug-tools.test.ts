@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { createMcpTestHarness } from '../../helpers/mcp-harness.js';
-import { expectDrugSearchResult, expectDrugGetResult, expectDrugAdverseEventsSection } from '../../helpers/assertions.js';
+import { expectDrugGetResult, expectDrugAdverseEventsSection } from '../../helpers/assertions.js';
 import { retryOnRateLimit } from '../../helpers/retry.js';
 
 let harness: Awaited<ReturnType<typeof createMcpTestHarness>>;
@@ -14,33 +14,56 @@ afterAll(async () => {
 });
 
 describe('drug_search', () => {
+  // drug_search replies are envelopes (issue #83): { results, hint? }.
   it('returns aspirin results with valid name', async () => {
-    const results = await retryOnRateLimit(() => harness.callTool('drug_search', { query: 'aspirin' }));
-    expectDrugSearchResult(results);
-    expect(results.length).toBeGreaterThan(0);
-    const hit = results.find((r: any) => /aspirin|acetylsalicylic acid/i.test(r.name || ''));
+    const envelope = await retryOnRateLimit(() => harness.callTool('drug_search', { query: 'aspirin' }));
+    expect(Array.isArray(envelope.results)).toBe(true);
+    expect(envelope.results.length).toBeGreaterThan(0);
+    const hit = envelope.results.find((r: any) => /aspirin|acetylsalicylic acid/i.test(r.name || ''));
     expect(hit).toBeDefined();
+    // A matching query carries no hint.
+    expect(envelope.hint).toBeUndefined();
   }, 60000);
 
-  it('returns imatinib', async () => {
-    const results = await retryOnRateLimit(() => harness.callTool('drug_search', { query: 'imatinib' }));
-    expectDrugSearchResult(results);
-    const hit = results.find((r: any) =>
+  it('returns imatinib without a sparse no-identifier duplicate (issue #83)', async () => {
+    const envelope = await retryOnRateLimit(() => harness.callTool('drug_search', { query: 'imatinib' }));
+    expect(Array.isArray(envelope.results)).toBe(true);
+    const hit = envelope.results.find((r: any) =>
       r.chembl_id === 'CHEMBL941' || r.name?.toLowerCase().includes('imatinib')
     );
     expect(hit).toBeDefined();
+    // Every imatinib-named row must carry a chemical identity — the sparse
+    // "Imatinib Mesylate" row with no ids merges into the id-bearing rows.
+    for (const r of envelope.results) {
+      if (r.name?.toLowerCase().includes('imatinib')) {
+        expect(r.chembl_id || r.inchi_key).toBeTruthy();
+      }
+    }
   }, 60000);
 
-  it('returns empty for nonsense query', async () => {
-    const results = await retryOnRateLimit(() => harness.callTool('drug_search', { query: 'ZZZZNOTADRUG99999' }));
-    expectDrugSearchResult(results);
-    expect(results.length).toBe(0);
+  it('returns an empty-results envelope with a hint for nonsense query', async () => {
+    const envelope = await retryOnRateLimit(() => harness.callTool('drug_search', { query: 'ZZZZNOTADRUG99999' }));
+    expect(envelope.results).toEqual([]);
+    expect(typeof envelope.hint).toBe('string');
+    expect(envelope.hint).toContain('drug_search matches drug names/keywords');
+  }, 60000);
+
+  it('mechanism-style query (EGFR inhibitor) returns empty results plus the gene_drugs hint (issue #83)', async () => {
+    // MyChem has no mechanism text in this query: the UMLS-concept hits it
+    // does return carry no chemical identity fields, so after the transform
+    // + dedup passes the result is legitimately empty — with the hint
+    // directing mechanism/target queries to gene_drugs.
+    const envelope = await retryOnRateLimit(() => harness.callTool('drug_search', { query: 'EGFR inhibitor' }));
+    expect(envelope.results).toEqual([]);
+    expect(typeof envelope.hint).toBe('string');
+    expect(envelope.hint).toContain("No ChEMBL/MyChem identity matches for 'EGFR inhibitor'");
+    expect(envelope.hint).toContain('gene_drugs');
   }, 60000);
 
   it('respects limit parameter', async () => {
-    const results = await retryOnRateLimit(() => harness.callTool('drug_search', { query: 'inhibitor', limit: 2 }));
-    expectDrugSearchResult(results);
-    expect(results.length).toBeLessThanOrEqual(2);
+    const envelope = await retryOnRateLimit(() => harness.callTool('drug_search', { query: 'inhibitor', limit: 2 }));
+    expect(Array.isArray(envelope.results)).toBe(true);
+    expect(envelope.results.length).toBeLessThanOrEqual(2);
   }, 60000);
 });
 

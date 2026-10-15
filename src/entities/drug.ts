@@ -127,14 +127,24 @@ function preferRicherDrugRow(a: DrugSearchResult, b: DrugSearchResult): DrugSear
   return a.name <= b.name ? a : b;
 }
 
+/** True when the row carries no chemical-identity id at all (name-keyed only). */
+function isIdLessDrugRow(row: DrugSearchResult): boolean {
+  return !row.chembl_id && !row.inchi_key;
+}
+
 /**
  * Normalize and deduplicate drug search rows: drop rows whose name is empty
  * or whitespace (e.g. MyChem records whose only annotation is an FDA orphan
  * designation without a generic name), then collapse case variants and
  * salt/ester forms onto a single row keyed by {@link drugIdentityKey},
- * keeping the record with the richest identity. Never refetches to refill a
- * limit — returning fewer rows than requested is accepted. Exported for
- * reuse by the cross-entity layer.
+ * keeping the record with the richest identity. A second merge pass (issue
+ * #83) then absorbs identifier-less rows into an id-bearing row when their
+ * salt-stripped lowercase names match — e.g. a sparse "Imatinib Mesylate"
+ * row with no ids next to the CHEMBL941/CHEMBL1642 rows is a duplicate of
+ * the same chemical identity, but its name-only key could never collide with
+ * an id key, so it previously survived as a third, useless row. Never
+ * refetches to refill a limit — returning fewer rows than requested is
+ * accepted. Exported for reuse by the cross-entity layer.
  */
 export function collapseSaltVariants(rows: DrugSearchResult[]): DrugSearchResult[] {
   const byKey = new Map<string, DrugSearchResult>();
@@ -144,7 +154,32 @@ export function collapseSaltVariants(rows: DrugSearchResult[]): DrugSearchResult
     const existing = byKey.get(key);
     byKey.set(key, existing ? preferRicherDrugRow(existing, row) : row);
   }
-  return [...byKey.values()];
+
+  // Second pass: an id-less row whose salt-stripped name matches an
+  // id-bearing row's is the same chemical entity — merge it in (absorbing
+  // any fields the id-bearing row lacks) instead of keeping a sparse
+  // duplicate. Id-less rows with no id-bearing namesake survive untouched.
+  const keyed = [...byKey.values()];
+  const idBearingByName = new Map<string, DrugSearchResult>();
+  for (const row of keyed) {
+    if (isIdLessDrugRow(row)) continue;
+    const nameKey = stripSaltSuffixTokens(row.name.trim().toLowerCase());
+    if (!idBearingByName.has(nameKey)) idBearingByName.set(nameKey, row);
+  }
+  return keyed.filter(row => {
+    if (!isIdLessDrugRow(row)) return true;
+    const nameKey = stripSaltSuffixTokens(row.name.trim().toLowerCase());
+    const idBearing = idBearingByName.get(nameKey);
+    if (!idBearing) return true;
+    // Absorb any sparse-row fields the surviving row lacks (never overwrite).
+    const absorbInto = idBearing as unknown as Record<string, unknown>;
+    for (const [field, value] of Object.entries(row)) {
+      if (field !== 'name' && value !== undefined && absorbInto[field] === undefined) {
+        absorbInto[field] = value;
+      }
+    }
+    return false;
+  });
 }
 
 export async function drugSearch(
@@ -362,12 +397,12 @@ export async function drugGet(
       } else if (settled.status === 'fulfilled' && settled.value.error) {
         const sectionResult = settled.value as { error?: string };
         (result.sections as Record<string, unknown>)[sectionsToFetch[si]] = {
-          error: sectionResult.error
+          _error: sectionResult.error
         };
       } else if (settled.status === 'rejected') {
         const reason = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
         (result.sections as Record<string, unknown>)[sectionsToFetch[si]] = {
-          error: `Section '${sectionsToFetch[si]}' fetch failed: ${reason}. The data source may be temporarily unavailable.`
+          _error: `Section '${sectionsToFetch[si]}' fetch failed: ${reason}. The data source may be temporarily unavailable.`
         };
       }
     }

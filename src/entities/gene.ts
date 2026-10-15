@@ -5,6 +5,7 @@ import { fetchWithTimeout } from '../connections/fetch-utils.js';
 import { withRetry, isRetryableError } from '../connections/retry.js';
 import { transformMyGeneHit } from '../transform/gene.js';
 import { fetchDisgenetGdaSummary } from './disgenet.js';
+import { otDiseasesForGene } from './opentargets.js';
 import { gtexMedianExpression } from './gtex.js';
 
 const SECTION_TIMEOUT_MS = 8000;
@@ -240,12 +241,12 @@ export async function geneGet(
         } else if (settled.status === 'fulfilled' && settled.value.error) {
           const sectionResult = settled.value as { error?: string };
           (result.sections as Record<string, unknown>)[sectionsToFetch[si]] = {
-            error: sectionResult.error
+            _error: sectionResult.error
           };
         } else if (settled.status === 'rejected') {
           const reason = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
           (result.sections as Record<string, unknown>)[sectionsToFetch[si]] = {
-            error: `Section '${sectionsToFetch[si]}' fetch failed: ${reason}. The data source may be temporarily unavailable.`
+            _error: `Section '${sectionsToFetch[si]}' fetch failed: ${reason}. The data source may be temporarily unavailable.`
           };
         }
       }
@@ -618,34 +619,9 @@ async function fetchDisgenet(geneSymbol: string, signal?: AbortSignal): Promise<
 
 async function fetchDiseases(geneSymbol: string, signal?: AbortSignal): Promise<{ diseases?: Array<{ name: string; source: string }> }> {
   try {
-    const otConn = connectionManager.getConnection('opentargets');
-
-    const searchQuery = `query($symbol: String!) {
-      search(queryString: $symbol, entityNames: ["target"], page: {index: 0, size: 1}) {
-        hits { id name entity }
-      }
-    }`;
-    const searchRaw = await otConn.request(searchQuery, { symbol: geneSymbol }, { signal, rootField: 'search' }) as any;
-    const ensemblId = searchRaw?.data?.search?.hits?.[0]?.id;
-    if (!ensemblId) {
-      return { _error: `Could not resolve Ensembl ID for '${geneSymbol}' via OpenTargets. Gene symbol may be invalid.` } as any;
-    }
-
-    const targetQuery = `query($ensemblId: String!) {
-      target(ensemblId: $ensemblId) {
-        associatedDiseases(page: {index: 0, size: 20}) {
-          rows { disease { id name } score }
-        }
-      }
-    }`;
-    const targetRaw = await otConn.request(targetQuery, { ensemblId }, { signal, rootField: 'target' }) as any;
-    const rows = targetRaw?.data?.target?.associatedDiseases?.rows || [];
-    
-    const diseases = rows.map((r: any) => ({
-      name: r.disease?.name || '',
-      source: 'opentargets',
-    })).filter((d: any) => d.name);
-    
+    // Shared keyless OpenTargets fallback chain (search → target →
+    // associatedDiseases); see src/entities/opentargets.ts.
+    const diseases = await otDiseasesForGene(geneSymbol, signal);
     return { diseases };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);

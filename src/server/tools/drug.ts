@@ -21,9 +21,9 @@ export function registerDrugTools(server: McpServer): void {
   server.registerTool(
     'drug_search',
     {
-      description: 'Search for drugs by name, mechanism, or keyword',
+      description: 'Search for drugs by name or keyword (chemical identity: names, synonyms, and identifiers in ChEMBL/MyChem). This is NOT a mechanism or target search — MyChem has no mechanism text in this query, so "EGFR inhibitor"-style queries return nothing. For drugs targeting a gene/mechanism, use gene_drugs with the target gene symbol.',
       inputSchema: {
-        query: z.string().trim().min(1, 'Query must be a non-empty string after trimming').describe('Drug name, mechanism, or keyword to search'),
+        query: z.string().trim().min(1, 'Query must be a non-empty string after trimming').describe('Drug name or keyword (chemical identity, e.g. "imatinib"); for target/mechanism queries (e.g. "EGFR inhibitor") use gene_drugs with the gene symbol instead'),
         limit: z.number().int().min(1).max(50).default(10).describe('Maximum results'),
         offset: z.number().int().min(0).default(0).describe('Result offset'),
       },
@@ -32,11 +32,18 @@ export function registerDrugTools(server: McpServer): void {
     async ({ query, limit, offset }) => {
       try {
         const results = await drugSearch(query, { limit, offset });
-        return { content: [{ type: 'text', text: JSON.stringify(results) }] };
+        // Response envelope: results plus, when nothing matched, an explicit
+        // hint that drug_search is a chemical-identity search and mechanism /
+        // target queries belong on gene_drugs (issue #83).
+        const envelope: { results: typeof results; hint?: string } = { results };
+        if (results.length === 0) {
+          envelope.hint = `No ChEMBL/MyChem identity matches for '${query}'. drug_search matches drug names/keywords; for target/mechanism queries (e.g. 'EGFR inhibitor') use gene_drugs with the target's gene symbol.`;
+        }
+        return { content: [{ type: 'text', text: JSON.stringify(envelope) }] };
       } catch (error) {
-        return { 
+        return {
           content: [{ type: 'text', text: String(error) }],
-          isError: true 
+          isError: true
         };
       }
     }

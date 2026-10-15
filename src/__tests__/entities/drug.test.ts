@@ -10,6 +10,8 @@ import {
 } from '../../entities/drug.js';
 import type { DrugSearchResult } from '../../entities/drug.js';
 import { connectionManager } from '../../connections/manager.js';
+import { parseMockUrl } from '../helpers/mock-url.js';
+import { createMcpTestHarness, type McpTestHarness } from '../helpers/mcp-harness.js';
 
 describe('drug', () => {
   let originalFetch: typeof global.fetch;
@@ -228,6 +230,51 @@ describe('drug', () => {
       const rows = collapseSaltVariants([row(''), row('   '), row('aspirin')]);
       expect(rows).toHaveLength(1);
       expect(rows[0].name).toBe('aspirin');
+    });
+
+    // Second merge pass (issue #83): an id-less row whose salt-stripped name
+    // matches an id-bearing row is the same chemical entity — merge, don't
+    // keep a sparse duplicate.
+    test('absorbs the identifier-less imatinib trio member into the id-bearing rows', () => {
+      // Live "imatinib" search shape: base (CHEMBL941), mesylate salt
+      // (CHEMBL1642), and a sparse "Imatinib Mesylate" row with no ids —
+      // the id-less row's name-only key can never collide with an id key.
+      const rows = collapseSaltVariants([
+        row('imatinib', { chembl_id: 'CHEMBL941' }),
+        row('imatinib mesylate', { chembl_id: 'CHEMBL1642' }),
+        row('Imatinib Mesylate'),
+      ]);
+      expect(rows).toHaveLength(2);
+      expect(rows.map(r => r.chembl_id).sort()).toEqual(['CHEMBL1642', 'CHEMBL941']);
+    });
+
+    test('id-less rows merge into id-bearing namesakes case- and salt-insensitively', () => {
+      const rows = collapseSaltVariants([
+        row('IMATINIB MESYLATE', { chembl_id: 'CHEMBL1642' }),
+        row('imatinib'),
+      ]);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].chembl_id).toBe('CHEMBL1642');
+    });
+
+    test('the id-bearing survivor absorbs fields the sparse row uniquely carried', () => {
+      const rows = collapseSaltVariants([
+        row('imatinib', { chembl_id: 'CHEMBL941' }),
+        row('Imatinib Mesylate', { molecular_formula: 'C29H31N7O' }),
+      ]);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].chembl_id).toBe('CHEMBL941');
+      expect(rows[0].name).toBe('imatinib'); // name never overwritten
+      expect(rows[0].molecular_formula).toBe('C29H31N7O'); // absorbed
+    });
+
+    test('id-less rows with no id-bearing namesake survive untouched', () => {
+      const rows = collapseSaltVariants([
+        row('artesunate', { molecular_formula: 'C19H28O8' }),
+        row('sodium stibogluconate'), // no id-bearing "stibogluconate" — keep
+      ]);
+      expect(rows).toHaveLength(2);
+      expect(rows.map(r => r.name).sort()).toEqual(['artesunate', 'sodium stibogluconate']);
     });
   });
 
@@ -614,5 +661,71 @@ describe('drug', () => {
       expect(result.score).toBe(2);
       expect((result.hit as any).chebi.name).toBe('Compound X');
     });
+  });
+});
+
+// ============================================================
+// drug_search tool envelope (issue #83)
+// ============================================================
+describe('drug_search tool envelope (issue #83)', () => {
+  let harness: McpTestHarness;
+  let originalFetch: typeof global.fetch;
+
+  beforeAll(async () => {
+    harness = await createMcpTestHarness();
+  });
+
+  afterAll(async () => {
+    await harness.close();
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    originalFetch = global.fetch;
+    connectionManager.closeAll();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  test('wraps results in the { results } envelope on matches', async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((input: any) => {
+      const url = parseMockUrl(input);
+      expect(url.hostname).toBe('mychem.info');
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          hits: [{ chebi: { name: 'Aspirin' }, unichem: { chembl: 'CHEMBL25' } }],
+        }),
+        headers: new Headers({ 'content-type': 'application/json' }),
+      });
+    }) as any;
+
+    const envelope = await harness.callTool('drug_search', { query: 'aspirin' });
+
+    expect(Array.isArray(envelope.results)).toBe(true);
+    expect(envelope.results).toHaveLength(1);
+    expect(envelope.results[0].name).toBe('Aspirin');
+    expect(envelope.hint).toBeUndefined();
+  });
+
+  test('empty results carry the mechanism-query hint naming gene_drugs', async () => {
+    // MyChem has no mechanism text in this query — "EGFR inhibitor"-style
+    // queries legitimately return nothing, and the envelope must say where
+    // those queries belong instead of a bare [].
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ hits: [] }),
+      headers: new Headers({ 'content-type': 'application/json' }),
+    }) as any;
+
+    const envelope = await harness.callTool('drug_search', { query: 'EGFR inhibitor' });
+
+    expect(envelope.results).toEqual([]);
+    expect(typeof envelope.hint).toBe('string');
+    expect(envelope.hint).toContain("No ChEMBL/MyChem identity matches for 'EGFR inhibitor'");
+    expect(envelope.hint).toContain('drug_search matches drug names/keywords');
+    expect(envelope.hint).toContain("use gene_drugs with the target's gene symbol");
   });
 });

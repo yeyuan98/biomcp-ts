@@ -438,26 +438,63 @@ export interface PathwayEnrichmentResult {
   source: string;
 }
 
-export async function geneEnrichment(geneSymbols: string[]): Promise<PathwayEnrichmentResult[]> {
-  if (!geneSymbols.length || geneSymbols.length < 3) {
+/**
+ * Enrichment reply envelope (issue #85): the returned pathway page plus the
+ * honesty fields — how many pathways Reactome reported in total, and whether
+ * the page is a truncated view of them (mirrors the `truncated` flag pattern
+ * in ensembl.ts).
+ */
+export interface GeneEnrichmentResult {
+  pathways: PathwayEnrichmentResult[];
+  /** Total pathways Reactome reported for the submitted gene set. */
+  total_reported: number;
+  /** True when `pathways` is a truncated slice of `total_reported`. */
+  truncated: boolean;
+}
+
+/** Upper bound of the `limit` parameter (Reactome reports up to ~100). */
+const GENE_ENRICHMENT_MAX_LIMIT = 100;
+/** Default pathway page size when the caller passes no limit. */
+const GENE_ENRICHMENT_DEFAULT_LIMIT = 30;
+
+export async function geneEnrichment(
+  geneSymbols: string[],
+  limit = GENE_ENRICHMENT_DEFAULT_LIMIT
+): Promise<GeneEnrichmentResult | Array<{ _error: string }>> {
+  // Reactome's /identifiers/projection counts every submitted identifier
+  // line, so duplicates and case variants inflate `genes_overlap` beyond the
+  // real input size (issue #85): dedup + uppercase + drop empties first, and
+  // apply the 3-gene minimum to the UNIQUE set (that is the gene count
+  // Reactome actually sees).
+  const uniqueSymbols = [...new Set(
+    geneSymbols.map(s => s.trim().toUpperCase()).filter(s => s.length > 0)
+  )];
+  if (uniqueSymbols.length < 3) {
     throw new Error('Gene enrichment requires at least 3 genes');
   }
-  
+  const safeLimit = Number.isFinite(limit)
+    ? Math.min(Math.max(Math.floor(limit), 1), GENE_ENRICHMENT_MAX_LIMIT)
+    : GENE_ENRICHMENT_DEFAULT_LIMIT;
+
   try {
     // Registry 'reactome_analysis' connection supplies rate limiting, timeout
     // and retry. The AnalysisService takes a plain-text identifier list, not JSON.
     const conn = connectionManager.getConnection('reactome_analysis') as RestConnection;
-    const data = await conn.post('/identifiers/projection', geneSymbols.join('\n')) as ReactomeAnalysisResponse;
+    const data = await conn.post('/identifiers/projection', uniqueSymbols.join('\n')) as ReactomeAnalysisResponse;
     const pathways = data?.pathways || [];
-    
-    return pathways.slice(0, 30).map((p: { stId?: string; name?: string; entities?: { pValue?: number; found?: number; total?: number } }) => ({
-      pathway_id: p.stId || '',
-      name: p.name || '',
-      p_value: p.entities?.pValue,
-      genes_overlap: p.entities?.found,
-      genes_total: p.entities?.total,
-      source: 'reactome',
-    }));
+
+    return {
+      pathways: pathways.slice(0, safeLimit).map((p: { stId?: string; name?: string; entities?: { pValue?: number; found?: number; total?: number } }) => ({
+        pathway_id: p.stId || '',
+        name: p.name || '',
+        p_value: p.entities?.pValue,
+        genes_overlap: p.entities?.found,
+        genes_total: p.entities?.total,
+        source: 'reactome',
+      })),
+      total_reported: pathways.length,
+      truncated: pathways.length > safeLimit,
+    };
   } catch (error) {
     // Cause-aware message: raw fetch rejections hide their errno code
     // (ETIMEDOUT, ECONNREFUSED, ...) in error.cause — surface it (see
