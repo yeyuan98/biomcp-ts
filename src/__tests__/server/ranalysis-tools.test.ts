@@ -3,10 +3,10 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
-const runDeseq2Mock = jest.fn();
-const runEdgerMock = jest.fn();
+const runDeseq2Mock = jest.fn<(...args: any[]) => any>();
+const runEdgerMock = jest.fn<(...args: any[]) => any>();
 const runLimmaMock = jest.fn();
-const runSessionInfoMock = jest.fn();
+const runSessionInfoMock = jest.fn<(...args: any[]) => any>();
 const shutdownREngineMock = jest.fn();
 
 jest.unstable_mockModule('../../ranalysis/analyzers.js', () => ({

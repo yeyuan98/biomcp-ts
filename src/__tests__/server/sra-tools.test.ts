@@ -97,7 +97,7 @@ function okXml(xml: string) {
 }
 
 function mockEutils(esearchIds: string[]): void {
-  global.fetch = jest.fn().mockImplementation((rawUrl: string) => {
+  global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((rawUrl: string) => {
     const url = new URL(rawUrl);
     if (url.pathname.endsWith('/esearch.fcgi')) {
       return Promise.resolve(okJson({ esearchresult: { count: String(esearchIds.length), idlist: esearchIds } }));

@@ -137,7 +137,7 @@ jest.mock('../../connections/manager.js', () => mockLoudModule('connections/mana
     getConnection: jest.fn().mockReturnValue({
       request: jest.fn(),
       post: jest.fn(),
-      healthCheck: jest.fn().mockResolvedValue(true),
+      healthCheck: jest.fn<(...args: any[]) => any>().mockResolvedValue(true),
     }),
   },
 }));

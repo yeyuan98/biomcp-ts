@@ -63,7 +63,7 @@ function okJson(body: unknown) {
 }
 
 function mockFetchRoutes(routes: Record<string, (url: URL) => unknown>): void {
-  global.fetch = jest.fn().mockImplementation((rawUrl: string) => {
+  global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((rawUrl: string) => {
     const url = new URL(rawUrl);
     for (const [prefix, handler] of Object.entries(routes)) {
       if (url.pathname.startsWith(prefix)) {
