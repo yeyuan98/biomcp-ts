@@ -225,7 +225,7 @@ describe('biowasm engine (worker boundary mocked)', () => {
     process.env.ANALYSIS_BIOWASM_WORKER_PATH = join(tmpdir(), 'biowasm-engine-test-no-such', 'biowasm-worker.js');
     const err = await biowasmEngine.ensureReady().catch((e: unknown) => e);
     expect(err).toBeInstanceOf(BiowasmNotAvailableError);
-    expect(String(err.message)).toMatch(/npm run build|ANALYSIS_BIOWASM_WORKER_PATH/);
+    expect(String((err as Error).message)).toMatch(/npm run build|ANALYSIS_BIOWASM_WORKER_PATH/);
   });
 
   it('runs a tool and maps the worker response', async () => {

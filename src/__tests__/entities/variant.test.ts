@@ -18,7 +18,7 @@ describe('variant', () => {
   // ========== Existing tests (kept unchanged) ==========
 
   test('variantSearch() calls connection with correct myvariant endpoint', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [{ _id: 'rs123', gene: { symbol: 'BRCA1' } }] }),
     }) as any;
@@ -33,7 +33,7 @@ describe('variant', () => {
   });
 
   test('variantSearch() returns transformed results', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [{
@@ -57,7 +57,7 @@ describe('variant', () => {
   });
 
   test('variantGet() calls connection with correct endpoint', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         _id: 'vcf123',
@@ -101,7 +101,7 @@ describe('variant', () => {
   // --- variantSearch filter tests ---
 
   test('variantSearch() with gene filter includes cadd.gene.genename in query', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -113,7 +113,7 @@ describe('variant', () => {
   });
 
   test('variantSearch() with pathogenic significance filter maps correctly', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -126,7 +126,7 @@ describe('variant', () => {
   });
 
   test('variantSearch() with likely_pathogenic significance maps to "likely pathogenic"', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -138,7 +138,7 @@ describe('variant', () => {
   });
 
   test('variantSearch() with consequence missense maps to missense_variant', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -150,7 +150,7 @@ describe('variant', () => {
   });
 
   test('variantSearch() with consequence frameshift maps to frameshift_variant', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -162,7 +162,7 @@ describe('variant', () => {
   });
 
   test('variantSearch() with hgvsp filter includes dbnsfp.hgvsp in query', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -174,7 +174,7 @@ describe('variant', () => {
   });
 
   test('variantSearch() with hgvsc filter includes snpeff.ann.hgvs_c in query', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -186,7 +186,7 @@ describe('variant', () => {
   });
 
   test('variantSearch() with min_cadd includes cadd.phred range in query', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -198,7 +198,7 @@ describe('variant', () => {
   });
 
   test('variantSearch() with max_frequency uses real gnomad AF fields in OR-clause', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -212,7 +212,7 @@ describe('variant', () => {
   });
 
   test('variantSearch() with rs123 query rewrites to dbsnp.rsid', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -224,7 +224,7 @@ describe('variant', () => {
   });
 
   test('variantSearch() with HGVS cDNA query rewrites to snpeff filters', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -237,7 +237,7 @@ describe('variant', () => {
   });
 
   test('variantSearch() returns empty array for empty hits', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -248,7 +248,7 @@ describe('variant', () => {
   });
 
   test('variantSearch() with multiple filters joins them with AND', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -273,7 +273,7 @@ describe('variant', () => {
       { _id: 'chr7:3', _version: 2, dbsnp: { rsid: 'rs3' }, gnomad_genome: { af: { af: 0.005 } } },
     ];
 
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve(variantArray),
     }) as any;
@@ -288,7 +288,7 @@ describe('variant', () => {
     const hgvsId = 'NM_004333.4:c.1799T>A';
     let callCount = 0;
 
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callCount++;
       if (callCount === 1) {
         // First call: resolve HGVS to genomic ID
@@ -314,7 +314,7 @@ describe('variant', () => {
   });
 
   test('variantGet() with "all" sections fetches all 5 sections', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         _id: 'vcf123',
@@ -336,7 +336,7 @@ describe('variant', () => {
   });
 
   test('variantGet() with error response throws', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ error: 'Variant not found' }),
     }) as any;
@@ -345,7 +345,7 @@ describe('variant', () => {
   });
 
   test('variantGet() alphagenome section returns honest stub without network call', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       json: () => Promise.resolve({
@@ -366,7 +366,7 @@ describe('variant', () => {
   });
 
   test('variantGet() maps alphagenome_scores alias to alphagenome section', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         _id: 'vcf123',
@@ -467,7 +467,7 @@ describe('variant', () => {
   // --- variantGet with specific sections ---
 
   test('variantGet() with frequency section includes gnomad data', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         _id: 'vcf123',
@@ -485,7 +485,7 @@ describe('variant', () => {
   });
 
   test('variantGet() with predictions section extracts CADD scores', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         _id: 'vcf123',
@@ -504,7 +504,7 @@ describe('variant', () => {
   });
 
   test('variantGet() with clinical section extracts clinvar data', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         _id: 'vcf123',
@@ -533,7 +533,7 @@ describe('variant', () => {
 
   test('variantGet() with HGVS input that cannot be resolved throws', async () => {
     let callCount = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callCount++;
       // HGVS resolve returns no hits
       return Promise.resolve({
@@ -546,7 +546,7 @@ describe('variant', () => {
   });
 
   test('variantSearch() with limit and offset passes them as query params', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -577,7 +577,7 @@ describe('variantGet clinical section — CIViC lookup', () => {
   });
 
   function mockConnections(civicResponse: unknown) {
-    const civicRequest = jest.fn().mockResolvedValue(civicResponse);
+    const civicRequest = jest.fn<(...args: any[]) => any>().mockResolvedValue(civicResponse);
     const realGetConnection = connectionManager.getConnection.bind(connectionManager);
     jest.spyOn(connectionManager, 'getConnection').mockImplementation((sourceId: string) => {
       if (sourceId === 'civic') {
@@ -589,7 +589,7 @@ describe('variantGet clinical section — CIViC lookup', () => {
   }
 
   function mockMyVariantGet() {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       json: () => Promise.resolve({
@@ -682,7 +682,7 @@ describe('fetchOncoKbAnnotation', () => {
   });
 
   test('sends hugoSymbol + normalized alteration, never legacy gene/byProteinChange params', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         geneExist: true,
@@ -716,7 +716,7 @@ describe('fetchOncoKbAnnotation', () => {
   });
 
   test('returns null annotation payload for empty OncoKB response object', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ geneExist: false, variantExist: false }),
     }) as any;

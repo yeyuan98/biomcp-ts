@@ -44,7 +44,7 @@ describe('disease_get', () => {
   it('returns breast cancer by MONDO ID', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('disease_get', { disease_id: 'MONDO:0007254' }));
     expectDiseaseGetResult(result);
-    expect(result.name.toLowerCase()).toContain('breast');
+    expect((result.name as string).toLowerCase()).toContain('breast');
   }, 60000);
 
   it('throws for invalid disease ID', async () => {

@@ -37,7 +37,7 @@ describe('cross-entity', () => {
   });
 
   test('discover() calls geneSearch + drugSearch + diseaseSearch', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -57,7 +57,7 @@ describe('cross-entity', () => {
   });
 
   test('searchAll() calls all entity search functions', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [],
@@ -86,7 +86,7 @@ describe('cross-entity', () => {
   });
 
   test('batchGet() calls correct entity get per type', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [{ symbol: 'BRCA1', name: 'BRCA1' }],
@@ -357,7 +357,7 @@ describe('variantToTrials', () => {
 
   test('resolves variant to gene + protein change and searches trials', async () => {
     let callCount = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callCount++;
       // First call: variantGet → MyVariant.info
       // Second call: trialSearch → ClinicalTrials.gov
@@ -402,7 +402,7 @@ describe('variantToTrials', () => {
 
   test('falls back to gene-only search when no protein change available', async () => {
     let callCount = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callCount++;
       if (callCount === 1) {
         // variantGet returns gene but no hgvs_p
@@ -440,7 +440,7 @@ describe('variantToTrials', () => {
   });
 
   test('falls back to raw variantId when resolution fails', async () => {
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve({
@@ -459,7 +459,7 @@ describe('variantToTrials', () => {
 
   test('converts HGVS three-letter to shorthand in trial search query', async () => {
     let callCount = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callCount++;
       // First call: variantGet (myvariant.info)
       if (callCount === 1) {
@@ -501,7 +501,7 @@ describe('variantToTrials', () => {
 
   test('gene-only fallback when gene+mutation returns no results', async () => {
     let callCount = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callCount++;
       // First call: variantGet
       if (callCount === 1) {
@@ -548,7 +548,7 @@ describe('variantToTrials', () => {
 
   test('Arg123Ter (stop codon) is converted to R123*', async () => {
     let callCount = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callCount++;
       if (callCount === 1) {
         return Promise.resolve({
@@ -603,7 +603,7 @@ describe('geneToDrugs', () => {
 
   test('returns drugs for a known gene', async () => {
     let callCount = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callCount++;
       // All calls are GraphQL POSTs to OpenTargets
       return Promise.resolve({
@@ -651,7 +651,7 @@ describe('geneToDrugs', () => {
 
   test('ranks drugs by clinical stage and report count (observed OT enum format)', async () => {
     let callCount = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callCount++;
       return Promise.resolve({
         ok: true,
@@ -692,7 +692,7 @@ describe('geneToDrugs', () => {
 
   test('collapses salt variants onto the best-ranked row', async () => {
     let callCount = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callCount++;
       return Promise.resolve({
         ok: true,
@@ -731,7 +731,7 @@ describe('geneToDrugs', () => {
   });
 
   test('returns error when gene not found', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         data: { search: { hits: [] } },
@@ -745,7 +745,7 @@ describe('geneToDrugs', () => {
   });
 
   test('returns error on API failure', async () => {
-    global.fetch = jest.fn().mockRejectedValue(new Error('Network error')) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(new Error('Network error')) as any;
 
     const results = await geneToDrugs('BRAF');
 
@@ -772,7 +772,7 @@ describe('geneToTrials', () => {
   });
 
   test('delegates to trialSearch and maps results', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         studies: [{
@@ -797,7 +797,7 @@ describe('geneToTrials', () => {
   });
 
   test('returns empty array when no trials found', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ studies: [] }),
     }) as any;
@@ -826,7 +826,7 @@ describe('drugToGenes', () => {
 
   test('returns gene targets for a known drug', async () => {
     let callCount = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callCount++;
       return Promise.resolve({
         ok: true,
@@ -875,7 +875,7 @@ describe('drugToGenes', () => {
   });
 
   test('returns error when drug not found', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         data: { search: { hits: [] } },
@@ -890,7 +890,7 @@ describe('drugToGenes', () => {
 
   test('deduplicates duplicate target gene symbols', async () => {
     let callCount = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callCount++;
       return Promise.resolve({
         ok: true,
@@ -953,7 +953,7 @@ describe('drugToTrials', () => {
   });
 
   test('passes searchType=intervention to trialSearch', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         studies: [{
@@ -997,7 +997,7 @@ describe('drugToAdverseEvents', () => {
   });
 
   test('returns ranked FAERS reactions via fully-qualified substance_name search', async () => {
-    global.fetch = jest.fn()
+    global.fetch = jest.fn<(...args: any[]) => any>()
       .mockResolvedValueOnce({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
@@ -1041,7 +1041,7 @@ describe('drugToAdverseEvents', () => {
       headers: new Headers({ 'content-type': 'application/json' }),
       text: () => Promise.resolve('{"error":{"code":"NOT_FOUND"}}'),
     };
-    global.fetch = jest.fn()
+    global.fetch = jest.fn<(...args: any[]) => any>()
       .mockResolvedValueOnce(notFound)
       .mockResolvedValueOnce({
         ok: true,
@@ -1072,7 +1072,7 @@ describe('drugToAdverseEvents', () => {
       headers: new Headers({ 'content-type': 'application/json' }),
       text: () => Promise.resolve('{"error":{"code":"NOT_FOUND"}}'),
     };
-    global.fetch = jest.fn().mockResolvedValue(notFound) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(notFound) as any;
 
     const result = await drugToAdverseEvents('zzznotadrug999');
 
@@ -1081,7 +1081,7 @@ describe('drugToAdverseEvents', () => {
   });
 
   test('drug names with quotes and backslashes are Lucene-escaped in the search phrase', async () => {
-    global.fetch = jest.fn()
+    global.fetch = jest.fn<(...args: any[]) => any>()
       .mockResolvedValueOnce({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
@@ -1102,7 +1102,7 @@ describe('drugToAdverseEvents', () => {
   });
 
   test('returns error row on hard API failure', async () => {
-    global.fetch = jest.fn().mockRejectedValue(new Error('Service unavailable')) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(new Error('Service unavailable')) as any;
 
     const results = await drugToAdverseEvents('aspirin');
 
@@ -1130,7 +1130,7 @@ describe('diseaseToDrugs', () => {
 
   test('resolves MONDO ID via mydisease then queries OpenTargets', async () => {
     let callCount = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callCount++;
       return Promise.resolve({
         ok: true,
@@ -1180,7 +1180,7 @@ describe('diseaseToDrugs', () => {
 
   test('queries OpenTargets directly for plain text query', async () => {
     let callCount = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callCount++;
       return Promise.resolve({
         ok: true,
@@ -1221,7 +1221,7 @@ describe('diseaseToDrugs', () => {
 
   test('ranks drugs by clinical stage then report count (observed OT enum format)', async () => {
     let callCount = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callCount++;
       return Promise.resolve({
         ok: true,
@@ -1264,7 +1264,7 @@ describe('diseaseToDrugs', () => {
 
   test('normalizes differently-formatted stage values when ranking', async () => {
     let callCount = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callCount++;
       return Promise.resolve({
         ok: true,
@@ -1305,7 +1305,7 @@ describe('diseaseToDrugs', () => {
 
   test('collapses salt variants onto the best-ranked row', async () => {
     let callCount = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callCount++;
       return Promise.resolve({
         ok: true,
@@ -1346,7 +1346,7 @@ describe('diseaseToDrugs', () => {
   });
 
   test('returns error when disease not found', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         data: { search: { hits: [] } },
@@ -1361,7 +1361,7 @@ describe('diseaseToDrugs', () => {
 
   test('falls back to MONDO EFO ID format when initial search fails', async () => {
     let callCount = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callCount++;
       return Promise.resolve({
         ok: true,
@@ -1432,7 +1432,7 @@ describe('diseaseToGenes', () => {
   });
 
   test('queries gda/summary with normalized disease code and raw Authorization key', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         payload: [
@@ -1478,7 +1478,7 @@ describe('diseaseToGenes', () => {
   });
 
   test('normalizes colon-form MONDO ids to DisGeNET underscore form', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ payload: [], warnings: [] }),
       headers: new Headers({ 'content-type': 'application/json' }),
@@ -1509,7 +1509,7 @@ describe('geneEnrichment additional tests', () => {
   });
 
   test('returns pathway enrichment results', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         pathways: [
@@ -1543,7 +1543,7 @@ describe('geneEnrichment additional tests', () => {
 
   test('handles timeout with AbortError', async () => {
     const abortError = new DOMException('The operation was aborted', 'AbortError');
-    global.fetch = jest.fn().mockRejectedValue(abortError) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(abortError) as any;
 
     const results = await geneEnrichment(['BRCA1', 'TP53', 'ATM']);
 
@@ -1552,7 +1552,7 @@ describe('geneEnrichment additional tests', () => {
   });
 
   test('handles HTTP error response', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: false,
       status: 500,
       statusText: 'Internal Server Error',
@@ -1567,7 +1567,7 @@ describe('geneEnrichment additional tests', () => {
 
   // Issue #62: network-level failures must not blame the gene input.
   test('network failure (raw fetch rejection, cause code) names the code and proxy env, not gene input', async () => {
-    global.fetch = jest.fn().mockRejectedValue(
+    global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(
       Object.assign(new TypeError('fetch failed'), { cause: { code: 'ETIMEDOUT' } })
     ) as any;
 
@@ -1583,7 +1583,7 @@ describe('geneEnrichment additional tests', () => {
 
   test('network failure (HttpConnectionError already carrying the code) is classified the same', async () => {
     // Post-PR-#69 shape: the transport layer already appended the cause code.
-    global.fetch = jest.fn().mockRejectedValue(
+    global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(
       new HttpConnectionError('fetch failed (ECONNREFUSED)')
     ) as any;
 
@@ -1646,7 +1646,7 @@ describe('batchGet additional tests', () => {
   });
 
   test('returns error for unknown entity type', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({}),
     }) as any;
@@ -1660,7 +1660,7 @@ describe('batchGet additional tests', () => {
 
   test('handles mixed success and failure', async () => {
     let callCount = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callCount++;
       if (callCount === 1) {
         // geneGet succeeds
@@ -1690,7 +1690,7 @@ describe('batchGet additional tests', () => {
   });
 
   test('handles all entity types in a single batch', async () => {
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve({ hits: [{ symbol: 'test' }], studies: [] }),
@@ -1729,7 +1729,7 @@ describe('searchAll additional tests', () => {
   });
 
   test('with entity filter searches only specified entities', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [{ symbol: 'BRCA1', name: 'BRCA1' }],

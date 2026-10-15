@@ -236,7 +236,7 @@ describe('seminal prior-art mining', () => {
     mainPatents?: unknown[];
     searchCalls?: { count: number };
   }) {
-    return jest.fn().mockImplementation((url: any, init?: any) => {
+    return jest.fn<(...args: any[]) => any>().mockImplementation((url: any, init?: any) => {
       const u = String(url);
       const { hostname } = parseMockUrl(u);
       if (hostname === 'patents.google.com') {
@@ -389,7 +389,7 @@ describe('seminal prior-art mining', () => {
   });
 
   test('mining failures degrade to a note without breaking the search', async () => {
-    global.fetch = jest.fn().mockImplementation((url: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
       const u = String(url);
       const { hostname } = parseMockUrl(u);
       if (hostname === 'patents.google.com') return Promise.reject(new Error('no network'));
@@ -418,7 +418,7 @@ describe('seminal prior-art mining', () => {
     searchCalls?: { count: number };
     onMainSearch?: () => void;
   }) {
-    return jest.fn().mockImplementation((url: any, init?: any) => {
+    return jest.fn<(...args: any[]) => any>().mockImplementation((url: any, init?: any) => {
       const u = String(url);
       const { hostname } = parseMockUrl(u);
       if (hostname === 'patents.google.com') {
@@ -526,7 +526,7 @@ describe('seminal prior-art mining', () => {
   });
 
   test('non-200 getDocument bodies do not inflate the mined denominator', async () => {
-    global.fetch = jest.fn().mockImplementation((url: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
       const u = String(url);
       const { hostname } = parseMockUrl(u);
       if (hostname === 'patents.google.com') return Promise.reject(new Error('no network'));
@@ -601,7 +601,7 @@ describe('seminal prior-art mining', () => {
         },
       },
     };
-    global.fetch = jest.fn().mockImplementation((url: any, init?: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any, init?: any) => {
       const u = String(url);
       const { hostname } = parseMockUrl(u);
       if (u.includes('accesstoken')) {
@@ -667,7 +667,7 @@ describe('seminal prior-art mining', () => {
     // (publicationNumber is a different patent, family does not contain it) —
     // must be rejected; the second candidate gets the correct page.
     let detailCalls = 0;
-    global.fetch = jest.fn().mockImplementation((url: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
       const u = String(url);
       const { hostname, pathname } = parseMockUrl(u);
       if (u.includes('/api/users/me/session')) {
@@ -751,7 +751,7 @@ describe('patent search federation', () => {
     // simulate GP breaker open by tripping it through a network failure
     const { connectionManager } = await import('../../connections/manager.js');
     connectionManager.closeAll();
-    global.fetch = jest.fn().mockRejectedValue(Object.assign(new Error('fetch failed'), { cause: { code: 'ETIMEDOUT' } })) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(Object.assign(new Error('fetch failed'), { cause: { code: 'ETIMEDOUT' } })) as any;
     await expect(gp.searchGooglePatents('crispr', {})).rejects.toThrow();
     expect(gp.isGooglePatentsBlocked()).toBe(true);
     const note = worldwideCoverageNote();
@@ -770,7 +770,7 @@ describe('patent search federation', () => {
 
     const { connectionManager } = await import('../../connections/manager.js');
     connectionManager.closeAll();
-    global.fetch = jest.fn().mockImplementation((url: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
       const u = String(url);
       if (parseMockUrl(u).hostname === 'api.uspto.gov') {
         return Promise.resolve({
@@ -797,7 +797,7 @@ describe('patent search federation', () => {
     connectionManager.closeAll();
     gp.resetGooglePatentsBreaker();
     const fetchCalls: string[] = [];
-    global.fetch = jest.fn().mockImplementation((url: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
       fetchCalls.push(String(url));
       return Promise.reject(Object.assign(new Error('fetch failed'), { cause: { code: 'ETIMEDOUT', errno: -110 } }));
     }) as any;
@@ -825,7 +825,7 @@ describe('patent search federation', () => {
     process.env.USPTO_API_KEY = 'u';
     const gp = await import('../../entities/patent/search/google-patents.js');
     gp.resetGooglePatentsBreaker();
-    global.fetch = jest.fn().mockImplementation((url: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
       const u = String(url);
       if (parseMockUrl(u).hostname === 'api.uspto.gov') {
         const payload = JSON.stringify({
@@ -866,7 +866,7 @@ describe('patent search federation', () => {
   test('patentSearch: no odp fallback without key; _error surfaces for ppubs', async () => {
     const gp = await import('../../entities/patent/search/google-patents.js');
     gp.resetGooglePatentsBreaker();
-    global.fetch = jest.fn().mockRejectedValue(new HttpConnectionError('HTTP 503: Service Unavailable', 503)) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(new HttpConnectionError('HTTP 503: Service Unavailable', 503)) as any;
 
     const { patentSearch } = await import('../../entities/patent/search/index.js');
     const response = await advanceUntilSettled(patentSearch('crispr', {}));
@@ -876,7 +876,7 @@ describe('patent search federation', () => {
     expect(markers.some(p => p._note)).toBe(false);
     // no USPTO ODP endpoint hit (no key configured → no fallback attempt)
     const calledUrls = (global.fetch as any).mock.calls.map((c: any[]) => String(c[0]));
-    expect(calledUrls.some(u => parseMockUrl(u).hostname === 'api.uspto.gov')).toBe(false);
+    expect(calledUrls.some((u: any) => parseMockUrl(u).hostname === 'api.uspto.gov')).toBe(false);
     gp.resetGooglePatentsBreaker();
     (await import('../../connections/manager.js')).connectionManager.closeAll();
   });
@@ -887,7 +887,7 @@ describe('patent search federation', () => {
     gp.resetGooglePatentsBreaker();
     let now = 1_000;
     const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
-    global.fetch = jest.fn().mockImplementation((url: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
       now = 20_000; // simulate time passing while backends run
       return Promise.reject(new HttpConnectionError('HTTP 503: Service Unavailable', 503));
     }) as any;
@@ -897,7 +897,7 @@ describe('patent search federation', () => {
     expect(response.patents.some(p => p._error?.includes("'ppubs' failed"))).toBe(true);
     expect(response.patents.some(p => p._note)).toBe(false);
     const calledUrls = (global.fetch as any).mock.calls.map((c: any[]) => String(c[0]));
-    expect(calledUrls.some(u => parseMockUrl(u).hostname === 'api.uspto.gov')).toBe(false);
+    expect(calledUrls.some((u: any) => parseMockUrl(u).hostname === 'api.uspto.gov')).toBe(false);
     nowSpy.mockRestore();
     gp.resetGooglePatentsBreaker();
     (await import('../../connections/manager.js')).connectionManager.closeAll();
@@ -906,7 +906,7 @@ describe('patent search federation', () => {
   test('patentSearch: clean 0-hit search appends _hint guidance', async () => {
     const gp = await import('../../entities/patent/search/google-patents.js');
     gp.resetGooglePatentsBreaker();
-    const odpSearch = jest.fn().mockImplementation((url: any) => {
+    const odpSearch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
       const u = String(url);
       if (u.includes('/api/users/me/session')) {
         return Promise.resolve({
@@ -926,13 +926,13 @@ describe('patent search federation', () => {
       }
       return Promise.reject(new Error(`unexpected ${u}`));
     });
-    const gpSearch = jest.fn().mockImplementation(() => Promise.resolve({
+    const gpSearch = jest.fn<(...args: any[]) => any>().mockImplementation(() => Promise.resolve({
       ok: true,
       status: 200,
       headers: new Headers({ 'content-type': 'application/json' }),
       json: () => Promise.resolve({}),
     }));
-    global.fetch = jest.fn().mockImplementation((url: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
       const u = String(url);
       return parseMockUrl(u).hostname === 'ppubs.uspto.gov' ? odpSearch(url) : gpSearch(url);
     }) as any;
@@ -949,7 +949,7 @@ describe('patent search federation', () => {
   test('patentSearch: exhausted relevance window (matches exist, page empty) gets a pagination hint', async () => {
     const gp = await import('../../entities/patent/search/google-patents.js');
     gp.resetGooglePatentsBreaker();
-    global.fetch = jest.fn().mockImplementation((url: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
       const u = String(url);
       if (u.includes('/api/users/me/session')) {
         return Promise.resolve({
@@ -1008,7 +1008,7 @@ describe('patent search federation', () => {
 
     const { connectionManager } = await import('../../connections/manager.js');
     connectionManager.closeAll();
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: false,
       status: 503,
       statusText: 'Service Unavailable',
@@ -1030,7 +1030,7 @@ describe('patent search federation', () => {
     gp.resetGooglePatentsBreaker();
     const { connectionManager } = await import('../../connections/manager.js');
     connectionManager.closeAll();
-    global.fetch = jest.fn().mockRejectedValue(Object.assign(new Error('fetch failed'), { cause: { code: 'ETIMEDOUT' } })) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(Object.assign(new Error('fetch failed'), { cause: { code: 'ETIMEDOUT' } })) as any;
 
     await expect(gp.searchGooglePatents('crispr', {})).rejects.toThrow(/fetch failed/);
     expect(gp.isGooglePatentsBlocked()).toBe(true);
@@ -1049,7 +1049,7 @@ describe('patent search federation', () => {
     gp.resetGooglePatentsBreaker();
     const { connectionManager } = await import('../../connections/manager.js');
     connectionManager.closeAll();
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: false,
       status: 503,
       statusText: 'Service Unavailable',
@@ -1071,7 +1071,7 @@ describe('patent search federation', () => {
   test('google patents search quotes multi-word phrases (OR-junk guard)', async () => {
     const { connectionManager } = await import('../../connections/manager.js');
     connectionManager.closeAll();
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       json: () => Promise.resolve({ results: { cluster: [{ result: [{ patent: { publication_number: 'US1B2', title: 'X' } }] }] } }),
@@ -1110,7 +1110,7 @@ describe('OpsClient', () => {
     const { OpsClient } = await import('../../entities/patent/ops-client.js');
     const client = new OpsClient();
     let tokenCalls = 0;
-    global.fetch = jest.fn().mockImplementation((url: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
       if (String(url).includes('/auth/accesstoken')) {
         tokenCalls++;
         const payload = JSON.stringify({ access_token: `tok-${tokenCalls}`, expires_in: 1199 });
@@ -1142,7 +1142,7 @@ describe('OpsClient', () => {
   test('get() retries once on 403 rate-limit rejection and succeeds', async () => {
     const { OpsClient } = await import('../../entities/patent/ops-client.js');
     const client = new OpsClient();
-    global.fetch = jest.fn()
+    global.fetch = jest.fn<(...args: any[]) => any>()
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -1172,7 +1172,7 @@ describe('OpsClient', () => {
   test('get() on 403 quota-class rejection does NOT retry, records failure, throws with reason', async () => {
     const ops = await import('../../entities/patent/ops-client.js');
     const client = new ops.OpsClient();
-    global.fetch = jest.fn()
+    global.fetch = jest.fn<(...args: any[]) => any>()
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -1198,7 +1198,7 @@ describe('OpsClient', () => {
   test('get() on HTTP 429 retries once and succeeds', async () => {
     const { OpsClient } = await import('../../entities/patent/ops-client.js');
     const client = new OpsClient();
-    global.fetch = jest.fn()
+    global.fetch = jest.fn<(...args: any[]) => any>()
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -1228,7 +1228,7 @@ describe('OpsClient', () => {
   test('get() on repeated HTTP 429 records failure and throws', async () => {
     const ops = await import('../../entities/patent/ops-client.js');
     const client = new ops.OpsClient();
-    global.fetch = jest.fn()
+    global.fetch = jest.fn<(...args: any[]) => any>()
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -1253,7 +1253,7 @@ describe('OpsClient', () => {
   test('get() throws descriptive error on bad credentials', async () => {
     const { OpsClient } = await import('../../entities/patent/ops-client.js');
     const client = new OpsClient();
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: false,
       status: 401,
       headers: new Headers(),
@@ -1292,7 +1292,7 @@ describe('PpubsClient', () => {
     let sessionCalls = 0;
     let searchBodies: Array<Record<string, unknown>> = [];
 
-    global.fetch = jest.fn().mockImplementation((url: any, init?: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any, init?: any) => {
       const u = String(url);
       if (u.includes('/api/users/me/session')) {
         sessionCalls++;
@@ -1335,7 +1335,7 @@ describe('PpubsClient', () => {
     const { PpubsClient } = await import('../../entities/patent/ppubs-client.js');
     const client = new PpubsClient();
     let call = 0;
-    global.fetch = jest.fn().mockImplementation((url: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
       call++;
       const u = String(url);
       if (u.includes('/api/users/me/session')) {
@@ -1463,7 +1463,7 @@ describe('wayback fallback', () => {
 
   test('findWaybackSnapshot returns id_ URL when snapshot exists', async () => {
     const { findWaybackSnapshot } = await import('../../entities/patent/detail/wayback.js');
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       text: () => Promise.resolve(JSON.stringify({
@@ -1477,7 +1477,7 @@ describe('wayback fallback', () => {
 
   test('findWaybackSnapshot returns null when no snapshot', async () => {
     const { findWaybackSnapshot } = await import('../../entities/patent/detail/wayback.js');
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       text: () => Promise.resolve(JSON.stringify({ archived_snapshots: {} })),
@@ -1487,7 +1487,7 @@ describe('wayback fallback', () => {
 
   test('findWaybackSnapshot returns null for a 404 capture without fetching playback', async () => {
     const { findWaybackSnapshot } = await import('../../entities/patent/detail/wayback.js');
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       text: () => Promise.resolve(JSON.stringify({
@@ -1511,7 +1511,7 @@ describe('wayback fallback', () => {
 
   test('findWaybackSnapshot returns null when the snapshot is marked unavailable', async () => {
     const { findWaybackSnapshot } = await import('../../entities/patent/detail/wayback.js');
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       text: () => Promise.resolve(JSON.stringify({
@@ -1525,7 +1525,7 @@ describe('wayback fallback', () => {
     const { fetchWaybackOriginal } = await import('../../entities/patent/detail/wayback.js');
     const { gzipSync } = await import('node:zlib');
     const gz = gzipSync(Buffer.from('<html>decompressed</html>'));
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       arrayBuffer: () => Promise.resolve(gz.buffer.slice(gz.byteOffset, gz.byteOffset + gz.byteLength)),
     }) as any;
@@ -1569,7 +1569,7 @@ describe('query builders (assert exact upstream request construction)', () => {
     const { PpubsClient } = await import('../../entities/patent/ppubs-client.js');
     const client = new PpubsClient();
     const bodies: Array<Record<string, unknown>> = [];
-    global.fetch = jest.fn().mockImplementation((url: any, init?: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any, init?: any) => {
       const u = String(url);
       if (u.includes('/api/users/me/session')) {
         return Promise.resolve({
@@ -1620,7 +1620,7 @@ describe('query builders (assert exact upstream request construction)', () => {
       inventionTitle: `Doc ${i}`,
       score: 10 - i,
     }));
-    global.fetch = jest.fn().mockImplementation((url: any, init?: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any, init?: any) => {
       const u = String(url);
       if (u.includes('/api/users/me/session')) {
         return Promise.resolve({
@@ -1660,7 +1660,7 @@ describe('query builders (assert exact upstream request construction)', () => {
     const { connectionManager } = await import('../../connections/manager.js');
     connectionManager.closeAll();
     const posts: Array<Record<string, unknown>> = [];
-    global.fetch = jest.fn().mockImplementation((url: any, init?: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any, init?: any) => {
       posts.push({ url: String(url), body: JSON.parse(init.body) });
       return Promise.resolve({
         ok: true,
@@ -1686,10 +1686,10 @@ describe('query builders (assert exact upstream request construction)', () => {
       date_range: '2023-01-01/2024-12-31',
     });
     expect(posts).toHaveLength(1);
-    expect(posts[0].body.q).toBe(
+    expect((posts[0].body as any).q).toBe(
       '(crispr AND "gene editing") AND applicationMetaData.firstApplicantName:"Say \\"hi\\" Inc" AND applicationMetaData.filingDate:[2023-01-01 TO 2024-12-31]'
     );
-    expect(posts[0].body.pagination).toEqual({ offset: 0, limit: 10 });
+    expect((posts[0].body as any).pagination).toEqual({ offset: 0, limit: 10 });
     connectionManager.closeAll();
   });
 
@@ -1697,17 +1697,17 @@ describe('query builders (assert exact upstream request construction)', () => {
     const { normalizeExchangeDocuments } = await import('../../entities/patent/search/ops.js');
     const doc = (n: string) => ({ '@country': { '$': 'US' }, '@doc-number': { '$': n }, '@kind': { '$': 'B2' } });
     // shape 1: {"exchange-document": [doc, doc]}
-    expect(normalizeExchangeDocuments({ 'exchange-document': [doc('1'), doc('2')] })).toHaveLength(2);
+    expect(normalizeExchangeDocuments({ 'exchange-document': [doc('1'), doc('2')] } as any)).toHaveLength(2);
     // shape 2 (verified live, ti+ab queries): [{exchange-document: doc}, ...]
     expect(normalizeExchangeDocuments([
       { 'exchange-document': doc('3') },
       { 'exchange-document': doc('4') },
       { 'exchange-document': doc('5') },
-    ])).toHaveLength(3);
+    ] as any)).toHaveLength(3);
     // single doc (not array) and empty/garbage shapes
     expect(normalizeExchangeDocuments({ 'exchange-document': doc('6') })).toHaveLength(1);
     expect(normalizeExchangeDocuments({})).toEqual([]);
-    expect(normalizeExchangeDocuments([{ 'other-key': {} }, null as any])).toEqual([]);
+    expect(normalizeExchangeDocuments([{ 'other-key': {} }, null as any] as any)).toEqual([]);
   });
 
   test('searchOps parses the list-of-wrapped exchange-documents shape (evaluator repro)', async () => {
@@ -1724,7 +1724,7 @@ describe('query builders (assert exact upstream request construction)', () => {
         },
       },
     });
-    global.fetch = jest.fn()
+    global.fetch = jest.fn<(...args: any[]) => any>()
       .mockImplementationOnce(() => Promise.resolve({
         ok: true,
         status: 200,
@@ -1773,7 +1773,7 @@ describe('query builders (assert exact upstream request construction)', () => {
         },
       })),
     });
-    global.fetch = jest.fn()
+    global.fetch = jest.fn<(...args: any[]) => any>()
       .mockImplementationOnce(() => Promise.resolve({
         ok: true,
         status: 200,
@@ -1805,7 +1805,7 @@ describe('query builders (assert exact upstream request construction)', () => {
         },
       },
     };
-    global.fetch = jest.fn()
+    global.fetch = jest.fn<(...args: any[]) => any>()
       .mockImplementationOnce(() => Promise.resolve({
         ok: true,
         status: 200,
@@ -1839,7 +1839,7 @@ describe('query builders (assert exact upstream request construction)', () => {
     process.env.EPO_OPS_CONSUMER_KEY = 'k';
     process.env.EPO_OPS_CONSUMER_SECRET = 's';
     const calls: Array<{ url: string; headers: Headers; body?: string }> = [];
-    global.fetch = jest.fn().mockImplementation((url: any, init?: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any, init?: any) => {
       const u = String(url);
       if (u.includes('/auth/accesstoken')) {
         return Promise.resolve({
@@ -1880,8 +1880,8 @@ describe('query builders (assert exact upstream request construction)', () => {
     const searchCall = calls.find(c => c.url.includes('search/biblio'));
     expect(searchCall?.url).toContain(encodeURIComponent('(ti="crispr cas9" OR ab="crispr cas9") AND pa="moderna"'));
     expect(searchCall?.url).toContain('Range=11-15');
-    expect((searchCall?.headers as Record<string, string>)['Authorization']).toBe('Bearer tok');
-    expect((searchCall?.headers as Record<string, string>)['Accept']).toBe('application/json');
+    expect((searchCall?.headers as unknown as Record<string, string>)['Authorization']).toBe('Bearer tok');
+    expect((searchCall?.headers as unknown as Record<string, string>)['Accept']).toBe('application/json');
     const tokenCall = (global.fetch as any).mock.calls.find((c: any[]) => String(c[0]).includes('/auth/accesstoken'));
     expect((tokenCall[1].headers as Record<string, string>)['Authorization']).toMatch(/^Basic /);
     expect(tokenCall[1].body).toBe('grant_type=client_credentials');
@@ -1906,7 +1906,7 @@ describe('fetchPpubsClaims splitting', () => {
     const { PpubsClient } = await import('../../entities/patent/ppubs-client.js');
     const client = new PpubsClient();
     const searchQueries: string[] = [];
-    global.fetch = jest.fn().mockImplementation((url: any, init?: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any, init?: any) => {
       const u = String(url);
       if (u.includes('/api/users/me/session')) {
         return Promise.resolve({
@@ -1958,7 +1958,7 @@ describe('fetchPpubsClaims splitting', () => {
   test('num= markup WITHOUT inline numbering still splits (pins the num-div path itself)', async () => {
     const { PpubsClient } = await import('../../entities/patent/ppubs-client.js');
     const client = new PpubsClient();
-    global.fetch = jest.fn().mockImplementation((url: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
       const u = String(url);
       if (u.includes('/api/users/me/session')) {
         return Promise.resolve({
@@ -2009,7 +2009,7 @@ describe('fetchPpubsClaims splitting', () => {
   test('splits CLM-id markup when num= attributes are absent', async () => {
     const { PpubsClient } = await import('../../entities/patent/ppubs-client.js');
     const client = new PpubsClient();
-    global.fetch = jest.fn().mockImplementation((url: any, init?: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any, init?: any) => {
       const u = String(url);
       if (u.includes('/api/users/me/session')) {
         return Promise.resolve({
@@ -2058,7 +2058,7 @@ describe('fetchPpubsClaims splitting', () => {
   test('splits unmarked claimsHtml via sequential text markers; references do not split claims', async () => {
     const { PpubsClient } = await import('../../entities/patent/ppubs-client.js');
     const client = new PpubsClient();
-    global.fetch = jest.fn().mockImplementation((url: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
       const u = String(url);
       if (u.includes('/api/users/me/session')) {
         return Promise.resolve({
@@ -2107,7 +2107,7 @@ describe('fetchPpubsClaims splitting', () => {
     const { PpubsClient } = await import('../../entities/patent/ppubs-client.js');
     const client = new PpubsClient();
     let docCount: number | null = 12; // first call: upstream count present
-    global.fetch = jest.fn().mockImplementation((url: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
       const u = String(url);
       if (u.includes('/api/users/me/session')) {
         return Promise.resolve({
@@ -2190,7 +2190,7 @@ describe('patentGet orchestration (chains)', () => {
   });
 
   function ppubsMock(core: Record<string, unknown>) {
-    return jest.fn().mockImplementation((url: any) => {
+    return jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
       const u = String(url);
       const { hostname } = parseMockUrl(u);
       // wayback legs: availability (archive.org) and playback (web.archive.org)
@@ -2366,7 +2366,7 @@ describe('fetchGooglePatentDetail block-page detection', () => {
   test('both live and wayback unavailable → descriptive error', async () => {
     const { connectionManager } = await import('../../connections/manager.js');
     connectionManager.closeAll();
-    global.fetch = jest.fn().mockImplementation((url: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
       const u = String(url);
       const { hostname, pathname } = parseMockUrl(u);
       if (hostname === 'patents.google.com' && pathname.startsWith('/patent/')) {

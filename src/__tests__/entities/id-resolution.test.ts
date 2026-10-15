@@ -76,7 +76,7 @@ describe('resolveToPmid', () => {
   });
 
   test('resolves DOI to PMID via NCBI IDConv', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         records: [{ pmid: 12345678, doi: '10.1234/test' }],
@@ -88,7 +88,7 @@ describe('resolveToPmid', () => {
   });
 
   test('resolves PMCID to PMID via NCBI IDConv', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         records: [{ pmid: 12345678, pmcid: 'PMC1234567' }],
@@ -100,7 +100,7 @@ describe('resolveToPmid', () => {
   });
 
   test('returns all available IDs', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         records: [{
@@ -120,7 +120,7 @@ describe('resolveToPmid', () => {
   });
 
   test('throws error when no record returned', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ records: [] }),
     }) as any;
@@ -129,7 +129,7 @@ describe('resolveToPmid', () => {
   });
 
   test('throws error when record has error status', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         records: [{ status: 'error', errmsg: 'ID not found' }],
@@ -140,7 +140,7 @@ describe('resolveToPmid', () => {
   });
 
   test('throws error when PMID is missing from response', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         records: [{ doi: '10.1234/test' }],
@@ -151,7 +151,7 @@ describe('resolveToPmid', () => {
   });
 
   test('handles network errors gracefully', async () => {
-    global.fetch = jest.fn().mockRejectedValue(new Error('Network error')) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(new Error('Network error')) as any;
 
     await expect(resolveToPmid('10.1234/test', 'doi')).rejects.toThrow('ID resolution failed');
   });
@@ -171,7 +171,7 @@ describe('resolveDoiToPmid', () => {
   });
 
   test('resolves DOI to PMID via PubMed ESearch', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         esearchresult: { idlist: ['12345678'] }
@@ -183,7 +183,7 @@ describe('resolveDoiToPmid', () => {
   });
 
   test('throws error when DOI not found in PubMed', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         esearchresult: { idlist: [] }
@@ -194,7 +194,7 @@ describe('resolveDoiToPmid', () => {
   });
 
   test('throws error when esearchresult is missing', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({}),
     }) as any;
@@ -203,13 +203,13 @@ describe('resolveDoiToPmid', () => {
   });
 
   test('handles network errors gracefully', async () => {
-    global.fetch = jest.fn().mockRejectedValue(new Error('Network error')) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(new Error('Network error')) as any;
 
     await expect(resolveDoiToPmid('10.1234/test')).rejects.toThrow('DOI resolution failed');
   });
 
   test('uses correct URL format for DOI search', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         esearchresult: { idlist: ['12345678'] }

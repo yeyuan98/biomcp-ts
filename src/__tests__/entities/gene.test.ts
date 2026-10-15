@@ -17,7 +17,7 @@ describe('gene', () => {
   });
 
   test('geneSearch() calls connection with correct mygene search endpoint', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [{ symbol: 'BRCA1', name: 'BRCA1' }] }),
     }) as any;
@@ -32,7 +32,7 @@ describe('gene', () => {
   });
 
   test('geneSearch() returns transformed results', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [{ symbol: 'BRCA1', name: 'BRCA1 DNA repair', entrezgene: 672 }],
@@ -48,7 +48,7 @@ describe('gene', () => {
   });
 
   test('geneGet() calls connection with correct endpoint', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [{ symbol: 'BRCA1', name: 'BRCA1 DNA repair' }],
@@ -99,7 +99,7 @@ describe('geneSearch with options', () => {
   });
 
   test('geneSearch() includes chromosome filter in query params', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -111,7 +111,7 @@ describe('geneSearch with options', () => {
   });
 
   test('geneSearch() uses custom limit and offset', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -124,7 +124,7 @@ describe('geneSearch with options', () => {
   });
 
   test('geneSearch() uses default limit=10 and offset=0', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -137,7 +137,7 @@ describe('geneSearch with options', () => {
   });
 
   test('geneSearch() does not include type/chr when options not provided', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -167,7 +167,7 @@ describe('geneSearch empty results', () => {
   });
 
   test('geneSearch() returns empty array when API returns empty hits', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -177,7 +177,7 @@ describe('geneSearch empty results', () => {
   });
 
   test('geneSearch() returns empty array when API returns no hits field', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({}),
     }) as any;
@@ -204,7 +204,7 @@ describe('geneSearch genomic_pos transformation', () => {
   });
 
   test('geneSearch() transforms genomic_pos into genomic_coordinates', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [{
@@ -227,7 +227,7 @@ describe('geneSearch genomic_pos transformation', () => {
   });
 
   test('geneSearch() handles result without genomic_pos', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [{
@@ -245,7 +245,7 @@ describe('geneSearch genomic_pos transformation', () => {
   });
 
   test('geneSearch() handles result with uniprot and omim fields', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [{
@@ -286,7 +286,7 @@ describe('geneGet with sections', () => {
     // First call: gene lookup via mygene
     // Second call: reactome pathway fetch
     let callIndex = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callIndex++;
       if (callIndex === 1) {
         // mygene lookup
@@ -329,7 +329,7 @@ describe('geneGet with sections', () => {
 
   test('geneGet() with protein section triggers uniprot fetch', async () => {
     let callIndex = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callIndex++;
       if (callIndex === 1) {
         return Promise.resolve({
@@ -369,7 +369,7 @@ describe('geneGet with sections', () => {
 
   test('geneGet() fetches multiple sections in parallel', async () => {
     let callIndex = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callIndex++;
       if (callIndex === 1) {
         return Promise.resolve({
@@ -421,7 +421,7 @@ describe('geneGet with smart alias resolution', () => {
 
   test('geneGet() smart=true resolves alias when exact match fails', async () => {
     let callIndex = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callIndex++;
       if (callIndex === 1) {
         // First lookup: no exact match
@@ -468,7 +468,7 @@ describe('geneGet with smart alias resolution', () => {
 
   test('geneGet() smart=true, alias not found throws smart-specific error', async () => {
     let callIndex = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callIndex++;
       if (callIndex === 1) {
         // First lookup: no exact match
@@ -508,7 +508,7 @@ describe('geneGet without smart mode', () => {
   });
 
   test('geneGet() smart=false, no hits throws error suggesting smart=true', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
       headers: new Headers({ 'content-type': 'application/json' }),
@@ -519,7 +519,7 @@ describe('geneGet without smart mode', () => {
   });
 
   test('geneGet() with no smart param defaults to non-smart behavior', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
       headers: new Headers({ 'content-type': 'application/json' }),
@@ -544,7 +544,7 @@ describe('geneGet section fetch error handling', () => {
 
   test('geneGet() returns partial results when a section fetch fails', async () => {
     let callIndex = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callIndex++;
       if (callIndex === 1) {
         // Gene lookup succeeds
@@ -599,7 +599,7 @@ describe('geneGet with all sections', () => {
 
   test('geneGet() with sections=["all"] fetches all known sections', async () => {
     let callIndex = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callIndex++;
       if (callIndex === 1) {
         return Promise.resolve({
@@ -659,7 +659,7 @@ describe('geneGet abort/timeout handling', () => {
 
   test('geneGet() handles AbortError from fetch', async () => {
     const abortError = new DOMException('The operation was aborted', 'AbortError');
-    global.fetch = jest.fn().mockRejectedValue(abortError) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(abortError) as any;
 
     // The abort must propagate as the original DOMException (name + message),
     // not a generic opaque failure.
@@ -687,7 +687,7 @@ describe('geneGet genomic_pos handling', () => {
   });
 
   test('geneGet() sets chromosome and position from genomic_pos', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [{
@@ -707,7 +707,7 @@ describe('geneGet genomic_pos handling', () => {
   });
 
   test('geneGet() handles non-array genomic_pos', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [{
@@ -726,7 +726,7 @@ describe('geneGet genomic_pos handling', () => {
   });
 
   test('geneGet() handles missing genomic_pos', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [{
@@ -763,7 +763,7 @@ describe('geneGet section aliases', () => {
 
   test('geneGet() maps dosage_sensitivity alias to clingen', async () => {
     let callIndex = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callIndex++;
       if (callIndex === 1) {
         return Promise.resolve({
@@ -796,7 +796,7 @@ describe('geneGet section aliases', () => {
 
   test('geneGet() maps protein_atlas alias to hpa', async () => {
     let callIndex = 0;
-    global.fetch = jest.fn().mockImplementation((url: string) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: string) => {
       callIndex++;
       if (callIndex === 1) {
         return Promise.resolve({
@@ -852,7 +852,7 @@ describe('resolveGeneAlias via geneGet smart', () => {
 
   test('geneGet() smart mode prefers case-exact alias match', async () => {
     let callIndex = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callIndex++;
       if (callIndex === 1) {
         // First lookup: no exact match
@@ -905,7 +905,7 @@ describe('resolveGeneAlias via geneGet smart', () => {
 
   test('geneGet() smart mode falls back to case-insensitive alias match', async () => {
     let callIndex = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callIndex++;
       if (callIndex === 1) {
         return Promise.resolve({
@@ -950,7 +950,7 @@ describe('resolveGeneAlias via geneGet smart', () => {
 
   test('geneGet() smart mode handles string alias (not array)', async () => {
     let callIndex = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callIndex++;
       if (callIndex === 1) {
         return Promise.resolve({
@@ -994,7 +994,7 @@ describe('resolveGeneAlias via geneGet smart', () => {
 
   test('geneGet() smart mode sorts alias hits by _id for deterministic ordering', async () => {
     let callIndex = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callIndex++;
       if (callIndex === 1) {
         return Promise.resolve({
@@ -1063,7 +1063,7 @@ describe('geneGet core only', () => {
   });
 
   test('geneGet() without sections returns core fields only', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [{
@@ -1102,7 +1102,7 @@ describe('geneGet with GO section', () => {
 
   test('geneGet() fetches GO terms and categorizes by aspect', async () => {
     let callIndex = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callIndex++;
       if (callIndex === 1) {
         return Promise.resolve({
@@ -1170,7 +1170,7 @@ describe('geneGet with interactions section', () => {
 
   test('geneGet() fetches protein-protein interactions from STRING', async () => {
     let callIndex = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callIndex++;
       if (callIndex === 1) {
         return Promise.resolve({
@@ -1225,7 +1225,7 @@ describe('geneGet with civic section', () => {
 
   test('geneGet() fetches CIViC clinical variants', async () => {
     let callIndex = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callIndex++;
       if (callIndex === 1) {
         return Promise.resolve({
@@ -1288,7 +1288,7 @@ describe('geneGet with unknown section', () => {
   });
 
   test('geneGet() handles unknown section name gracefully', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [{
@@ -1326,7 +1326,7 @@ describe('geneGet with clingen section', () => {
   });
 
   test('geneGet() clingen returns error about no public API', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [{
@@ -1365,7 +1365,7 @@ describe('geneGet with constraint section', () => {
 
   test('geneGet() fetches gnomAD constraint scores', async () => {
     let callIndex = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callIndex++;
       if (callIndex === 1) {
         return Promise.resolve({
@@ -1435,7 +1435,7 @@ describe('geneGet with disgenet section', () => {
   });
 
   test('geneGet() disgenet returns error when DISGENET_API_KEY not set', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [{
@@ -1481,7 +1481,7 @@ describe('geneGet with disgenet section (keyed)', () => {
 
   test('geneGet() disgenet queries gda/summary with gene_symbol and raw Authorization key', async () => {
     let callIndex = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callIndex++;
       if (callIndex === 1) {
         // mygene lookup
@@ -1557,7 +1557,7 @@ describe('geneGet with ontology section', () => {
 
   test('geneGet() fetches ontology enrichment data', async () => {
     let callIndex = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callIndex++;
       if (callIndex === 1) {
         return Promise.resolve({
@@ -1621,7 +1621,7 @@ describe('geneGet multiple sections with partial success and failure', () => {
 
   test('geneGet() returns mix of successful and failed sections', async () => {
     let callIndex = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callIndex++;
       if (callIndex === 1) {
         // Gene lookup
@@ -1730,7 +1730,7 @@ describe('geneGet with expression section', () => {
   });
 
   test('geneGet() expression section returns GTEx tissues as {tissue, tpm}', async () => {
-    global.fetch = jest.fn().mockImplementation((rawUrl: string) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((rawUrl: string) => {
       if (parseMockUrl(rawUrl).hostname === 'mygene.info') {
         return Promise.resolve(okJson({
           hits: [{ symbol: 'TP53', name: 'Tumor protein p53', summary: 'Tumor suppressor.' }],
@@ -1750,13 +1750,13 @@ describe('geneGet with expression section', () => {
     expect(expression.tissues.map(t => t.tissue)).toEqual(['Adipose_Subcutaneous', 'Whole_Blood', 'Muscle_Skeletal']);
 
     const urls = (global.fetch as any).mock.calls.map((c: any[]) => c[0] as string);
-    const medianUrl = urls.find(u => u.includes('medianGeneExpression'));
+    const medianUrl = urls.find((u: any) => u.includes('medianGeneExpression'));
     expect(medianUrl).toContain('gencodeId=ENSG00000141510.18');
     expect(medianUrl).toContain('datasetId=gtex_v10');
   });
 
   test('geneGet() expression section surfaces _error when gene is not in GTEx', async () => {
-    global.fetch = jest.fn().mockImplementation((rawUrl: string) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((rawUrl: string) => {
       if (parseMockUrl(rawUrl).hostname === 'mygene.info') {
         return Promise.resolve(okJson({
           hits: [{ symbol: 'NOGTEX1', name: 'Not in GTEx', summary: 'A gene.' }],
@@ -1777,7 +1777,7 @@ describe('geneGet with expression section', () => {
   });
 
   test('geneGet() expression section surfaces _error for empty median data', async () => {
-    global.fetch = jest.fn().mockImplementation((rawUrl: string) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((rawUrl: string) => {
       if (parseMockUrl(rawUrl).hostname === 'mygene.info') {
         return Promise.resolve(okJson({
           hits: [{ symbol: 'TP53', name: 'Tumor protein p53', summary: 'Tumor suppressor.' }],

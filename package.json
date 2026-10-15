@@ -53,7 +53,7 @@
     "test:all": "npm run test && npm run test:integration",
     "test:coverage-all": "npm run test:coverage && npm run test:integration -- --coverage",
     "test:deploy": "bash deploy/tests/smoke-test.sh",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

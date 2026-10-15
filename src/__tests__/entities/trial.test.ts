@@ -16,7 +16,7 @@ describe('trial', () => {
   });
 
   test('trialSearch() calls connection with correct clinicaltrials endpoint', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         studies: [{
@@ -40,7 +40,7 @@ describe('trial', () => {
   });
 
   test('trialSearch() returns transformed results', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         studies: [{
@@ -64,7 +64,7 @@ describe('trial', () => {
   });
 
   test('trialGet() calls connection with correct endpoint', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         studies: [{
@@ -88,7 +88,7 @@ describe('trial', () => {
   });
 
   test('trialSearch() with phase filter uses filter.advanced AREA[Phase]', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ studies: [] }),
     }) as any;
@@ -101,7 +101,7 @@ describe('trial', () => {
   });
 
   test('trialSearch() with intervention_type filter uses filter.advanced AREA[InterventionType]', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ studies: [] }),
     }) as any;
@@ -114,7 +114,7 @@ describe('trial', () => {
   });
 
   test('trialSearch() with both phase and intervention_type joins with AND', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ studies: [] }),
     }) as any;
@@ -133,7 +133,7 @@ describe('trial', () => {
   });
 
   test('trialSearch() normalizes phase strings via PHASE_MAP', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ studies: [] }),
     }) as any;
@@ -145,7 +145,7 @@ describe('trial', () => {
   });
 
   test('trialSearch() handles combined phases with slash using OR', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ studies: [] }),
     }) as any;
@@ -162,7 +162,7 @@ describe('trial', () => {
   });
 
   test('trialSearch() with status filter still uses filter.overallStatus', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ studies: [] }),
     }) as any;
@@ -175,7 +175,7 @@ describe('trial', () => {
   });
 
   test('trialSearch() passes pageToken to API for pagination', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         studies: [{
@@ -198,7 +198,7 @@ describe('trial', () => {
   });
 
   test('trialSearch() returns nextPageToken from API response', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         nextPageToken: 'next_page_token_xyz',
@@ -220,7 +220,7 @@ describe('trial', () => {
   });
 
   test('trialSearch() omits nextPageToken when API has no more pages', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         studies: [{

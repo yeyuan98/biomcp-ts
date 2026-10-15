@@ -26,7 +26,7 @@ describe('trial_search', () => {
     expectTrialSearchResult(response);
     for (const trial of response.studies) {
       if (trial.status) {
-        expect(trial.status.toUpperCase()).toBe('RECRUITING');
+        expect((trial.status as string).toUpperCase()).toBe('RECRUITING');
       }
     }
   }, 60000);

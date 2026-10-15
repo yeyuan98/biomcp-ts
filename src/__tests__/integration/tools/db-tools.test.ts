@@ -35,7 +35,7 @@ describeIfMysql('db tools against live MySQL', () => {
       const result = await client.callTool({ name, arguments: args });
       return {
         isError: result.isError === true,
-        json: () => JSON.parse((result.content[0] as { text: string }).text),
+        json: () => JSON.parse(((result as any).content[0] as { text: string }).text),
       };
     };
   }, 30000);
@@ -93,7 +93,7 @@ describeIfSqlite('db tools against local SQLite file(s)', () => {
       const result = await client.callTool({ name, arguments: args });
       return {
         isError: result.isError === true,
-        json: () => JSON.parse((result.content[0] as { text: string }).text),
+        json: () => JSON.parse(((result as any).content[0] as { text: string }).text),
       };
     };
   }, 30000);

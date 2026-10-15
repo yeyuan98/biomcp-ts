@@ -27,7 +27,7 @@ describe('drug', () => {
   });
 
   test('drugSearch() calls connection with correct mychem search endpoint', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [{ name: 'Aspirin', unichem: { chembl: 'CHEMBL25' } }] }),
     }) as any;
@@ -42,7 +42,7 @@ describe('drug', () => {
   });
 
   test('drugSearch() returns transformed results', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [
@@ -66,7 +66,7 @@ describe('drug', () => {
   });
 
   test('drugSearch() maps chembl fields when chebi is absent', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [
@@ -110,7 +110,7 @@ describe('drug', () => {
         orphan_designation: { original_text: 'Treatment of something rare' },
       }],
     }));
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [
@@ -138,7 +138,7 @@ describe('drug', () => {
   test('drugSearch() uses the orphan designation generic_name as a last-resort name', async () => {
     // Live-verified shape: records exist with fda_orphan_drug but no
     // chebi/unii/chembl-pref_name/ndc (e.g. mychem _id FIHJKUPKCHIPAT-UHFFFAOYSA-N).
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [{
@@ -160,7 +160,7 @@ describe('drug', () => {
   });
 
   test('drugSearch() collapses case and salt variants onto the richest row', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [
@@ -232,7 +232,7 @@ describe('drug', () => {
   });
 
   test('drugGet() uses single combined query', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [{
@@ -254,7 +254,7 @@ describe('drug', () => {
   });
 
   test('drugGet() escapes Lucene special characters in query', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -266,7 +266,7 @@ describe('drug', () => {
   });
 
   test('drugGet() resolves drug found via synonym', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [{
@@ -287,7 +287,7 @@ describe('drug', () => {
   });
 
   test('drugGet() throws when no hits returned', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
     }) as any;
@@ -298,7 +298,7 @@ describe('drug', () => {
   });
 
   test('drugGet() adverse_events section fetches ranked FAERS reactions', async () => {
-    global.fetch = jest.fn()
+    global.fetch = jest.fn<(...args: any[]) => any>()
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({
@@ -330,7 +330,7 @@ describe('drug', () => {
   // backslashes must be doubled BEFORE quotes are escaped, so a trailing
   // backslash cannot consume the closing quote of the phrase.
   test('fetchAdverseEvents() Lucene-escapes quotes and backslashes in the search phrase', async () => {
-    global.fetch = jest.fn()
+    global.fetch = jest.fn<(...args: any[]) => any>()
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({ meta: { results: { total: 3 } }, results: [] }),
@@ -348,7 +348,7 @@ describe('drug', () => {
   });
 
   test('drugGet() sections=["all"] includes adverse_events alongside the six legacy sections', async () => {
-    global.fetch = jest.fn().mockImplementation(async (input: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(async (input: any) => {
       const url = typeof input === 'string' ? input : input?.url ?? String(input);
       // Route on the parsed hostname (never substring matching — the query
       // carries user input and could contain any host string).
@@ -443,7 +443,7 @@ describe('drug', () => {
   });
 
   test('drugGet() resolves ChEMBL hit and consolidates aliases for alamethicin', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [

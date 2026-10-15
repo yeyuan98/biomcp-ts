@@ -92,7 +92,7 @@ describe('projection format-string composition', () => {
 
   it('applies the default fields when no projection is given', () => {
     expect(canonicalizeProjection()).toEqual({ fields: ['CHROM', 'POS', 'REF', 'ALT'], samples: undefined });
-    expect(canonicalizeProjection({ samples: ['s1'] })).toEqual({ fields: ['CHROM', 'POS', 'REF', 'ALT'], samples: ['s1'] });
+    expect(canonicalizeProjection({ samples: ['s1'] } as any)).toEqual({ fields: ['CHROM', 'POS', 'REF', 'ALT'], samples: ['s1'] });
   });
 });
 

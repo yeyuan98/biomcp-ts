@@ -246,7 +246,7 @@ describe('citation module', () => {
     });
 
     test('returns federated result structure', async () => {
-      global.fetch = jest.fn().mockResolvedValue(mockJson({})) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson({})) as any;
 
       const result = await advanceUntilSettled(
         getCitations(
@@ -263,7 +263,7 @@ describe('citation module', () => {
     });
 
     test('queries specific source when source option provided', async () => {
-      global.fetch = jest.fn().mockResolvedValue(mockJson({})) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson({})) as any;
 
       const result = await advanceUntilSettled(
         getCitations(
@@ -277,7 +277,7 @@ describe('citation module', () => {
     });
 
     test('full mode queries all 5 providers', async () => {
-      global.fetch = jest.fn().mockResolvedValue(mockJson({})) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson({})) as any;
 
       const result = await advanceUntilSettled(
         getCitations(
@@ -295,7 +295,7 @@ describe('citation module', () => {
     });
 
     test('returns error for unknown source', async () => {
-      global.fetch = jest.fn().mockResolvedValue(mockJson({})) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson({})) as any;
 
       const result = await getCitations(
         { pmid: '12345' },
@@ -499,7 +499,7 @@ describe('citation module', () => {
       };
 
       let callCount = 0;
-      global.fetch = jest.fn().mockImplementation(() => {
+      global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
         callCount++;
         if (callCount === 1) return Promise.resolve(mockJson(searchResponse));
         return Promise.resolve(mockJson(citationsResponse));
@@ -533,7 +533,7 @@ describe('citation module', () => {
       };
 
       let callCount = 0;
-      global.fetch = jest.fn().mockImplementation(() => {
+      global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
         callCount++;
         if (callCount === 1) return Promise.resolve(mockJson(searchResponse));
         return Promise.resolve(mockJson(citationsResponse));
@@ -557,7 +557,7 @@ describe('citation module', () => {
         },
       };
 
-      global.fetch = jest.fn().mockResolvedValue(mockJson(citationsResponse)) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson(citationsResponse)) as any;
 
       const result = await europepmcProvider.getForwardCitations({ pmid: '12345' }, 10);
 
@@ -579,7 +579,7 @@ describe('citation module', () => {
         },
       };
 
-      global.fetch = jest.fn().mockResolvedValue(mockJson(citationsResponse)) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson(citationsResponse)) as any;
 
       const result = await europepmcProvider.getForwardCitations({ pmid: '12345' }, 10);
 
@@ -597,7 +597,7 @@ describe('citation module', () => {
         },
       };
 
-      global.fetch = jest.fn().mockResolvedValue(mockJson(referencesResponse)) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson(referencesResponse)) as any;
 
       const result = await europepmcProvider.getBackwardReferences({ pmid: '17145705' }, 10);
 
@@ -620,7 +620,7 @@ describe('citation module', () => {
         },
       };
 
-      global.fetch = jest.fn().mockResolvedValue(mockJson(referencesResponse)) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson(referencesResponse)) as any;
 
       const result = await europepmcProvider.getBackwardReferences({ pmid: '12345' }, 10, 2007);
 
@@ -629,7 +629,7 @@ describe('citation module', () => {
     });
 
     test('returns empty when PMID resolution fails', async () => {
-      global.fetch = jest.fn().mockResolvedValue(mockJson({ resultList: { result: [] } })) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson({ resultList: { result: [] } })) as any;
 
       const result = await europepmcProvider.getForwardCitations({ doi: '10.1/notfound' }, 10);
       expect(result).toEqual([]);
@@ -649,7 +649,7 @@ describe('citation module', () => {
         },
       };
 
-      global.fetch = jest.fn().mockResolvedValue(mockJson(citationsResponse)) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson(citationsResponse)) as any;
 
       const result = await europepmcProvider.getForwardCitations({ pmid: '12345' }, 10);
 
@@ -663,7 +663,7 @@ describe('citation module', () => {
 
   describe('Crossref provider', () => {
     test('getForwardCitations makes no request (references filter removed from Crossref API)', async () => {
-      global.fetch = jest.fn().mockResolvedValue(mockJson({})) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson({})) as any;
 
       const result = await crossrefProvider.getForwardCitations({ doi: '10.1/test' }, 10);
 
@@ -679,7 +679,7 @@ describe('citation module', () => {
     test('appends mailto param when CROSSREF_EMAIL is set', async () => {
       process.env.CROSSREF_EMAIL = 'researcher@example.org';
       try {
-        global.fetch = jest.fn().mockResolvedValue(mockJson({ message: { 'is-referenced-by-count': 3, reference: [] } })) as any;
+        global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson({ message: { 'is-referenced-by-count': 3, reference: [] } })) as any;
 
         await crossrefProvider.getCitationCount({ doi: '10.1/test' });
 
@@ -691,7 +691,7 @@ describe('citation module', () => {
     });
 
     test('omits mailto param when CROSSREF_EMAIL is unset', async () => {
-      global.fetch = jest.fn().mockResolvedValue(mockJson({ message: { 'is-referenced-by-count': 3, reference: [] } })) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson({ message: { 'is-referenced-by-count': 3, reference: [] } })) as any;
 
       await crossrefProvider.getCitationCount({ doi: '10.1/test' });
 
@@ -707,7 +707,7 @@ describe('citation module', () => {
         },
       };
 
-      global.fetch = jest.fn().mockResolvedValue(mockJson(workResponse)) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson(workResponse)) as any;
 
       const refs = await crossrefProvider.getBackwardReferences({ doi: '10.1/test' }, 10);
       const count = await crossrefProvider.getCitationCount({ doi: '10.1/test' });
@@ -729,7 +729,7 @@ describe('citation module', () => {
             ],
           },
         };
-        global.fetch = jest.fn().mockResolvedValue(mockJson(workResponse)) as any;
+        global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson(workResponse)) as any;
 
         const refs = await crossrefProvider.getBackwardReferences({ doi: '10.1371/journal.pone.0110904' }, 50);
         const count = await crossrefProvider.getCitationCount({ doi: '10.1371/journal.pone.0110904' });
@@ -755,7 +755,7 @@ describe('citation module', () => {
           ],
         },
       };
-      global.fetch = jest.fn().mockResolvedValue(mockJson(workResponse)) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson(workResponse)) as any;
 
       const refs = await crossrefProvider.getBackwardReferences({ doi: '10.1/works' }, 10);
 
@@ -774,7 +774,7 @@ describe('citation module', () => {
             reference: [null, { DOI: '10.1/ok', author: 'AD Lemly' }],
           },
         };
-        global.fetch = jest.fn().mockResolvedValue(mockJson(workResponse)) as any;
+        global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson(workResponse)) as any;
 
         const refs = await crossrefProvider.getBackwardReferences({ doi: '10.1/malformed' }, 10);
         const count = await crossrefProvider.getCitationCount({ doi: '10.1/malformed' });
@@ -788,7 +788,7 @@ describe('citation module', () => {
     });
 
     test('stable 404 (DOI unknown to Crossref) is memoized for the TTL', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: false,
         status: 404,
         statusText: 'Not Found',
@@ -806,7 +806,7 @@ describe('citation module', () => {
 
     test('transient failure is not memoized: next call retries', async () => {
       let call = 0;
-      global.fetch = jest.fn().mockImplementation(async () => {
+      global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(async () => {
         call++;
         if (call <= 3) {
           // 503 + registry retry (attempts: 3) exhausts, resolves null, evicts.
@@ -831,7 +831,7 @@ describe('citation module', () => {
     });
 
     test('clearWorkCache resets cache so next call makes a new fetch', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce(mockJson({ message: { 'is-referenced-by-count': 5, reference: [] } }))
         .mockResolvedValueOnce(mockJson({ message: { 'is-referenced-by-count': 10, reference: [] } })) as any;
 
@@ -879,7 +879,7 @@ describe('citation module', () => {
 </PubmedArticleSet>`;
 
     test('getForwardCitations enriches PMIDs via EFetch', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce(mockJson({
           linksets: [{ linksetdbs: [{ linkname: 'pubmed_pubmed_citedin', links: ['111'] }] }],
         }))
@@ -900,7 +900,7 @@ describe('citation module', () => {
     });
 
     test('getCitationCount shares elink cache with getForwardCitations', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce(mockJson({
           linksets: [{ linksetdbs: [{ linkname: 'pubmed_pubmed_citedin', links: ['111', '222', '333'] }] }],
         }))
@@ -920,7 +920,7 @@ describe('citation module', () => {
 
     test('clearCitedInCache resets cache so next call makes a new fetch', async () => {
       let mockCallCount = 0;
-      global.fetch = jest.fn().mockImplementation(() => {
+      global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
         mockCallCount++;
         if (mockCallCount === 1) {
           return Promise.resolve(mockJson({
@@ -954,7 +954,7 @@ describe('citation module', () => {
     });
 
     test('getCitationCount returns null when no links', async () => {
-      global.fetch = jest.fn().mockResolvedValue(mockJson({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson({
         linksets: [{ linksetdbs: [] }],
       })) as any;
 
@@ -970,7 +970,7 @@ describe('citation module', () => {
 
   describe('OpenCitations provider', () => {
     test('getForwardCitations calls v2 API with doi-prefixed path and parses PID strings', async () => {
-      global.fetch = jest.fn().mockResolvedValue(mockJson([
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson([
         { citing: 'omid:br/06202413427 doi:10.1021/ci2003126 openalex:W2079223054 pmid:22145975', cited: 'omid:br/061601349566 doi:10.1093/nar/gkl999' },
         { citing: 'omid:br/06330144817 doi:10.1101/2023.06.21.545851 openalex:W438189127', cited: 'omid:br/061601349566 doi:10.1093/nar/gkl999' },
       ])) as any;
@@ -989,7 +989,7 @@ describe('citation module', () => {
     });
 
     test('getBackwardReferences parses cited PID strings', async () => {
-      global.fetch = jest.fn().mockResolvedValue(mockJson([
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson([
         { citing: 'omid:br/061601349566 doi:10.1093/nar/gkl999', cited: 'omid:br/0650243709 doi:10.1021/jm048957q pmid:15943484' },
       ])) as any;
 
@@ -1004,7 +1004,7 @@ describe('citation module', () => {
     });
 
     test('getCitationCount parses string count from v2 API', async () => {
-      global.fetch = jest.fn().mockResolvedValue(mockJson([{ count: '1974' }])) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson([{ count: '1974' }])) as any;
 
       const result = await opencitationsProvider.getCitationCount({ doi: '10.1/test' });
 
@@ -1030,7 +1030,7 @@ describe('citation module', () => {
     });
 
     test('getForwardCitations uses PMCID as query ID', async () => {
-      global.fetch = jest.fn().mockResolvedValue(mockJson({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(mockJson({
         data: [{ citationPaper: { paperId: 'abc', title: 'Paper', authors: [{ name: 'A' }], year: 2023, venue: 'Science', externalIds: { DOI: '10.1/a' } } }],
       })) as any;
 
@@ -1049,7 +1049,7 @@ describe('citation module', () => {
     });
 
     test('handles 429 rate limiting gracefully (registry-driven retry)', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: false,
         status: 429,
         statusText: 'Too Many Requests',

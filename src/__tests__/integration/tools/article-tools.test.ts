@@ -172,10 +172,10 @@ describe('article_get preprint DOIs (bioRxiv/medRxiv)', () => {
     expectArticleGetResult(result);
     expect(result.abstract).toBeTruthy();
     expect(['bioRxiv', 'medRxiv']).toContain(result.preprint_server);
-    expect(Array.isArray(result.preprint?.versions)).toBe(true);
-    expect(result.preprint?.versions.length).toBeGreaterThan(0);
+    expect(Array.isArray((result.preprint as any)?.versions)).toBe(true);
+    expect((result.preprint as any)?.versions.length).toBeGreaterThan(0);
     expect(result.license).toBeTruthy();
-    expect(result.published?.doi || result.published?.pmid).toBeTruthy();
+    expect((result.published as any)?.doi || (result.published as any)?.pmid).toBeTruthy();
   }, 60000);
 
   // New shared bioRxiv/medRxiv DOI prefix (live-verified posting).

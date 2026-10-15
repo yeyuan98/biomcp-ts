@@ -168,7 +168,7 @@ function okBinary(content: Buffer, contentLength?: number) {
 type RouteHandler = (url: URL) => unknown;
 
 function mockFetchRoutes(routes: Record<string, RouteHandler>): void {
-  global.fetch = jest.fn().mockImplementation((rawUrl: string) => {
+  global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((rawUrl: string) => {
     const url = new URL(rawUrl);
     for (const [prefix, handler] of Object.entries(routes)) {
       if (url.href.startsWith(prefix)) {
@@ -215,7 +215,7 @@ function defaultRoutes(overrides: EutilsOverrides = {}): Record<string, RouteHan
           const base = entries[key];
           entries[key] = () => {
             const entry = base();
-            return { ...entry, pubmedids: (entry as { pubmedids?: unknown }).pubmedids?.map(String) };
+            return { ...entry, pubmedids: (entry as { pubmedids?: unknown[] }).pubmedids?.map(String) };
           };
         }
       }

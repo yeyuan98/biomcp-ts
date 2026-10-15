@@ -4,12 +4,12 @@ import { HttpConnectionError } from '../../connections/errors.js';
 import type { ConnectionOptions } from '../../connections/base.js';
 
 jest.mock('../../connections/rate-limiter.js', () => ({
-  TokenBucketRateLimiter: jest.fn().mockImplementation(() => ({
-    acquire: jest.fn().mockResolvedValue(undefined),
+  TokenBucketRateLimiter: jest.fn<(...args: any[]) => any>().mockImplementation(() => ({
+    acquire: jest.fn<(...args: any[]) => any>().mockResolvedValue(undefined),
   })),
   RateLimiterFactory: {
-    create: jest.fn().mockReturnValue({ acquire: jest.fn().mockResolvedValue(undefined) }),
-    getEffectiveRate: jest.fn().mockReturnValue(100),
+    create: jest.fn<(...args: any[]) => any>().mockReturnValue({ acquire: jest.fn<(...args: any[]) => any>().mockResolvedValue(undefined) }),
+    getEffectiveRate: jest.fn<(...args: any[]) => any>().mockReturnValue(100),
   },
 }));
 
@@ -38,7 +38,7 @@ describe('RestConnection', () => {
   });
 
   test('request() calls fetch with correct URL (baseUrl + req path)', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ data: 'test' }),
     }) as any;
@@ -53,7 +53,7 @@ describe('RestConnection', () => {
   });
 
   test('request() builds exact URL for normal paths (no double slash)', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({}),
     }) as any;
@@ -65,7 +65,7 @@ describe('RestConnection', () => {
   });
 
   test('request() attaches query-only paths directly (no separator before ?id=)', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'text/xml' }),
       text: () => Promise.resolve('<ok/>'),
@@ -82,7 +82,7 @@ describe('RestConnection', () => {
   });
 
   test('request() strips trailing baseUrl slash for query-only paths (idconv)', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({}),
     }) as any;
@@ -98,7 +98,7 @@ describe('RestConnection', () => {
   });
 
   test('request() attaches fragment-only paths directly', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({}),
     }) as any;
@@ -124,7 +124,7 @@ describe('RestConnection', () => {
       },
     };
 
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({}),
     }) as any;
@@ -147,7 +147,7 @@ describe('RestConnection', () => {
       },
     };
 
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({}),
     }) as any;
@@ -173,7 +173,7 @@ describe('RestConnection', () => {
       },
     };
 
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({}),
     }) as any;
@@ -190,14 +190,14 @@ describe('RestConnection', () => {
   test('request() calls rateLimiter.acquire() before fetch', async () => {
     let acquireCalled = false;
 
-    global.fetch = jest.fn().mockImplementation(async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(async () => {
       return { ok: true, json: () => Promise.resolve({}) };
     }) as any;
 
     const conn = new RestConnection(baseOptions);
     const rateLimiter = (conn as any).rateLimiter;
     const originalAcquire = rateLimiter.acquire.bind(rateLimiter);
-    rateLimiter.acquire = jest.fn().mockImplementation(async () => {
+    rateLimiter.acquire = jest.fn<(...args: any[]) => any>().mockImplementation(async () => {
       acquireCalled = true;
       return originalAcquire();
     });
@@ -208,7 +208,7 @@ describe('RestConnection', () => {
   });
 
   test('healthCheck() returns true on HTTP 200', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       status: 200,
     }) as any;
@@ -222,7 +222,7 @@ describe('RestConnection', () => {
   // resolved HTTP response (even 404/500) counts as "reachable". If this is
   // deemed a bug, change the implementation deliberately and update this test.
   test('healthCheck() returns true on any resolved HTTP response (pins 404/500 => true)', async () => {
-    global.fetch = jest.fn()
+    global.fetch = jest.fn<(...args: any[]) => any>()
       .mockResolvedValueOnce({ ok: false, status: 404 })
       .mockResolvedValueOnce({ ok: false, status: 503 }) as any;
 
@@ -233,7 +233,7 @@ describe('RestConnection', () => {
   });
 
   test('request() returns text for XML content-type', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'text/xml; charset=utf-8' }),
       text: () => Promise.resolve('<root><item>data</item></root>'),
@@ -247,7 +247,7 @@ describe('RestConnection', () => {
   });
 
   test('request() returns text for application/xml content-type', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/xml' }),
       text: () => Promise.resolve('<response>ok</response>'),
@@ -261,7 +261,7 @@ describe('RestConnection', () => {
   });
 
   test('request() returns text for text/plain content-type', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'text/plain' }),
       text: () => Promise.resolve('plain text response'),
@@ -274,7 +274,7 @@ describe('RestConnection', () => {
   });
 
   test('healthCheck() returns false on network error', async () => {
-    global.fetch = jest.fn().mockRejectedValue(new Error('Network error')) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(new Error('Network error')) as any;
 
     const conn = new RestConnection(baseOptions);
     const result = await conn.healthCheck();
@@ -282,7 +282,7 @@ describe('RestConnection', () => {
   });
 
   test('request() includes hint for HTTP 400 (bad request / not indexed)', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: false,
       status: 400,
       statusText: 'Bad Request',
@@ -304,7 +304,7 @@ describe('RestConnection', () => {
   });
 
   test('request() includes hint for HTTP 404 (not found)', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: false,
       status: 404,
       statusText: 'Not Found',
@@ -326,7 +326,7 @@ describe('RestConnection', () => {
   });
 
   test('request() includes hint for HTTP 429 (rate limited)', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: false,
       status: 429,
       statusText: 'Too Many Requests',
@@ -349,7 +349,7 @@ describe('RestConnection', () => {
   });
 
   test('request() includes hint for HTTP 401 (auth required)', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: false,
       status: 401,
       statusText: 'Unauthorized',
@@ -369,7 +369,7 @@ describe('RestConnection', () => {
   });
 
   test('request() includes hint for HTTP 403 (forbidden)', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: false,
       status: 403,
       statusText: 'Forbidden',
@@ -389,7 +389,7 @@ describe('RestConnection', () => {
   });
 
   test('request() includes hint for HTTP 500 (server error)', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: false,
       status: 500,
       statusText: 'Internal Server Error',
@@ -411,7 +411,7 @@ describe('RestConnection', () => {
   });
 
   test('request() includes no hint for other HTTP errors', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: false,
       status: 418,
       statusText: "I'm a Teapot",
@@ -435,7 +435,7 @@ describe('RestConnection', () => {
   });
 
   test('request() throws a typed error on 3xx when followRedirects is false', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: false,
       status: 301,
       statusText: 'Moved Permanently',
@@ -461,7 +461,7 @@ describe('RestConnection', () => {
     // Simulates fetch's built-in redirect handling: with redirect:'follow'
     // the caller only ever sees the final 200; only a manual redirect mode
     // would surface the 301 (and then rest.ts would throw).
-    global.fetch = jest.fn().mockImplementation(async (_url: any, init: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(async (_url: any, init: any) => {
       if (init.redirect === 'manual') {
         return {
           ok: false,
@@ -482,7 +482,7 @@ describe('RestConnection', () => {
   });
 
   test('post() with a string body sends text/plain verbatim (Reactome AnalysisService shape)', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       json: () => Promise.resolve({ pathways: [] }),
@@ -501,7 +501,7 @@ describe('RestConnection', () => {
   describe('transport-level fetch rejections', () => {
     test('fetch rejection with a cause code wraps into a status-less retryable HttpConnectionError', async () => {
       const original = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ETIMEDOUT' } });
-      global.fetch = jest.fn().mockRejectedValue(original) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(original) as any;
 
       const conn = new RestConnection(baseOptions);
       try {
@@ -519,7 +519,7 @@ describe('RestConnection', () => {
     });
 
     test('fetch rejection without cause keeps the raw message verbatim (never "(undefined)")', async () => {
-      global.fetch = jest.fn().mockRejectedValue(new TypeError('fetch failed')) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(new TypeError('fetch failed')) as any;
 
       const conn = new RestConnection(baseOptions);
       try {
@@ -542,7 +542,7 @@ describe('RestConnection', () => {
       // and fetch-utils string-match the message). The wrap must leave it
       // exactly as-is.
       const timeoutError = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
-      global.fetch = jest.fn().mockRejectedValue(timeoutError) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(timeoutError) as any;
 
       const conn = new RestConnection(baseOptions);
       try {
@@ -558,7 +558,7 @@ describe('RestConnection', () => {
 
     test('caller-cancelled AbortError also passes through untouched', async () => {
       const abortError = new DOMException('The operation was aborted', 'AbortError');
-      global.fetch = jest.fn().mockRejectedValue(abortError) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(abortError) as any;
 
       const conn = new RestConnection(baseOptions);
       await expect(conn.request('/test')).rejects.toBe(abortError);
@@ -570,7 +570,7 @@ describe('RestConnection', () => {
       // message keeps today's raw escape and non-retryable classification, so
       // retry counts (and real-backoff timing budgets elsewhere) are stable.
       const original = new Error('PPR citation endpoints exploded');
-      global.fetch = jest.fn().mockRejectedValue(original) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(original) as any;
 
       const conn = new RestConnection({ ...baseOptions, retry: { attempts: 3, backoffMs: 1 } });
       await expect(conn.request('/test')).rejects.toBe(original);
@@ -579,7 +579,7 @@ describe('RestConnection', () => {
 
     test('post() wraps its transport rejections identically', async () => {
       const original = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
-      global.fetch = jest.fn().mockRejectedValue(original) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(original) as any;
 
       const conn = new RestConnection(baseOptions);
       try {
@@ -601,7 +601,7 @@ describe('RestConnection', () => {
       };
 
       test('transport rejection inside a retried source still retries and then succeeds', async () => {
-        global.fetch = jest.fn()
+        global.fetch = jest.fn<(...args: any[]) => any>()
           .mockRejectedValueOnce(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }))
           .mockRejectedValueOnce(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ETIMEDOUT' } }))
           .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: 'recovered' }) }) as any;
@@ -614,7 +614,7 @@ describe('RestConnection', () => {
       });
 
       test('all-attempt transport rejections surface the wrapped error after exhausting retries', async () => {
-        global.fetch = jest.fn().mockRejectedValue(
+        global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(
           Object.assign(new TypeError('fetch failed'), { cause: { code: 'ETIMEDOUT' } })
         ) as any;
 
@@ -632,7 +632,7 @@ describe('RestConnection', () => {
     };
 
     test('request() retries a retryable failure (503) and succeeds', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' })
         .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: 'recovered' }) }) as any;
 
@@ -644,7 +644,7 @@ describe('RestConnection', () => {
     });
 
     test('request() does not retry a non-retryable failure (400)', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: false,
         status: 400,
         statusText: 'Bad Request',
@@ -656,7 +656,7 @@ describe('RestConnection', () => {
     });
 
     test('request() exhausts attempts on persistent retryable failure', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: false,
         status: 503,
         statusText: 'Service Unavailable',
@@ -668,7 +668,7 @@ describe('RestConnection', () => {
     });
 
     test('source without retry config makes a single attempt', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: false,
         status: 503,
         statusText: 'Service Unavailable',
@@ -680,7 +680,7 @@ describe('RestConnection', () => {
     });
 
     test('post() retries a retryable failure and succeeds', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' })
         .mockResolvedValueOnce({
           ok: true,

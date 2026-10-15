@@ -203,12 +203,12 @@ describe('biowasm registry validation', () => {
     const mirror = join(cacheRoot, 'mirror-empty');
     mkdirSync(mirror, { recursive: true });
     process.env.ANALYSIS_BIOWASM_MIRROR_URL = mirror;
-    await expect(provisionBiowasmAssets(jest.fn())).rejects.toThrow(/missing files: samtools\.js/);
+    await expect(provisionBiowasmAssets(jest.fn<(...args: any[]) => any>())).rejects.toThrow(/missing files: samtools\.js/);
   });
 
   it('rejects an env mirror value that is neither a path nor http(s)', async () => {
     process.env.ANALYSIS_BIOWASM_MIRROR_URL = 'not-a-real-thing://x';
-    await expect(provisionBiowasmAssets(jest.fn())).rejects.toThrow(/ANALYSIS_BIOWASM_MIRROR_URL/);
+    await expect(provisionBiowasmAssets(jest.fn<(...args: any[]) => any>())).rejects.toThrow(/ANALYSIS_BIOWASM_MIRROR_URL/);
   });
 
   it('reports a mismatched cached set and re-downloads from the CDN', async () => {

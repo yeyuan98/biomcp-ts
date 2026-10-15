@@ -66,7 +66,7 @@ function makeOpts(over: Partial<WatchdogOptions> = {}): WatchdogOptions & { canc
     cancelMessage: CANCEL_MESSAGE,
     discardError: new Error('runtime discarded'),
     ...over,
-  };
+  } as WatchdogOptions & { cancel: jest.Mock; discard: jest.Mock };
 }
 
 describe('runWithWatchdog activity + ceiling (progress-driven deadlines)', () => {
@@ -88,7 +88,7 @@ describe('runWithWatchdog activity + ceiling (progress-driven deadlines)', () =>
   it('maxRunMs is an absolute ceiling that activity() cannot extend', async () => {
     const opts = makeOpts({ timeoutMs: 50, watchdogMs: 20, maxRunMs: 140 });
     const started = Date.now();
-    let stopInterval: (() => void) | null = null;
+    let stopInterval: (() => void) | null = null as (() => void) | null;
     try {
       await expect(
         runWithWatchdog(

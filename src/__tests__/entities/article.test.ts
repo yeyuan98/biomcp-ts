@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { articleSearch, articleGet, transformPubTator, transformLitSense, transformEuropePMC, transformSemanticScholar, transformPreprint, parseDateRange, parseArticleId, isPreprintDoi } from '../../entities/article.js';
+import { articleSearch, articleGet, transformPubTator, transformLitSense, transformEuropePMC, transformSemanticScholar, transformPreprint, parseDateRange, parseArticleId, isPreprintDoi } from '../../entities/article/index.js';
 import { clearCitationCache } from '../../entities/article/citation/index.js';
 import { clearWorkCache } from '../../entities/article/citation/crossref.js';
 import { clearCitedInCache } from '../../entities/article/citation/pubmed.js';
@@ -167,7 +167,7 @@ describe('article', () => {
   });
 
   test('articleSearch() calls ESearch then EFetch for PubMed', async () => {
-    global.fetch = jest.fn()
+    global.fetch = jest.fn<(...args: any[]) => any>()
       .mockResolvedValueOnce({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
@@ -202,7 +202,7 @@ describe('article', () => {
   });
 
   test('articleSearch() returns empty on empty results', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       json: () => Promise.resolve({ esearchresult: { idlist: [] } }),
@@ -213,7 +213,7 @@ describe('article', () => {
   });
 
   test('articleGet() calls EFetch with correct PMID', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'text/xml' }),
       text: () => Promise.resolve(SINGLE_ARTICLE_XML),
@@ -230,7 +230,7 @@ describe('article', () => {
   });
 
   test('articleSearch() with pubtator source uses /search/?text= endpoint', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       json: () => Promise.resolve({
@@ -260,7 +260,7 @@ describe('article', () => {
     const page = Array.from({ length: 15 }, (_, i) => ({
       _id: String(34083286 + i), pmid: 34083286 + i, title: `Article ${i}`,
     }));
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       json: () => Promise.resolve({ results: page }),
@@ -277,7 +277,7 @@ describe('article', () => {
   });
 
   test('articleSearch() pubtator requests a larger size when limit exceeds the API default', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       json: () => Promise.resolve({ results: [] }),
@@ -290,7 +290,7 @@ describe('article', () => {
   });
 
   test('articleSearch() with litsense source uses /sentences/?query= endpoint', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       json: () => Promise.resolve([
@@ -316,7 +316,7 @@ describe('article', () => {
     const rows = [11, 22, 33, 44, 55].map(pmid => ({
       pmid, text: `Sentence ${pmid}.`, score: 0.9, section: 'abstract', annotations: [],
     }));
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       json: () => Promise.resolve(rows),
@@ -334,7 +334,7 @@ describe('article', () => {
     const rows = Array.from({ length: 300 }, (_, i) => ({
       pmid: i + 1, text: `Sentence ${i}.`, score: 0.9, section: 'abstract', annotations: [],
     }));
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       json: () => Promise.resolve(rows),
@@ -352,7 +352,7 @@ describe('article', () => {
     const rows = [11, 22].map(pmid => ({
       pmid, text: `Sentence ${pmid}.`, score: 0.9, section: 'abstract', annotations: [],
     }));
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       json: () => Promise.resolve(rows),
@@ -366,7 +366,7 @@ describe('article', () => {
   });
 
   test('articleSearch() europepmc offset windows client-side via over-fetch', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       json: () => Promise.resolve(europepmcLitePage(4)),
@@ -382,7 +382,7 @@ describe('article', () => {
   });
 
   test('articleSearch() europepmc over-fetch clamps at the 1000-row API cap', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       json: () => Promise.resolve(europepmcLitePage(1000)),
@@ -397,7 +397,7 @@ describe('article', () => {
   });
 
   test('articleSearch() europepmc offset beyond the cap yields empty page', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       json: () => Promise.resolve(europepmcLitePage(1000)),
@@ -411,7 +411,7 @@ describe('article', () => {
   });
 
   test('articleSearch() europepmc missing resultList yields empty page', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       json: () => Promise.resolve({ hitCount: 0 }),
@@ -424,7 +424,7 @@ describe('article', () => {
   });
 
   test('articleSearch() europepmc explicit cursorMark takes precedence over offset', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       json: () => Promise.resolve(europepmcLitePage(5)),
@@ -440,7 +440,7 @@ describe('article', () => {
   });
 
   test('articleSearch() europepmc offset=0 keeps the page-1 request shape', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
       json: () => Promise.resolve(europepmcLitePage(10)),
@@ -666,7 +666,7 @@ describe('article', () => {
     });
 
     test('PubMed search appends date params when dateRange is set', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
@@ -682,7 +682,7 @@ describe('article', () => {
     });
 
     test('PubMed search with open-ended from-only dateRange sends both bounds (defaulted maxdate)', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
@@ -698,7 +698,7 @@ describe('article', () => {
     });
 
     test('PubMed search with open-ended to-only dateRange sends both bounds (defaulted mindate)', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
@@ -714,7 +714,7 @@ describe('article', () => {
     });
 
     test('Europe PMC search appends date range in query', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: () => Promise.resolve({ resultList: { result: [] } }),
@@ -729,7 +729,7 @@ describe('article', () => {
     });
 
     test('Europe PMC search with open-ended to-only dateRange', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: () => Promise.resolve({ resultList: { result: [] } }),
@@ -743,7 +743,7 @@ describe('article', () => {
     });
 
     test('Europe PMC search date clause is year-granular across distinct years', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: () => Promise.resolve({ resultList: { result: [] } }),
@@ -758,7 +758,7 @@ describe('article', () => {
     });
 
     test('Europe PMC search with open-ended from-only dateRange', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: () => Promise.resolve({ resultList: { result: [] } }),
@@ -772,7 +772,7 @@ describe('article', () => {
     });
 
     test('Semantic Scholar search appends publicationDateOrYear param', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: () => Promise.resolve({ data: [] }),
@@ -785,7 +785,7 @@ describe('article', () => {
     });
 
     test('Semantic Scholar search with open-ended from-only', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: () => Promise.resolve({ data: [] }),
@@ -809,7 +809,7 @@ describe('article', () => {
           json: () => Promise.resolve({ data: [] }),
         });
         let releaseFirst!: (v: unknown) => void;
-        global.fetch = jest.fn().mockImplementation((url: unknown) => {
+        global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: unknown) => {
           if (parseMockUrl(url).hostname !== 'api.semanticscholar.org') return Promise.resolve(ok());
           if ((global.fetch as any).mock.calls.filter((c: any[]) => parseMockUrl(c[0]).hostname === 'api.semanticscholar.org').length === 1) {
             return new Promise(resolve => { releaseFirst = resolve; });
@@ -847,7 +847,7 @@ describe('article', () => {
     });
 
     test('federated search with dateRange only queries date-aware backends', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
@@ -881,7 +881,7 @@ describe('article', () => {
     });
 
     test('federated search without dateRange queries all backends', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: () => Promise.resolve({ esearchresult: { idlist: [] } }),
@@ -900,7 +900,7 @@ describe('article', () => {
     test('federated search: hanging provider rejects, never resolves null', async () => {
       jest.useFakeTimers();
       try {
-        global.fetch = jest.fn().mockImplementation((url: unknown) => {
+        global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: unknown) => {
           if (parseMockUrl(url).hostname === 'api.semanticscholar.org') {
             return new Promise(() => {});
           }
@@ -976,7 +976,7 @@ describe('article', () => {
 
   describe('articleGet with ID resolution', () => {
     test('articleGet() with PMID still works directly (no IDConv call)', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: true,
         headers: new Headers({ 'content-type': 'text/xml' }),
         text: () => Promise.resolve(SINGLE_ARTICLE_XML),
@@ -991,7 +991,7 @@ describe('article', () => {
     });
 
     test('articleGet() with empty records from IDConv throws error', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: () => Promise.resolve({ status: 'ok', records: [] }),
@@ -1001,7 +1001,7 @@ describe('article', () => {
     });
 
     test('articleGet() with PMCID error-status record without errmsg throws error', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: () => Promise.resolve({
@@ -1014,7 +1014,7 @@ describe('article', () => {
     });
 
     test('articleGet() with error-status record without errmsg throws error', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: () => Promise.resolve({
@@ -1027,7 +1027,7 @@ describe('article', () => {
     });
 
     test('articleGet() with PMID and oa section reports not_in_pmc when the article is not in PMC', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'text/xml' }),
@@ -1056,7 +1056,7 @@ describe('article', () => {
     });
 
     test('articleGet() with PMCID resolves to PMID then fetches', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
@@ -1101,7 +1101,7 @@ describe('article', () => {
 </PubmedArticle>
 </PubmedArticleSet>`;
 
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
@@ -1124,7 +1124,7 @@ describe('article', () => {
     });
 
     test('articleGet() with unresolvable DOI throws error', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: () => Promise.resolve({
@@ -1146,7 +1146,7 @@ describe('article', () => {
     });
 
     test('articleGet() with DOI and oa section reads the Europe PMC core record', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
@@ -1199,7 +1199,7 @@ describe('article', () => {
     });
 
     test('articleGet() with PMID and oa section reuses the PMCID from the PubMed XML (no IDConv call)', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'text/xml' }),
@@ -1222,7 +1222,7 @@ describe('article', () => {
     });
 
     test('articleGet() with PMID and oa section resolves the PMCID via IDConv when the PubMed XML lacks it', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'text/xml' }),
@@ -1253,7 +1253,7 @@ describe('article', () => {
     });
 
     test('fetchOpenAccess classifies open_access records and keeps only machine-fetchable PDFs', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValue({
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
@@ -1295,7 +1295,7 @@ describe('article', () => {
           ],
         },
       };
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValue({
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
@@ -1323,7 +1323,7 @@ describe('article', () => {
           fullTextUrl: [{ availability: 'Subscription required', documentStyle: 'doi', site: 'DOI', url: 'https://doi.org/10.1/x' }],
         },
       };
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValue({
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
@@ -1338,7 +1338,7 @@ describe('article', () => {
     });
 
     test('fetchOpenAccess reports unknown when Europe PMC has no record for a valid PMCID', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValue({
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
@@ -1357,7 +1357,7 @@ describe('article', () => {
     test('fetchOpenAccess surfaces _error when the Europe PMC search fails at transport level', async () => {
       // Persistent failure mock: the europepmc connection retries 5xx
       // (3 attempts), so mockResolvedValueOnce chains would be consumed.
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: false,
         status: 503,
         statusText: 'Service Unavailable',
@@ -1372,7 +1372,7 @@ describe('article', () => {
     }, 30000);
 
     test('articleGet() with oa section reports not_in_pmc when neither PubMed XML nor IDConv has a PMCID', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'text/xml' }),
@@ -1395,7 +1395,7 @@ describe('article', () => {
     });
 
     test('articleGet() with doi: prefix resolves correctly', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
@@ -1419,7 +1419,7 @@ describe('article', () => {
     });
 
     test('articleGet() with DOI that fails IDConv falls back to PubMed esearch', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
@@ -1448,7 +1448,7 @@ describe('article', () => {
     });
 
     test('articleGet() with DOI that fails both IDConv and PubMed esearch throws', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: () => Promise.resolve({
@@ -1461,7 +1461,7 @@ describe('article', () => {
     });
 
     test('articleGet() with DOI that returns error status without errmsg throws', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'application/json' }),
@@ -1487,7 +1487,7 @@ describe('article', () => {
     });
 
     test('articleGet() with fulltext section reports no_pmcid honestly when the article is not in PMC', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'text/xml' }),
@@ -1538,7 +1538,7 @@ describe('article', () => {
 
       const result = await articleGet('12345', ['all']);
 
-      expect(global.fetch.mock.calls.length).toBeGreaterThanOrEqual(5);
+      expect((global.fetch as any).mock.calls.length).toBeGreaterThanOrEqual(5);
       expect(result.sections).toBeDefined();
       expect(result.sections).toHaveProperty('open_access');
       expect(result.sections).toHaveProperty('annotations');
@@ -1546,8 +1546,8 @@ describe('article', () => {
       expect(result.sections).toHaveProperty('citation');
       // Full text is opt-in ONLY — "all" never triggers the XML fetch nor
       // emits a fulltext section.
-      expect(result.sections.fulltext).toBeUndefined();
-      const fulltextCalls = (global.fetch as any).mock.calls.map(c => String(c[0])).filter(u => u.includes('fullTextXML') || u.includes('db=pmc'));
+      expect(result.sections!.fulltext).toBeUndefined();
+      const fulltextCalls = (global.fetch as any).mock.calls.map((c: any) => String(c[0])).filter((u: any) => u.includes('fullTextXML') || u.includes('db=pmc'));
       expect(fulltextCalls).toHaveLength(0);
     }, 30000);
 
@@ -1580,7 +1580,7 @@ describe('article', () => {
     });
 
     test('articleGet() with DOI where IDConv record has no pmid throws', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: () => Promise.resolve({
@@ -1593,7 +1593,7 @@ describe('article', () => {
     });
 
     test('articleGet() with oa section returns license information from the Europe PMC record', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce({
           ok: true,
           headers: new Headers({ 'content-type': 'text/xml' }),
@@ -1669,7 +1669,7 @@ describe('article', () => {
     });
 
     test('fetchFullText fetches Europe PMC fullTextXML and parses sections', async () => {
-      global.fetch = jest.fn().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
 
       const result = await fetchFullText('PMC9999999', { oa: OA_OPEN, output: 'inline' });
 
@@ -1703,7 +1703,7 @@ describe('article', () => {
 
       const result = await fetchFullText('PMC9999999', { oa: OA_OPEN, output: 'inline' });
 
-      const eutilsUrl = (global.fetch as any).mock.calls.map(c => String(c[0])).find(u => u.includes('efetch.fcgi'));
+      const eutilsUrl = (global.fetch as any).mock.calls.map((c: any) => String(c[0])).find((u: any) => u.includes('efetch.fcgi'));
       expect(eutilsUrl).toContain('db=pmc');
       expect(eutilsUrl).toContain('id=9999999'); // PMC prefix stripped
       expect(result.status).toBe('available');
@@ -1712,7 +1712,7 @@ describe('article', () => {
     }, 30000);
 
     test('fetchFullText reports fetch_failed when both legs fail', async () => {
-      global.fetch = jest.fn().mockResolvedValue(failingResponse(500)) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(failingResponse(500)) as any;
 
       const result = await fetchFullText('PMC9999999', { oa: OA_OPEN });
 
@@ -1752,7 +1752,7 @@ describe('article', () => {
 
     test('fetchFullText reports no_machine_readable_xml for front-only records', async () => {
       const frontOnly = '<?xml version="1.0"?><article><front><article-meta><title>x</title></article-meta></front></article>';
-      global.fetch = jest.fn().mockResolvedValue(xmlResponse(frontOnly)) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(xmlResponse(frontOnly)) as any;
 
       const result = await fetchFullText('PMC9999999', { oa: OA_OPEN });
 
@@ -1761,7 +1761,7 @@ describe('article', () => {
     });
 
     test('fetchFullText truncates honestly with per-section flags and omitted sections', async () => {
-      global.fetch = jest.fn().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
 
       // Clamped to the 1000-char floor; the fixture introduction is ~1300 chars
       const result = await fetchFullText('PMC9999999', { oa: OA_OPEN, maxChars: 250, output: 'inline' });
@@ -1777,7 +1777,7 @@ describe('article', () => {
     });
 
     test('fetchFullText file mode (default) writes markdown and returns a handle, never the body', async () => {
-      global.fetch = jest.fn().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
 
       const result = await fetchFullText('PMC9999999', { oa: OA_OPEN, pmid: '12345', title: 'A test title' });
 
@@ -1836,7 +1836,7 @@ describe('article', () => {
     });
 
     test('fetchFullText file mode falls back to inline when the cache dir is unwritable', async () => {
-      global.fetch = jest.fn().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
       // Point the cache root at a regular file: every fs op under it fails
       const notADir = join(tmpdir(), `biomcp-notadir-${process.pid}`);
       writeFileSync(notADir, 'x');
@@ -1883,7 +1883,7 @@ describe('article', () => {
     });
 
     test('file mode ignores fulltext_max_chars — the file carries the complete text', async () => {
-      global.fetch = jest.fn().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
 
       const result = await fetchFullText('PMC9999999', { oa: OA_OPEN, maxChars: 1000 });
 
@@ -1896,7 +1896,7 @@ describe('article', () => {
     });
 
     test('file->inline fallback clamps to the default cap even when a larger inline cap was passed', async () => {
-      global.fetch = jest.fn().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(xmlResponse(JATS_FULLTEXT_XML)) as any;
       const notADir = join(tmpdir(), `biomcp-notadir2-${process.pid}`);
       writeFileSync(notADir, 'x');
 
@@ -2068,7 +2068,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
   const requestedUrls = () => (global.fetch as any).mock.calls.map((c: unknown[]) => String(c[0]));
 
   test('articleSearch preprint_only builds the PPR publisher query with resultType=core', async () => {
-    global.fetch = jest.fn().mockResolvedValue(jsonResponse(preprintCorePage(10))) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(jsonResponse(preprintCorePage(10))) as any;
 
     const result = await articleSearch('crispr', { source: 'preprint_only' });
 
@@ -2092,7 +2092,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
   });
 
   test('articleSearch preprint_only applies date range and offset window', async () => {
-    global.fetch = jest.fn().mockResolvedValue(jsonResponse(preprintCorePage(10))) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(jsonResponse(preprintCorePage(10))) as any;
 
     const result = await articleSearch('vaccine', { source: 'preprint_only', limit: 3, offset: 5, dateRange: '2025-01-01/2025-12-31' });
 
@@ -2104,7 +2104,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
   });
 
   test('articleSearch preprint_only date clause is year-granular and follows the PPR wrapper', async () => {
-    global.fetch = jest.fn().mockResolvedValue(jsonResponse(preprintCorePage(3))) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(jsonResponse(preprintCorePage(3))) as any;
 
     await articleSearch('vaccine', { source: 'preprint_only', dateRange: '2020-06-15/2021-03-01' });
 
@@ -2114,7 +2114,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
   });
 
   test('articleSearch preprint_only explicit cursorMark takes precedence over offset', async () => {
-    global.fetch = jest.fn().mockResolvedValue(jsonResponse(preprintCorePage(6))) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(jsonResponse(preprintCorePage(6))) as any;
 
     const result = await articleSearch('crispr', { source: 'preprint_only', limit: 2, offset: 4, cursorMark: 'AoIIQCC9' });
 
@@ -2128,7 +2128,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
   });
 
   test('articleSearch preprint_only empty resultList.result yields []', async () => {
-    global.fetch = jest.fn().mockResolvedValue(jsonResponse({ resultList: {} })) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(jsonResponse({ resultList: {} })) as any;
 
     const result = await articleSearch('crispr', { source: 'preprint_only' });
 
@@ -2137,7 +2137,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
   });
 
   test('articleSearch preprint_only returns _error row on transport failure', async () => {
-    global.fetch = jest.fn().mockRejectedValue(new Error('network down')) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(new Error('network down')) as any;
 
     const result = await articleSearch('crispr', { source: 'preprint_only' });
 
@@ -2329,9 +2329,9 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
 
     const urls = (global.fetch as any).mock.calls.map((c: unknown[]) => String(c[0]));
     // same host serves both collections → no medrxiv probe after transport failure
-    expect(urls.some(u => u.includes('/details/medrxiv/'))).toBe(false);
+    expect(urls.some((u: any) => u.includes('/details/medrxiv/'))).toBe(false);
     // official API unreachable → /pubs would be pure wasted latency
-    expect(urls.some(u => u.includes('/pubs/'))).toBe(false);
+    expect(urls.some((u: any) => u.includes('/pubs/'))).toBe(false);
     // EPMC degraded core with published from the "Preprint of" link, no network call
     expect(result.preprint?.data_source).toBe('europepmc');
     expect(result.published).toEqual({ pmid: '32015507', source: 'europepmc' });
@@ -2393,7 +2393,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
 
       const urls = requestedUrls();
       // budget guard: /pubs never hit the wire despite the official API succeeding
-      expect(urls.some(u => u.includes('/pubs/'))).toBe(false);
+      expect(urls.some((u: any) => u.includes('/pubs/'))).toBe(false);
       // published mapping degrades to the EPMC "Preprint of" link...
       expect(result.published).toMatchObject({ pmid: '32015507', source: 'europepmc' });
       // ...with the skip disclosed on the natural note field
@@ -2424,7 +2424,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     const result = await getPreprintArticle('10.1101/2025.03.05.641768');
 
     const urls = requestedUrls();
-    expect(urls.some(u => u.includes('/pubs/'))).toBe(true);
+    expect(urls.some((u: any) => u.includes('/pubs/'))).toBe(true);
     expect(result.published).toMatchObject({ doi: '10.3389/fbinf.2025.1577324', source: 'biorxiv_pubs' });
     expect((result.published as any).note).toBeUndefined();
   }, 15000);
@@ -2525,7 +2525,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     expect(citation.backward_references).toHaveLength(2);
     // fetch pageSize = max(limit*3, 10) — the limit still governs the returned window
     const urls = (global.fetch as any).mock.calls.map((c: unknown[]) => String(c[0]));
-    expect(urls.find(u => u.includes('/PPR910295/citations'))).toContain('pageSize=10');
+    expect(urls.find((u: any) => u.includes('/PPR910295/citations'))).toContain('pageSize=10');
   }, 15000);
 
   test('articleGet preprint citation_direction="forward" requests only /citations; skipped array key stays empty', async () => {
@@ -2534,8 +2534,8 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     const result = await articleGet('10.1101/2021.10.25.465764', ['citation'], { citationDirection: 'forward' });
 
     const urls = requestedUrls();
-    expect(urls.some(u => u.includes('/PPR910295/citations'))).toBe(true);
-    expect(urls.some(u => u.includes('/PPR910295/references'))).toBe(false);
+    expect(urls.some((u: any) => u.includes('/PPR910295/citations'))).toBe(true);
+    expect(urls.some((u: any) => u.includes('/PPR910295/references'))).toBe(false);
     const citation = result.sections?.citation as any;
     expect(citation.forward_citations.map((c: any) => c.title)).toEqual(['Citing paper 1', 'Citing paper 2', 'Citing paper 3']);
     // envelope key intact for the skipped direction → applyLimit still slices a real array
@@ -2551,8 +2551,8 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     const result = await articleGet('10.1101/2021.10.25.465764', ['citation'], { citationDirection: 'backward' });
 
     const urls = requestedUrls();
-    expect(urls.some(u => u.includes('/PPR910295/citations'))).toBe(false);
-    expect(urls.some(u => u.includes('/PPR910295/references'))).toBe(true);
+    expect(urls.some((u: any) => u.includes('/PPR910295/citations'))).toBe(false);
+    expect(urls.some((u: any) => u.includes('/PPR910295/references'))).toBe(true);
     const citation = result.sections?.citation as any;
     expect(citation.backward_references.map((c: any) => c.title)).toEqual(['Referenced paper 1', 'Referenced paper 2', 'Referenced paper 3']);
     expect(Array.isArray(citation.forward_citations)).toBe(true);
@@ -2565,8 +2565,8 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     const result = await articleGet('10.1101/2021.10.25.465764', ['citation']);
 
     const urls = requestedUrls();
-    expect(urls.some(u => u.includes('/PPR910295/citations'))).toBe(true);
-    expect(urls.some(u => u.includes('/PPR910295/references'))).toBe(true);
+    expect(urls.some((u: any) => u.includes('/PPR910295/citations'))).toBe(true);
+    expect(urls.some((u: any) => u.includes('/PPR910295/references'))).toBe(true);
     const citation = result.sections?.citation as any;
     expect(citation.forward_citations).toHaveLength(3);
     expect(citation.backward_references).toHaveLength(3);
@@ -2665,11 +2665,11 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
 
     expect(result.preprint?.data_source).toBe('api.biorxiv.org');
     const urls = (global.fetch as any).mock.calls.map((c: unknown[]) => String(c[0]));
-    const detailsUrl = urls.find(u => parseMockUrl(u).pathname.startsWith('/details/biorxiv/')) ?? '';
+    const detailsUrl = urls.find((u: any) => parseMockUrl(u).pathname.startsWith('/details/biorxiv/')) ?? '';
     // reserved chars encoded per segment ('?' → %3F, '=' → %3D), '/' preserved
     expect(detailsUrl).toContain('2024.01.01.12345%3Fv%3Dx');
     expect(detailsUrl).not.toContain('?v=x');
-    const pubsUrl = urls.find(u => u.includes('/pubs/')) ?? '';
+    const pubsUrl = urls.find((u: any) => u.includes('/pubs/')) ?? '';
     expect(pubsUrl).toContain('2024.01.01.12345%3Fv%3Dx/na');
   }, 15000);
 });

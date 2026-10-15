@@ -45,7 +45,7 @@ describe('patent_search', () => {
       harness.callTool('patent_search', { query: 'cancer immunotherapy', source: 'ppubs', limit: 2, seminal: false }));
     expectPatentSearchResult(response);
     expect(response.patents.length).toBeLessThanOrEqual(2);
-    expect(response.seminal_prior_art).toBeUndefined();
+    expect((response as any).seminal_prior_art).toBeUndefined();
   }, 120000);
 
   it('ranks a quoted biotech concept by relevance on ppubs (mRNA display)', async () => {
@@ -61,7 +61,7 @@ describe('patent_search', () => {
     // Relevance mode surfaces scores and a family-based match count
     expect(real.some((p: Record<string, unknown>) => typeof p.relevance_score === 'number')).toBe(true);
     expect(response.total_hits?.ppubs).toBeDefined();
-    expect(response.total_hits_basis?.ppubs).toContain('families');
+    expect((response as any).total_hits_basis?.ppubs).toContain('families');
   }, 120000);
 
   it('falls back to recency sort when sort_by=recency', async () => {
@@ -81,24 +81,24 @@ describe('patent_search', () => {
       harness.callTool('patent_search', { query: '"mRNA display"', limit: 5 }));
     expectPatentSearchResult(response);
     // Default-on: seminal fields present whenever real results exist.
-    expect(Array.isArray(response.seminal_prior_art)).toBe(true);
-    expect(typeof response.mined_count).toBe('number');
-    if ((response.mined_count as number) >= 3) {
+    expect(Array.isArray((response as any).seminal_prior_art)).toBe(true);
+    expect(typeof (response as any).mined_count).toBe('number');
+    if (((response as any).mined_count as number) >= 3) {
       // The foundational Szostak art is co-cited across assignees by the
       // diversity-sampled top grants — resolved to a US family member
       // (US6261804B1/US6207446B1, "Selection of proteins using RNA-protein
       // fusions", General Hospital Corp) with OPS creds, or its PCT form
       // WO98/31700 keylessly. Tolerant matcher guards against live drift.
-      const seminal = (response.seminal_prior_art as Array<Record<string, unknown>>)
+      const seminal = ((response as any).seminal_prior_art as Array<Record<string, unknown>>)
         .map(e => `${e.publication_number} ${e.title || ''} ${e.assignee || ''}`).join(' | ');
       expect(seminal).toMatch(/6261804|6207446|31700|RNA-protein fusions/i);
-      const szostak = (response.seminal_prior_art as Array<Record<string, unknown>>)
+      const szostak = ((response as any).seminal_prior_art as Array<Record<string, unknown>>)
         .find(e => /6261804|6207446|31700/i.test(String(e.publication_number)));
       expect(Number(szostak?.co_cited_by)).toBeGreaterThanOrEqual(2);
       expect(Array.isArray(szostak?.cited_by)).toBe(true);
     } else {
       // A thin pool must still be EXPLAINED, never silently empty.
-      expect(String(response.seminal_note)).toMatch(/too few|no commonly-cited|skipped|deadline/);
+      expect(String((response as any).seminal_note)).toMatch(/too few|no commonly-cited|skipped|deadline/);
     }
   }, 180000);
 });
@@ -113,17 +113,17 @@ describe('patent_get', () => {
       }));
     expectPatentGetResult(result);
     expect(String(result.publication_number)).toMatch(/^US11027025/);
-    const classifications = result.sections?.classifications as Record<string, unknown> | undefined;
+    const classifications = (result.sections as any)?.classifications as Record<string, unknown> | undefined;
     expect(classifications).toBeDefined();
     expect((classifications as any)?.error).toBeUndefined();
     expect(((classifications as any)?.cpc as unknown[])?.length).toBeGreaterThan(0);
-    const claims = result.sections?.claims as Record<string, unknown> | undefined;
+    const claims = (result.sections as any)?.claims as Record<string, unknown> | undefined;
     expect(claims).toBeDefined();
     if (!(claims as any)?.error) {
       expect(Array.isArray((claims as any).claims)).toBe(true);
       expect((claims as any).claims.length).toBeGreaterThan(0);
     }
-    const citations = result.sections?.citations as Record<string, unknown> | undefined;
+    const citations = (result.sections as any)?.citations as Record<string, unknown> | undefined;
     if (citations && !Array.isArray(citations)) {
       if (!(citations as any).error) {
         expect(Array.isArray((citations as any).backward)).toBe(true);
@@ -162,7 +162,7 @@ opsDescribe('patent_search (EPO OPS, keyed)', () => {
       const result = await retryOnRateLimit(() =>
         harness.callTool('patent_get', { patent_id: 'EP1000000A1', sections: ['claims'], limit: 3 }));
       expectPatentGetResult(result);
-      const claims = result.sections?.claims as Record<string, unknown> | undefined;
+      const claims = (result.sections as any)?.claims as Record<string, unknown> | undefined;
       expect(claims).toBeDefined();
       expect((claims as any)?.error).toBeUndefined();
       expect(Array.isArray((claims as any)?.claims)).toBe(true);

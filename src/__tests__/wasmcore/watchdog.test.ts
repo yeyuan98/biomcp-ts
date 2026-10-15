@@ -15,7 +15,7 @@ function makeOpts(over: Partial<WatchdogOptions> = {}): WatchdogOptions & { canc
     cancelMessage: CANCEL_MESSAGE,
     discardError: new Error('runtime discarded'),
     ...over,
-  };
+  } as WatchdogOptions & { cancel: jest.Mock; discard: jest.Mock };
 }
 
 describe('runWithWatchdog', () => {
