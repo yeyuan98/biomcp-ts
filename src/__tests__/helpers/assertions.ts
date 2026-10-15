@@ -1,7 +1,7 @@
 export function expectGeneSearchResult(data: unknown): asserts data is Array<Record<string, unknown>> {
   expect(Array.isArray(data)).toBe(true);
-  if (data.length > 0) {
-    const first = data[0] as Record<string, unknown>;
+  if ((data as unknown[]).length > 0) {
+    const first = (data as unknown[])[0] as Record<string, unknown>;
     expect(first).toHaveProperty('symbol');
     expect(first).toHaveProperty('name');
     expect(typeof first.symbol).toBe('string');
@@ -18,8 +18,8 @@ export function expectGeneGetResult(data: unknown): asserts data is Record<strin
 
 export function expectDrugSearchResult(data: unknown): asserts data is Array<Record<string, unknown>> {
   expect(Array.isArray(data)).toBe(true);
-  if (data.length > 0) {
-    const first = data[0] as Record<string, unknown>;
+  if ((data as unknown[]).length > 0) {
+    const first = (data as unknown[])[0] as Record<string, unknown>;
     expect(first).toHaveProperty('name');
     expect(typeof first.name).toBe('string');
   }
@@ -32,8 +32,8 @@ export function expectDrugGetResult(data: unknown): asserts data is Record<strin
 
 export function expectVariantSearchResult(data: unknown): asserts data is Array<Record<string, unknown>> {
   expect(Array.isArray(data)).toBe(true);
-  if (data.length > 0) {
-    const first = data[0] as Record<string, unknown>;
+  if ((data as unknown[]).length > 0) {
+    const first = (data as unknown[])[0] as Record<string, unknown>;
     expect(first).toHaveProperty('id');
     expect(typeof first.id).toBe('string');
   }
@@ -46,8 +46,8 @@ export function expectVariantGetResult(data: unknown): asserts data is Record<st
 
 export function expectDiseaseSearchResult(data: unknown): asserts data is Array<Record<string, unknown>> {
   expect(Array.isArray(data)).toBe(true);
-  if (data.length > 0) {
-    const first = data[0] as Record<string, unknown>;
+  if ((data as unknown[]).length > 0) {
+    const first = (data as unknown[])[0] as Record<string, unknown>;
     expect(first).toHaveProperty('name');
     expect(first).toHaveProperty('disease_id');
     expect(typeof first.name).toBe('string');
@@ -64,8 +64,8 @@ export function expectDiseaseGetResult(data: unknown): asserts data is Record<st
 
 export function expectArticleSearchResult(data: unknown): asserts data is Array<Record<string, unknown>> {
   expect(Array.isArray(data)).toBe(true);
-  if (data.length > 0) {
-    const first = data[0] as Record<string, unknown>;
+  if ((data as unknown[]).length > 0) {
+    const first = (data as unknown[])[0] as Record<string, unknown>;
     expect(first).toHaveProperty('title');
     expect(typeof first.title).toBe('string');
   }

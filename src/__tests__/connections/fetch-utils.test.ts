@@ -22,7 +22,7 @@ describe('fetchWithTimeout', () => {
     const promise = fetchWithTimeout(
       async (signal) => {
         await new Promise<void>((resolve, reject) => {
-          signal.addEventListener('abort', () => reject(new Error('abort')), { once: true });
+          signal!.addEventListener('abort', () => reject(new Error('abort')), { once: true });
         });
         return 'late';
       },
@@ -36,14 +36,14 @@ describe('fetchWithTimeout', () => {
   });
 
   it('passes AbortSignal to the function and detects abort', async () => {
-    let receivedSignal: AbortSignal | null = null;
+    let receivedSignal: AbortSignal | null | undefined = null;
     const promise = fetchWithTimeout(
       async (signal) => {
         receivedSignal = signal;
         expect(signal).toBeInstanceOf(AbortSignal);
-        expect(signal.aborted).toBe(false);
+        expect(signal!.aborted).toBe(false);
         await new Promise<void>((resolve, reject) => {
-          signal.addEventListener('abort', () => reject(new Error('abort')), { once: true });
+          signal!.addEventListener('abort', () => reject(new Error('abort')), { once: true });
         });
         return 'data';
       },

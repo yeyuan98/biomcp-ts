@@ -54,7 +54,7 @@ function makeBundleDir(root: string, name = 'bundle-src'): { dir: string; tarPat
 describe('VerifiedAssetStore', () => {
   let tmpRoot: string;
   let cacheDir: string;
-  let fetchMock: jest.Mock;
+  let fetchMock: jest.Mock<(...args: any[]) => any>;
   const realFetch = global.fetch;
 
   beforeEach(() => {

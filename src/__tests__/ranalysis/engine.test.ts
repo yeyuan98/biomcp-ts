@@ -1,17 +1,17 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 
-const captureRMock = jest.fn();
+const captureRMock = jest.fn<(...args: any[]) => any>();
 const purgeMock = jest.fn();
-const initMock = jest.fn();
-const closeMock = jest.fn();
+const initMock = jest.fn<(...args: any[]) => any>();
+const closeMock = jest.fn<(...args: any[]) => any>();
 const interruptMock = jest.fn();
-const evalRMock = jest.fn();
-const mkdirMock = jest.fn();
-const writeFileMock = jest.fn();
+const evalRMock = jest.fn<(...args: any[]) => any>();
+const mkdirMock = jest.fn<(...args: any[]) => any>();
+const writeFileMock = jest.fn<(...args: any[]) => any>();
 
 const shelterMock = { captureR: captureRMock, purge: purgeMock };
 
-const analyzePathMock = jest.fn(async () => ({ exists: true }));
+const analyzePathMock = jest.fn<(...args: any[]) => any>(async () => ({ exists: true }));
 const webRInstance = {
   init: initMock,
   close: closeMock,
@@ -30,7 +30,7 @@ const closeServerSpy = jest.fn(async () => undefined);
 
 jest.unstable_mockModule('../../ranalysis/mirror.js', () => ({
   resolveMirror: jest.fn(async () => ({ dir: '/fake/mirror', origin: 'env-dir' })),
-  MirrorServer: jest.fn().mockImplementation(() => ({ start: startServerSpy, close: closeServerSpy, url: () => 'http://127.0.0.1:65535' })),
+  MirrorServer: jest.fn<(...args: any[]) => any>().mockImplementation(() => ({ start: startServerSpy, close: closeServerSpy, url: () => 'http://127.0.0.1:65535' })),
   MirrorError: class MirrorError extends Error {},
 }));
 

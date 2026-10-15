@@ -2,13 +2,13 @@ import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { connectToolClient, type ToolClient } from '../helpers/mcp-harness.js';
 
-const runBamSummaryMock = jest.fn();
+const runBamSummaryMock = jest.fn<(...args: any[]) => any>();
 const runBamViewRegionMock = jest.fn();
 const runBcfSummaryMock = jest.fn();
-const runBcfViewRegionMock = jest.fn();
-const runBedOpMock = jest.fn();
+const runBcfViewRegionMock = jest.fn<(...args: any[]) => any>();
+const runBedOpMock = jest.fn<(...args: any[]) => any>();
 const runConvertMock = jest.fn();
-const runSessionInfoMock = jest.fn();
+const runSessionInfoMock = jest.fn<(...args: any[]) => any>();
 const runCliMock = jest.fn();
 const engineRunMock = jest.fn();
 const shutdownEngineMock = jest.fn();

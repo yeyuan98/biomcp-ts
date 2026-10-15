@@ -12,7 +12,7 @@ describe('parseEutilsJson', () => {
       header: { type: 'esearch' },
       esearchresult: { count: '1', idlist: ['200183947'] },
     });
-    const parsed = parseEutilsJson<{ esearchresult: { idlist: string[] } }>(raw, 'GEO search');
+    const parsed = parseEutilsJson<{ esearchresult: { error?: unknown; idlist: string[] } }>(raw, 'GEO search');
     expect(parsed.esearchresult.idlist).toEqual(['200183947']);
   });
 
@@ -44,7 +44,7 @@ describe('parseEutilsJson', () => {
 
 describe('parseEutilsResponse', () => {
   it('accepts pre-parsed objects from RestConnection', () => {
-    const parsed = parseEutilsResponse<{ esearchresult: { idlist: string[] } }>(
+    const parsed = parseEutilsResponse<{ esearchresult: { error?: unknown; idlist: string[] } }>(
       { esearchresult: { idlist: ['1'] } },
       'SRA search'
     );

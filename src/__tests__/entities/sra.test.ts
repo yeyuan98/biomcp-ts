@@ -175,7 +175,7 @@ function mockEutils(handlers: {
   esearch?: (url: URL) => unknown;
   efetch?: (url: URL) => string;
 }): void {
-  global.fetch = jest.fn().mockImplementation((rawUrl: string) => {
+  global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((rawUrl: string) => {
     const url = new URL(rawUrl);
     if (url.pathname.endsWith('/esearch.fcgi') && handlers.esearch) {
       const body = handlers.esearch(url);
@@ -198,7 +198,7 @@ function efetchCallUrls(): string[] {
   return fetchUrls().filter(url => url.includes('efetch.fcgi'));
 }
 
-function efetchIds(url: string): string[] {
+function efetchIds(url: string | URL): string[] {
   return (new URL(url).searchParams.get('id') || '').split(',').filter(Boolean);
 }
 

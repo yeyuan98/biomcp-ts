@@ -94,7 +94,7 @@ describe('MirrorServer file serving (whitelist map)', () => {
 describe('wasm mirror resolution', () => {
   let tmpRoot: string;
   let cacheDir: string;
-  let fetchMock: jest.Mock;
+  let fetchMock: jest.Mock<(...args: any[]) => any>;
 
   async function importMirror() {
     const mod = await import('../../ranalysis/mirror.js');

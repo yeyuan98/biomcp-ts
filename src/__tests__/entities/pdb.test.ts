@@ -9,9 +9,9 @@ function createMockConnection(methods: Record<string, any> = {}) {
     sourceId: 'mock',
     protocol: 'rest' as const,
     effectiveRateLimitMs: 100,
-    request: methods.request || jest.fn().mockResolvedValue(null),
-    post: methods.post || jest.fn().mockResolvedValue(null),
-    healthCheck: methods.healthCheck || jest.fn().mockResolvedValue(true),
+    request: methods.request || jest.fn<(...args: any[]) => any>().mockResolvedValue(null),
+    post: methods.post || jest.fn<(...args: any[]) => any>().mockResolvedValue(null),
+    healthCheck: methods.healthCheck || jest.fn<(...args: any[]) => any>().mockResolvedValue(true),
     close: methods.close || jest.fn(),
   };
 }
@@ -90,8 +90,8 @@ describe('formatFileSize boundary values', () => {
 
 describe('pdbSearch', () => {
   let originalFetch: typeof global.fetch;
-  let mockPost: jest.Mock;
-  let mockRequest: jest.Mock;
+  let mockPost: jest.Mock<(...args: any[]) => any>;
+  let mockRequest: jest.Mock<(...args: any[]) => any>;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -174,7 +174,7 @@ describe('pdbSearch', () => {
       if (sourceId === 'pdb_data') {
         pdbDataCalled = true;
         return createMockConnection({
-          request: jest.fn().mockResolvedValue(entryData),
+          request: jest.fn<(...args: any[]) => any>().mockResolvedValue(entryData),
         }) as any;
       }
       return createMockConnection() as any;
@@ -217,7 +217,7 @@ describe('pdbSearch', () => {
 
 describe('pdbGet', () => {
   let originalFetch: typeof global.fetch;
-  let mockRequest: jest.Mock;
+  let mockRequest: jest.Mock<(...args: any[]) => any>;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -400,7 +400,7 @@ describe('pdbGet', () => {
 
 describe('pdbDownload', () => {
   let originalFetch: typeof global.fetch;
-  let mockRequest: jest.Mock;
+  let mockRequest: jest.Mock<(...args: any[]) => any>;
   let tempFiles: string[] = [];
 
   beforeEach(() => {

@@ -26,14 +26,14 @@ describe('retry', () => {
 
   describe('withRetry', () => {
     it('succeeds on first attempt', async () => {
-      const fn = jest.fn().mockResolvedValue('success');
+      const fn = jest.fn<(...args: any[]) => any>().mockResolvedValue('success');
       const result = await withRetry(fn);
       expect(result).toBe('success');
       expect(fn).toHaveBeenCalledTimes(1);
     });
 
     it('retries on 429 error and succeeds', async () => {
-      const fn = jest.fn()
+      const fn = jest.fn<(...args: any[]) => any>()
         .mockRejectedValueOnce(error429)
         .mockResolvedValue('success');
 
@@ -48,7 +48,7 @@ describe('retry', () => {
     it('respects maxRetries and throws after exhausting retries', async () => {
       jest.useRealTimers(); // Use real timers for this test
 
-      const fn = jest.fn()
+      const fn = jest.fn<(...args: any[]) => any>()
         .mockRejectedValueOnce(error429)
         .mockRejectedValueOnce(error429)
         .mockRejectedValueOnce(error429);
@@ -70,17 +70,17 @@ describe('retry', () => {
     });
 
     it('applies exponential backoff without jitter', async () => {
-      const fn = jest.fn()
+      const fn = jest.fn<(...args: any[]) => any>()
         .mockRejectedValueOnce(error429Short)
         .mockRejectedValueOnce(error429Short)
         .mockResolvedValue('success');
 
       const delays: number[] = [];
       const originalSetTimeout = global.setTimeout;
-      global.setTimeout = jest.fn().mockImplementation((callback, delay) => {
+      global.setTimeout = jest.fn<(...args: any[]) => any>().mockImplementation((callback, delay) => {
         delays.push(delay as number);
         return originalSetTimeout(callback, 0);
-      });
+      }) as unknown as typeof global.setTimeout;
 
       try {
         const promise = withRetry(fn, { jitter: false, maxRetries: 2 });
@@ -96,16 +96,16 @@ describe('retry', () => {
     });
 
     it('adds jitter when enabled', async () => {
-      const fn = jest.fn()
+      const fn = jest.fn<(...args: any[]) => any>()
         .mockRejectedValueOnce(error429Short)
         .mockResolvedValue('success');
 
       const delays: number[] = [];
       const originalSetTimeout = global.setTimeout;
-      global.setTimeout = jest.fn().mockImplementation((callback, delay) => {
+      global.setTimeout = jest.fn<(...args: any[]) => any>().mockImplementation((callback, delay) => {
         delays.push(delay as number);
         return originalSetTimeout(callback, 0);
-      });
+      }) as unknown as typeof global.setTimeout;
 
       try {
         const promise = withRetry(fn, { jitter: true, baseDelayMs: 1000 });
@@ -122,7 +122,7 @@ describe('retry', () => {
     });
 
     it('respects maxDelayMs cap', async () => {
-      const fn = jest.fn()
+      const fn = jest.fn<(...args: any[]) => any>()
         .mockRejectedValueOnce(error429Short)
         .mockRejectedValueOnce(error429Short)
         .mockRejectedValueOnce(error429Short)
@@ -131,10 +131,10 @@ describe('retry', () => {
 
       const delays: number[] = [];
       const originalSetTimeout = global.setTimeout;
-      global.setTimeout = jest.fn().mockImplementation((callback, delay) => {
+      global.setTimeout = jest.fn<(...args: any[]) => any>().mockImplementation((callback, delay) => {
         delays.push(delay as number);
         return originalSetTimeout(callback, 0);
-      });
+      }) as unknown as typeof global.setTimeout;
 
       try {
         const promise = withRetry(fn, {
@@ -158,21 +158,21 @@ describe('retry', () => {
     });
 
     it('throws non-retryable errors immediately', async () => {
-      const fn = jest.fn().mockRejectedValue(error400);
+      const fn = jest.fn<(...args: any[]) => any>().mockRejectedValue(error400);
 
       await expect(withRetry(fn)).rejects.toThrow('HTTP 400');
       expect(fn).toHaveBeenCalledTimes(1); // No retries
     });
 
     it('handles non-Error thrown values', async () => {
-      const fn = jest.fn().mockRejectedValue('string error');
+      const fn = jest.fn<(...args: any[]) => any>().mockRejectedValue('string error');
 
       await expect(withRetry(fn)).rejects.toBe('string error');
       expect(fn).toHaveBeenCalledTimes(1); // Not retryable (not an Error)
     });
 
     it('works with zero retries', async () => {
-      const fn = jest.fn().mockRejectedValue(error429Short);
+      const fn = jest.fn<(...args: any[]) => any>().mockRejectedValue(error429Short);
 
       await expect(withRetry(fn, { maxRetries: 0 })).rejects.toThrow('HTTP 429');
       expect(fn).toHaveBeenCalledTimes(1); // Only initial attempt
@@ -180,7 +180,7 @@ describe('retry', () => {
 
     it('uses custom isRetryable function', async () => {
       const customError = new Error('Custom transient error');
-      const fn = jest.fn()
+      const fn = jest.fn<(...args: any[]) => any>()
         .mockRejectedValueOnce(customError)
         .mockResolvedValue('success');
 
@@ -199,7 +199,7 @@ describe('retry', () => {
 
     it('uses custom logger', async () => {
       const mockLogger = { warn: jest.fn() };
-      const fn = jest.fn()
+      const fn = jest.fn<(...args: any[]) => any>()
         .mockRejectedValueOnce(error429Short)
         .mockResolvedValue('success');
 

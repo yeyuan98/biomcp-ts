@@ -24,7 +24,7 @@ async function createDbHarness(env: Record<string, string | undefined>) {
     registered,
     callTool: async (name: string, args: Record<string, unknown> = {}) => {
       const result = await client.callTool({ name, arguments: args });
-      const text = (result.content[0] as { text: string }).text;
+      const text = ((result as any).content[0] as { text: string }).text;
       return {
         isError: result.isError === true,
         text,

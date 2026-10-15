@@ -1,4 +1,4 @@
-.PHONY: help install build build-bundle typecheck typecheck-src typecheck-scripts test test-unit test-integration test-all test-coverage clean publish publish-alpha depmap-list depmap-build
+.PHONY: help install build build-bundle typecheck typecheck-src typecheck-tests typecheck-scripts test test-unit test-integration test-all test-coverage clean publish publish-alpha depmap-list depmap-build
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -12,10 +12,13 @@ build: ## Compile and bundle into dist/bundle.js
 
 build-bundle: build ## Alias for build
 
-typecheck: typecheck-src typecheck-scripts ## Type-check without emitting (src/ + scripts/)
+typecheck: typecheck-src typecheck-tests typecheck-scripts ## Type-check without emitting (src/ + tests/ + scripts/)
 
 typecheck-src: ## Type-check src/ only
-	npm run typecheck
+	npx tsc --noEmit
+
+typecheck-tests: ## Type-check the test suite (src/__tests__ via tsconfig.test.json)
+	npx tsc --noEmit -p tsconfig.test.json
 
 typecheck-scripts: ## Type-check scripts/ only
 	npx tsc --noEmit -p tsconfig.scripts.json

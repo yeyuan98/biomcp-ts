@@ -79,7 +79,7 @@ function okBinary(content: Buffer) {
 type RouteHandler = (url: URL) => unknown;
 
 function mockFetchRoutes(routes: Record<string, RouteHandler>): void {
-  global.fetch = jest.fn().mockImplementation((rawUrl: string) => {
+  global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((rawUrl: string) => {
     const url = new URL(rawUrl);
     for (const [prefix, handler] of Object.entries(routes)) {
       if (url.href.startsWith(prefix)) {

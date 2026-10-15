@@ -19,7 +19,7 @@ describe('gene_search', () => {
     expectGeneSearchResult(results);
     const hit = results.find((r: any) => r.symbol === 'BRCA1');
     expect(hit).toBeDefined();
-    expect(Number(hit.entrez_id)).toBe(672);
+    expect(Number(hit!.entrez_id)).toBe(672);
   }, 60000);
 
   it('returns TP53 with stable identity', async () => {
@@ -27,7 +27,7 @@ describe('gene_search', () => {
     expectGeneSearchResult(results);
     const hit = results.find((r: any) => r.symbol === 'TP53');
     expect(hit).toBeDefined();
-    expect(Number(hit.entrez_id)).toBe(7157);
+    expect(Number(hit!.entrez_id)).toBe(7157);
   }, 60000);
 
   it('returns results for EGFR', async () => {
@@ -35,7 +35,7 @@ describe('gene_search', () => {
     expectGeneSearchResult(results);
     const hit = results.find((r: any) => r.symbol === 'EGFR');
     expect(hit).toBeDefined();
-    expect(Number(hit.entrez_id)).toBe(1956);
+    expect(Number(hit!.entrez_id)).toBe(1956);
   }, 60000);
 
   it('returns empty for nonsense query', async () => {

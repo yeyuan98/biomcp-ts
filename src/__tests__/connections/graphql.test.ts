@@ -4,12 +4,12 @@ import { HttpConnectionError } from '../../connections/errors.js';
 import type { ConnectionOptions } from '../../connections/base.js';
 
 jest.mock('../../connections/rate-limiter.js', () => ({
-  TokenBucketRateLimiter: jest.fn().mockImplementation(() => ({
-    acquire: jest.fn().mockResolvedValue(undefined),
+  TokenBucketRateLimiter: jest.fn<(...args: any[]) => any>().mockImplementation(() => ({
+    acquire: jest.fn<(...args: any[]) => any>().mockResolvedValue(undefined),
   })),
   RateLimiterFactory: {
-    create: jest.fn().mockReturnValue({ acquire: jest.fn().mockResolvedValue(undefined) }),
-    getEffectiveRate: jest.fn().mockReturnValue(100),
+    create: jest.fn<(...args: any[]) => any>().mockReturnValue({ acquire: jest.fn<(...args: any[]) => any>().mockResolvedValue(undefined) }),
+    getEffectiveRate: jest.fn<(...args: any[]) => any>().mockReturnValue(100),
   },
 }));
 
@@ -33,7 +33,7 @@ describe('GraphQLConnection', () => {
   });
 
   test('request() sends POST with GraphQL query in body', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ data: {} }),
     }) as any;
@@ -58,7 +58,7 @@ describe('GraphQLConnection', () => {
       delivery: { type: 'bearer' as const },
     };
 
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ data: {} }),
     }) as any;
@@ -73,7 +73,7 @@ describe('GraphQLConnection', () => {
   });
 
   test('request() includes a timeout signal in fetch', async () => {
-    global.fetch = jest.fn().mockImplementation(async (_url: string, init: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(async (_url: string, init: any) => {
       expect(init.signal).toBeDefined();
       return { ok: true, json: () => Promise.resolve({ data: {} }) };
     }) as any;
@@ -86,7 +86,7 @@ describe('GraphQLConnection', () => {
   test('request() accepts external signal and combines with timeout', async () => {
     const externalCtrl = new AbortController();
 
-    global.fetch = jest.fn().mockImplementation(async (_url: string, init: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(async (_url: string, init: any) => {
       expect(init.signal).toBeDefined();
       return { ok: true, json: () => Promise.resolve({ data: {} }) };
     }) as any;
@@ -97,7 +97,7 @@ describe('GraphQLConnection', () => {
   });
 
   test('healthCheck() includes a timeout signal', async () => {
-    global.fetch = jest.fn().mockImplementation(async (_url: string, init: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(async (_url: string, init: any) => {
       expect(init.signal).toBeDefined();
       return { ok: false, status: 500 };
     }) as any;
@@ -108,7 +108,7 @@ describe('GraphQLConnection', () => {
   });
 
   test('healthCheck() returns true on HTTP 200 and on 400 (GraphQL endpoints reject bare POSTs with 400)', async () => {
-    global.fetch = jest.fn()
+    global.fetch = jest.fn<(...args: any[]) => any>()
       .mockResolvedValueOnce({ ok: true, status: 200 })
       .mockResolvedValueOnce({ ok: false, status: 400 }) as any;
 
@@ -119,7 +119,7 @@ describe('GraphQLConnection', () => {
   });
 
   test('healthCheck() returns false on non-400 HTTP errors and network errors', async () => {
-    global.fetch = jest.fn()
+    global.fetch = jest.fn<(...args: any[]) => any>()
       .mockResolvedValueOnce({ ok: false, status: 500 })
       .mockRejectedValueOnce(new Error('Network error')) as any;
 
@@ -130,7 +130,7 @@ describe('GraphQLConnection', () => {
   });
 
   test('request() passes through partial data despite errors[]', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         data: { gene: { name: 'BRCA1' }, otherRoot: { ok: true } },
@@ -146,7 +146,7 @@ describe('GraphQLConnection', () => {
   });
 
   test('request() throws typed error when errors[] accompany null data', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         data: null,
@@ -161,7 +161,7 @@ describe('GraphQLConnection', () => {
   });
 
   test('request() throws when rootField is null alongside errors[]', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         data: { gene: null, otherRoot: { ok: true } },
@@ -181,7 +181,7 @@ describe('GraphQLConnection', () => {
   });
 
   test('request() returns data unchanged when no errors[]', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ data: { gene: null } }),
     }) as any;
@@ -195,7 +195,7 @@ describe('GraphQLConnection', () => {
   describe('transport-level fetch rejections', () => {
     test('fetch rejection with a cause code wraps into a status-less retryable HttpConnectionError', async () => {
       const original = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
-      global.fetch = jest.fn().mockRejectedValue(original) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(original) as any;
 
       const conn = new GraphQLConnection(baseOptions);
       try {
@@ -213,7 +213,7 @@ describe('GraphQLConnection', () => {
     });
 
     test('fetch rejection without cause keeps the raw message verbatim (never "(undefined)")', async () => {
-      global.fetch = jest.fn().mockRejectedValue(new TypeError('fetch failed')) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(new TypeError('fetch failed')) as any;
 
       const conn = new GraphQLConnection(baseOptions);
       try {
@@ -235,7 +235,7 @@ describe('GraphQLConnection', () => {
       // and fetch-utils string-match the message). The wrap must leave it
       // exactly as-is.
       const timeoutError = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
-      global.fetch = jest.fn().mockRejectedValue(timeoutError) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(timeoutError) as any;
 
       const conn = new GraphQLConnection(baseOptions);
       try {
@@ -251,7 +251,7 @@ describe('GraphQLConnection', () => {
 
     test('caller-cancelled AbortError also passes through untouched', async () => {
       const abortError = new DOMException('The operation was aborted', 'AbortError');
-      global.fetch = jest.fn().mockRejectedValue(abortError) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(abortError) as any;
 
       const conn = new GraphQLConnection(baseOptions);
       await expect(conn.request('{ gene { name } }')).rejects.toBe(abortError);
@@ -259,7 +259,7 @@ describe('GraphQLConnection', () => {
 
     test('rejections without a network signature pass through raw (retry classification unchanged)', async () => {
       const original = new Error('PPR citation endpoints exploded');
-      global.fetch = jest.fn().mockRejectedValue(original) as any;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(original) as any;
 
       const conn = new GraphQLConnection({ ...baseOptions, retry: { attempts: 3, backoffMs: 1 } });
       await expect(conn.request('{ gene { name } }')).rejects.toBe(original);
@@ -267,7 +267,7 @@ describe('GraphQLConnection', () => {
     });
 
     test('transport rejection inside a retried source still retries and then succeeds', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockRejectedValueOnce(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }))
         .mockRejectedValueOnce(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ETIMEDOUT' } }))
         .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: { gene: { name: 'BRCA1' } } }) }) as any;
@@ -280,7 +280,7 @@ describe('GraphQLConnection', () => {
     });
 
     test('all-attempt transport rejections surface the wrapped error after exhausting retries', async () => {
-      global.fetch = jest.fn().mockRejectedValue(
+      global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(
         Object.assign(new TypeError('fetch failed'), { cause: { code: 'ETIMEDOUT' } })
       ) as any;
 
@@ -297,7 +297,7 @@ describe('GraphQLConnection', () => {
     };
 
     test('request() retries a retryable failure (503) and succeeds', async () => {
-      global.fetch = jest.fn()
+      global.fetch = jest.fn<(...args: any[]) => any>()
         .mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' })
         .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: { gene: { name: 'BRCA1' } } }) }) as any;
 
@@ -309,7 +309,7 @@ describe('GraphQLConnection', () => {
     });
 
     test('request() does not retry a non-retryable failure (400)', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: false,
         status: 400,
         statusText: 'Bad Request',
@@ -321,7 +321,7 @@ describe('GraphQLConnection', () => {
     });
 
     test('source without retry config makes a single attempt', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: false,
         status: 503,
         statusText: 'Service Unavailable',

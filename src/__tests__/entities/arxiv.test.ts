@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { articleSearch, searchArxiv, parseArxivAtomXml } from '../../entities/article.js';
+import { articleSearch, searchArxiv, parseArxivAtomXml } from '../../entities/article/index.js';
 import { parseMockUrl } from '../helpers/mock-url.js';
 import { connectionManager } from '../../connections/manager.js';
 
@@ -10,12 +10,12 @@ import { connectionManager } from '../../connections/manager.js';
 // fault-injection test intentionally sleeps through ONE real retry backoff
 // (~3.5 s) so the registry retry policy itself is exercised.
 jest.mock('../../connections/rate-limiter.js', () => ({
-  TokenBucketRateLimiter: jest.fn().mockImplementation(() => ({
-    acquire: jest.fn().mockResolvedValue(undefined),
+  TokenBucketRateLimiter: jest.fn<(...args: any[]) => any>().mockImplementation(() => ({
+    acquire: jest.fn<(...args: any[]) => any>().mockResolvedValue(undefined),
   })),
   RateLimiterFactory: {
-    create: jest.fn().mockReturnValue({ acquire: jest.fn().mockResolvedValue(undefined) }),
-    getEffectiveRate: jest.fn().mockReturnValue(3000),
+    create: jest.fn<(...args: any[]) => any>().mockReturnValue({ acquire: jest.fn<(...args: any[]) => any>().mockResolvedValue(undefined) }),
+    getEffectiveRate: jest.fn<(...args: any[]) => any>().mockReturnValue(3000),
   },
 }));
 
@@ -271,7 +271,7 @@ describe('searchArxiv', () => {
   });
 
   test('builds query URL with sanitized terms (quotes/parens stripped, field prefixes neutralized)', async () => {
-    global.fetch = jest.fn().mockResolvedValue(atomResponse(VERSIONED_ID_XML)) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(atomResponse(VERSIONED_ID_XML)) as any;
 
     const result = await articleSearch('CRISPR "base (editing)" ti:cas9 AU:Smith', { source: 'arxiv' });
 
@@ -291,7 +291,7 @@ describe('searchArxiv', () => {
   });
 
   test('appends quoted submittedDate range with open bounds defaulted (r08 syntax)', async () => {
-    global.fetch = jest.fn().mockResolvedValue(atomResponse(EMPTY_FEED_XML)) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(atomResponse(EMPTY_FEED_XML)) as any;
 
     await articleSearch('quantum', { source: 'arxiv', dateRange: '2020-01-01/' });
     await articleSearch('quantum', { source: 'arxiv', dateRange: '/2020-12-31' });
@@ -304,7 +304,7 @@ describe('searchArxiv', () => {
   });
 
   test('both-bounds dateRange sends submittedDate:"A TO B" with no sentinel bounds', async () => {
-    global.fetch = jest.fn().mockResolvedValue(atomResponse(EMPTY_FEED_XML)) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(atomResponse(EMPTY_FEED_XML)) as any;
 
     await articleSearch('quantum', { source: 'arxiv', dateRange: '2020-01-01/2020-12-31' });
 
@@ -316,7 +316,7 @@ describe('searchArxiv', () => {
   });
 
   test('clamps max_results at 50, passes offset as start, and clamps start at the 30000 deep-paging ceiling', async () => {
-    global.fetch = jest.fn().mockResolvedValue(atomResponse(EMPTY_FEED_XML)) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(atomResponse(EMPTY_FEED_XML)) as any;
 
     await searchArxiv('electron', 100, 5);
 
@@ -338,14 +338,14 @@ describe('searchArxiv', () => {
   });
 
   test('empty feed resolves to [] (not an error result)', async () => {
-    global.fetch = jest.fn().mockResolvedValue(atomResponse(EMPTY_FEED_XML)) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(atomResponse(EMPTY_FEED_XML)) as any;
 
     const result = await searchArxiv('xqzjwqvxnonexistentterm', 10, 0);
     expect(result).toEqual([]);
   });
 
   test('HTML body surfaces as _error result (transform throw caught by error contract)', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       headers: new Headers({ 'content-type': 'text/html' }),
       text: () => Promise.resolve(HTML_PAGE),
@@ -358,7 +358,7 @@ describe('searchArxiv', () => {
   });
 
   test('HTTP 403: fetch called exactly once (never retried) and _error names the per-IP block, not an API key', async () => {
-    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 403, statusText: 'Forbidden' }) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({ ok: false, status: 403, statusText: 'Forbidden' }) as any;
 
     const result = await searchArxiv('electron', 10, 0);
 
@@ -376,7 +376,7 @@ describe('searchArxiv', () => {
     // NB: this test intentionally sleeps through the real ~3.5 s retry
     // backoff (registry retry: { attempts: 2, backoffMs: 3500 }) — only the
     // rate limiter is mocked (see file header).
-    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 429, statusText: 'Too Many Requests' }) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({ ok: false, status: 429, statusText: 'Too Many Requests' }) as any;
 
     const result = await searchArxiv('electron', 10, 0);
 
@@ -402,7 +402,7 @@ describe('searchArxiv', () => {
     // registry retry policy fires first (attempts: 2 → exactly 2 fetches);
     // NB: this test sleeps through one real ~3.5 s retry backoff like the
     // 429 test above (only the rate limiter is mocked — see file header).
-    global.fetch = jest.fn().mockRejectedValue(new TypeError('fetch failed')) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(new TypeError('fetch failed')) as any;
 
     const result = await searchArxiv('electron', 10, 0);
 
@@ -417,7 +417,7 @@ describe('searchArxiv', () => {
   test('truncated mid-entry XML fails parsing and surfaces as an _error row', async () => {
     // Passes the feed sniff (<?xml + <feed>), then the parser hits the
     // unterminated tag mid-entry and throws — wrapped by the shared catch.
-    global.fetch = jest.fn().mockResolvedValue(atomResponse(TRUNCATED_MID_ENTRY_XML)) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(atomResponse(TRUNCATED_MID_ENTRY_XML)) as any;
 
     const result = await searchArxiv('electron', 10, 0);
 
@@ -456,5 +456,4 @@ describe('searchArxiv', () => {
     expect(result).toHaveLength(2);
     expect(result.map(r => r.pmid)).toEqual(['41721000', '41721001']);
   });
-});
 });

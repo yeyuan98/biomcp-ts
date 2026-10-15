@@ -17,7 +17,7 @@ describe('disease', () => {
   });
 
   test('diseaseSearch() calls connection with correct mydisease endpoint', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [{ name: 'Breast Cancer', diseaseid: 'C0006142' }] }),
     }) as any;
@@ -32,7 +32,7 @@ describe('disease', () => {
   });
 
   test('diseaseSearch() returns transformed results', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         hits: [{
@@ -52,7 +52,7 @@ describe('disease', () => {
   });
 
   test('diseaseGet() calls connection with correct endpoint', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         _id: 'MONDO:0007254',
@@ -70,7 +70,7 @@ describe('disease', () => {
   });
 
   test('diseaseGet() retries the alternate curie form when the primary lookup fails', async () => {
-    global.fetch = jest.fn()
+    global.fetch = jest.fn<(...args: any[]) => any>()
       .mockResolvedValueOnce({
         ok: false,
         status: 404,
@@ -94,7 +94,7 @@ describe('disease', () => {
   });
 
   test('diseaseGet() throws a descriptive error when no ID form resolves', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: false,
       status: 404,
     }) as any;
@@ -147,7 +147,7 @@ describe('diseaseGet gene_associations section (DisGeNET)', () => {
   });
 
   test('queries gda/summary with normalized disease code and raw Authorization key', async () => {
-    global.fetch = jest.fn().mockImplementation((input: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((input: any) => {
       const url = typeof input === 'string' ? input : input.url;
       if (parseMockUrl(url).hostname === 'mydisease.info') {
         return Promise.resolve({
@@ -208,7 +208,7 @@ describe('diseaseGet gene_associations section (DisGeNET)', () => {
   });
 
   test('normalizes colon-form MONDO ids to DisGeNET underscore form', async () => {
-    global.fetch = jest.fn().mockImplementation((input: any) => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((input: any) => {
       const url = typeof input === 'string' ? input : input.url;
       if (parseMockUrl(url).hostname === 'mydisease.info') {
         return Promise.resolve({

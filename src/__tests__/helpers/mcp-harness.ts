@@ -58,7 +58,7 @@ export interface CallToolOptions {
 
 export type ToolClient = {
   readonly client: Client;
-  callTool: (name: string, args?: Record<string, unknown>, options?: CallToolOptions) => Promise<unknown>;
+  callTool: (name: string, args?: Record<string, unknown>, options?: CallToolOptions) => Promise<any>;
   /** Every server→client message observed since connect (copy). */
   capturedMessages: () => CapturedMessage[];
   /** Only notifications/progress params, in arrival order. */
@@ -118,7 +118,7 @@ export async function connectToolClient(server: McpServer): Promise<ToolClient> 
 }
 
 export type McpTestHarness = {
-  callTool: (name: string, args?: Record<string, unknown>, options?: CallToolOptions) => Promise<unknown>;
+  callTool: (name: string, args?: Record<string, unknown>, options?: CallToolOptions) => Promise<any>;
   listTools: () => Promise<unknown>;
   capturedMessages: () => CapturedMessage[];
   progressNotifications: () => ProgressCapture[];
