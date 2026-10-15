@@ -88,13 +88,20 @@ export function worldwideCoverageNote(): string | undefined {
 
 /**
  * Order federated results by relevance when any backend supplied scores:
- * scored results first (score desc, stable), unscored backends after.
+ * scored results first (score desc), unscored backends after. Equal scores
+ * tie-break on publication_number so the page is deterministic — backend
+ * relevance scores (e.g. ppubs/Solr) drift slightly per request, and
+ * without a tie-break near-equal documents swap places between calls.
  */
 export function orderFederatedByRelevance(patents: PatentSearchResult[]): PatentSearchResult[] {
   if (!patents.some(p => typeof p.relevance_score === 'number')) return patents;
   const scored = patents.filter(p => typeof p.relevance_score === 'number');
   const unscored = patents.filter(p => typeof p.relevance_score !== 'number');
-  scored.sort((a, b) => (b.relevance_score as number) - (a.relevance_score as number));
+  scored.sort(
+    (a, b) =>
+      (b.relevance_score as number) - (a.relevance_score as number) ||
+      a.publication_number.localeCompare(b.publication_number),
+  );
   return [...scored, ...unscored];
 }
 
@@ -126,12 +133,13 @@ async function runBackend(
 /**
  * Federated patent search. Without an explicit `source`, queries the
  * auto-selected worldwide + US (ppubs) backends concurrently and deduplicates
- * by publication number. A failed backend appends a `{ _error }` marker
- * element instead of failing the whole search; when the default ppubs backend
- * fails hard and a USPTO ODP key exists, one budget-guarded fallback retry
- * runs on ODP and its results are tagged with a `{ _note }` provenance
- * marker. Marker elements (_error/_note/_hint) never count toward `limit`.
- * A clean 0-hit search appends a `{ _hint }` with refinement guidance.
+ * by publication number. Per-backend failures and degradation notes are
+ * reported OUT OF BAND in the response envelope (`errors` / `warnings`) —
+ * never as marker items inside `patents`, so `patents.length` always
+ * respects `limit` and every element is a real patent record. When the
+ * default ppubs backend fails hard and a USPTO ODP key exists, one
+ * budget-guarded fallback retry runs on ODP and the provenance note moves
+ * into `warnings`.
  */
 export async function patentSearch(
   query: string,
@@ -146,8 +154,9 @@ export async function patentSearch(
 
   const collected: PatentSearchResult[] = [];
   const total_hits: PatentSearchResponse['total_hits'] = {};
-  const errors: Array<{ source: PatentSource; message: string }> = [];
-  const notes: Array<{ source: PatentSource; message: string }> = [];
+  const errors: PatentSearchResponse['errors'] = [];
+  const warnings: string[] = [];
+  let fallbackNote: { source: PatentSource; message: string } | undefined;
 
   const record = (source: PatentSource, value: { patents: PatentSearchResult[]; total?: number }) => {
     collected.push(...value.patents);
@@ -176,46 +185,42 @@ export async function patentSearch(
       try {
         const fallback = await runBackend('uspto_odp', query, options);
         record('uspto_odp', fallback);
-        notes.push({
+        fallbackNote = {
           source: 'ppubs',
           message: `Search on source 'ppubs' failed: ${message}`,
-        });
+        };
         continue;
       } catch {
-        // fall through to the error marker below
+        // fall through to the error below
       }
     }
-    errors.push({ source, message });
+    errors.push({ source, message: `Search on source '${source}' failed: ${message}` });
   }
 
   const limit = options.limit ?? 10;
   const ordered = orderFederatedByRelevance(dedupPatents(collected));
   const patents: PatentSearchResult[] = ordered.slice(0, limit);
 
-  for (const { source, message } of notes) {
+  if (fallbackNote) {
     const visible = patents.some(
       p => p.source === 'uspto_odp' || p.also_found_in?.includes('uspto_odp'),
     );
     const suffix = visible
       ? 'showing uspto_odp fallback results.'
       : 'uspto_odp fallback results did not fit on this page (check total_hits).';
-    patents.push({ publication_number: '', _note: `${message}; ${suffix}`, source });
-  }
-  for (const { source, message } of errors) {
-    patents.push({ publication_number: '', _error: `Search on source '${source}' failed: ${message}`, source });
+    warnings.push(`${fallbackNote.message}; ${suffix}`);
   }
   // Auto mode with no worldwide backend left (OPS backoff + GP breaker):
   // say so once instead of silently returning US-only results.
   if (!options.source) {
     const coverageNote = worldwideCoverageNote();
     if (coverageNote && !backends.includes('ops') && !backends.includes('google_patents')) {
-      patents.push({ publication_number: '', _note: coverageNote, source: 'ppubs' });
+      warnings.push(coverageNote);
     }
   }
-  if (collected.length === 0 && errors.length === 0 && notes.length === 0) {
+  if (collected.length === 0 && errors.length === 0 && !fallbackNote) {
     const someMatches = Object.values(total_hits).some(t => (t ?? 0) > 0);
-    const hintSource = backends.includes('ppubs') ? 'ppubs' : backends[0];
-    patents.push({ publication_number: '', _hint: someMatches ? WINDOW_HINT : EMPTY_HINT, source: hintSource });
+    warnings.push(someMatches ? WINDOW_HINT : EMPTY_HINT);
   }
 
   const total_hits_basis: PatentSearchResponse['total_hits_basis'] = {};
@@ -230,14 +235,13 @@ export async function patentSearch(
   // fallback loop so a slow main search (or the shared ppubs rate limiter
   // draining under batch concurrency) shrinks — or skips — mining.
   const response: PatentSearchResponse = { patents, total_hits };
+  if (warnings.length > 0) response.warnings = warnings;
+  if (errors.length > 0) response.errors = errors;
   if (total_hits_basis && Object.keys(total_hits_basis).length > 0) {
     response.total_hits_basis = total_hits_basis;
   }
   if (options.seminal ?? true) {
-    const hasRealResults = patents.some(
-      p => p.publication_number && !p._error && !p._note && !p._hint,
-    );
-    if (hasRealResults) {
+    if (patents.length > 0) {
       let seminal_note: string | undefined;
       const elapsed = Date.now() - startedAt;
       const remaining = PATENT_SEARCH_TOOL_BUDGET_MS - elapsed - MINING_SAFETY_MARGIN_MS;

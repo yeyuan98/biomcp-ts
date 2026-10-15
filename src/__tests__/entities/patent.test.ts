@@ -300,8 +300,8 @@ describe('seminal prior-art mining', () => {
 
     const { patentSearch } = await import('../../entities/patent/search/index.js');
     const response = await advanceUntilSettled(patentSearch('"mRNA display"', { limit: 5 }));
-    // main page intact (2 real results + gp _error marker)
-    expect(response.patents.filter(p => !p._error)).toHaveLength(2);
+    // main page intact (2 real results; the failed gp backend rides in errors)
+    expect(response.patents).toHaveLength(2);
     // one extra ppubs search for the mining pool
     expect(searchCalls.count).toBe(2);
     // co-citation entries: shared US ref + the Szostak PCT in all raw formats
@@ -354,7 +354,7 @@ describe('seminal prior-art mining', () => {
     }) as any;
     const { patentSearch } = await import('../../entities/patent/search/index.js');
     const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
-    expect(response.patents.filter(p => !p._error)).toHaveLength(1);
+    expect(response.patents).toHaveLength(1);
     expect(response.seminal_prior_art).toEqual([]);
     expect(response.seminal_note).toContain('too few granted');
     expect(response.mined_count).toBe(0);
@@ -403,7 +403,7 @@ describe('seminal prior-art mining', () => {
     }) as any;
     const { patentSearch } = await import('../../entities/patent/search/index.js');
     const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
-    expect(response.patents.filter(p => !p._error)).toHaveLength(3);
+    expect(response.patents).toHaveLength(3);
     expect(response.seminal_prior_art).toEqual([]);
     expect(response.seminal_note).toContain('too few granted documents yielded reference data');
   });
@@ -451,7 +451,7 @@ describe('seminal prior-art mining', () => {
     const { patentSearch } = await import('../../entities/patent/search/index.js');
     const response = await advanceUntilSettled(patentSearch('"mRNA display"', { limit: 5 }));
     // main page intact; the note carries the underlying status, not a constant string
-    expect(response.patents.filter(p => !p._error)).toHaveLength(2);
+    expect(response.patents).toHaveLength(2);
     expect(response.seminal_note).toContain('skipped');
     expect(response.seminal_note).toContain('PPUBS mining-pool search failed: HTTP 500');
   });
@@ -472,7 +472,7 @@ describe('seminal prior-art mining', () => {
     }) as any;
     const { patentSearch } = await import('../../entities/patent/search/index.js');
     const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
-    expect(response.patents.filter(p => !p._error)).toHaveLength(1);
+    expect(response.patents).toHaveLength(1);
     expect(response.seminal_note).toContain('skipped');
     expect(response.seminal_note).toContain('deadline exceeded after 30s');
     expect(response.seminal_note).not.toContain('mining source unavailable');
@@ -501,7 +501,7 @@ describe('seminal prior-art mining', () => {
     const { patentSearch } = await import('../../entities/patent/search/index.js');
     const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
     expect(searchCalls.count).toBe(1); // main search only — no pool call burned
-    expect(response.patents.filter(p => !p._error)).toHaveLength(1);
+    expect(response.patents).toHaveLength(1);
     expect(response.seminal_prior_art).toBeUndefined();
     expect(response.mined_count).toBeUndefined();
     expect(response.seminal_note).toContain('time budget exhausted');
@@ -786,8 +786,8 @@ describe('patent search federation', () => {
 
     const { patentSearch } = await import('../../entities/patent/search/index.js');
     const response = await advanceUntilSettled(patentSearch('crispr', { seminal: false }));
-    expect(response.patents.some(p => p._note?.includes('worldwide coverage unavailable'))).toBe(true);
-    expect(response.patents.some(p => p._error?.includes("'google_patents' failed"))).toBe(false); // breaker short-circuited, no burned call
+    expect(response.warnings?.some(w => w.includes('worldwide coverage unavailable'))).toBe(true);
+    expect(response.errors?.some(e => e.message.includes("'google_patents' failed"))).toBe(false); // breaker short-circuited, no burned call
     connectionManager.closeAll();
   });
 
@@ -821,7 +821,7 @@ describe('patent search federation', () => {
     expect(selectSearchBackends({ source: 'uspto_odp' })).toEqual(['uspto_odp']);
   });
 
-  test('patentSearch falls back ppubs→odp on hard failure with _note provenance', async () => {
+  test('patentSearch falls back ppubs→odp on hard failure with a warnings provenance note', async () => {
     process.env.USPTO_API_KEY = 'u';
     const gp = await import('../../entities/patent/search/google-patents.js');
     gp.resetGooglePatentsBreaker();
@@ -854,8 +854,8 @@ describe('patent search federation', () => {
     const { patentSearch } = await import('../../entities/patent/search/index.js');
     const response = await advanceUntilSettled(patentSearch('crispr compositions', {}));
     expect(response.patents.some(p => p.publication_number === 'US11027025')).toBe(true);
-    expect(response.patents.some(p => p._note && p._note.includes('ppubs') && p._note.includes('uspto_odp'))).toBe(true);
-    expect(response.patents.some(p => p._error && p._error.includes('google_patents'))).toBe(true);
+    expect(response.warnings?.some(w => w.includes('ppubs') && w.includes('uspto_odp'))).toBe(true);
+    expect(response.errors?.some(e => e.source === 'google_patents' && e.message.includes('google_patents'))).toBe(true);
     expect(response.total_hits?.uspto_odp).toBe(1);
     expect(response.total_hits_basis?.uspto_odp).toBeDefined();
     expect(response.total_hits_basis?.ppubs).toBeUndefined();
@@ -863,17 +863,17 @@ describe('patent search federation', () => {
     (await import('../../connections/manager.js')).connectionManager.closeAll();
   });
 
-  test('patentSearch: no odp fallback without key; _error surfaces for ppubs', async () => {
+  test('patentSearch: no odp fallback without key; per-source failures surface in errors', async () => {
     const gp = await import('../../entities/patent/search/google-patents.js');
     gp.resetGooglePatentsBreaker();
     global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(new HttpConnectionError('HTTP 503: Service Unavailable', 503)) as any;
 
     const { patentSearch } = await import('../../entities/patent/search/index.js');
     const response = await advanceUntilSettled(patentSearch('crispr', {}));
-    const markers = response.patents.filter(p => p._error || p._note || p._hint);
-    expect(markers.some(p => p._error?.includes("'ppubs' failed"))).toBe(true);
-    expect(markers.some(p => p._error?.includes("'google_patents' failed"))).toBe(true);
-    expect(markers.some(p => p._note)).toBe(false);
+    expect(response.patents).toEqual([]); // failures never ride inside the results array
+    expect(response.errors?.some(e => e.message.includes("'ppubs' failed"))).toBe(true);
+    expect(response.errors?.some(e => e.message.includes("'google_patents' failed"))).toBe(true);
+    expect(response.warnings).toBeUndefined();
     // no USPTO ODP endpoint hit (no key configured → no fallback attempt)
     const calledUrls = (global.fetch as any).mock.calls.map((c: any[]) => String(c[0]));
     expect(calledUrls.some((u: any) => parseMockUrl(u).hostname === 'api.uspto.gov')).toBe(false);
@@ -894,8 +894,8 @@ describe('patent search federation', () => {
 
     const { patentSearch } = await import('../../entities/patent/search/index.js');
     const response = await advanceUntilSettled(patentSearch('crispr', {}));
-    expect(response.patents.some(p => p._error?.includes("'ppubs' failed"))).toBe(true);
-    expect(response.patents.some(p => p._note)).toBe(false);
+    expect(response.errors?.some(e => e.message.includes("'ppubs' failed"))).toBe(true);
+    expect(response.warnings).toBeUndefined();
     const calledUrls = (global.fetch as any).mock.calls.map((c: any[]) => String(c[0]));
     expect(calledUrls.some((u: any) => parseMockUrl(u).hostname === 'api.uspto.gov')).toBe(false);
     nowSpy.mockRestore();
@@ -903,7 +903,7 @@ describe('patent search federation', () => {
     (await import('../../connections/manager.js')).connectionManager.closeAll();
   });
 
-  test('patentSearch: clean 0-hit search appends _hint guidance', async () => {
+  test('patentSearch: clean 0-hit search returns empty patents + guidance warning', async () => {
     const gp = await import('../../entities/patent/search/google-patents.js');
     gp.resetGooglePatentsBreaker();
     const odpSearch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
@@ -939,9 +939,8 @@ describe('patent search federation', () => {
 
     const { patentSearch } = await import('../../entities/patent/search/index.js');
     const response = await advanceUntilSettled(patentSearch('xyzzyplugh-nonexistent-concept', {}));
-    expect(response.patents).toHaveLength(1);
-    expect(response.patents[0]._hint).toContain('quoting an exact concept phrase');
-    expect(response.patents[0].source).toBe('ppubs');
+    expect(response.patents).toEqual([]); // the hint is a warning, never a results item
+    expect(response.warnings?.some(w => w.includes('quoting an exact concept phrase'))).toBe(true);
     gp.resetGooglePatentsBreaker();
     (await import('../../connections/manager.js')).connectionManager.closeAll();
   });
@@ -979,8 +978,8 @@ describe('patent search federation', () => {
 
     const { patentSearch } = await import('../../entities/patent/search/index.js');
     const response = await advanceUntilSettled(patentSearch('mRNA display', { offset: 100 }));
-    expect(response.patents).toHaveLength(1);
-    expect(response.patents[0]._hint).toContain('bounded relevance window');
+    expect(response.patents).toEqual([]); // the hint is a warning, never a results item
+    expect(response.warnings?.some(w => w.includes('bounded relevance window'))).toBe(true);
     expect(response.total_hits?.ppubs).toBe(88262);
     gp.resetGooglePatentsBreaker();
     (await import('../../connections/manager.js')).connectionManager.closeAll();
@@ -999,6 +998,70 @@ describe('patent search federation', () => {
     expect(ordered.map(p => p.publication_number)).toEqual(['US2', 'US3', 'US1', 'EP1', 'EP2']);
     // No scores anywhere → order untouched
     expect(orderFederatedByRelevance([unscoredA, unscoredB])).toEqual([unscoredA, unscoredB]);
+  });
+
+  test('orderFederatedByRelevance: equal scores tie-break on publication_number (deterministic pages)', async () => {
+    const { orderFederatedByRelevance } = await import('../../entities/patent/search/index.js');
+    // Backend relevance scores (Solr) drift per request; without a
+    // tie-break near-equal documents swap places between identical calls.
+    const rows = [
+      { publication_number: 'US1', relevance_score: 7, source: 'ppubs' as const },
+      { publication_number: 'US2', relevance_score: 7, source: 'ppubs' as const },
+      { publication_number: 'US3', relevance_score: 7, source: 'ppubs' as const },
+      { publication_number: 'US0', relevance_score: 9, source: 'ppubs' as const },
+    ];
+    const forward = orderFederatedByRelevance([...rows]);
+    const reversed = orderFederatedByRelevance([...rows].reverse());
+    expect(forward.map(p => p.publication_number)).toEqual(['US0', 'US1', 'US2', 'US3']);
+    expect(reversed.map(p => p.publication_number)).toEqual(['US0', 'US1', 'US2', 'US3']);
+  });
+
+  test('patentSearch: limit=5 returns EXACTLY 5 items, no marker keys, failure reported out of band (#86)', async () => {
+    const gp = await import('../../entities/patent/search/google-patents.js');
+    gp.resetGooglePatentsBreaker();
+    // ppubs delivers 20 hits; the worldwide google_patents leg fails hard.
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
+      const u = String(url);
+      if (u.includes('/api/users/me/session')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'x-access-token': 'tok-1', 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ userCase: { caseId: 1 } })),
+        });
+      }
+      if (u.includes('/api/searches/searchWithBeFamily')) {
+        const patents = Array.from({ length: 20 }, (_, i) => ({
+          guid: `US-${1100000 + i}-B2`,
+          type: 'USPAT',
+          publicationReferenceDocumentNumber: String(1100000 + i),
+          inventionTitle: `Crispr compositions ${i}`,
+        }));
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ patents, numberOfFamilies: 20 })),
+        });
+      }
+      return Promise.reject(new HttpConnectionError('HTTP 503: Service Unavailable', 503));
+    }) as any;
+
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await advanceUntilSettled(patentSearch('crispr compositions', { limit: 5, seminal: false }));
+    // EXACTLY limit — a failed backend must never pad the page with markers
+    expect(response.patents).toHaveLength(5);
+    for (const p of response.patents) {
+      expect(p).not.toHaveProperty('_note');
+      expect(p).not.toHaveProperty('_error');
+      expect(p).not.toHaveProperty('_hint');
+      expect(p.publication_number).toMatch(/^US\d/);
+    }
+    // The failed worldwide backend is reported out of band, honest wording kept
+    expect(response.errors?.some(e => e.source === 'google_patents' && e.message.includes("Search on source 'google_patents' failed"))).toBe(true);
+    expect(response.warnings).toBeUndefined();
+    gp.resetGooglePatentsBreaker();
+    (await import('../../connections/manager.js')).connectionManager.closeAll();
   });
 
   test('google patents breaker opens on 503 and short-circuits subsequent calls', async () => {

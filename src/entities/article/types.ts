@@ -79,7 +79,38 @@ export interface Article {
   version?: number;
   /** URL of the full-text JATS XML on www.biorxiv.org (not fetched; served as a link) */
   jatsxml_url?: string;
+  /** LitSense rows only: the matched sentence (the API's `text` field). */
+  sentence?: string;
+  /** LitSense rows only: the section the matched sentence came from. */
+  section?: string;
+  /**
+   * INTERNAL backend-failure contract: backends return `[{ _error: ... }]`
+   * rows, which the federation layer (dedup) drops and the searchArticles
+   * boundary converts into out-of-band envelope errors. Never surfaces in
+   * tool output.
+   */
   _error?: string;
+}
+
+/**
+ * Out-of-band per-source failure in the article search response envelope.
+ * Messages keep the honest wording of the internal `_error` rows verbatim.
+ */
+export interface ArticleSearchError {
+  source: string;
+  message: string;
+  retryable?: boolean;
+}
+
+/**
+ * Clean response envelope for article search: results NEVER contain
+ * `_error`/marker rows — per-source failures and degradation notes ride
+ * in `errors`/`warnings` instead (issues #87/#78).
+ */
+export interface ArticleSearchResponse {
+  results: Article[];
+  warnings?: string[];
+  errors?: ArticleSearchError[];
 }
 
 export interface ArticleGetOptions {

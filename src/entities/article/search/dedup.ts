@@ -1,6 +1,22 @@
 import type { Article } from '../types.js';
 
-const NO_FILL_KEYS = new Set(['source', 'score', '_error']);
+/**
+ * LitSense relevance floor. LitSense is a sentence-similarity API that
+ * ALWAYS answers — for nonsense/off-topic queries it still returns its
+ * nearest sentences, at live-measured similarity scores of ~0.39-0.55
+ * (noise floor), while meaningful matches score > 0.6 (live-verified:
+ * topical BRCA1 queries return 1.0, a pure-gibberish query returned
+ * 0.516). Rows below this floor are dropped so federated ranking never
+ * seats gibberish-adjacent sentences (issue #78).
+ */
+export const LITSENSE_RELEVANCE_FLOOR = 0.6;
+
+/** True when a LitSense row clears the relevance floor (scoreless rows pass). */
+export function isAboveLitsenseFloor(article: Article): boolean {
+  return article.source !== 'litsense' || typeof article.score !== 'number' || article.score >= LITSENSE_RELEVANCE_FLOOR;
+}
+
+const NO_FILL_KEYS = new Set(['source', 'score', 'sentence', 'section', '_error']);
 
 function isMissing(value: unknown): boolean {
   return value === undefined || value === null || value === '';
@@ -27,6 +43,7 @@ export function deduplicateAndRank(articles: Article[], limit: number): Article[
 
   for (const article of articles) {
     if (article._error) continue;
+    if (!isAboveLitsenseFloor(article)) continue;
     const key = dedupKey(article);
     if (!key) continue;
     const base = seen.get(key);

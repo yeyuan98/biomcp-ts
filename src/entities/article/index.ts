@@ -1,5 +1,5 @@
-export type { ArticleSearchOptions, Article, ArticleResult, ArticleGetOptions, PreprintFunder, PreprintVersionInfo, PreprintCorrespondingAuthor, PreprintDetails, PreprintPublishedVersion } from './types.js';
-export { articleSearch, parseDateRange } from './search/index.js';
+export type { ArticleSearchOptions, ArticleSearchError, ArticleSearchResponse, Article, ArticleResult, ArticleGetOptions, PreprintFunder, PreprintVersionInfo, PreprintCorrespondingAuthor, PreprintDetails, PreprintPublishedVersion } from './types.js';
+export { searchArticles, articleSearch, parseDateRange } from './search/index.js';
 export { articleGet } from './detail/index.js';
 export { deduplicateAndRank } from './search/dedup.js';
 export { parseArticleId, isPreprintDoi } from './detail/id-resolution.js';

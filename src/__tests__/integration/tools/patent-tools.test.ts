@@ -17,11 +17,18 @@ afterAll(async () => {
 });
 
 describe('patent_search', () => {
-  it('returns patents from auto-selected backends', async () => {
+  it('returns patents from auto-selected backends; limit=5 → EXACTLY 5 items, no marker keys (#86)', async () => {
     const response = await retryOnRateLimit(() => harness.callTool('patent_search', { query: 'crispr cas9', limit: 5, seminal: false }));
     expectPatentSearchResult(response);
-    const real = response.patents.filter((p: Record<string, unknown>) => !(p as any)._error);
-    expect(real.length).toBeGreaterThan(0);
+    // Core #86 invariant: the results array contains only real patent
+    // records and respects limit exactly — failures/notes ride in
+    // warnings/errors, never as extra items.
+    expect(response.patents).toHaveLength(5);
+    for (const p of response.patents as Array<Record<string, unknown>>) {
+      expect(p).not.toHaveProperty('_note');
+      expect(p).not.toHaveProperty('_error');
+      expect(p).not.toHaveProperty('_hint');
+    }
   }, 120000);
 
   it('returns US results via keyless ppubs source', async () => {
@@ -52,7 +59,7 @@ describe('patent_search', () => {
     const response = await retryOnRateLimit(() =>
       harness.callTool('patent_search', { query: '"mRNA display"', source: 'ppubs', limit: 5 }));
     expectPatentSearchResult(response);
-    const real = response.patents.filter((p: Record<string, unknown>) => !p._error && !p._hint);
+    const real = response.patents;
     expect(real.length).toBeGreaterThan(0);
     // On-topic hit in the top 5: the mRNA display technique concerns
     // selecting binding proteins/peptides from mRNA libraries (tolerant matcher).
@@ -69,7 +76,6 @@ describe('patent_search', () => {
       harness.callTool('patent_search', { query: 'crispr cas9', source: 'ppubs', sort_by: 'recency', limit: 3, seminal: false }));
     expectPatentSearchResult(response);
     const dates = response.patents
-      .filter((p: Record<string, unknown>) => !p._error && !p._hint)
       .map((p: Record<string, unknown>) => String(p.publication_date || ''));
     expect(dates.length).toBeGreaterThan(0);
     const sorted = [...dates].sort().reverse();
@@ -190,22 +196,26 @@ describe('patent_search resilience (live)', () => {
       process.env.EPO_OPS_CONSUMER_SECRET = 'placeholder-secret';
       const first = await retryOnRateLimit(() =>
         harness.callTool('patent_search', { query: 'crispr', limit: 3, seminal: false }));
-      // Auth failure surfaces as _error on the first search…
-      expect(first.patents.some((p: Record<string, unknown>) =>
-        String((p as any)._error || '').includes("'ops' failed"))).toBe(true);
+      // Auth failure surfaces in the envelope errors on the first search…
+      expect((first.errors as Array<{ source: string; message: string }> | undefined)
+        ?.some(e => e.source === 'ops' && e.message.includes("'ops' failed"))).toBe(true);
       // …and trips the auth-class backoff immediately.
       const second = await retryOnRateLimit(() =>
         harness.callTool('patent_search', { query: 'crispr', limit: 3, seminal: false }));
-      // No ops attempt (and hence no repeated ops _error) after the trip.
-      // If the worldwide substitute is also unavailable, a coverage note
+      // No ops attempt (and hence no repeated ops error) after the trip.
+      // If the worldwide substitute is also unavailable, a coverage warning
       // explains the US-only results instead (logic unit-pinned; live GP
       // availability varies, so the note's presence is not asserted here).
-      const secondOpsError = second.patents.some((p: Record<string, unknown>) =>
-        String((p as any)._error || '').includes("'ops' failed"));
+      const secondOpsError = (second.errors as Array<{ source: string; message: string }> | undefined)
+        ?.some(e => e.source === 'ops' && e.message.includes("'ops' failed"));
       expect(secondOpsError).toBe(false);
       // Still returns real ppubs results regardless of worldwide status.
-      expect(second.patents.some((p: Record<string, unknown>) =>
-        !(p as any)._error && !(p as any)._note && !(p as any)._hint)).toBe(true);
+      expect(second.patents.length).toBeGreaterThan(0);
+      for (const p of second.patents as Array<Record<string, unknown>>) {
+        expect(p).not.toHaveProperty('_error');
+        expect(p).not.toHaveProperty('_note');
+        expect(p).not.toHaveProperty('_hint');
+      }
     } finally {
       process.env.EPO_OPS_CONSUMER_KEY = savedKey;
       process.env.EPO_OPS_CONSUMER_SECRET = savedSecret;

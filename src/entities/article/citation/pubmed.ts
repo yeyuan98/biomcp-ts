@@ -1,7 +1,9 @@
 import { connectionManager } from '../../../connections/manager.js';
 import { parsePubMedXml } from '../transform/pubmed.js';
+import type { Article } from '../types.js';
 import type { ArticleId, CitationRecord, CitationCount } from './types.js';
 import { withTimeout, DEFAULT_PROVIDER_TIMEOUT_MS } from '../../../connections/fetch-utils.js';
+import { chunkUids, joinUidParam } from '../../eutils-utils.js';
 
 interface PubMedLinkResponse {
   linksets?: Array<{
@@ -48,35 +50,52 @@ export function clearCitedInCache(): void {
   citedInCache.clear();
 }
 
+/**
+ * Batch-fetch full PubMed records (title, abstract, authors, ...) for a
+ * list of PMIDs via efetch, chunked under the E-utilities per-request id
+ * cap (chunkUids/joinUidParam). Unlike enrichPmids this THROWS on
+ * transport/parse failure so callers can report the real cause — used by
+ * the search layer's LitSense metadata enrichment (best-effort there:
+ * the caller catches and degrades to a warning).
+ */
+export async function fetchPmidArticles(pmids: string[]): Promise<Map<string, Article>> {
+  const byPmid = new Map<string, Article>();
+  if (pmids.length === 0) return byPmid;
+
+  const conn = connectionManager.getConnection('eutils');
+  for (const batch of chunkUids(pmids)) {
+    const xmlString = await withTimeout(
+      conn.request(`/efetch.fcgi?db=pubmed&id=${joinUidParam(batch)}&rettype=abstract`) as Promise<string>,
+      DEFAULT_PROVIDER_TIMEOUT_MS,
+      { onTimeout: 'null' }
+    );
+    if (!xmlString) continue;
+    for (const article of parsePubMedXml(xmlString)) {
+      if (article.pmid) byPmid.set(article.pmid, article);
+    }
+  }
+  return byPmid;
+}
+
 async function enrichPmids(pmids: string[]): Promise<Map<string, CitationRecord>> {
   const recordMap = new Map<string, CitationRecord>();
   if (pmids.length === 0) return recordMap;
 
   try {
-    const conn = connectionManager.getConnection('eutils');
-    const xmlString = await withTimeout(
-      conn.request(`/efetch.fcgi?db=pubmed&id=${pmids.join(',')}&rettype=abstract`) as Promise<string>,
-      DEFAULT_PROVIDER_TIMEOUT_MS,
-      { onTimeout: 'null' }
-    );
-
-    if (!xmlString) return recordMap;
-    const articles = parsePubMedXml(xmlString);
-    for (const article of articles) {
-      if (article.pmid) {
-        recordMap.set(article.pmid, {
-          pmid: article.pmid,
-          doi: article.doi,
-          title: article.title,
-          authors: article.authors,
-          journal: article.journal,
-          volume: article.volume,
-          issue: article.issue,
-          pages: article.pages,
-          year: article.publication_date ? extractYear(article.publication_date) : undefined,
-          source: 'pubmed',
-        });
-      }
+    const articles = await fetchPmidArticles(pmids);
+    for (const article of articles.values()) {
+      recordMap.set(article.pmid!, {
+        pmid: article.pmid,
+        doi: article.doi,
+        title: article.title,
+        authors: article.authors,
+        journal: article.journal,
+        volume: article.volume,
+        issue: article.issue,
+        pages: article.pages,
+        year: article.publication_date ? extractYear(article.publication_date) : undefined,
+        source: 'pubmed',
+      });
     }
   } catch (error) {
     console.error('[pubmed/enrichPmids] Error:', error);

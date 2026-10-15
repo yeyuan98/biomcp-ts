@@ -28,13 +28,15 @@ afterAll(async () => {
 
 describe('article_search', () => {
   it('returns PubMed results for BRCA1', async () => {
-    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'BRCA1', source: 'pubmed' }));
+    const response = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'BRCA1', source: 'pubmed' }));
+    const results = response.results;
     expectArticleSearchResult(results);
     expect(results.length).toBeGreaterThan(0);
   }, 60000);
 
   it('returns results from europepmc source', async () => {
-    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'cancer immunotherapy', source: 'europepmc' }));
+    const response = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'cancer immunotherapy', source: 'europepmc' }));
+    const results = response.results;
     expectArticleSearchResult(results);
     if (results.length > 0) {
       expect(results[0].source).toBe('europepmc');
@@ -42,15 +44,52 @@ describe('article_search', () => {
   }, 60000);
 
   it('returns empty for nonsensical query', async () => {
-    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'ZZZZZNOTAPAPER99999xyz', source: 'pubmed' }));
+    const response = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'ZZZZZNOTAPAPER99999xyz', source: 'pubmed' }));
+    const results = response.results;
     expectArticleSearchResult(results);
     expect(results.length).toBe(0);
   }, 60000);
+
+  // Issue #78: PubMed's term translation drops unrecognized tokens and
+  // matches the residue; the gibberish query must NOT come back as
+  // plausible-looking citations. Envelope contract: results [] + an
+  // explanatory warning, errors (if any source failed) out of band.
+  it('gibberish query returns no citations and a warning instead of noise (#78)', async () => {
+    const response = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'qqqzzz impossible term xyzzy' }));
+    expect(Array.isArray(response.results)).toBe(true);
+    expect(response.results).toEqual([]);
+    expect(Array.isArray(response.warnings)).toBe(true);
+    expect((response.warnings as string[]).some(w => w.includes('PubMed ignored all meaningful terms'))).toBe(true);
+    expect(response.results.some((r: Record<string, unknown>) => r._error !== undefined)).toBe(false);
+  }, 90000);
+
+  // Issue #87: LitSense rows used to carry only pmid/score — no metadata.
+  // Now each row keeps the matched sentence and is PubMed-enriched with a
+  // title when enrichment succeeds (or the envelope carries the warning).
+  it('litsense rows carry the matched sentence and titles (or an enrichment warning) (#87)', async () => {
+    const response = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'BRCA1 mutations increase breast cancer risk', source: 'litsense', limit: 5 }));
+    const results = response.results;
+    expect(Array.isArray(results)).toBe(true);
+    expect(results.length).toBeGreaterThan(0);
+    for (const r of results) {
+      expect(r.source).toBe('litsense');
+      expect(typeof r.sentence).toBe('string');
+      expect(r.sentence.length).toBeGreaterThan(0);
+    }
+    const enrichmentUnavailable = (response.warnings as string[] | undefined)
+      ?.some(w => w.startsWith('litsense metadata enrichment unavailable'));
+    if (!enrichmentUnavailable) {
+      expect(results.some((r: Record<string, unknown>) => typeof r.title === 'string' && (r.title as string).length > 0)).toBe(true);
+    } else {
+      console.warn('[article-search-litsense] enrichment unavailable this run; sparse rows + warning asserted');
+    }
+  }, 90000);
 });
 
 describe('article_search preprint_only (bioRxiv + medRxiv)', () => {
   it('returns labeled preprints with abstracts', async () => {
-    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'crispr base editing', source: 'preprint_only', limit: 5 }));
+    const response = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'crispr base editing', source: 'preprint_only', limit: 5 }));
+    const results = response.results;
     expectArticleSearchResult(results);
     expect(results.length).toBeGreaterThan(0);
     for (const r of results) {
@@ -62,7 +101,8 @@ describe('article_search preprint_only (bioRxiv + medRxiv)', () => {
   }, 60000);
 
   it('applies dateRange filtering', async () => {
-    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'crispr', source: 'preprint_only', limit: 5, dateRange: '2020-01-01/2021-12-31' }));
+    const response = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'crispr', source: 'preprint_only', limit: 5, dateRange: '2020-01-01/2021-12-31' }));
+    const results = response.results;
     expectArticleSearchResult(results);
     for (const r of results) {
       const year = String(r.publication_date ?? '').slice(0, 4);
@@ -73,7 +113,8 @@ describe('article_search preprint_only (bioRxiv + medRxiv)', () => {
 
 describe('article_search arxiv source', () => {
   it('returns arXiv results for CRISPR base editing', async () => {
-    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'CRISPR base editing', source: 'arxiv', limit: 5 }));
+    const response = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'CRISPR base editing', source: 'arxiv', limit: 5 }));
+    const results = response.results;
     expectArticleSearchResult(results);
     expect(results.length).toBeGreaterThan(0);
     const first = results[0];
@@ -86,7 +127,8 @@ describe('article_search arxiv source', () => {
   }, 60000);
 
   it('returns date-filtered arXiv results within 2024', async () => {
-    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'transformer', source: 'arxiv', limit: 3, dateRange: '2024-01-01/2024-12-31' }));
+    const response = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'transformer', source: 'arxiv', limit: 3, dateRange: '2024-01-01/2024-12-31' }));
+    const results = response.results;
     expectArticleSearchResult(results);
     expect(results.length).toBeGreaterThan(0);
     expect(
@@ -95,7 +137,8 @@ describe('article_search arxiv source', () => {
   }, 60000);
 
   it('returns empty for nonsensical arXiv query', async () => {
-    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'zzqqxxzz nothingmatches', source: 'arxiv' }));
+    const response = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'zzqqxxzz nothingmatches', source: 'arxiv' }));
+    const results = response.results;
     expectArticleSearchResult(results);
     expect(results.length).toBe(0);
     expect(results.some((r) => r._error !== undefined)).toBe(false);
@@ -106,7 +149,8 @@ describe('article_search arxiv source', () => {
   // dedup — so absence is only acceptable when the other sources still
   // delivered results (documented-acceptable absence).
   it('includes arXiv results in federated search when the leg completes', async () => {
-    const results = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'CRISPR base editing', limit: 20 }));
+    const response = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'CRISPR base editing', limit: 20 }));
+    const results = response.results;
     expectArticleSearchResult(results);
     expect(results.length).toBeGreaterThan(0);
     expect(results.some((r) => r.source !== 'arxiv')).toBe(true);

@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { articleSearch, articleGet, transformPubTator, transformLitSense, transformEuropePMC, transformSemanticScholar, transformPreprint, parseDateRange, parseArticleId, isPreprintDoi } from '../../entities/article/index.js';
+import { searchArticles, articleSearch, articleGet, transformPubTator, transformLitSense, transformEuropePMC, transformSemanticScholar, transformPreprint, parseDateRange, parseArticleId, isPreprintDoi } from '../../entities/article/index.js';
 import { clearCitationCache } from '../../entities/article/citation/index.js';
 import { clearWorkCache } from '../../entities/article/citation/crossref.js';
 import { clearCitedInCache } from '../../entities/article/citation/pubmed.js';
@@ -494,6 +494,9 @@ describe('article', () => {
     expect(result.abstract).toBeUndefined();
     expect(result.score).toBe(0.88);
     expect(result.source).toBe('litsense');
+    // the matched sentence is kept on the row (issue #87: no more bare pmid/score)
+    expect(result.sentence).toBe('A sentence about BRCA1.');
+    expect(result.section).toBe('abstract');
   });
 
   test('transformEuropePMC maps fields correctly', () => {
@@ -832,18 +835,21 @@ describe('article', () => {
       }
     });
 
-    test('pubtator source returns error when dateRange is set', async () => {
-      const result = await articleSearch('brca1', { source: 'pubtator', dateRange: '2020-01-01/2023-12-31' });
-      expect(result).toHaveLength(1);
-      expect(result[0]).toHaveProperty('_error');
-      expect((result[0] as any)._error).toContain('does not support date filtering');
+    test('pubtator source surfaces dateRange rejection as an envelope error, never an item (#87)', async () => {
+      const response = await searchArticles('brca1', { source: 'pubtator', dateRange: '2020-01-01/2023-12-31' });
+      expect(response.results).toEqual([]);
+      expect(response.errors).toHaveLength(1);
+      expect(response.errors![0].source).toBe('pubtator');
+      expect(response.errors![0].message).toContain('does not support date filtering');
+      expect(response.errors![0].message).toContain('Use pubmed, europepmc, semantic_scholar, preprint_only, or arxiv.');
     });
 
-    test('litsense source returns error when dateRange is set', async () => {
-      const result = await articleSearch('brca1', { source: 'litsense', dateRange: '2020-01-01/2023-12-31' });
-      expect(result).toHaveLength(1);
-      expect(result[0]).toHaveProperty('_error');
-      expect((result[0] as any)._error).toContain('does not support date filtering');
+    test('litsense source surfaces dateRange rejection as an envelope error, never an item (#87)', async () => {
+      const response = await searchArticles('brca1', { source: 'litsense', dateRange: '2020-01-01/2023-12-31' });
+      expect(response.results).toEqual([]);
+      expect(response.errors).toHaveLength(1);
+      expect(response.errors![0].source).toBe('litsense');
+      expect(response.errors![0].message).toContain('does not support date filtering');
     });
 
     test('federated search with dateRange only queries date-aware backends', async () => {
@@ -921,6 +927,287 @@ describe('article', () => {
       } finally {
         jest.useRealTimers();
       }
+    });
+
+    const okJson = (payload: unknown) => ({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve(payload),
+    });
+    const okXml = (payload: string) => ({
+      ok: true,
+      headers: new Headers({ 'content-type': 'text/xml' }),
+      text: () => Promise.resolve(payload),
+    });
+
+    // Live-verified PubMed behavior (issue #78): the automatic term
+    // translation drops unrecognized tokens and matches the residue —
+    // "qqqzzz impossible term xyzzy" executes as impossible AND term and
+    // would return ~3300 unrelated papers.
+    test('searchArticles: pubmed gibberish query returns [] + warning, never residue noise (#78)', async () => {
+      global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: unknown) => {
+        const u = String(url);
+        if (u.includes('esearch.fcgi')) {
+          return Promise.resolve(okJson({
+            esearchresult: {
+              idlist: ['42869464', '42851520'],
+              count: '3333',
+              querytranslation: '("impossibilities"[All Fields] OR "impossible"[All Fields]) AND ("term"[All Fields])',
+            },
+          }));
+        }
+        throw new Error('efetch must not run when the query was suppressed');
+      }) as any;
+
+      const response = await searchArticles('qqqzzz impossible term xyzzy', { source: 'pubmed' });
+
+      expect(response.results).toEqual([]);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(response.warnings?.some(w =>
+        w.includes('qqqzzz') && w.includes('xyzzy') && w.includes('unrecognized')
+      )).toBe(true);
+      expect(response.errors).toBeUndefined();
+    });
+
+    // Live-verified federated behavior (issue #78 repro): arXiv matches
+    // "impossible"/"term" in physics papers when PubMed recognized nothing.
+    test('searchArticles federated: gibberish suppresses other backends\' residue matches too (#78)', async () => {
+      const arxivFeed = `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">
+<entry><id>http://arxiv.org/abs/2510.12868v1</id><title>Branes and Antibranes: The Impossible States</title>
+<summary>Abstract mentioning the word term.</summary><published>2025-10-14T00:00:00Z</published>
+<author><name>R. Emparan</name></author><arxiv:primary_category xmlns:arxiv="http://arxiv.org/schemas/atom" term="hep-th"/></entry>
+</feed>`;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: unknown) => {
+        const { hostname } = parseMockUrl(url);
+        const u = String(url);
+        if (u.includes('esearch.fcgi')) {
+          return Promise.resolve(okJson({
+            esearchresult: {
+              idlist: ['42869464'],
+              count: '3333',
+              querytranslation: '("impossibilities"[All Fields] OR "impossible"[All Fields]) AND ("term"[All Fields])',
+            },
+          }));
+        }
+        // arXiv returns a plausible-looking match on the generic residue words
+        if (hostname === 'export.arxiv.org') {
+          return Promise.resolve({
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/atom+xml' }),
+            text: () => Promise.resolve(arxivFeed),
+          });
+        }
+        if (hostname === 'api.semanticscholar.org') return Promise.resolve(okJson({ data: [] }));
+        // europepmc/pubtator/litsense fail hard — errors must still ride out
+        return Promise.reject(new Error('network down'));
+      }) as any;
+
+      const response = await searchArticles('qqqzzz impossible term xyzzy', {});
+
+      // The whole federated page is suppressed — the arXiv residue match
+      // never seats as a plausible citation.
+      expect(response.results).toEqual([]);
+      expect(response.results.some(r => r.source === 'arxiv')).toBe(false);
+      expect(response.warnings?.some(w => w.includes('PubMed ignored all meaningful terms'))).toBe(true);
+      expect(response.warnings?.some(w => w.includes('federated results suppressed'))).toBe(true);
+      // Per-source failures from the other legs still ride in errors
+      expect(response.errors?.map(e => e.source)).toEqual(expect.arrayContaining(['europepmc', 'pubtator', 'litsense']));
+    });
+
+    test('searchArticles: pubmed partial token drop still returns results + honest warning (#78)', async () => {
+      global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: unknown) => {
+        const u = String(url);
+        if (u.includes('esearch.fcgi')) {
+          return Promise.resolve(okJson({
+            esearchresult: {
+              idlist: ['12345'],
+              count: '1',
+              querytranslation: '"crispr"[All Fields] AND "cas9"[All Fields]',
+            },
+          }));
+        }
+        return Promise.resolve(okXml(SINGLE_ARTICLE_XML));
+      }) as any;
+
+      const response = await searchArticles('crispr cas9 zzzqqqxyzzy', { source: 'pubmed' });
+
+      expect(response.results).toHaveLength(1);
+      expect(response.results[0]._error).toBeUndefined();
+      expect(response.warnings?.some(w => w.includes('zzzqqqxyzzy') && w.includes('ignored unrecognized terms'))).toBe(true);
+    });
+
+    test('searchArticles: pubmed normal query carries no degradation warning', async () => {
+      global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: unknown) => {
+        const u = String(url);
+        if (u.includes('esearch.fcgi')) {
+          return Promise.resolve(okJson({
+            esearchresult: {
+              idlist: ['12345'],
+              count: '1',
+              querytranslation: '"brca1"[All Fields]',
+            },
+          }));
+        }
+        return Promise.resolve(okXml(SINGLE_ARTICLE_XML));
+      }) as any;
+
+      const response = await searchArticles('brca1', { source: 'pubmed' });
+
+      expect(response.results).toHaveLength(1);
+      expect(response.warnings).toBeUndefined();
+      expect(response.errors).toBeUndefined();
+    });
+
+    test('searchArticles: litsense rows carry the matched sentence + PubMed-enriched title (#87)', async () => {
+      const litsenseRows = [
+        { pmid: 12345, text: 'Sentence about BRCA1.', score: 1, section: 'abstract', annotations: [] },
+        { pmid: 67890, text: 'Another sentence.', score: 0.9, section: 'INTRO', annotations: [] },
+      ];
+      global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: unknown) => {
+        const u = String(url);
+        if (u.includes('/sentences/')) return Promise.resolve(okJson(litsenseRows));
+        if (u.includes('efetch.fcgi')) return Promise.resolve(okXml(SINGLE_ARTICLE_XML));
+        throw new Error(`unexpected ${u}`);
+      }) as any;
+
+      const response = await searchArticles('brca1', { source: 'litsense' });
+
+      expect(response.results).toHaveLength(2);
+      for (const row of response.results) {
+        expect(row.sentence).toBeTruthy();
+        expect(typeof row.section).toBe('string');
+        expect(row.source).toBe('litsense');
+      }
+      // PMID 12345 is enriched from the mocked efetch (SINGLE_ARTICLE_XML);
+      // PMID 67890 is not in the XML and stays sparse.
+      const enriched = response.results.find(r => r.pmid === '12345');
+      expect(enriched?.title).toBe('Test article about BRCA1');
+      expect(enriched?.abstract).toBe('Full abstract text for testing purposes.');
+      const sparse = response.results.find(r => r.pmid === '67890');
+      expect(sparse?.title).toBeUndefined();
+      expect(response.warnings).toBeUndefined();
+    });
+
+    test('searchArticles: litsense enrichment failure keeps sparse rows + surfaces a warning (#87)', async () => {
+      const litsenseRows = [
+        { pmid: 12345, text: 'Sentence about BRCA1.', score: 1, section: 'abstract', annotations: [] },
+      ];
+      global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: unknown) => {
+        const u = String(url);
+        if (u.includes('/sentences/')) return Promise.resolve(okJson(litsenseRows));
+        if (u.includes('efetch.fcgi')) {
+          return Promise.resolve(okXml('<!DOCTYPE html><html><body>blocked</body></html>'));
+        }
+        throw new Error(`unexpected ${u}`);
+      }) as any;
+
+      const response = await searchArticles('brca1', { source: 'litsense' });
+
+      expect(response.results).toHaveLength(1);
+      expect(response.results[0].sentence).toBe('Sentence about BRCA1.');
+      expect(response.results[0].title).toBeUndefined();
+      expect(response.warnings?.some(w => w.startsWith('litsense metadata enrichment unavailable'))).toBe(true);
+      expect(response.errors).toBeUndefined();
+    });
+
+    test('searchArticles: litsense relevance floor drops noise matches and warns when nothing clears it (#78)', async () => {
+      // Live-measured LitSense noise floor for gibberish: ~0.39-0.55.
+      const noiseRows = [
+        { pmid: 11111, text: 'Unrelated sentence.', score: 0.5156, section: 'abstract', annotations: [] },
+        { pmid: 22222, text: 'Another unrelated one.', score: 0.41, section: 'results', annotations: [] },
+      ];
+      global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: unknown) => {
+        const u = String(url);
+        if (u.includes('/sentences/')) return Promise.resolve(okJson(noiseRows));
+        throw new Error(`unexpected ${u}`);
+      }) as any;
+
+      const response = await searchArticles('qqqzzz xyzzy plugh', { source: 'litsense' });
+
+      expect(response.results).toEqual([]);
+      expect(response.warnings?.some(w => w.includes('relevance floor') && w.includes('2 litsense matches'))).toBe(true);
+    });
+
+    test('searchArticles federated: failed backends become envelope errors, never result items (#87)', async () => {
+      global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: unknown) => {
+        const { hostname } = parseMockUrl(url);
+        const u = String(url);
+        if (hostname === 'eutils.ncbi.nlm.nih.gov') {
+          if (u.includes('esearch.fcgi')) {
+            return Promise.resolve(okJson({
+              esearchresult: { idlist: ['12345'], count: '1', querytranslation: '"brca1"[All Fields]' },
+            }));
+          }
+          return Promise.resolve(okXml(SINGLE_ARTICLE_XML));
+        }
+        if (hostname === 'api.semanticscholar.org') {
+          return Promise.resolve(okJson({ data: [] }));
+        }
+        // pubtator + litsense fail hard (no retry config — fast in tests)
+        return Promise.reject(new Error('network down'));
+      }) as any;
+
+      const response = await searchArticles('brca1', {});
+
+      expect(response.results).toHaveLength(1);
+      expect(response.results[0].pmid).toBe('12345');
+      expect(response.results.every(r => r._error === undefined)).toBe(true);
+      const failedSources = response.errors?.map(e => e.source);
+      expect(failedSources).toEqual(expect.arrayContaining(['pubtator', 'litsense']));
+      for (const err of response.errors ?? []) {
+        expect(err.message).toContain('failed');
+        expect(typeof err.message).toBe('string');
+      }
+    });
+
+    // Federated floor warning must fire only when the FLOOR emptied the
+    // litsense contribution — an above-floor litsense row whose PMID also
+    // came from pubmed dedup-merges into that record and legitimately
+    // disappears as a litsense-sourced row; that is not a floor drop and
+    // must NOT be reported as one.
+    test('searchArticles federated: dedup-merged litsense rows are not misreported as floor drops (#78)', async () => {
+      const litsenseRows = [
+        // above floor, same PMID as the pubmed hit → merges, page keeps the pubmed record
+        { pmid: 12345, text: 'Topical BRCA1 sentence.', score: 0.95, section: 'abstract', annotations: [] },
+      ];
+      const pubmedLeg = (u: string) => {
+        if (u.includes('efetch')) {
+          return Promise.resolve(okXml(SINGLE_ARTICLE_XML));
+        }
+        return Promise.resolve(okJson({
+          esearchresult: { idlist: ['12345'], count: '1', querytranslation: '"brca1"[All Fields]' },
+        }));
+      };
+      global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: unknown) => {
+        const { hostname } = parseMockUrl(url);
+        const u = String(url);
+        if (hostname === 'eutils.ncbi.nlm.nih.gov') return pubmedLeg(u);
+        if (u.includes('/sentences/')) return Promise.resolve(okJson(litsenseRows));
+        if (hostname === 'api.semanticscholar.org') return Promise.resolve(okJson({ data: [] }));
+        return Promise.reject(new Error('network down'));
+      }) as any;
+
+      const merged = await searchArticles('brca1', {});
+      expect(merged.results.some(r => r.pmid === '12345')).toBe(true);
+      expect(merged.warnings?.some(w => w.includes('relevance floor'))).toBeFalsy();
+
+      // Same federation but the litsense leg returns ONLY sub-floor noise
+      // → the floor emptied the contribution and the warning must say so.
+      const noiseOnly = [
+        { pmid: 99999, text: 'Unrelated sentence.', score: 0.42, section: 'abstract', annotations: [] },
+      ];
+      (global.fetch as any).mockImplementation((url: unknown) => {
+        const { hostname } = parseMockUrl(url);
+        const u = String(url);
+        if (hostname === 'eutils.ncbi.nlm.nih.gov') return pubmedLeg(u);
+        if (u.includes('/sentences/')) return Promise.resolve(okJson(noiseOnly));
+        if (hostname === 'api.semanticscholar.org') return Promise.resolve(okJson({ data: [] }));
+        return Promise.reject(new Error('network down'));
+      });
+
+      const emptied = await searchArticles('brca1', {});
+      expect(emptied.results.some(r => r.pmid === '12345')).toBe(true);
+      expect(emptied.warnings?.some(w => w.includes('relevance floor') && w.includes('1 litsense matches'))).toBe(true);
     });
   });
 
@@ -2136,13 +2423,15 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     expect(result).toEqual([]);
   });
 
-  test('articleSearch preprint_only returns _error row on transport failure', async () => {
+  test('articleSearch preprint_only surfaces transport failure as an envelope error (#87)', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(new Error('network down')) as any;
 
-    const result = await articleSearch('crispr', { source: 'preprint_only' });
+    const response = await searchArticles('crispr', { source: 'preprint_only' });
 
-    expect(result).toHaveLength(1);
-    expect(result[0]._error).toContain('searchPreprints failed');
+    expect(response.results).toEqual([]);
+    expect(response.errors).toHaveLength(1);
+    expect(response.errors![0].source).toBe('preprint_only');
+    expect(response.errors![0].message).toContain('searchPreprints failed');
   });
 
   test('isPreprintDoi classifies both prefixes and rejects journal DOIs', () => {
