@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { articleSearch, articleGet } from '../../entities/article/index.js';
+import { searchArticles, articleGet } from '../../entities/article/index.js';
 import { applyLimit } from './utils.js';
 
 const TOOL_TIMEOUT_MS = 30000;
@@ -34,7 +34,7 @@ export function registerArticleTools(server: McpServer): void {
   server.registerTool(
     'article_search',
     {
-      description: 'Search literature across multiple backends with federated search and deduplication',
+      description: 'Search literature across multiple backends with federated search and deduplication. Response is an envelope: { results, warnings?, errors? } — per-source failures ride in `errors` (never as items inside `results`), degradation notes (e.g. PubMed dropping unrecognized query terms, LitSense relevance-floor drops) in `warnings`. LitSense rows carry the matched sentence plus PubMed-enriched title/metadata when available.',
       inputSchema: {
         query: z.string().trim().min(1, 'Query must be a non-empty string after trimming').describe('Search query (title, abstract, or keyword). Journal scoping: PubMed matches full journal names and NLM abbreviations; EuropePMC JOURNAL:"..." filters require the NLM abbreviation (e.g. "N Engl J Med")'),
         source: z.enum(['pubmed', 'europepmc', 'semantic_scholar', 'pubtator', 'litsense', 'preprint_only', 'arxiv']).optional().describe('Specific source to search. "preprint_only" searches ONLY bioRxiv+medRxiv preprints (bioRxiv/medRxiv DOIs, abstracts, citation counts, via Europe PMC\'s preprint index); "arxiv" searches the arXiv preprint server (quotes, parentheses, and field prefixes like ti:/au: are stripped from the query for arXiv only). Default (unset) = federated journal-literature search across PubMed, EuropePMC, Semantic Scholar, arXiv, PubTator, LitSense; bioRxiv/medRxiv preprints are NOT included unless explicitly requested via preprint_only.'),
@@ -51,8 +51,8 @@ export function registerArticleTools(server: McpServer): void {
     },
     async ({ query, source, limit, offset, dateRange }) => {
       try {
-        const results = await withToolTimeout(articleSearch(query, { source, limit, offset, dateRange }));
-        return { content: [{ type: 'text', text: JSON.stringify(results) }] };
+        const response = await withToolTimeout(searchArticles(query, { source, limit, offset, dateRange }));
+        return { content: [{ type: 'text', text: JSON.stringify(response) }] };
       } catch (error) {
         return {
           content: [{ type: 'text', text: String(error) }],

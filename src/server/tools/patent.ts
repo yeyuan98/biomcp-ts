@@ -28,7 +28,8 @@ export function registerPatentTools(server: McpServer): void {
         'ops = EPO OPS worldwide bibliographic search over titles/abstracts (needs EPO_OPS_CONSUMER_KEY/EPO_OPS_CONSUMER_SECRET) | ' +
         'uspto_odp = US application metadata, bibliographic only but inventor/CPC/continuity-rich (needs USPTO_API_KEY) | ' +
         'google_patents = worldwide best-effort (often unavailable). ' +
-        'Auto mode queries worldwide + ppubs concurrently; if ppubs fails hard it falls back to uspto_odp once (tagged with _note). ' +
+        'Auto mode queries worldwide + ppubs concurrently; if ppubs fails hard it falls back to uspto_odp once (noted in warnings). ' +
+        'Per-backend failures and degradation notes are reported out of band in the response `errors`/`warnings` arrays — every element of `patents` is a real patent record and respects `limit`. ' +
         'Pass source to force a specific backend. Results are ranked by relevance by default (ppubs sort_by). ' +
         'Foundational prior art is auto-discovered via co-citation mining of the top results and returned in seminal_prior_art ' +
         '(surfaces seminal documents whose own vocabulary predates the query concept).',

@@ -342,7 +342,7 @@ export async function mineSeminalPriorArt(
 
   const visibleKeys = new Set(
     visibleResults
-      .filter(p => p.publication_number && !p._error && !p._note && !p._hint)
+      .filter(p => p.publication_number)
       .map(p => parsePatentRef(p.publication_number))
       .filter((c): c is RefCanonical => c !== null)
       .map(refKey),

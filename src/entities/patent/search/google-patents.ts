@@ -37,7 +37,7 @@ function tripBreaker(openMs: number): void {
  * Network-level failures (proxy-less blocked environments, DNS outages,
  * connect timeouts) must trip the breaker just like HTTP 503/429 blocks —
  * verified live: without this, "fetch failed" repeated on every search
- * forever, appending a fresh _error marker each round.
+ * forever, appending a fresh _error entry each round.
  */
 const NETWORK_ERROR_RE = /fetch failed|ETIMEDOUT|ENETUNREACH|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket hang up/i;
 

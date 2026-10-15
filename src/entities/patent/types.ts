@@ -34,9 +34,16 @@ export interface PatentSearchResult {
   relevance_score?: number;
   source: PatentSource;
   also_found_in?: PatentSource[];
-  _error?: string;
-  _note?: string;
-  _hint?: string;
+}
+
+/**
+ * Out-of-band per-backend failure in the search response envelope. Messages
+ * keep the honest wording of the former in-array `_error` markers verbatim.
+ */
+export interface PatentSearchError {
+  source: PatentSource;
+  message: string;
+  retryable?: boolean;
 }
 
 export interface PatentSearchResponse {
@@ -44,6 +51,13 @@ export interface PatentSearchResponse {
   total_hits?: Partial<Record<PatentSource, number>>;
   /** Documents what each backend's total_hits number counts (per-backend semantics differ). */
   total_hits_basis?: Partial<Record<PatentSource, string>>;
+  /**
+   * Degradation/context notes (fallback provenance, coverage loss, empty-result
+   * guidance). The former in-array `_note`/`_hint` marker items, verbatim wording.
+   */
+  warnings?: string[];
+  /** Per-backend failures (the former in-array `_error` marker items, verbatim wording). */
+  errors?: PatentSearchError[];
   /** Foundational prior art co-cited by the top results (seminal mining; default on). */
   seminal_prior_art?: PatentSeminalEntry[];
   /** How many granted documents were reference-mined (denominator for co_cited_by). */
