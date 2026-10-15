@@ -98,7 +98,9 @@ describe('geneSearch with options', () => {
     global.fetch = originalFetch;
   });
 
-  test('geneSearch() includes chromosome filter in query params', async () => {
+  test('geneSearch() appends the chromosome filter as a genome-interval clause in q', async () => {
+    // mygene's /query has no `chr` URL param (it is silently ignored), so the
+    // filter must ride inside the q string: `TP53 AND chr17:1-999999999`.
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
@@ -107,7 +109,44 @@ describe('geneSearch with options', () => {
     await geneSearch('TP53', { chromosome: '17' });
 
     const callUrl = (global.fetch as any).mock.calls[0][0] as string;
-    expect(callUrl).toContain('chr=17');
+    const queryParam = new URL(callUrl).searchParams.get('q') || '';
+    expect(queryParam).toContain('TP53');
+    expect(queryParam).toContain('chr17:1-999999999');
+    // The broken form (a `chr` URL param, silently ignored by mygene) is gone.
+    expect(new URL(callUrl).searchParams.get('chr')).toBeNull();
+  });
+
+  test('geneSearch() normalizes chromosome input (prefix, case, M→MT) into the interval clause', async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ hits: [] }),
+    }) as any;
+
+    const cases: Array<[string, string]> = [
+      ['chr17', 'chr17:1-999999999'],
+      ['CHR7', 'chr7:1-999999999'],
+      ['x', 'chrX:1-999999999'],
+      ['M', 'chrMT:1-999999999'], // mygene keys mitochondrial as MT (chrM: 0 hits, live)
+      ['MT', 'chrMT:1-999999999'],
+    ];
+    for (const [input, expected] of cases) {
+      (global.fetch as any).mockClear();
+      await geneSearch('BRAF', { chromosome: input });
+      const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+      const queryParam = new URL(callUrl).searchParams.get('q') || '';
+      expect(queryParam).toContain(expected);
+    }
+  });
+
+  test('geneSearch() throws a validation error listing valid values for an invalid chromosome', async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ hits: [] }),
+    }) as any;
+
+    await expect(geneSearch('TP53', { chromosome: '23' })).rejects.toThrow(/Invalid chromosome '23'.*1-22/s);
+    await expect(geneSearch('TP53', { chromosome: 'chrZ' })).rejects.toThrow(/Invalid chromosome 'chrZ'/);
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   test('geneSearch() uses custom limit and offset', async () => {
@@ -226,6 +265,60 @@ describe('geneSearch genomic_pos transformation', () => {
     });
   });
 
+  test('geneSearch() maps object-shaped genomic_pos (single mapping) to genomic_coordinates', async () => {
+    // Live mygene /query returns a PLAIN OBJECT for single mappings
+    // (TP53 → genomic_pos:{"chr":"17",...}); the array-only reader dropped it.
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        hits: [{
+          symbol: 'TP53',
+          name: 'Tumor protein p53',
+          entrezgene: 7157,
+          genomic_pos: { chr: '17', start: 7661779, end: 7687538, strand: -1 },
+        }],
+      }),
+    }) as any;
+
+    const results = await geneSearch('TP53');
+
+    expect(results).toHaveLength(1);
+    expect(results[0].genomic_coordinates).toEqual({
+      chromosome: '17',
+      start: 7661779,
+      end: 7687538,
+    });
+  });
+
+  test('geneSearch() with chromosome filter passes the mocked response through and lands the clause in q', async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        hits: [{
+          symbol: 'RPS4Y1',
+          name: 'Ribosomal protein S4 Y-linked 1',
+          entrezgene: 6192,
+          genomic_pos: { chr: 'Y', start: 2714846, end: 2717537 },
+        }],
+      }),
+    }) as any;
+
+    const results = await geneSearch('ribosomal protein', { chromosome: 'Y' });
+
+    // The chromosome clause lands in the q string (URL-decoded)…
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    const queryParam = new URL(callUrl).searchParams.get('q') || '';
+    expect(queryParam).toBe('ribosomal protein AND chrY:1-999999999');
+    // …and the mocked mygene response is transformed and passed through.
+    expect(results).toHaveLength(1);
+    expect(results[0].symbol).toBe('RPS4Y1');
+    expect(results[0].genomic_coordinates).toEqual({
+      chromosome: 'Y',
+      start: 2714846,
+      end: 2717537,
+    });
+  });
+
   test('geneSearch() handles result without genomic_pos', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
@@ -263,6 +356,27 @@ describe('geneSearch genomic_pos transformation', () => {
     expect(results).toHaveLength(1);
     expect(results[0].uniprot_id).toBe('P04637');
     expect(results[0].omim_id).toBe('191170');
+  });
+
+  test('geneSearch() maps object-shaped uniprot ({SwissProt}) to uniprot_id', async () => {
+    // Live mygene /query returns uniprot as {"SwissProt":"P04637"} (an
+    // object, not a string array) — the array-only reader dropped it.
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        hits: [{
+          symbol: 'TP53',
+          name: 'Tumor protein p53',
+          entrezgene: 7157,
+          uniprot: { SwissProt: 'P04637' },
+        }],
+      }),
+    }) as any;
+
+    const results = await geneSearch('TP53');
+
+    expect(results).toHaveLength(1);
+    expect(results[0].uniprot_id).toBe('P04637');
   });
 });
 

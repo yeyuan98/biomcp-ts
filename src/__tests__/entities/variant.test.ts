@@ -112,7 +112,7 @@ describe('variant', () => {
     expect(callUrl).toContain('cadd.gene.genename%3ABRCA1');
   });
 
-  test('variantSearch() with pathogenic significance filter maps correctly', async () => {
+  test('variantSearch() with pathogenic significance uses a quoted phrase, not a wildcard substring', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
@@ -121,11 +121,15 @@ describe('variant', () => {
     await variantSearch({ significance: 'pathogenic' });
 
     const callUrl = (global.fetch as any).mock.calls[0][0] as string;
-    // pathogenic -> pathogenic (same)
-    expect(callUrl).toContain('pathogenic');
+    const queryParam = new URL(callUrl).searchParams.get('q') || '';
+    // Phrase (token) match — a wildcard `*pathogenic*` would also match
+    // "Conflicting interpretations of pathogenicity" (live: BRCA1 wildcard
+    // 2678 hits incl. Conflicting rows; phrase 861 pathogenic-only rows).
+    expect(queryParam).toContain('clinvar.rcv.clinical_significance:"pathogenic"');
+    expect(queryParam).not.toContain('*pathogenic*');
   });
 
-  test('variantSearch() with likely_pathogenic significance maps to "likely pathogenic"', async () => {
+  test('variantSearch() with likely_pathogenic significance maps to the "likely pathogenic" phrase', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
@@ -133,8 +137,57 @@ describe('variant', () => {
 
     await variantSearch({ significance: 'likely_pathogenic' });
 
-    const callUrl = decodeURIComponent((global.fetch as any).mock.calls[0][0] as string).replace(/\+/g, ' ');
-    expect(callUrl).toContain('likely pathogenic');
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    const queryParam = new URL(callUrl).searchParams.get('q') || '';
+    expect(queryParam).toContain('clinvar.rcv.clinical_significance:"likely pathogenic"');
+  });
+
+  test('variantSearch() significance post-filter drops hits displayed as "Conflicting interpretations of pathogenicity"', async () => {
+    // clinvar.rcv is an ARRAY: the ANY-match query clause admits a record
+    // whose displayed significance is Conflicting but that carries one
+    // pathogenic RCV — the post-filter must drop it.
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        hits: [
+          {
+            _id: 'chr17:g.1A>T',
+            clinvar: { rcv: [
+              { clinical_significance: 'Conflicting interpretations of pathogenicity' },
+              { clinical_significance: 'Pathogenic' },
+            ] },
+          },
+          {
+            _id: 'chr17:g.2C>G',
+            clinvar: { rcv: [{ clinical_significance: 'Pathogenic' }] },
+          },
+        ],
+      }),
+    }) as any;
+
+    const results = await variantSearch({ significance: 'pathogenic' });
+
+    expect(results.map(r => r.id)).toEqual(['chr17:g.2C>G']);
+  });
+
+  test('variantSearch() significance post-filter keeps "Pathogenic/Likely pathogenic" for both requested categories', async () => {
+    const mkFetch = () => jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        hits: [{
+          _id: 'chr17:g.3T>A',
+          clinvar: { rcv: [{ clinical_significance: 'Pathogenic/Likely pathogenic' }] },
+        }],
+      }),
+    }) as any;
+
+    global.fetch = mkFetch();
+    const asPathogenic = await variantSearch({ significance: 'pathogenic' });
+    expect(asPathogenic).toHaveLength(1);
+
+    global.fetch = mkFetch();
+    const asLikelyPathogenic = await variantSearch({ significance: 'likely_pathogenic' });
+    expect(asLikelyPathogenic).toHaveLength(1);
   });
 
   test('variantSearch() with consequence missense maps to missense_variant', async () => {
@@ -173,7 +226,10 @@ describe('variant', () => {
     expect(callUrl).toContain('dbnsfp.hgvsp:*p.Val600Glu*');
   });
 
-  test('variantSearch() with hgvsc filter includes snpeff.ann.hgvs_c in query', async () => {
+  test('variantSearch() with bare c. hgvsc passes it through to the query unchanged', async () => {
+    // rewriteVariantQuery is idempotent for bare c. forms — the token goes
+    // into q verbatim (live: 50 relevant hits incl. BRAF V600E rs113488022,
+    // vs 2408 loose phrase matches for the old quoted-field clause).
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ hits: [] }),
@@ -181,8 +237,28 @@ describe('variant', () => {
 
     await variantSearch({ hgvsc: 'c.1799T>A' });
 
-    const callUrl = decodeURIComponent((global.fetch as any).mock.calls[0][0] as string);
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    const queryParam = new URL(callUrl).searchParams.get('q') || '';
+    expect(queryParam).toContain('c.1799T>A');
+  });
+
+  test('variantSearch() with full-HGVS hgvsc splits it into feature_id + hgvs_c clauses', async () => {
+    // snpeff.ann.hgvs_c stores ONLY the c. portion (the transcript lives in
+    // snpeff.ann.feature_id), so quoting the full NM_004333.4:c.1799T>A
+    // string matched nothing (live: 0 hits); the rewrite splits it exactly
+    // like the query= path (mirrors the query-param test below).
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ hits: [] }),
+    }) as any;
+
+    await variantSearch({ hgvsc: 'NM_004333.4:c.1799T>A' });
+
+    const callUrl = decodeURIComponent((global.fetch as any).mock.calls[0][0] as string).replace(/\+/g, ' ');
+    expect(callUrl).toContain('snpeff.ann.feature_id:NM_004333.4');
     expect(callUrl).toContain('snpeff.ann.hgvs_c:"c.1799T>A"');
+    // The unsplit full string must NOT appear as a quoted hgvs_c value.
+    expect(callUrl).not.toContain('snpeff.ann.hgvs_c:"NM_004333.4:c.1799T>A"');
   });
 
   test('variantSearch() with min_cadd includes cadd.phred range in query', async () => {
@@ -265,6 +341,77 @@ describe('variant', () => {
   });
 
   // --- variantGet tests ---
+
+  test('variantGet() with ClinVar numeric id resolves via clinvar.variant_id then fetches the variant', async () => {
+    // /variant/13961 404s live — ClinVar ids are not document keys; the
+    // resolver must query clinvar.variant_id (NOT _clinvarVariantId, which
+    // returns 0 hits) and use hits[0]._id for the fetch.
+    let callCount = 0;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ hits: [{ _id: 'chr7:g.140453136A>T' }] }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          _id: 'chr7:g.140453136A>T',
+          dbsnp: { rsid: 'rs113488022' },
+        }),
+      });
+    }) as any;
+
+    const result = await variantGet('13961', []);
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    const resolveUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(resolveUrl).toContain('/query?');
+    expect(decodeURIComponent(resolveUrl)).toContain('clinvar.variant_id:13961');
+    expect(decodeURIComponent(resolveUrl)).toContain('fields=_id');
+    expect(decodeURIComponent(resolveUrl)).toContain('size=1');
+    const fetchUrl = (global.fetch as any).mock.calls[1][0] as string;
+    expect(fetchUrl).toContain('/variant/chr7:g.140453136A%3ET');
+    expect(result.id).toBe('rs113488022');
+  });
+
+  test('variantGet() accepts clinvar_-prefixed and VCV accession ClinVar id forms', async () => {
+    for (const id of ['clinvar_13961', 'VCV0000013961']) {
+      let callCount = 0;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ hits: [{ _id: 'chr7:g.140453136A>T' }] }),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ _id: 'chr7:g.140453136A>T', dbsnp: { rsid: 'rs113488022' } }),
+        });
+      }) as any;
+
+      const result = await variantGet(id, []);
+      expect(result.id).toBe('rs113488022');
+      const resolveUrl = decodeURIComponent((global.fetch as any).mock.calls[0][0] as string);
+      // VCV leading zeros are normalized away; both forms resolve to 13961.
+      expect(resolveUrl).toContain('clinvar.variant_id:13961');
+    }
+  });
+
+  test('variantGet() with unresolvable ClinVar id throws a descriptive ClinVar error', async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ hits: [] }),
+    }) as any;
+
+    await expect(variantGet('999999999999', [])).rejects.toThrow(/ClinVar.*not found.*could not be resolved/s);
+    // Only the resolution query ran — no blind /variant/999... fetch.
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
 
   test('variantGet() with array response selects best variant with gnomad data', async () => {
     const variantArray = [

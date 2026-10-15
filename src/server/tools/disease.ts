@@ -66,7 +66,7 @@ export function registerDiseaseTools(server: McpServer): void {
     {
       description: 'Get detailed disease information by ID',
       inputSchema: {
-        disease_id: z.string().describe('Disease ID (e.g., "DOID:0060268", "C0018794")'),
+        disease_id: z.string().describe('Disease ID (e.g., "DOID:0060268", "MONDO:0007254", "OMIM:114480", or UMLS CUI "C0018794")'),
         sections: z.array(z.enum(DISEASE_SECTIONS)).optional().describe('Sections to include'),
         limit: z.number().int().min(1).max(100).default(20),
       },
@@ -136,7 +136,7 @@ export function registerDiseaseTools(server: McpServer): void {
           } catch {
             return { 
               content: [{ type: 'text', text: JSON.stringify({ 
-                _error: `Disease '${disease_id}' not found. Try disease_search to find valid disease IDs. Supported ID formats: MONDO:XXXXXXX, DOID:XXXXXXX, OMIM:XXXXXX.` 
+                _error: `Disease '${disease_id}' not found. Try disease_search to find valid disease IDs. Supported ID formats: MONDO:XXXXXXX, DOID:XXXXXXX, OMIM:XXXXXX, UMLS CUI (e.g. C0018794).`
               }) }],
               isError: true 
             };

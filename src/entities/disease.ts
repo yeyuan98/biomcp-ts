@@ -63,6 +63,27 @@ function altCurieForm(id: string): string | undefined {
   return undefined;
 }
 
+/** UMLS Concept Unique Identifier, e.g. C0018794 / C0006142. */
+const UMLS_CUI_PATTERN = /^C\d{6,7}$/i;
+
+/**
+ * Resolve a UMLS CUI to the document id mydisease keys records by. The
+ * `/disease/{cui}` endpoint 404s for CUIs (mydisease keys documents by
+ * MONDO/DOID/HP ids), but the query endpoint resolves them — note the field
+ * path is exactly `umls.umls` (top-level `umls` is an object; plain
+ * `umls:"C..."` and `mondo.xrefs.umls_cui` both return 0 hits, live-verified:
+ * C0018794 → HP:0012722, C0006142 → MONDO:0007254).
+ */
+async function resolveUmlsCui(cui: string, conn: { request: (path: string) => Promise<unknown> }): Promise<string | null> {
+  const queryParams = new URLSearchParams({
+    q: `umls.umls:"${cui}"`,
+    fields: '_id',
+    size: '1',
+  });
+  const response = await conn.request(`/query?${queryParams.toString()}`) as { hits?: Array<{ _id?: string }> };
+  return response.hits?.[0]?._id ?? null;
+}
+
 export async function diseaseGet(
   diseaseId: string,
   sections?: string[]
@@ -73,11 +94,34 @@ export async function diseaseGet(
 
   let disease: MyDiseaseRecord | null = null;
 
+  // UMLS CUI input (e.g. "C0018794" — the disease_get docstring's own
+  // example): mydisease's /disease/{id} endpoint 404s for CUIs, so resolve
+  // the CUI to its document id via the query endpoint first. The `umls:{cui}`
+  // curie form stays in the candidate list as a fallback because some CUIs
+  // resolve to UMLS-sourced documents whose own id /disease/ will not serve
+  // (live: C0018794 → HP:0012722 404s, while /disease/umls:C0018794 works).
+  let lookupId = diseaseId;
+  const cuiMatch = UMLS_CUI_PATTERN.exec(diseaseId.trim());
+  if (cuiMatch) {
+    const cui = cuiMatch[0].toUpperCase();
+    try {
+      lookupId = (await resolveUmlsCui(cui, conn)) ?? `umls:${cui}`;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(`[diseaseGet] UMLS CUI resolution for '${cui}' failed: ${msg}`);
+      lookupId = `umls:${cui}`;
+    }
+  }
+
   // Primary /disease/{id} lookup, retrying the alternate curie separator
   // form (the API keys records as MONDO:0007254 but DisGeNET-style callers
   // often paste MONDO_0007254, and vice versa). A free-text `q=<id>` query
   // returns 0 hits for IDs, so it is not used as a fallback.
-  const candidates = altCurieForm(diseaseId) ? [diseaseId, altCurieForm(diseaseId)!] : [diseaseId];
+  const candidates = altCurieForm(lookupId) ? [lookupId, altCurieForm(lookupId)!] : [lookupId];
+  if (cuiMatch) {
+    const umlsCurie = `umls:${cuiMatch[0].toUpperCase()}`;
+    if (!candidates.includes(umlsCurie)) candidates.push(umlsCurie);
+  }
   for (const candidate of candidates) {
     try {
       const directResponse = await conn.request(`/disease/${encodeURIComponent(candidate)}`) as any;
@@ -99,7 +143,7 @@ export async function diseaseGet(
   }
 
   if (!disease) {
-    throw new Error(`Disease '${diseaseId}' not found. Try disease_search to find valid disease IDs. Supported ID formats: MONDO:XXXXXXX, DOID:XXXXXXX, OMIM:XXXXXX.`);
+    throw new Error(`Disease '${diseaseId}' not found. Try disease_search to find valid disease IDs. Supported ID formats: MONDO:XXXXXXX, DOID:XXXXXXX, OMIM:XXXXXX, UMLS CUI (e.g. C0018794).`);
   }
   const result: DiseaseResult = {
     name: disease.name,
