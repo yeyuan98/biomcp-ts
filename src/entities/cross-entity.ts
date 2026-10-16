@@ -433,7 +433,18 @@ export interface PathwayEnrichmentResult {
   pathway_id: string;
   name: string;
   p_value?: number;
+  /**
+   * Number of unique SUBMITTED genes Reactome matched in this pathway — the
+   * gene-level truth, computed with one follow-up
+   * `POST /token/{token}/found/all` request (see `fetchMatchedGenesPerPathway`).
+   * Deliberately NOT Reactome's `pathways[].entities.found`: that field counts
+   * matched Reactome ENTITIES, and one gene symbol legitimately projects onto
+   * several of them (UniProt entry plus Ensembl gene/transcript), so it can
+   * exceed the unique input size. Undefined only in the anomalous case where
+   * the follow-up reply omits a requested pathway.
+   */
   genes_overlap?: number;
+  /** Pathway size denominator Reactome reports (entities total, per projection reply). */
   genes_total?: number;
   source: string;
 }
@@ -482,13 +493,22 @@ export async function geneEnrichment(
     const conn = connectionManager.getConnection('reactome_analysis') as RestConnection;
     const data = await conn.post('/identifiers/projection', uniqueSymbols.join('\n')) as ReactomeAnalysisResponse;
     const pathways = data?.pathways || [];
+    const page = pathways.slice(0, safeLimit);
+
+    // `pathways[].entities.found` counts matched Reactome ENTITIES, not
+    // genes: one symbol legitimately projects onto several entities (live
+    // probe 2026-10-16: a 10-gene panel reports found=14 in "Generic
+    // Transcription Pathway" because e.g. BRCA1 maps to a UniProt entry plus
+    // an Ensembl gene and transcript). The token follow-up resolves the true
+    // gene-level overlap for the returned page.
+    const genesByPathway = await fetchMatchedGenesPerPathway(conn, data, page, uniqueSymbols);
 
     return {
-      pathways: pathways.slice(0, safeLimit).map((p: { stId?: string; name?: string; entities?: { pValue?: number; found?: number; total?: number } }) => ({
+      pathways: page.map((p: { stId?: string; name?: string; entities?: { pValue?: number; found?: number; total?: number } }) => ({
         pathway_id: p.stId || '',
         name: p.name || '',
         p_value: p.entities?.pValue,
-        genes_overlap: p.entities?.found,
+        genes_overlap: genesByPathway.get(p.stId || ''),
         genes_total: p.entities?.total,
         source: 'reactome',
       })),
@@ -511,6 +531,68 @@ export async function geneEnrichment(
     }
     return [{ _error: `Gene enrichment analysis failed (source: reactome): ${msg}. Ensure at least 3 valid gene symbols are provided, or try again later.` } as any];
   }
+}
+
+/**
+ * True gene-level overlap per pathway (issue #85 resolution).
+ *
+ * Reactome's `/identifiers/projection` reply only carries
+ * `pathways[].entities.found` — the count of matched Reactome ENTITIES,
+ * which exceeds the matched-GENE count whenever one submitted symbol maps
+ * to several entities (live probe 2026-10-16, 10-gene panel: "Generic
+ * Transcription Pathway" reports found=14 while only 7 unique genes
+ * matched; BRCA1 alone carries a UniProt entry plus an Ensembl gene and a
+ * transcript entity). The analysis reply's `summary.token` unlocks
+ * `POST /token/{token}/found/all`, which returns — for a comma-separated
+ * list of pathway stable IDs, in ONE request — the SUBMITTED identifiers
+ * that matched in each pathway. That identifier-level list is the honest
+ * `genes_overlap`.
+ *
+ * Computation: per pathway, uppercase + deduplicate the returned identifier
+ * list and intersect it with the submitted unique-symbol set, so the count
+ * is by construction bounded by (and typically equals) the unique input
+ * size, even if the upstream echo ever drifted from the submitted list.
+ *
+ * Failure policy is deliberately loud: `genes_overlap` is part of the tool
+ * contract, and silently falling back to the entity count would reinstate
+ * the exact > unique-genes numbers this follow-up exists to eliminate — so
+ * a failed/shapeless follow-up, or a reply missing `summary.token`, fails
+ * the whole call instead of degrading the field.
+ */
+async function fetchMatchedGenesPerPathway(
+  conn: RestConnection,
+  analysis: ReactomeAnalysisResponse,
+  page: ReactomeAnalysisPathway[],
+  submittedSymbols: string[]
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (page.length === 0) return counts;
+
+  const token = analysis?.summary?.token;
+  if (!token) {
+    throw new Error('Reactome analysis reply omitted summary.token — per-pathway matched-gene counts are unavailable');
+  }
+
+  // One request for the whole returned page: comma-separated stable IDs as
+  // plain text (the endpoint explicitly takes "plain text, not json").
+  const stIds = page.map(p => p.stId || '').filter(id => id.length > 0);
+  if (stIds.length === 0) return counts;
+  const found = await conn.post(`/token/${token}/found/all?resource=TOTAL`, stIds.join(',')) as ReactomeFoundAllRow[];
+  if (!Array.isArray(found)) {
+    throw new Error('Unexpected reply shape from Reactome /token/{token}/found/all');
+  }
+
+  const submitted = new Set(submittedSymbols);
+  for (const row of found) {
+    if (!row?.pathway) continue;
+    const uniqueGenes = new Set(
+      (row.entities || [])
+        .map(e => (e?.id || '').trim().toUpperCase())
+        .filter(id => id.length > 0 && submitted.has(id))
+    );
+    counts.set(row.pathway, uniqueGenes.size);
+  }
+  return counts;
 }
 
 export interface DiscoverResult {
@@ -841,15 +923,28 @@ interface ReactomeSearchResponse {
 }
 
 interface ReactomeAnalysisResponse {
-  pathways?: Array<{
-    stId: string;
-    name: string;
-    entities: {
-      pValue?: number;
-      found?: number;
-      total?: number;
-    };
-  }>;
+  summary?: {
+    /** Server-side handle for the stored analysis; enables the found/all follow-up. */
+    token?: string;
+  };
+  pathways?: ReactomeAnalysisPathway[];
+}
+
+interface ReactomeAnalysisPathway {
+  stId?: string;
+  name?: string;
+  entities?: {
+    pValue?: number;
+    /** Matched Reactome ENTITIES (not genes) — may exceed the unique input size. */
+    found?: number;
+    total?: number;
+  };
+}
+
+/** Row of `/token/{token}/found/all`: matched SUBMITTED identifiers per pathway. */
+interface ReactomeFoundAllRow {
+  pathway?: string;
+  entities?: Array<{ id?: string }>;
 }
 
 interface ChemblMechanismResponse {

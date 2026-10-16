@@ -125,9 +125,61 @@ export class RestConnection implements IConnection<string, unknown> {
     
     const contentType = response.headers?.get?.('content-type') || '';
     if (!contentType || contentType.includes('json')) {
-      return response.json();
+      return this.parseJsonBody(response);
     }
     return response.text();
+  }
+
+  /**
+   * Parse a JSON response body with a raw-control-character fallback.
+   *
+   * Some sources intermittently serve JSON containing raw (unescaped)
+   * U+0000–U+001F control characters inside string literals — forbidden by
+   * RFC 8259 and rejected by V8 with an opaque `SyntaxError: Bad control
+   * character in string literal` (observed live from NCBI via
+   * genbank_search). When the strict parse throws a SyntaxError, the payload
+   * is retried once with every raw control character REMOVED. Removal
+   * (rather than escaping) is deliberate: an escaped `\uXXXX` form is only
+   * valid inside a string, and without a full tokenizer the fallback cannot
+   * tell string content from inter-token whitespace; dropping the byte is
+   * lossy only for that single character and can never alter document
+   * structure (outside string literals these bytes are insignificant JSON
+   * whitespace). Payloads that parse strictly are byte-untouched — the
+   * fallback only runs after a failure — and if the sanitized payload still
+   * fails to parse, the ORIGINAL SyntaxError propagates so the genuine
+   * defect stays visible.
+   *
+   * Mechanics: the response is cloned BEFORE the primary parse because a
+   * failed `response.json()` leaves the body stream consumed ("Body is
+   * unusable"), leaving no second chance at the bytes. Minimal response
+   * stand-ins without the stream API (as used throughout the test suite)
+   * skip the clone and keep today's `response.json()` verbatim behavior,
+   * mirroring the defensive `headers?.get?.` access above.
+   */
+  private async parseJsonBody(response: Response): Promise<unknown> {
+    let backup: Response | undefined;
+    try {
+      if (typeof response.clone === 'function') backup = response.clone();
+    } catch {
+      // Cloning only fails on an already-disturbed body, which the primary
+      // parse below would reject anyway; proceed without the fallback copy.
+    }
+    try {
+      return await response.json();
+    } catch (error) {
+      // Name check alongside instanceof: the rejection may cross realm
+      // boundaries (undici under Jest's vm), where instanceof fails but the
+      // `name` property still reads "SyntaxError".
+      const isSyntaxError = error instanceof SyntaxError ||
+        (error as { name?: unknown } | null)?.name === 'SyntaxError';
+      if (!isSyntaxError || !backup) throw error;
+      const sanitized = (await backup.text()).replace(/[\x00-\x1f]/g, '');
+      try {
+        return JSON.parse(sanitized);
+      } catch {
+        throw error; // propagate the ORIGINAL error, not the sanitized one
+      }
+    }
   }
 
   /** `body` may be a plain string — sent verbatim as text/plain (e.g. Reactome
@@ -173,7 +225,7 @@ export class RestConnection implements IConnection<string, unknown> {
 
     const contentType = response.headers?.get?.('content-type') || '';
     if (!contentType || contentType.includes('json')) {
-      return response.json();
+      return this.parseJsonBody(response);
     }
     return response.text();
   }

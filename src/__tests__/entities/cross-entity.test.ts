@@ -1486,23 +1486,33 @@ describe('geneEnrichment additional tests', () => {
   });
 
   test('returns the enrichment envelope: pathways page, total_reported, truncated=false', async () => {
-    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({
-        pathways: [
-          {
-            stId: 'R-HSA-1640170',
-            name: 'Cell Cycle',
-            entities: { pValue: 0.001, found: 5, total: 100 },
-          },
-          {
-            stId: 'R-HSA-73894',
-            name: 'DNA Repair',
-            entities: { pValue: 0.005, found: 3, total: 80 },
-          },
-        ],
-      }),
-    }) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          summary: { token: 'TOK%3D' },
+          pathways: [
+            {
+              stId: 'R-HSA-1640170',
+              name: 'Cell Cycle',
+              entities: { pValue: 0.001, found: 7, total: 100 },
+            },
+            {
+              stId: 'R-HSA-73894',
+              name: 'DNA Repair',
+              entities: { pValue: 0.005, found: 3, total: 80 },
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve([
+          // Gene-level truth: fewer unique genes than the entity counts above.
+          { pathway: 'R-HSA-1640170', entities: [{ id: 'BRCA1' }, { id: 'TP53' }, { id: 'RB1' }, { id: 'CHEK2' }, { id: 'ATM' }] },
+          { pathway: 'R-HSA-73894', entities: [{ id: 'BRCA1' }, { id: 'TP53' }, { id: 'ATM' }] },
+        ]),
+      }) as any;
 
     const result = (await geneEnrichment(['BRCA1', 'TP53', 'RB1', 'CHEK2', 'ATM'])) as GeneEnrichmentResult;
 
@@ -1516,8 +1526,17 @@ describe('geneEnrichment additional tests', () => {
       source: 'reactome',
     });
     expect(result.pathways[1].pathway_id).toBe('R-HSA-73894');
+    expect(result.pathways[1].genes_overlap).toBe(3);
     expect(result.total_reported).toBe(2);
     expect(result.truncated).toBe(false);
+    // The follow-up is ONE request for the whole page: token path, plain-text
+    // comma-separated stable IDs.
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    const followUp = (global.fetch as any).mock.calls[1];
+    expect(String(followUp[0])).toContain('reactome.org/AnalysisService/token/TOK%3D/found/all');
+    expect(String(followUp[0])).toContain('resource=TOTAL');
+    expect(followUp[1].body).toBe('R-HSA-1640170,R-HSA-73894');
+    expect(followUp[1].headers.get('content-type')).toBe('text/plain');
   });
 
   test('deduplicates, uppercases, and drops empties before submission (issue #85)', async () => {
@@ -1544,9 +1563,22 @@ describe('geneEnrichment additional tests', () => {
       name: `Pathway ${i}`,
       entities: { pValue: 0.01, found: 3, total: 100 },
     }));
-    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ pathways: manyPathways }),
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
+      if (String(url).includes('/found/all')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(
+            Array.from({ length: 45 }, (_, i) => ({
+              pathway: `R-HSA-${i}`,
+              entities: [{ id: 'A1' }, { id: 'A2' }, { id: 'A3' }],
+            }))
+          ),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ summary: { token: 'TOK' }, pathways: manyPathways }),
+      });
     }) as any;
 
     // Default limit 30: page truncated, total reported.
@@ -1568,22 +1600,83 @@ describe('geneEnrichment additional tests', () => {
     expect(small.truncated).toBe(true);
   });
 
-  test('genes_overlap is Reactome-reported passthrough, never clamped (issue #85 invariant)', async () => {
-    // Mocked upstream absurdity (found far above the unique input size):
-    // post-dedup the invariant should hold for real responses, but what we
-    // emit must always equal what Reactome reported — honesty over clamping.
+  test('genes_overlap counts unique matched GENES, not entities (issue #85: entity multiplicity)', async () => {
+    // Live-observed shape (2026-10-16 probe of the 10-gene cancer panel):
+    // Reactome reports entities.found=14 in "Generic Transcription Pathway"
+    // because one symbol projects onto several entities (BRCA1 → UniProt
+    // entry + Ensembl gene + transcript), while /token/found/all lists only
+    // the matched SUBMITTED symbols. genes_overlap must be the gene-level
+    // number: deduplicated case-insensitively and intersected with the
+    // submitted set (an echoed non-submitted id is excluded), so it can
+    // never exceed the unique input size.
+    global.fetch = jest.fn<(...args: any[]) => any>()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          summary: { token: 'TOK' },
+          pathways: [
+            { stId: 'R-HSA-212436', name: 'Generic Transcription Pathway', entities: { pValue: 1e-9, found: 14, total: 1574 } },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve([
+          {
+            pathway: 'R-HSA-212436',
+            entities: [
+              { id: 'TP53' }, { id: 'BRCA1' }, { id: 'brca1' }, { id: 'ATM' },
+              { id: 'EGFR' }, // echoed but NOT submitted — excluded by the intersect
+            ],
+          },
+        ]),
+      }) as any;
+
+    const result = (await geneEnrichment(['BRCA1', 'brca1', 'TP53', 'ATM'])) as GeneEnrichmentResult;
+
+    expect(result.pathways[0].genes_overlap).toBe(3); // BRCA1 (case-collapsed), TP53, ATM
+    expect(result.pathways[0].genes_total).toBe(1574); // entity-level denominator stays verbatim
+  });
+
+  test('token follow-up failure fails the whole call loudly (no entity-count fallback)', async () => {
+    // The projection succeeded, but genes_overlap is part of the contract:
+    // falling back to entities.found would silently restore > unique-genes
+    // numbers, so the follow-up error must surface instead.
+    global.fetch = jest.fn<(...args: any[]) => any>()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          summary: { token: 'TOK' },
+          pathways: [
+            { stId: 'R-HSA-1', name: 'P', entities: { found: 3, total: 10 } },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+      }) as any;
+
+    const err = enrichError(await geneEnrichment(['BRCA1', 'TP53', 'ATM']));
+
+    expect(err).toContain('HTTP 503');
+    expect(err).toContain('reactome');
+  });
+
+  test('missing summary.token fails loudly instead of degrading to entity counts', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         pathways: [
-          { stId: 'R-HSA-1', name: 'Odd pathway', entities: { pValue: 0.5, found: 99, total: 100 } },
+          { stId: 'R-HSA-1', name: 'P', entities: { found: 3, total: 10 } },
         ],
       }),
     }) as any;
 
-    const result = (await geneEnrichment(['BRCA1', 'TP53', 'ATM'])) as GeneEnrichmentResult;
+    const err = enrichError(await geneEnrichment(['BRCA1', 'TP53', 'ATM']));
 
-    expect(result.pathways[0].genes_overlap).toBe(99);
+    expect(err).toContain('summary.token');
   });
 
   test('handles timeout with AbortError', async () => {
@@ -1670,16 +1763,27 @@ describe('gene_enrich tool contract', () => {
   });
 
   test('serializes the envelope (pathways, total_reported, truncated) and passes limit through', async () => {
-    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({
-        pathways: Array.from({ length: 4 }, (_, i) => ({
-          stId: `R-HSA-${i}`,
-          name: `Pathway ${i}`,
-          entities: { pValue: 0.01, found: 2, total: 50 },
-        })),
-      }),
-    }) as any;
+    global.fetch = jest.fn<(...args: any[]) => any>()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          summary: { token: 'TOK' },
+          pathways: Array.from({ length: 4 }, (_, i) => ({
+            stId: `R-HSA-${i}`,
+            name: `Pathway ${i}`,
+            entities: { pValue: 0.01, found: 2, total: 50 },
+          })),
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve([
+          { pathway: 'R-HSA-0', entities: [{ id: 'BRCA1' }, { id: 'TP53' }] },
+          { pathway: 'R-HSA-1', entities: [{ id: 'BRCA1' }] },
+          { pathway: 'R-HSA-2', entities: [{ id: 'TP53' }] },
+          { pathway: 'R-HSA-3', entities: [{ id: 'ATM' }] },
+        ]),
+      }) as any;
 
     const result = await harness.callTool('gene_enrich', {
       genes: ['BRCA1', 'TP53', 'ATM'],
@@ -1688,8 +1792,8 @@ describe('gene_enrich tool contract', () => {
 
     expect(result).toEqual({
       pathways: [
-        expect.objectContaining({ pathway_id: 'R-HSA-0' }),
-        expect.objectContaining({ pathway_id: 'R-HSA-1' }),
+        expect.objectContaining({ pathway_id: 'R-HSA-0', genes_overlap: 2 }),
+        expect.objectContaining({ pathway_id: 'R-HSA-1', genes_overlap: 1 }),
       ],
       total_reported: 4,
       truncated: true,
