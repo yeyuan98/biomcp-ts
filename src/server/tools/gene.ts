@@ -192,7 +192,7 @@ export function registerGeneTools(server: McpServer): void {
   server.registerTool(
     'gene_enrich',
     {
-      description: 'Perform pathway enrichment analysis for a gene list (Reactome over-representation). Requires at least 3 genes; the list is deduplicated (case-insensitive) before submission, and the reply reports how many pathways Reactome found in total alongside the returned page.',
+      description: 'Perform pathway enrichment analysis for a gene list (Reactome over-representation). Requires at least 3 genes; the list is deduplicated (case-insensitive) before submission. Each pathway reports genes_overlap — the count of unique SUBMITTED genes Reactome matched there, resolved with one follow-up token lookup (Reactome\'s entity-level match count can exceed the gene count when one gene maps to multiple entities, e.g. a UniProt entry plus Ensembl gene/transcript). The reply also reports how many pathways Reactome found in total alongside the returned page.',
       inputSchema: {
         genes: z.array(z.string()).min(3, 'Gene enrichment requires at least 3 genes').describe('List of HGNC gene symbols (minimum 3; duplicates and case variants are collapsed before submission)'),
         limit: z.number().int().min(1).max(100).default(30).describe('Maximum pathways to return (1-100; Reactome reports up to ~100)'),

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, jest } from '@jest/globals';
 import { createMcpTestHarness } from '../../helpers/mcp-harness.js';
-import { expectGeneSearchResult, expectGeneGetResult, expectCrossEntityDrugRows, expectCrossEntityTrialRows, expectCrossEntityArticleRows } from '../../helpers/assertions.js';
+import { expectGeneSearchResult, expectGeneGetResult, expectCrossEntityDrugRows, expectCrossEntityTrialRows } from '../../helpers/assertions.js';
 import { retryOnRateLimit } from '../../helpers/retry.js';
 
 jest.setTimeout(60000); // measured p95 ≈ 21 s (gene_enrich reactome legs); 60 s also matches the MCP client request cap
@@ -179,14 +179,33 @@ describe('gene_trials', () => {
 describe('gene_articles', () => {
   it('returns articles for BRCA1', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('gene_articles', { symbol: 'BRCA1' }));
-    expectCrossEntityArticleRows(result);
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBeGreaterThan(0);
+    const rows = result as Array<Record<string, any>>;
+    // Federated ranking may lead with a non-PMID source (litsense, pubtator,
+    // semantic_scholar, preprints), so row 1 is not required to carry a pmid.
+    // The pmid contract applies where it is actually guaranteed: (a) at least
+    // one row with a numeric pmid, (b) every pubmed/europepmc-sourced row,
+    // and (c) titles are non-empty strings.
+    expect(
+      rows.some((r) => r.pmid !== undefined && /^\d+$/.test(String(r.pmid)))
+    ).toBe(true);
+    for (const row of rows) {
+      if (row.source === 'pubmed' || row.source === 'europepmc') {
+        expect(row.pmid).toBeDefined();
+        expect(String(row.pmid)).toMatch(/^\d+$/);
+      }
+    }
+    expect(typeof rows[0].title).toBe('string');
+    expect(rows[0].title.length).toBeGreaterThan(0);
   }, 60000);
 });
 
 describe('gene_enrich', () => {
   // Issue #85's 10-gene cancer panel, submitted with duplicates and case
-  // variants: 10 unique genes after dedup (Reactome counts submitted lines,
-  // so every found-count must be <= the unique size).
+  // variants: 10 unique genes after dedup. genes_overlap is the count of
+  // unique SUBMITTED genes Reactome matched per pathway (resolved with one
+  // token follow-up request), so it is bounded by the unique input size.
   const CANCER_PANEL_10 = [
     'TP53', 'tp53', 'BRCA1', 'BRCA1 ', 'BRCA2', 'EGFR', 'KRAS',
     'PIK3CA', 'PTEN', 'APC', 'MYC', 'rb1',
@@ -205,8 +224,11 @@ describe('gene_enrich', () => {
       expect(p.pathway_id).toMatch(/^R-HSA-\d+$/);
       expect(typeof p.name).toBe('string');
       expect(p.source).toBe('reactome');
-      // Dedup invariant (issue #85): Reactome's found-count must never
-      // exceed the 10 unique submitted genes.
+      // Gene-level invariant (issue #85): genes_overlap counts unique
+      // matched GENES — never Reactome's entity-level found, which exceeds
+      // the gene count when one symbol projects onto several entities
+      // (live 2026-10-16 probe: found=14 vs 7 genes in "Generic
+      // Transcription Pathway") — so it must stay <= the 10 unique inputs.
       expect(p.genes_overlap).toBeLessThanOrEqual(10);
     }
     expect(typeof result.total_reported).toBe('number');
