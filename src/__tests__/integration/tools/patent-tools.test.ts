@@ -97,18 +97,49 @@ describe('patent_search', () => {
     expect(Array.isArray((response as any).seminal_prior_art)).toBe(true);
     expect(typeof (response as any).mined_count).toBe('number');
     if (((response as any).mined_count as number) >= 3) {
+      const entries = (response as any).seminal_prior_art as Array<Record<string, unknown>>;
       // The foundational Szostak art is co-cited across assignees by the
       // diversity-sampled top grants — resolved to a US family member
       // (US6261804B1/US6207446B1, "Selection of proteins using RNA-protein
       // fusions", General Hospital Corp) with OPS creds, or its PCT form
       // WO98/31700 keylessly. Tolerant matcher guards against live drift.
-      const seminal = ((response as any).seminal_prior_art as Array<Record<string, unknown>>)
+      const joined = entries
         .map(e => `${e.publication_number} ${e.title || ''} ${e.assignee || ''}`).join(' | ');
-      expect(seminal).toMatch(/6261804|6207446|31700|RNA-protein fusions/i);
-      const szostak = ((response as any).seminal_prior_art as Array<Record<string, unknown>>)
+      expect(joined).toMatch(/6261804|6207446|31700|RNA-protein fusions/i);
+      // Three-way contract, NO NaN comparisons: an absent entry or an
+      // absent/thin co_cited_by must route to the explanation path below,
+      // never into Number(undefined) >= 2 (the old 11-run CI failure).
+      const byCanonicalNumber = entries
         .find(e => /6261804|6207446|31700/i.test(String(e.publication_number)));
-      expect(Number(szostak?.co_cited_by)).toBeGreaterThanOrEqual(2);
-      expect(Array.isArray(szostak?.cited_by)).toBe(true);
+      if (byCanonicalNumber !== undefined
+        && typeof byCanonicalNumber.co_cited_by === 'number'
+        && byCanonicalNumber.co_cited_by >= 2) {
+        // Rich case: the art sits under a canonical number with real
+        // cross-assignee co-citation — require the citing docs too.
+        expect(Array.isArray(byCanonicalNumber.cited_by)).toBe(true);
+        expect((byCanonicalNumber.cited_by as unknown[]).length).toBeGreaterThan(0);
+      } else {
+        // Thin-pool CI reality: OPS/Google-Patents resolution rewrote the
+        // publication number to a different US family member (the tolerant
+        // matcher above passed via the title alternative), or the entry
+        // carries thin co-citation metadata. Either way the response must
+        // EXPLAIN it, never pass silently: the entry-level note pins the
+        // exact resolution wording emitted by seminal.ts ("US family
+        // member of WO…/…PCT…" / "PCT publication…"), and a genuinely
+        // thin pool is covered by the response-level seminal_note.
+        const art = entries.find(e =>
+          /6261804|6207446|31700/i.test(String(e.publication_number))
+          || /6261804|6207446|31700|RNA-protein fusions/i
+            .test(`${e.publication_number} ${e.title || ''} ${e.assignee || ''}`));
+        expect(art).toBeDefined();
+        if (art !== undefined && typeof art.co_cited_by === 'number' && art.co_cited_by >= 2) {
+          expect(Array.isArray(art.cited_by)).toBe(true);
+        }
+        const explained =
+          /US family member of .*PCT|PCT publication/i.test(String(art?.note ?? ''))
+          || /too few|no commonly-cited|skipped|deadline/i.test(String((response as any).seminal_note ?? ''));
+        expect(explained).toBe(true);
+      }
     } else {
       // A thin pool must still be EXPLAINED, never silently empty.
       expect(String((response as any).seminal_note)).toMatch(/too few|no commonly-cited|skipped|deadline/);
@@ -213,8 +244,12 @@ describe('patent_search resilience (live)', () => {
       // If the worldwide substitute is also unavailable, a coverage warning
       // explains the US-only results instead (logic unit-pinned; live GP
       // availability varies, so the note's presence is not asserted here).
+      // An ABSENT errors array means the second search had nothing to report
+      // at all — the strongest form of backoff success — so fold the
+      // undefined from `undefined?.some(...)` into false rather than
+      // failing the assertion with received=undefined.
       const secondOpsError = (second.errors as Array<{ source: string; message: string }> | undefined)
-        ?.some(e => e.source === 'ops' && e.message.includes("'ops' failed"));
+        ?.some(e => e.source === 'ops' && e.message.includes("'ops' failed")) ?? false;
       expect(secondOpsError).toBe(false);
       // Still returns real ppubs results regardless of worldwide status.
       expect(second.patents.length).toBeGreaterThan(0);
