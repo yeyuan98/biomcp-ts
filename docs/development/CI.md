@@ -9,7 +9,7 @@ configuration see [../ENV-VARS.md](../ENV-VARS.md).
 
 | Piece | File | Role |
 |---|---|---|
-| Gate pipeline | `.github/workflows/ci.yml` | Runs every gate on every PR and push to `main` |
+| Gate pipeline | `.github/workflows/ci.yml` | Two parallel jobs on every PR and push to `main`: required gate `ci` + advisory `integration` (see below) |
 | Auto-merge | `.github/workflows/dependabot-automerge.yml` | Merges qualifying Dependabot PRs after `ci` passes |
 | R WASM mirror release | `.github/workflows/r-wasm-mirror.yml` | On version bump to `main`, builds (or copy-forwards) the R-analysis wasm package bundle and publishes it as the release asset end-user servers download at first use; fresh builds are gated by golden numeric validation (`scripts/ranalysis/validate-bundle.mjs`) |
 | Dependabot config | `.github/dependabot.yml` | Weekly lockfile-only version updates + grouped security updates |
@@ -17,15 +17,19 @@ configuration see [../ENV-VARS.md](../ENV-VARS.md).
 
 ## The gate pipeline (`ci.yml`)
 
-Single job, id `ci` — the job id **is** the status-check name the ruleset
-requires, so it must not be renamed or matrixed without updating the ruleset.
+Two jobs run in parallel on every PR and push to `main`: the required gate
+`ci` (this section) and the advisory `integration` tier (next section).
+
+The gate is a single job, id `ci` — the job id **is** the status-check name
+the ruleset requires, so it must not be renamed or matrixed without updating
+the ruleset.
 
 Gates in order, each failing the build on error:
 
 1. `npm ci` — installs exactly from `package-lock.json`
 2. `make typecheck` — both `src/` and `scripts/` tsconfigs
-3. `npm test` — the 1300+ mocked unit tests (integration tests are excluded via
-   the npm script; they hit live biomedical APIs)
+3. `npm test` — the 1300+ mocked unit tests (integration tests are excluded
+   via the npm script; they run in the separate `integration` job)
 4. `npm run build` — `tsc` + the two esbuild bundles
 5. `npm audit --audit-level=low` — **full** audit, not `--omit=dev`, minus
    one documented allowlist entry (see below)
@@ -65,6 +69,66 @@ once a patched sprintf-js release exists.
 An LSP-style `Content-Length: ...` framed request yields no response and the
 test would silently degrade to checking nothing. Keep stdin open briefly
 (`sleep 2`) or the server may exit before flushing.
+
+## Integration tier & merge checklist
+
+The same workflow runs a second job, id/name `integration`, in parallel with
+`ci` (no `needs` between them). It runs `npm run test:integration` — the
+keyless live-API suites via `jest.integration.config.ts` with `--runInBand`;
+env-gated suites (db, biowasm/ranalysis mirror, depmap) self-skip in CI via
+`describe.skip`, exactly as they do locally in a bare environment.
+
+What the two checks mean on a PR:
+
+- **`ci`** — the required gate (typecheck / unit / build / audit / smoke).
+  Must be green to merge; the ruleset enforces it.
+- **`integration`** — **advisory but MANDATORY-REVIEW.** It has no
+  `continue-on-error`, so failures render as a red ✗ named `integration` in
+  the checks list — impossible to overlook. It is deliberately NOT a required
+  check, so it never blocks merge mechanically: shared GitHub runner IPs get
+  rate-limited/geo-blocked by upstream biomedical APIs intermittently, and
+  hard-failing every PR on that would stall all work. The deal is: the red ✗
+  never blocks the merge button, but **no merge happens without triage** of
+  every red integration run.
+
+**Standardized pre-merge step (do this on every PR):**
+
+1. Open the `integration` check on the PR's checks list.
+2. Read the **Step Summary** — the `Integration failure summary` step renders
+   a verdict header (`❌ N failed — triage before merging` or
+   `✅ N passed / all green`), a `Suite | Failed test` table, and the verbatim
+   jest totals. The raw jest output is attached as the `integration-log`
+   artifact whenever the job fails, for full context beyond the table.
+3. Bucket **every** failure in the table into exactly one of:
+
+   | Bucket | Meaning | Action |
+   |---|---|---|
+   | (a) upstream | live API rate-limited / timed out / geo-blocked the runner | note it in the PR and merge |
+   | (b) test-design | the assertion is brittle against volatile live data | file an issue, then merge |
+   | (c) code defect | the contract under test is genuinely broken | **fix before merging** |
+
+Rubric examples from the 2026-10-15 audit (the incident that created this
+checklist — integration failures had hidden behind a green `ci` for six
+merges):
+
+- **Upstream (a):** the ensembl 60 s-timeout family — REST/Ensembl endpoints
+  slow or refusing runner IPs; the code is fine, the network wasn't.
+- **Test-design (b):** patent Szostak `co_cited_by` NaN floor (the live
+  patent pool no longer carries ≥2 co-citations for that entry, so
+  `Number(undefined) >= 2` fails) and the placeholder-OPS
+  `undefined`-vs-`false` assertion (coverage-note shape drifted behind a
+  flag neither side asserts deliberately).
+- **Code defect (c):** `gene_enrich` reported `genes_overlap: 11` for a
+  10-unique-gene input — a dedup invariant violation (issue #85), fixed
+  before merge.
+
+**Local reproduction:** `make test-integration` (the npm script needs the
+ESM launcher — see [src/__tests__/README.md](../../src/__tests__/README.md)).
+Caveat: a local WSL2 clock that has drifted makes token-bucket rate limiters
+and TLS certificate checks fail spuriously in ways that never happen on CI
+runners — resync the clock (restart WSL / NTP sync) before trusting a local
+red run, and treat **CI as authoritative** when deciding whether a flake is
+real.
 
 ## Dependabot: two kinds of PR
 

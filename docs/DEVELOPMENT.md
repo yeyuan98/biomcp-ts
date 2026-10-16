@@ -45,6 +45,12 @@ make test-coverage     # Unit tests with coverage report
 CI runs these gates (plus build, dependency audit, and a stdio smoke test) on
 every PR — see [development/CI.md](development/CI.md).
 
+In CI the integration suites run in a separate advisory **`integration` job**:
+a red ✗ there never blocks merge, but every failure must be triaged (upstream
+/ test-design / code defect) before merging — the job's Step Summary carries
+the failed-test table, and the checklist lives in
+[development/CI.md § Integration tier & merge checklist](development/CI.md#integration-tier--merge-checklist).
+
 The database integration suite needs a live MySQL server and is skipped unless configured:
 
 ```bash

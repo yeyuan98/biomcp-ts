@@ -1,9 +1,17 @@
 # CI gate pipeline for biomcp-ts
 #
-# Runs on every pull_request and on pushes to main. The job id (`ci`) doubles as
-# the status-check name — the branch ruleset requires exactly this check before
-# merging, which is also what makes dependabot auto-merge safe (see
-# docs/development/CI.md).
+# Runs on every pull_request and on pushes to main. Two parallel jobs:
+#
+# - `ci` — the required gate (the job id doubles as the status-check name the
+#   branch ruleset requires; do not rename it). Typecheck → unit → build →
+#   audit → smoke. Also what makes dependabot auto-merge safe (see
+#   docs/development/CI.md).
+# - `integration` — the advisory tier. Runs the live-API integration suites
+#   with NO continue-on-error, so a failure renders as a red ✗ named
+#   `integration` in the checks list (visible, impossible to miss) but the
+#   check is NOT required, so it never blocks merge. Failures must be triaged
+#   per the rubric in docs/development/CI.md; a step summary + the
+#   `integration-log` artifact carry the details.
 #
 # Note: full `npm audit` (not --omit=dev) is intentional. This repo bundles
 # runtime code from devDependencies into dist/bundle.js (e.g. fast-xml-parser),
@@ -43,16 +51,6 @@ jobs:
       - name: Unit tests (mocked; integration excluded by npm test)
         run: npm test
 
-      # Keyless live-API suites (jest.integration.config.ts, --runInBand).
-      # Env-gated suites (db, biowasm/ranalysis mirror, depmap) self-skip via
-      # describe.skip when their env vars are absent. Non-blocking: shared
-      # GitHub runner IPs get rate-limited/geo-blocked by upstream APIs
-      # intermittently, so failures here are surfaced for review but do not
-      # block merges (unit tests above remain the required gate).
-      - name: Integration tests (live keyless APIs; non-blocking)
-        run: npm run test:integration
-        continue-on-error: true
-
       - name: Build bundles
         run: npm run build
 
@@ -89,3 +87,47 @@ jobs:
           req='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci-smoke","version":"0"}}}'
           out=$({ echo "$req"; sleep 2; } | timeout 15 node dist/bundle.js)
           echo "$out" | grep -q '"serverInfo"'
+
+  # Advisory tier — see the workflow header and docs/development/CI.md.
+  # Runs in parallel with `ci` (no `needs`); deliberately NOT a required
+  # status check, so a red `integration` never blocks merge — but failures
+  # are impossible to overlook (red ✗ + step summary + log artifact) and
+  # MUST be triaged before merging.
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install (lockfile-exact)
+        run: npm ci --no-fund
+
+      # Keyless live-API suites (jest.integration.config.ts, --runInBand).
+      # Env-gated suites (db, biowasm/ranalysis mirror, depmap) self-skip via
+      # describe.skip when their env vars are absent. NO continue-on-error
+      # here on purpose: jest's exit code must fail this job so the checks
+      # list shows a red ✗ named `integration`.
+      - name: Integration tests (live keyless APIs)
+        shell: bash # explicit bash => -eo pipefail; the set below is belt-and-braces
+        run: |
+          set -o pipefail # else tee masks jest's exit code and failures hide again
+          npm run test:integration 2>&1 | tee integration.log
+
+      # Runs on failure AND success: the all-green verdict is worth recording
+      # too. Appends the verdict + failed-test table + triage rubric to the
+      # run's Step Summary (scripts/ci/integration-summary.ts never throws).
+      - name: Integration failure summary
+        if: always()
+        run: node --import tsx scripts/ci/integration-summary.ts integration.log
+
+      # Full raw jest output for reviewers (retained per repo artifact policy).
+      - name: Upload integration log (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-log
+          path: integration.log
