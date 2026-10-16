@@ -116,8 +116,18 @@ describe('article_search preprint_only (bioRxiv + medRxiv)', () => {
 });
 
 describe('article_search arxiv source', () => {
+  // Empty-vs-error distinction: arXiv throttles datacenter IPs (CI runners),
+  // and an upstream failure surfaces in the envelope's errors — it must fail
+  // HONESTLY here instead of masquerading as an empty success below.
+  const expectNoUpstreamErrors = (response: { errors?: Array<{ source: string; message: string }> }) => {
+    if (Array.isArray(response.errors) && response.errors.length > 0) {
+      throw new Error('arxiv upstream error: ' + JSON.stringify(response.errors));
+    }
+  };
+
   it('returns arXiv results for CRISPR base editing', async () => {
     const response = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'CRISPR base editing', source: 'arxiv', limit: 5 }));
+    expectNoUpstreamErrors(response);
     const results = response.results;
     expectArticleSearchResult(results);
     expect(results.length).toBeGreaterThan(0);
@@ -132,6 +142,7 @@ describe('article_search arxiv source', () => {
 
   it('returns date-filtered arXiv results within 2024', async () => {
     const response = await retryOnRateLimit(() => harness.callTool('article_search', { query: 'transformer', source: 'arxiv', limit: 3, dateRange: '2024-01-01/2024-12-31' }));
+    expectNoUpstreamErrors(response);
     const results = response.results;
     expectArticleSearchResult(results);
     expect(results.length).toBeGreaterThan(0);
