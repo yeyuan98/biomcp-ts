@@ -211,7 +211,7 @@ Integration tests use `InMemoryTransport` from the MCP SDK to connect a real `Cl
 
 **Keyed skips:** OPS/ODP patent describes and the OncoKB variant test (see gating table above). Everything else runs keyless against live APIs.
 
-**CI strategy:** Integration tests are **not** run in CI — `.github/workflows/ci.yml` gates on the unit suite only. Run integration locally (or on-demand) via `npm run test:integration`; remember that gated suites skip silently in a bare environment (see the gating table).
+**CI strategy:** Integration tests run in CI in a separate advisory **`integration` job** (parallel to the required `ci` gate; no `continue-on-error` — failures show as a red ✗ with a Step Summary). A red run never blocks merge mechanically, but every failure must be triaged before merging: open the `integration` check → read its Step Summary → bucket each failure per the rubric in [docs/development/CI.md § Integration tier & merge checklist](../../../docs/development/CI.md#integration-tier--merge-checklist). The raw log is uploaded as the `integration-log` artifact on failure; reproduce locally with `make test-integration` (CI is authoritative over local WSL2 runs — clock skew there causes spurious failures). Env-gated suites self-skip in CI exactly as in a bare local environment (see the gating table).
 
 ## Database Tests
 
