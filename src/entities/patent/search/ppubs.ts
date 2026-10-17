@@ -22,6 +22,26 @@ function firstDate(v: string[] | undefined): string | undefined {
   return raw.slice(0, 10);
 }
 
+/**
+ * USPTO Public Search wraps query-term matches in `inventionTitle` with
+ * highlight spans regardless of the `highlights` request flag (issue #103),
+ * e.g. `<span term="mrnas" class="highlight18">mRNAs</span>` — sometimes with
+ * doubled quotes inside the tag: `term=""mrna""`. Module-local on purpose:
+ * only this search path emits the markup (ops/odp/google never do).
+ */
+function stripHighlightMarkup(title: string | undefined): string | undefined {
+  if (!title) return title;
+  let out = title;
+  // Repeated passes unwrap nested spans innermost-first.
+  let prev: string;
+  do {
+    prev = out;
+    out = out.replace(/<span\b[^>]*>(.*?)<\/span>/gi, '$1');
+  } while (out !== prev);
+  out = out.replace(/""/g, '"');
+  return out.replace(/\s+/g, ' ').trim();
+}
+
 export function transformPpubsResult(record: PpubsRecord): PatentSearchResult {
   const number = (record.publicationReferenceDocumentNumber || '').replace(/^US/, '');
   const kind = record.guid ? record.guid.split('-').pop() || '' : '';
@@ -38,7 +58,7 @@ export function transformPpubsResult(record: PpubsRecord): PatentSearchResult {
 
   return {
     publication_number: `US${number}${kind}`,
-    title: record.inventionTitle,
+    title: stripHighlightMarkup(record.inventionTitle),
     publication_date: record.datePublished ? record.datePublished.slice(0, 10) : undefined,
     filing_date: firstDate(record.applicationFilingDate),
     assignee: org.length > 0 ? org : undefined,
