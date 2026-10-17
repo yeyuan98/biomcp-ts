@@ -45,6 +45,59 @@ function wrapTransportError(error: unknown): unknown {
   return wrapped;
 }
 
+/**
+ * Best-effort extraction of an upstream error message from a non-OK response
+ * body, for appending to `HttpConnectionError` messages (` — Upstream: <msg>`).
+ *
+ * Why: non-2xx REST bodies often carry the actual diagnostic — Ensembl VEP
+ * answers an invalid HGVS with HTTP 400 and
+ * `{"error":"Unable to parse HGVS notation '…': Unable to map the cDNA
+ * coordinates … to genomic coordinates"}`, which is far more actionable than
+ * our generic status hint ("The record may not exist…" — actively misleading
+ * for a 400). Every failure mode is tolerated by design:
+ *
+ * - Bodyless response stand-ins (unit-test mocks without `.text()`), via a
+ *   typeof guard — message stays exactly as before.
+ * - Non-JSON bodies (live 500s frequently return HTML error pages): only
+ *   `{`-prefixed bodies within a bounded length are ever parsed.
+ * - JSON whose error fields are objects/non-strings: nothing is appended.
+ * - Any throw (stream already consumed, weird realms): swallowed.
+ *
+ * Extracted messages are truncated (~300 chars) so a chatty upstream cannot
+ * balloon tool error output.
+ */
+async function extractUpstreamErrorMessage(response: Response): Promise<string> {
+  try {
+    if (typeof response.text !== 'function') return '';
+    const body = (await response.text())?.trim();
+    // Only plausibly-JSON error bodies: starts with `{`, bounded size (live
+    // HTML error pages start with `<` and can be huge).
+    if (!body || !body.startsWith('{') || body.length > 2048) return '';
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return '';
+    }
+    if (typeof parsed !== 'object' || parsed === null) return '';
+    const error = (parsed as { error?: unknown }).error;
+    const message = (parsed as { message?: unknown }).message;
+    let extracted = '';
+    if (typeof error === 'string') {
+      extracted = error;
+    } else if (error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string') {
+      extracted = (error as { message: string }).message;
+    } else if (typeof message === 'string') {
+      extracted = message;
+    }
+    extracted = extracted.trim();
+    if (!extracted) return '';
+    return extracted.length > 300 ? `${extracted.slice(0, 300)}…` : extracted;
+  } catch {
+    return '';
+  }
+}
+
 function getHttpStatusHint(status: number, sourceId: string): string {
   if (status === 400) {
     return ` — The request was rejected by ${sourceId}. The record may not exist or may not be indexed yet. Verify the ID is correct and try an older/established record.`;
@@ -119,8 +172,7 @@ export class RestConnection implements IConnection<string, unknown> {
       if (this.options.followRedirects === false) {
         this.throwIfUnexpectedRedirect(response, url);
       }
-      const hint = getHttpStatusHint(response.status, this.sourceId);
-      throw new HttpConnectionError(`HTTP ${response.status}: ${response.statusText} — URL: ${url} — Source: ${this.sourceId}${hint}`, response.status);
+      await this.throwHttpError(response, url);
     }
     
     const contentType = response.headers?.get?.('content-type') || '';
@@ -128,6 +180,19 @@ export class RestConnection implements IConnection<string, unknown> {
       return this.parseJsonBody(response);
     }
     return response.text();
+  }
+
+  /** Build the non-OK error message: status hint plus, when the body is a
+   *  plausible JSON error document, the upstream's own explanation appended as
+   *  ` — Upstream: <msg>` (see extractUpstreamErrorMessage). */
+  private async throwHttpError(response: Response, url: string): Promise<never> {
+    const hint = getHttpStatusHint(response.status, this.sourceId);
+    const upstream = await extractUpstreamErrorMessage(response);
+    const upstreamSuffix = upstream ? ` — Upstream: ${upstream}` : '';
+    throw new HttpConnectionError(
+      `HTTP ${response.status}: ${response.statusText} — URL: ${url} — Source: ${this.sourceId}${hint}${upstreamSuffix}`,
+      response.status
+    );
   }
 
   /**
@@ -219,8 +284,7 @@ export class RestConnection implements IConnection<string, unknown> {
       if (this.options.followRedirects === false) {
         this.throwIfUnexpectedRedirect(response, url);
       }
-      const hint = getHttpStatusHint(response.status, this.sourceId);
-      throw new HttpConnectionError(`HTTP ${response.status}: ${response.statusText} — URL: ${url} — Source: ${this.sourceId}${hint}`, response.status);
+      await this.throwHttpError(response, url);
     }
 
     const contentType = response.headers?.get?.('content-type') || '';

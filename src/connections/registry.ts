@@ -29,15 +29,19 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   // homology, on-demand VEP consequences, region overlap. Keyless; verified
   // budget is 55,000 req/hour per IP — intervalMs 100 keeps a capacity-1
   // bucket well under it. Transient 500/503s are common upstream, hence the
-  // retry entry. See src/entities/ensembl.ts for endpoints deliberately
+  // retry entry. timeoutMs 30000: valid VEP calls have been observed taking
+  // 6.6–20.7 s (on-demand computation), which the former 15 s cap aborted
+  // mid-flight; attempts cut 3→2 in the same change so the worst-case retry
+  // stack (2×30 s + backoff) stays near the old 3×15 s instead of tripling
+  // to ~90 s. See src/entities/ensembl.ts for endpoints deliberately
   // excluded after repeated probe failures (/xrefs/*, /phenotype/*).
   ensembl: {
     sourceId: 'ensembl',
     baseUrl: 'https://rest.ensembl.org',
     protocol: 'rest',
-    handling: { timeoutMs: 15000 },
+    handling: { timeoutMs: 30000 },
     rateLimit: { intervalMs: 100 },
-    retry: { attempts: 3, backoffMs: 200 },
+    retry: { attempts: 2, backoffMs: 200 },
   },
   string: {
     sourceId: 'string',

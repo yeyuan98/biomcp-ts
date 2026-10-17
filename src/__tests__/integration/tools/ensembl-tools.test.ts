@@ -87,6 +87,32 @@ describe('ensembl tools (integration)', () => {
     expect(result.consequences.length).toBeGreaterThan(0);
   }, 60000);
 
+  // Regression guard for issue #102's underlying false negative: VEP works
+  // for non-human species when the HGVS transcript belongs to that species
+  // (NM_011640 = mouse Trp53). VEP computes these live (observed 7–20 s), so
+  // both the per-call SDK timeout and the jest timeout get headroom.
+  it('ensembl_consequence works for non-human species (mouse Trp53 RefSeq HGVS)', async () => {
+    const result = await retryOnRateLimit(() =>
+      harness.callTool(
+        'ensembl_consequence',
+        { variant: 'NM_011640:c.100A>G', species: 'mouse' },
+        { timeoutMs: 90000 }
+      )
+    );
+    expect(result.most_severe_consequence).toBe('missense_variant');
+    const trp53 = result.consequences.find((c: any) => c.gene_symbol === 'Trp53');
+    expect(trp53).toBeTruthy();
+  }, 120000);
+
+  it('ensembl_consequence surfaces the upstream VEP error for invalid HGVS (out-of-range c. position)', async () => {
+    // NM_139292 is mouse Reep6: c.1798 is beyond its CDS, so VEP answers
+    // HTTP 400 with an explanatory JSON body — which must now reach the tool
+    // error instead of the misleading generic "record may not exist" hint.
+    await expect(
+      harness.callTool('ensembl_consequence', { variant: 'NM_139292:c.1798T>A' })
+    ).rejects.toThrow(/Upstream: Unable to parse HGVS/);
+  }, 60000);
+
   it('ensembl_region returns genes in a BRAF-spanning interval', async () => {
     const result = await retryOnRateLimit(() =>
       harness.callTool('ensembl_region', {
