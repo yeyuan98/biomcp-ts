@@ -243,7 +243,7 @@ describe('ensembl entity', () => {
       mockFetchRoutes({
         '/lookup/id': () => {
           calls += 1;
-          if (calls < 3) {
+          if (calls < 2) {
             return {
               ok: false,
               status: 503,
@@ -258,7 +258,9 @@ describe('ensembl entity', () => {
 
       const result = await ensemblLookup('ENSG00000157764');
       expect(result.symbol).toBe('BRAF');
-      expect(calls).toBe(3);
+      // Registry ensembl entry: attempts 2 (cut from 3 alongside the 30 s
+      // timeout bump so the worst-case retry stack stays bounded).
+      expect(calls).toBe(2);
     }, 15000);
 
     it('surfaces an error after exhausting retries on persistent 503s', async () => {
@@ -403,6 +405,29 @@ describe('ensembl entity', () => {
       expect(JSON.parse(String(init.body))).toEqual({ ids: ['rs113488060'] });
       expect(result.input).toBe('rs113488060');
       expect(result.most_severe_consequence).toBe('missense_variant');
+    });
+
+    it('surfaces the upstream VEP error message on a 400 (invalid HGVS)', async () => {
+      const { ensemblConsequence } = await loadEnsembl();
+      mockFetchRoutes({
+        '/vep/': () => ({
+          ok: false,
+          status: 400,
+          statusText: 'Bad Request',
+          text: () =>
+            Promise.resolve(
+              JSON.stringify({
+                error:
+                  "Unable to parse HGVS notation 'NM_139292:c.1798T>A': Unable to map the cDNA coordinates 1798-1798 to genomic coordinates",
+              })
+            ),
+          headers: new Headers({ 'content-type': 'application/json' }),
+        }),
+      });
+
+      await expect(ensemblConsequence('NM_139292:c.1798T>A')).rejects.toThrow(
+        /Upstream: Unable to parse HGVS notation 'NM_139292:c\.1798T>A'/
+      );
     });
 
     it('rejects unsupported variant formats with guidance', async () => {
