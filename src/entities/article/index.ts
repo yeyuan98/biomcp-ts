@@ -9,6 +9,8 @@ export { transformPubTator } from './search/pubtator.js';
 export { transformLitSense } from './search/litsense.js';
 export { transformPreprint } from './search/preprint.js';
 export { getPreprintArticle } from './detail/preprint.js';
+export { fetchPreprintFullText, resetPreprintDownloadGate, PREPRINT_FULLTEXT_TOOL_BUDGET_MS } from './detail/preprint-fulltext.js';
+export type { PreprintFullTextResult, PreprintFullTextOptions } from './detail/preprint-fulltext.js';
 export { parsePubMedXml } from './transform/pubmed.js';
 export { parseArxivAtomXml } from './transform/arxiv.js';
 export { searchArxiv } from './search/arxiv.js';
