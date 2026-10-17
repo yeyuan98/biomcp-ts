@@ -40,6 +40,24 @@ export interface VariantResult {
   significance?: string;
   conditions?: string[];
   sections?: Record<string, unknown>;
+  /** Multi-allelic rsIDs only: one compact core record per ClinVar allele doc. */
+  alleles?: VariantAlleleRecord[];
+  /** Multi-allelic rsIDs only: names the allele the top-level record reflects. */
+  _warning?: string;
+}
+
+/**
+ * Compact per-allele core record attached by variantGet for multi-allelic
+ * rsIDs — mirrors transformMyVariantHit's field extraction so a variant_get
+ * allele and the corresponding variant_search row can never disagree.
+ */
+export interface VariantAlleleRecord {
+  id: string;
+  gene?: string;
+  hgvs_p?: string;
+  hgvs_c?: string;
+  significance?: string;
+  conditions?: string[];
 }
 
 export interface FrequencySection {
@@ -294,7 +312,10 @@ export async function variantGet(
 
   let allVariants: MyVariantGetResponse[] | undefined;
   if (Array.isArray(rawResponse)) {
-    allVariants = rawResponse as MyVariantGetResponse[];
+    // Copy before selection: the sort below runs on the filtered copy, and
+    // this doc-order array feeds the per-allele 'alleles' records attached
+    // further down — it must never be a sorted shared reference.
+    allVariants = [...(rawResponse as MyVariantGetResponse[])];
     const bestWithGnomad = allVariants
       .filter(v => (v as any).gnomad_exome || (v as any).gnomad_genome)
       .sort((a, b) => (b as any)._version - (a as any)._version)[0];
@@ -386,6 +407,16 @@ export async function variantGet(
     }
   }
   
+  if (allVariants && allVariants.length > 1) {
+    // Multi-allelic rsID (e.g. rs28934575): MyVariant keys one document per
+    // ALT allele and the selection above keeps only one — attach every doc
+    // as a compact core record so pathogenic ALT alleles are not silently
+    // hidden (issue #101).
+    variant.alleles = allVariants.map(toAlleleRecord);
+    const reflectedAllele = variant.hgvs_c ? `${response._id} (${variant.hgvs_c})` : response._id;
+    variant._warning = `${variant.rsid || id} is multi-allelic (${allVariants.length} ClinVar alleles); the top-level record reflects ${reflectedAllele}. See 'alleles' for all records.`;
+  }
+
   return variant;
 }
 
@@ -857,4 +888,21 @@ export function transformMyVariantHit(hit: any): VariantSearchResult {
     clinvar_stars: hit.clinvar?.stars,
     gnomad_af: hit.gnomad_exome?.af?.af ?? hit.gnomad_genome?.af?.af,
   };
+}
+
+/** Per-allele core record for multi-allelic rsIDs — mirrors transformMyVariantHit. */
+function toAlleleRecord(doc: MyVariantGetResponse): VariantAlleleRecord {
+  const ann = asArray(doc.snpeff?.ann)[0];
+  const allele: VariantAlleleRecord = {
+    id: doc.dbsnp?.rsid || doc._id,
+    gene: doc.dbsnp?.gene?.symbol || ann?.genename || (doc as any).dbnsfp?.gene?.genename,
+    hgvs_p: ann?.hgvs_p ? normalizeProteinChange(ann.hgvs_p) : undefined,
+    hgvs_c: ann?.hgvs_c,
+    significance: extractClinvarSignificance(doc.clinvar) || (doc as any).dbnsfp?.clinvar?.clnsig,
+  };
+  if (doc.clinvar) {
+    const conditions = extractAllClinvarConditions(asArray((doc.clinvar as any).rcv));
+    if (conditions.length > 0) allele.conditions = conditions;
+  }
+  return allele;
 }
