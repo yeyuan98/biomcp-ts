@@ -31,7 +31,9 @@ Accepts an HGNC symbol (TP53) or Ensembl gene ID (ENSG00000141510, versioned or 
     {
       description: `Get significant cis-eQTL associations for a gene in a specific GTEx tissue (GTEx Analysis v10): variant_id, p_value, and NES (effect direction/size), sorted by ascending p-value.
 
-tissue is a required GTEx tissueSiteDetailId (e.g. Whole_Blood, Brain_Cortex).`,
+tissue is a required GTEx tissueSiteDetailId (e.g. Whole_Blood, Brain_Cortex).
+
+An empty associations list is a VALID scientific result — the gene was tested but has no significant cis-eQTLs in that tissue (not a lookup failure). In that case the result carries a note listing other tissues where significant eQTLs DO exist (or stating that none exist in any tissue).`,
       inputSchema: {
         gene: z.string().describe('HGNC symbol (TP53) or Ensembl gene ID (ENSG00000141510, versioned or bare)'),
         tissue: z.string().describe('GTEx tissueSiteDetailId — required, e.g. Whole_Blood'),
