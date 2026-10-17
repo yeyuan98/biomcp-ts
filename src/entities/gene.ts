@@ -456,15 +456,24 @@ async function fetchGo(geneSymbol: string, signal?: AbortSignal): Promise<Array<
     
     const goData = response.hits?.[0]?.go;
     if (!goData) return [];
-    
+
+    // Deduplicate on GO id while collecting (issue #135): MyGene repeats ids
+    // within a category and across categories (live: TP53 shows 46 duplicated
+    // ids among ~130 annotations), and duplicates displacing unique terms in
+    // the 50-row slice below is pure information loss. Same seen-set idiom as
+    // fetchOntology; a term annotated under two categories keeps its
+    // first-seen aspect (BP before MF before CC).
+    const seen = new Set<string>();
     const terms: Array<{ id: string; term: string; aspect: string }> = [];
     for (const category of ['BP', 'MF', 'CC'] as const) {
       const items = (goData as Record<string, Array<{ id: string; term: string; gocategory?: string }>>)[category] || [];
       for (const item of items) {
+        if (seen.has(item.id)) continue;
+        seen.add(item.id);
         terms.push({ id: item.id, term: item.term, aspect: category });
       }
     }
-    
+
     return terms.slice(0, 50);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);

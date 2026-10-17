@@ -38,9 +38,11 @@ interface OtDrugCandidateRow {
  *   phase 0 / preclinical / IND (0.5) > unknown/unparsable (0)
  *
  * A phase range ('PHASE_1_2', 'Phase 2/3') ranks at its midpoint so it sits
- * strictly between its endpoints.
+ * strictly between its endpoints. Exported (issue #135) so the drug entity's
+ * `indications` section can rank rows with the same comparator its
+ * gene_drugs/disease_drugs siblings use.
  */
-function clinicalStageRank(stage: string | undefined): number {
+export function clinicalStageRank(stage: string | undefined): number {
   const norm = (stage ?? '')
     .trim()
     .toLowerCase()

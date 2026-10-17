@@ -7,6 +7,7 @@ import {
   resolveBestMatch,
   collapseSaltVariants,
   drugIdentityKey,
+  looksLikeSystematicChemicalName,
 } from '../../entities/drug.js';
 import type { DrugSearchResult } from '../../entities/drug.js';
 import { connectionManager } from '../../connections/manager.js';
@@ -369,6 +370,74 @@ describe('drug', () => {
     expect(result.molecular_formula).toBe('C9H8O4');
   });
 
+  // Regression for GitHub issue #135 (part 1): ChEBI's preferred label for
+  // some molecules IS the systematic IUPAC name, which previously became
+  // `name` verbatim. Live-verified on mychem.info 2026-10-17: tetrabenazine
+  // (CHEBI:64028 / CHEMBL117785) carries the 83-char systematic name as
+  // chebi.name while chembl.pref_name is the usable "TETRABENAZINE"; the
+  // live ndc sub-document is an ARRAY of NDC records, so ndc.nonproprietaryname
+  // never resolves on this hit and the demoted chain lands on pref_name.
+  const TETRABENAZINE_SYSTEMATIC =
+    '9,10-dimethoxy-3-isobutyl-1,3,4,6,7,11b-hexahydro-2H-pyrido[2,1-a]isoquinolin-2-one';
+
+  test('looksLikeSystematicChemicalName() fires only on systematic shapes', () => {
+    expect(TETRABENAZINE_SYSTEMATIC.length).toBe(83);
+    expect(looksLikeSystematicChemicalName(TETRABENAZINE_SYSTEMATIC)).toBe(true);
+    // Real drug names must pass through untouched.
+    expect(looksLikeSystematicChemicalName('acetylsalicylic acid')).toBe(false); // 0 locant chars
+    expect(looksLikeSystematicChemicalName('5-aminolevulinic acid')).toBe(false); // 2 locant chars
+    expect(looksLikeSystematicChemicalName('vitamin B12')).toBe(false); // 2 locant chars
+    // Each clause fires independently: length >= 50 with no locants...
+    expect(looksLikeSystematicChemicalName('a'.repeat(50))).toBe(true);
+    // ...bracket locants (fused-ring nomenclature)...
+    expect(looksLikeSystematicChemicalName('pyrido[2,1-a]')).toBe(true);
+    // ...digit/hyphen locant density >= 3 without brackets or length.
+    expect(looksLikeSystematicChemicalName('1,2,3-propanetriol')).toBe(true);
+  });
+
+  test('drugGet() demotes a systematic ChEBI label to iupac and falls through to ChEMBL pref_name', async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        hits: [{
+          _id: 'MKJIEFSOBYUXJB-UHFFFAOYSA-N',
+          chebi: { name: TETRABENAZINE_SYSTEMATIC, id: 'CHEBI:64028' },
+          chembl: { pref_name: 'TETRABENAZINE' },
+          ndc: [{ nonproprietaryname: 'tetrabenazine' }],
+        }],
+      }),
+    }) as any;
+
+    const result = await drugGet('tetrabenazine');
+
+    // pref_name stays VERBATIM — ChEMBL stores it uppercase; no case invention.
+    expect(result.name).toBe('TETRABENAZINE');
+    expect(result.iupac).toBe(TETRABENAZINE_SYSTEMATIC);
+  });
+
+  test('drugGet() keeps a non-systematic ChEBI label as name even when pref_name exists (aspirin)', async () => {
+    // The demotion pattern must NOT fire for real ChEBI drug names:
+    // "acetylsalicylic acid" is a legitimate drug name, not a systematic
+    // one, so it keeps its place at the head of the name chain.
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        hits: [{
+          chebi: { name: 'acetylsalicylic acid', formula: 'C9H8O4', mass: 180.16 },
+          chembl: { pref_name: 'ASPIRIN' },
+          unichem: { chembl: 'CHEMBL25' },
+        }],
+      }),
+    }) as any;
+
+    const result = await drugGet('aspirin');
+
+    expect(result.name).toBe('acetylsalicylic acid');
+    // Simpler contract: the raw ChEBI label is ALWAYS exposed when present,
+    // even when it equals `name`.
+    expect(result.iupac).toBe('acetylsalicylic acid');
+  });
+
   test('drugGet() throws when no hits returned', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
@@ -407,6 +476,77 @@ describe('drug', () => {
     const section = result.sections?.adverse_events as { total_reports: number; reactions: Array<{ reaction: string; count: number }> };
     expect(section.total_reports).toBe(500);
     expect(section.reactions).toEqual([{ reaction: 'NAUSEA', count: 12, source: 'openfda' }]);
+  });
+
+  // Regression for GitHub issue #135 (part 3): fetchIndications previously
+  // sliced the raw upstream order (rows.slice(0, 20)) with NO sort, so a
+  // PHASE_3 row could sit above APPROVAL rows — and the slice could even
+  // discard APPROVAL rows entirely. Ranking now happens BEFORE the slice,
+  // with the same comparator family gene_drugs/disease_drugs use
+  // (clinicalStageRank, then clinicalReports count, then disease name).
+  const mockDrugGetHosts = (otIndicationRows: unknown[]) => {
+    return jest.fn<(...args: any[]) => any>().mockImplementation(async (input: any, init?: any) => {
+      const url = typeof input === 'string' ? input : input?.url ?? String(input);
+      const u = new URL(url);
+      if (u.hostname === 'mychem.info') {
+        return {
+          ok: true,
+          json: () => Promise.resolve({
+            hits: [{ chebi: { name: 'Aspirin' }, unichem: { chembl: 'CHEMBL25' } }],
+          }),
+        };
+      }
+      // OpenTargets GraphQL POST — body is { query, variables }.
+      expect(u.hostname).toBe('api.platform.opentargets.org');
+      expect(String(init?.body)).toContain('clinicalReports');
+      return {
+        ok: true,
+        json: () => Promise.resolve({
+          data: { drug: { id: 'CHEMBL25', name: 'ASPIRIN', indications: { rows: otIndicationRows } } },
+        }),
+      };
+    }) as any;
+  };
+
+  test('drugGet() indications ranked by phase desc, then report count desc, then disease name asc', async () => {
+    global.fetch = mockDrugGetHosts([
+      { maxClinicalStage: 'PHASE_3', clinicalReports: [{ id: 'ECA1' }, { id: 'ECA2' }], disease: { id: 'MONDO_1', name: 'Zeta disease' } },
+      { maxClinicalStage: 'APPROVAL', clinicalReports: [{ id: 'ECB1' }], disease: { id: 'MONDO_2', name: 'Beta disease' } },
+      { maxClinicalStage: 'APPROVAL', clinicalReports: [{ id: 'ECC1' }, { id: 'ECC2' }, { id: 'ECC3' }], disease: { id: 'MONDO_3', name: 'Alpha disease' } },
+      { maxClinicalStage: 'PHASE_2', clinicalReports: [], disease: { id: 'MONDO_4', name: 'Achondroplasia' } },
+    ]);
+
+    const result = await drugGet('aspirin', ['indications']);
+
+    const rows = result.sections?.indications as Array<{ disease_name: string; phase: string }>;
+    expect(rows.map(r => r.phase)).toEqual(['APPROVAL', 'APPROVAL', 'PHASE_3', 'PHASE_2']);
+    // APPROVAL tie broken by report count (3 > 1); PHASE_3 vs PHASE_2 need no tie-break.
+    expect(rows.map(r => r.disease_name)).toEqual(['Alpha disease', 'Beta disease', 'Zeta disease', 'Achondroplasia']);
+  });
+
+  test('drugGet() indications cap applies AFTER ranking — APPROVAL rows survive the 20-row slice', async () => {
+    // 22 PHASE_2 rows ahead of 3 APPROVAL rows in the raw upstream order:
+    // the old slice(0, 20) kept 20 PHASE_2 rows and dropped every APPROVAL.
+    const rows = [
+      ...Array.from({ length: 22 }, (_, i) => ({
+        maxClinicalStage: 'PHASE_2',
+        clinicalReports: [{ id: `EC_P2_${i}` }],
+        disease: { id: `MONDO_P2_${i}`, name: `Phase two disease ${i}` },
+      })),
+      ...Array.from({ length: 3 }, (_, i) => ({
+        maxClinicalStage: 'APPROVAL',
+        clinicalReports: [{ id: `EC_AP_${i}` }],
+        disease: { id: `MONDO_AP_${i}`, name: `Approved disease ${i}` },
+      })),
+    ];
+    global.fetch = mockDrugGetHosts(rows);
+
+    const result = await drugGet('aspirin', ['indications']);
+
+    const indications = result.sections?.indications as Array<{ disease_name: string; phase: string }>;
+    expect(indications).toHaveLength(20);
+    expect(indications.slice(0, 3).map(r => r.phase)).toEqual(['APPROVAL', 'APPROVAL', 'APPROVAL']);
+    expect(indications.slice(3).every(r => r.phase === 'PHASE_2')).toBe(true);
   });
 
   // Regression for the Lucene phrase-escaping fix (escapeLucenePhrase, drug.ts):
