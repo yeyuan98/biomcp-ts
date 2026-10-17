@@ -118,7 +118,7 @@ transformMyChemResponse(data: Record<string, unknown>): DrugResult
 - **Tier 2 (Display/Synonym Match)**: Case-insensitive match on `unii.display_name`, `ndc.nonproprietaryname`, or `chebi.name_synonyms` (supporting array or single-string shapes)
 - **Tier 1 (Partial Match)**: Substring containment on `chebi.name` or `chembl.pref_name`
 - **Tie-Breaker (`+0.5`)**: Candidate hits carrying a ChEMBL identifier (`unichem.chembl` or `chembl.molecule_chembl_id`) receive a `+0.5` boost, prioritizing pharmacologically indexed records.
-- **Cross-Hit Field Consolidation**: When multi-record compounds split identifiers across InChIKeys in MyChem, `drugGet` backfills missing `chembl_id` or CAS `aliases` from other exact/synonym hits (score $\ge 2$).
+- **Cross-Hit Field Consolidation**: When multi-record compounds split identifiers across InChIKeys in MyChem, `drugGet` backfills missing `chembl_id` or `cas` (the CAS registry number, issue #123 — never mixed into `aliases`) from other exact/synonym hits (score $\ge 2$).
 
 ### Sections
 
