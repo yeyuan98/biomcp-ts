@@ -80,6 +80,37 @@ const MINIMAL_ARTICLE_XML_NO_PMC = `<?xml version="1.0"?>
 </PubmedArticle>
 </PubmedArticleSet>`;
 
+// PubmedArticleSet fixture whose rows carry caller-chosen PubDate shapes
+// (Year/Month/Day combos, MedlineDate strings, or no date at all) — for the
+// client-side dateRange post-filter tests (issue #120: displayed dates are
+// print/issue dates, which the epub-based pdat esearch window misses).
+// PMIDs are assigned in order starting at 40000001 so esearch idlists
+// can line up with the fixture rows.
+const pubmedDatedArticleXml = (
+  rows: Array<{ year?: string; month?: string; day?: string; medlineDate?: string }>
+): string => `<?xml version="1.0"?>
+<PubmedArticleSet>
+${rows.map((row, i) => {
+  const pubDate = row.medlineDate !== undefined
+    ? `<PubDate><MedlineDate>${row.medlineDate}</MedlineDate></PubDate>`
+    : `<PubDate>${row.year ? `<Year>${row.year}</Year>` : ''}${row.month ? `<Month>${row.month}</Month>` : ''}${row.day ? `<Day>${row.day}</Day>` : ''}</PubDate>`;
+  return `<PubmedArticle>
+<MedlineCitation Status="MEDLINE" Owner="NLM">
+<PMID Version="1">${40000001 + i}</PMID>
+<Article PubModel="Print">
+<Journal><Title>Nature</Title><ISOAbbreviation>Nature</ISOAbbreviation>
+<JournalIssue><Volume>1</Volume><Issue>1</Issue>${pubDate}</JournalIssue>
+</Journal>
+<ArticleTitle>Dated article ${i}</ArticleTitle>
+</Article>
+</MedlineCitation>
+</PubmedArticle>`;
+}).join('\n')}
+</PubmedArticleSet>`;
+
+const pubmedDatedPmids = (n: number): string[] =>
+  Array.from({ length: n }, (_, i) => String(40000001 + i));
+
 // Europe PMC core-record payload, live-verified shape: the link list lives
 // at fullTextUrlList.fullTextUrl (NOT fullTextUrlList.fullTextUrlList) and
 // availability is one of 'Open access' | 'Free' | 'Subscription required'.
@@ -715,6 +746,149 @@ describe('article', () => {
       expect(searchCallUrl).toContain('maxdate=2023/12/31');
     });
 
+    test('PubMed search overfetches retmax = min(limit*2, 100) when dateRange is set, plain limit otherwise', async () => {
+      global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => ({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ esearchresult: { idlist: [] } }),
+      })) as any;
+
+      await articleSearch('brca1', { source: 'pubmed', dateRange: '2020-01-01/2020-12-31', limit: 10 });
+      await articleSearch('brca1', { source: 'pubmed', dateRange: '2020-01-01/2020-12-31', limit: 60 });
+      await articleSearch('brca1', { source: 'pubmed', limit: 10 });
+
+      const urls = (global.fetch as any).mock.calls.map((c: any[]) => String(c[0]));
+      expect(urls[0]).toContain('retmax=20');
+      expect(urls[1]).toContain('retmax=100');
+      expect(urls[2]).toContain('retmax=10');
+    });
+
+    test('PubMed dateRange post-filter drops out-of-window displayed dates and warns on a short page', async () => {
+      global.fetch = jest.fn<(...args: any[]) => any>()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ esearchresult: { idlist: pubmedDatedPmids(3) } }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(pubmedDatedArticleXml([
+            { year: '2024', month: 'Mar', day: '5' },  // in window
+            { year: '2025', month: 'Jan' },            // out: pdat matched a 2024 epub, print date is 2025
+            { year: '2024', month: 'Aug', day: '13' }, // in window
+          ])),
+        }) as any;
+
+      const response = await searchArticles('brca1', { source: 'pubmed', dateRange: '2024-01-01/2024-12-31' });
+
+      expect(response.results.map(r => r.pmid)).toEqual(['40000001', '40000003']);
+      expect(response.warnings).toHaveLength(1);
+      expect(response.warnings![0]).toBe(
+        'Removed 1 records outside date range 2024-01-01/2024-12-31 (PubMed date-filter mismatch); ' +
+        '2/10 rows returned. More may exist — page with offset or raise limit.'
+      );
+    });
+
+    test('PubMed dateRange post-filter on a full page warns without the paging remedy', async () => {
+      global.fetch = jest.fn<(...args: any[]) => any>()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ esearchresult: { idlist: pubmedDatedPmids(3) } }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(pubmedDatedArticleXml([
+            { year: '2024', month: 'Mar', day: '5' },
+            { year: '2025', month: 'Jan' },
+            { year: '2024', month: 'Aug', day: '13' },
+          ])),
+        }) as any;
+
+      const response = await searchArticles('brca1', { source: 'pubmed', dateRange: '2024-01-01/2024-12-31', limit: 2 });
+
+      expect(response.results.map(r => r.pmid)).toEqual(['40000001', '40000003']);
+      expect(response.warnings).toHaveLength(1);
+      expect(response.warnings![0]).toBe(
+        'Removed 1 records outside your date range (PubMed date-filter mismatch).'
+      );
+    });
+
+    test('PubMed dateRange post-filter with zero in-window rows returns [] with the overfetch warning', async () => {
+      global.fetch = jest.fn<(...args: any[]) => any>()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ esearchresult: { idlist: pubmedDatedPmids(2) } }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(pubmedDatedArticleXml([
+            { year: '2025', month: 'Jan' },
+            { year: '2026', month: 'Jun' },
+          ])),
+        }) as any;
+
+      const response = await searchArticles('brca1', { source: 'pubmed', dateRange: '2024-01-01/2024-12-31' });
+
+      expect(response.results).toEqual([]);
+      expect(response.warnings).toHaveLength(1);
+      expect(response.warnings![0]).toBe(
+        '0 in-window records in fetched pool (PubMed date-filter mismatch); try a larger limit.'
+      );
+    });
+
+    test('PubMed dateRange post-filter passes MedlineDate/undated rows and refines month/day on boundary years only', async () => {
+      global.fetch = jest.fn<(...args: any[]) => any>()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ esearchresult: { idlist: pubmedDatedPmids(7) } }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(pubmedDatedArticleXml([
+            { year: '2024', month: 'Jan' },             // boundary from-year, month < from-month → dropped
+            { year: '2024', month: 'Jun' },             // boundary month, no day → kept (cannot disprove)
+            { year: '2024', month: 'Jun', day: '20' },  // boundary to-day → dropped
+            { year: '2024', month: 'Jul', day: '2' },   // boundary to-year, month > to-month → dropped
+            { medlineDate: '2024 Jan-Feb' },            // unparseable MedlineDate → kept
+            { year: '2023', month: 'Dec', day: '15' },  // year alone is outside → dropped
+            {},                                          // no displayed date → kept
+          ])),
+        }) as any;
+
+      const response = await searchArticles('brca1', { source: 'pubmed', dateRange: '2024-06-01/2024-06-15' });
+
+      expect(response.results.map(r => r.pmid)).toEqual(['40000002', '40000005', '40000007']);
+    });
+
+    test('PubMed dateRange post-filter emits no warning when nothing was dropped', async () => {
+      global.fetch = jest.fn<(...args: any[]) => any>()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ esearchresult: { idlist: pubmedDatedPmids(2) } }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(pubmedDatedArticleXml([
+            { year: '2024', month: 'Mar', day: '5' },
+            { year: '2024', month: 'Aug', day: '13' },
+          ])),
+        }) as any;
+
+      const response = await searchArticles('brca1', { source: 'pubmed', dateRange: '2024-01-01/2024-12-31' });
+
+      expect(response.results).toHaveLength(2);
+      expect(response.warnings).toBeUndefined();
+    });
+
     test('Europe PMC search appends date range in query', async () => {
       global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: true,
@@ -725,9 +899,8 @@ describe('article', () => {
       await articleSearch('brca1', { source: 'europepmc', dateRange: '2020-01-01/2023-12-31' });
 
       const callUrl = (global.fetch as any).mock.calls[0][0] as string;
-      expect(callUrl).toContain('pub_year');
-      expect(callUrl).toContain('2020');
-      expect(callUrl).toContain('2023');
+      const decodedUrl = decodeURIComponent(callUrl);
+      expect(decodedUrl).toContain('FIRST_PDATE:[2020-01-01 TO 2023-12-31]');
     });
 
     test('Europe PMC search with open-ended to-only dateRange', async () => {
@@ -741,10 +914,10 @@ describe('article', () => {
 
       const callUrl = (global.fetch as any).mock.calls[0][0] as string;
       const decodedUrl = decodeURIComponent(callUrl);
-      expect(decodedUrl).toContain('pub_year:[* TO 2023]');
+      expect(decodedUrl).toContain('FIRST_PDATE:[* TO 2023-12-31]');
     });
 
-    test('Europe PMC search date clause is year-granular across distinct years', async () => {
+    test('Europe PMC search date clause is day-granular across distinct years', async () => {
       global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
@@ -755,8 +928,9 @@ describe('article', () => {
 
       const callUrl = (global.fetch as any).mock.calls[0][0] as string;
       const decodedUrl = decodeURIComponent(callUrl);
-      // month/day is truncated: the clause carries years only
-      expect(decodedUrl).toContain('brca1 AND pub_year:[2020 TO 2021]');
+      // month/day is preserved: FIRST_PDATE matches the displayed
+      // firstPublicationDate at day granularity (issue #120)
+      expect(decodedUrl).toContain('brca1 AND FIRST_PDATE:[2020-06-15 TO 2021-03-01]');
     });
 
     test('Europe PMC search with open-ended from-only dateRange', async () => {
@@ -770,7 +944,7 @@ describe('article', () => {
 
       const callUrl = (global.fetch as any).mock.calls[0][0] as string;
       const decodedUrl = decodeURIComponent(callUrl);
-      expect(decodedUrl).toContain('pub_year:[2020 TO *]');
+      expect(decodedUrl).toContain('FIRST_PDATE:[2020-06-01 TO *]');
     });
 
     test('Semantic Scholar search appends publicationDateOrYear param', async () => {
@@ -2390,20 +2564,20 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     const result = await articleSearch('vaccine', { source: 'preprint_only', limit: 3, offset: 5, dateRange: '2025-01-01/2025-12-31' });
 
     const url = (global.fetch as any).mock.calls[0][0] as string;
-    expect(url).toContain(encodeURIComponent('AND pub_year:[2025 TO 2025]'));
+    expect(url).toContain(encodeURIComponent('AND FIRST_PDATE:[2025-01-01 TO 2025-12-31]'));
     expect(url).toContain(`pageSize=${Math.min(3 + 5, 1000)}`);
     // client-side window: rows 5..7 of the 10-row fixture
     expect(result.map(r => r.title)).toEqual(['Preprint 5', 'Preprint 6', 'Preprint 7']);
   });
 
-  test('articleSearch preprint_only date clause is year-granular and follows the PPR wrapper', async () => {
+  test('articleSearch preprint_only date clause is day-granular and follows the PPR wrapper', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(jsonResponse(preprintCorePage(3))) as any;
 
     await articleSearch('vaccine', { source: 'preprint_only', dateRange: '2020-06-15/2021-03-01' });
 
     const url = (global.fetch as any).mock.calls[0][0] as string;
     const decoded = decodeURIComponent(url);
-    expect(decoded).toContain('(vaccine) AND SRC:PPR AND PUBLISHER:(bioRxiv OR medRxiv) AND pub_year:[2020 TO 2021]');
+    expect(decoded).toContain('(vaccine) AND SRC:PPR AND PUBLISHER:(bioRxiv OR medRxiv) AND FIRST_PDATE:[2020-06-15 TO 2021-03-01]');
   });
 
   test('articleSearch preprint_only explicit cursorMark takes precedence over offset', async () => {

@@ -82,6 +82,79 @@ export interface PubMedQueryOutcome {
   suppressedAsGibberish?: boolean;
 }
 
+/** PubMed's 3-letter month abbreviations (PubDate Month element), mapped
+ * to their month number. */
+const MONTHS: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+  jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+
+interface DisplayDate {
+  year: number;
+  month?: number;
+  day?: number;
+}
+
+/** Parse a displayed `publication_date` ("2024 Aug 13", "2024 Aug",
+ * "2024") into year/month/day. Returns undefined for anything else —
+ * MedlineDate strings ("2024 Jan-Feb", "1975-1980", seasons, …) — so
+ * callers can keep unparseable rows instead of dropping them. */
+function parseDisplayDate(displayDate: string): DisplayDate | undefined {
+  const tokens = displayDate.trim().split(/\s+/);
+  if (!/^\d{4}$/.test(tokens[0])) return undefined;
+  const year = parseInt(tokens[0], 10);
+  if (tokens.length === 1) return { year };
+  const monthToken = tokens[1].toLowerCase();
+  const month = MONTHS[monthToken] ?? (/^\d{1,2}$/.test(monthToken) ? parseInt(monthToken, 10) : undefined);
+  if (month === undefined) return undefined;
+  if (tokens.length === 2) return { year, month };
+  if (!/^\d{1,2}$/.test(tokens[2])) return undefined;
+  return { year, month, day: parseInt(tokens[2], 10) };
+}
+
+function parseIsoDate(isoDate: string): DisplayDate {
+  const [year, month, day] = isoDate.split('-').map(p => parseInt(p, 10));
+  return { year, month, day };
+}
+
+/** >= comparison that never rejects on missing granularity: a date that
+ * carries no month/day cannot be proven earlier than the bound, so it
+ * passes (conservative — never drop what we cannot parse precisely). */
+function notBefore(date: DisplayDate, bound: DisplayDate): boolean {
+  if (date.year !== bound.year) return date.year > bound.year;
+  if (date.month === undefined || bound.month === undefined) return true;
+  if (date.month !== bound.month) return date.month > bound.month;
+  if (date.day === undefined || bound.day === undefined) return true;
+  return date.day >= bound.day;
+}
+
+function notAfter(date: DisplayDate, bound: DisplayDate): boolean {
+  if (date.year !== bound.year) return date.year < bound.year;
+  if (date.month === undefined || bound.month === undefined) return true;
+  if (date.month !== bound.month) return date.month < bound.month;
+  if (date.day === undefined || bound.day === undefined) return true;
+  return date.day <= bound.day;
+}
+
+/**
+ * Post-filter for the esearch `datetype=pdat` window (issue #120): pdat
+ * matches epub dates while rows display the print/issue date from
+ * `<PubDate>`, so records outside the requested range leak into results.
+ * Compares the DISPLAYED date against the range — year always; month/day
+ * only on boundary years, and only when the displayed date carries them.
+ * Unparseable/MedlineDate-style dates (and missing dates) PASS
+ * conservatively: this filter must never drop a row we cannot date.
+ */
+export function isWithinDateRange(displayDate: string | undefined, range: ParsedDateRange): boolean {
+  if (!displayDate) return true;
+  if (!range.from && !range.to) return true;
+  const parsed = parseDisplayDate(displayDate);
+  if (!parsed) return true;
+  if (range.from && !notBefore(parsed, parseIsoDate(range.from))) return false;
+  if (range.to && !notAfter(parsed, parseIsoDate(range.to))) return false;
+  return true;
+}
+
 export async function searchPubMed(
   query: string,
   limit: number,
@@ -92,8 +165,13 @@ export async function searchPubMed(
   signal?: AbortSignal
 ): Promise<Article[]> {
   try {
-    let searchUrl = `/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=${limit}&retstart=${offset}&retmode=json`;
-    if (dateRange?.from || dateRange?.to) {
+    // pdat (epub) vs displayed print date mismatch (issue #120): when a
+    // dateRange is active, overfetch so the client-side displayed-date
+    // filter below can drop out-of-window rows and still fill the page.
+    const hasDateRange = Boolean(dateRange?.from || dateRange?.to);
+    const retmax = hasDateRange ? Math.min(limit * 2, 100) : limit;
+    let searchUrl = `/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=${retmax}&retstart=${offset}&retmode=json`;
+    if (hasDateRange && dateRange) {
       // NBK25499: mindate/maxdate must be used together — default the
       // missing bound so esearch always receives a complete range.
       searchUrl += `&datetype=pdat`;
@@ -148,7 +226,33 @@ export async function searchPubMed(
       { signal }
     ) as string;
 
-    return parsePubMedXml(xmlString);
+    const articles = parsePubMedXml(xmlString);
+    if (!hasDateRange || !dateRange) return articles;
+
+    // pdat is epub-based but rows display the print/issue date (issue
+    // #120): re-check the DISPLAYED date and drop out-of-window rows
+    // (isWithinDateRange passes unparseable/MedlineDate rows through).
+    const inWindow = articles.filter(a => isWithinDateRange(a.publication_date, dateRange));
+    const dropped = articles.length - inWindow.length;
+    if (dropped === 0) return inWindow.slice(0, limit);
+    const rangeStr = `${dateRange.from ?? ''}/${dateRange.to ?? ''}`;
+    if (inWindow.length === 0) {
+      warnings?.push(
+        `0 in-window records in fetched pool (PubMed date-filter mismatch); try a larger limit.`
+      );
+      return [];
+    }
+    if (inWindow.length < limit) {
+      warnings?.push(
+        `Removed ${dropped} records outside date range ${rangeStr} (PubMed date-filter mismatch); ` +
+        `${inWindow.length}/${limit} rows returned. More may exist — page with offset or raise limit.`
+      );
+    } else {
+      warnings?.push(
+        `Removed ${dropped} records outside your date range (PubMed date-filter mismatch).`
+      );
+    }
+    return inWindow.slice(0, limit);
   } catch (error) {
     return backendErrorRow('searchPubMed', error);
   }

@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`article_search` `dateRange` is now enforced on pubmed and europepmc** (`src/entities/article/search/pubmed.ts`, `src/entities/article/europepmc-shared.ts`, `src/server/tools/article.ts`) — fixes #120. The filter was silently ignored on both backends: Europe PMC searched `pub_year:[Y TO Y]` (print year) while rows display `firstPublicationDate`, and PubMed's esearch `datetype=pdat` window matches epub dates while rows display the print/issue `<PubDate>` — in both cases out-of-window records were returned with no warning. Europe PMC (journal and preprint paths) now sends `FIRST_PDATE:[<from> TO <to>]` at day granularity (`*` for open bounds) — the very field rows display. PubMed overfetches (`retmax = min(limit*2, 100)`) when a range is active and post-filters rows client-side on the DISPLAYED date via a pure `isWithinDateRange` helper (year compared always; month/day only on boundary years and only when the date carries them; unparseable MedlineDate/undated rows pass conservatively), then records what happened in the envelope `warnings` channel — rows removed + the range (with paging/limit guidance when the page comes back short), or an explicit zero-in-window note. The dateRange tool docstring now discloses the pubmed epub-vs-print post-filter.
+
 ## [1.6.0-alpha.3] - 2026-10-17
 
 QA-campaign hardening: 11 upstream-verified fixes across search filters, ID resolution, contract honesty, and connection reliability, plus the deferred preprint full-text tool.
