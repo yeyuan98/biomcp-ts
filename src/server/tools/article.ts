@@ -35,7 +35,7 @@ export function registerArticleTools(server: McpServer): void {
             'Date range must be YYYY-MM-DD/YYYY-MM-DD (open-ended: YYYY-MM-DD/ or /YYYY-MM-DD)')
           .refine((s: string) => s.split('/').some((p: string) => p.length > 0), 'At least one date endpoint required')
           .optional()
-          .describe('Date range as YYYY-MM-DD/YYYY-MM-DD. Open-ended: "2020-01-01/" or "/2023-12-31". Only pubmed, europepmc, semantic_scholar, preprint_only, and arxiv support this.'),
+          .describe('Date range as YYYY-MM-DD/YYYY-MM-DD. Open-ended: "2020-01-01/" or "/2023-12-31". Only pubmed, europepmc, semantic_scholar, preprint_only, and arxiv support this. On pubmed, the upstream filter matches epub dates (pdat), so results are additionally post-filtered on the displayed publication date.'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },

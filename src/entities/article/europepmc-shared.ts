@@ -143,15 +143,20 @@ export function transformCitationEntry(entry: EuropePMCCitationEntry): CitationR
   };
 }
 
-/** Year-granularity date filter for /search queries. Returns the bare
- * `pub_year:[X TO Y]` predicate ('' when the range is absent), with `*`
- * as the open-bound sentinel on either side. Callers append it with a
- * leading ' AND ' only when non-empty. */
-export function epmcPubYearClause(dateRange?: { from?: string; to?: string }): string {
+/** Day-granularity date filter for /search queries. Returns the bare
+ * `FIRST_PDATE:[X TO Y]` predicate ('' when the range is absent), with `*`
+ * as the open-bound sentinel on either side. FIRST_PDATE is the first
+ * publication date — the very field rows display as
+ * `firstPublicationDate` — so the server-side window matches what callers
+ * see (the previous `pub_year` clause filtered the print year while rows
+ * showed first-publication dates, leaking out-of-window records,
+ * issue #120). Callers append it with a leading ' AND ' only when
+ * non-empty. */
+export function epmcFirstPdateClause(dateRange?: { from?: string; to?: string }): string {
   if (!dateRange?.from && !dateRange?.to) return '';
-  const fromYear = dateRange.from ? dateRange.from.slice(0, 4) : '*';
-  const toYear = dateRange.to ? dateRange.to.slice(0, 4) : '*';
-  return `pub_year:[${fromYear} TO ${toYear}]`;
+  const from = dateRange.from || '*';
+  const to = dateRange.to || '*';
+  return `FIRST_PDATE:[${from} TO ${to}]`;
 }
 
 /** Server label for a Europe PMC preprint (source=PPR) record: the
@@ -163,7 +168,7 @@ export function epmcPreprintServerLabel(publisher?: string): 'bioRxiv' | 'medRxi
 
 /** Core /search mechanics shared by the journal (search/europepmc.ts)
  * and preprint (search/preprint.ts) backends: query assembly, optional
- * year-granularity date clause, and window selection. Returns the rows
+ * day-granularity FIRST_PDATE date clause, and window selection. Returns the rows
  * of the requested window; errors propagate to the caller so each
  * backend keeps its own `_error` row envelope.
  *
@@ -191,7 +196,7 @@ export async function epmcSearchWindow<Row = unknown>(options: {
   const conn = connectionManager.getConnection('europepmc');
 
   let queryString = options.query;
-  const dateClause = epmcPubYearClause(options.dateRange);
+  const dateClause = epmcFirstPdateClause(options.dateRange);
   if (dateClause) queryString += ` AND ${dateClause}`;
 
   const fromCursor = Boolean(options.cursorMark);
