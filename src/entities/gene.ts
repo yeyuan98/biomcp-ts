@@ -10,6 +10,17 @@ import { gtexMedianExpression } from './gtex.js';
 
 const SECTION_TIMEOUT_MS = 8000;
 
+// Client-side chromosome filtering pages the UNFILTERED upstream ranking
+// (issue #98): a page of 100 relevance-ranked hits can yield few or zero
+// matching rows, so the scan walks pages of 100 up to this cap.
+const SCAN_PAGE_SIZE = 100;
+const SCAN_MAX_PAGES = 3;
+
+// Lucene specials that must be backslash-escaped before raw user text is
+// embedded in a fielded mygene query (the `symbol:` prefix fallback below).
+// Escaping each char individually also covers the two-char && and ||.
+const LUCENE_SPECIALS = /[+\-&|!(){}\[\]^"~*?:\\/]/g;
+
 export interface GeneSearchOptions {
   chromosome?: string;
   limit?: number;
@@ -17,12 +28,12 @@ export interface GeneSearchOptions {
 }
 
 /**
- * Normalize a user-supplied chromosome name for mygene's genome-interval
- * query syntax (`chr${norm}:1-999999999`). Accepts an optional `chr`/`CHR`
- * prefix and the values 1-22, X, Y, and M/MT (mitochondrial), case-
- * insensitively. mygene keys the mitochondrial chromosome as `MT` (live-
- * verified: `chrM:...` returns 0 hits, `chrMT:...` works), so `M` is mapped
- * to `MT`. Anything else throws a validation error listing valid values.
+ * Normalize a user-supplied chromosome name for comparison against mygene's
+ * `genomic_pos.chr` values. Accepts an optional `chr`/`CHR` prefix and the
+ * values 1-22, X, Y, and M/MT (mitochondrial), case-insensitively. mygene
+ * keys the mitochondrial chromosome as `MT`, so `M` is mapped to `MT`.
+ * Anything else throws a validation error listing valid values — before any
+ * network fetch happens.
  */
 function normalizeChromosome(input: string): string {
   const stripped = input.trim().replace(/^chr/i, '').toUpperCase();
@@ -45,6 +56,10 @@ export interface GeneSearchResult {
   };
   uniprot_id?: string;
   omim_id?: string;
+  // Set on every row when the bounded upstream scan could not gather enough
+  // chromosome-matching hits (see geneSearch): the row list may be incomplete
+  // because only the top ~300 relevance-ranked upstream hits were scanned.
+  _warning?: string;
 }
 
 export interface GeneGetOptions {
@@ -68,29 +83,89 @@ export async function geneSearch(
 
   const conn = connectionManager.getConnection('mygene');
 
-  // mygene's /query endpoint has no `chr` URL parameter (it is silently
-  // ignored), so the chromosome filter must ride inside the `q` string as a
-  // genome-interval clause (live-verified: `... AND chrY:1-999999999`).
-  let normalizedChr: string | undefined;
-  let q = query;
-  if (chromosome) {
-    normalizedChr = normalizeChromosome(chromosome);
-    q = `${query} AND chr${normalizedChr}:1-999999999`;
+  // Validate before any fetch: an invalid chromosome must fail fast.
+  const normalizedChr = chromosome ? normalizeChromosome(chromosome) : undefined;
+
+  const requestPage = (q: string, from: number, size: number): Promise<MyGeneSearchResponse> => {
+    const queryParams = new URLSearchParams({
+      q,
+      species: 'human',
+      fields: 'symbol,name,entrezgene,genomic_pos,uniprot,omim',
+      size: String(size),
+      from: String(from),
+    });
+    return conn.request(`/query?${queryParams.toString()}`) as Promise<MyGeneSearchResponse>;
+  };
+
+  // mygene's dismax `q` is exact-token only (issue #99): `q=BRCA` returns 0
+  // hits while `q=symbol:BRCA*` prefix-matches BRCA1/BRCA2/... case-
+  // insensitively. Single-token queries that return nothing are retried once
+  // with the Lucene-escaped token starred; multi-word queries never are (a
+  // starred phrase would not express prefix search).
+  const isSingleToken = !/\s/.test(query.trim());
+  const prefixFallbackQuery = () => `symbol:${query.trim().replace(LUCENE_SPECIALS, '\\$&')}*`;
+
+  if (!normalizedChr) {
+    let response = await requestPage(query, offset, limit);
+    if ((response.hits || []).length === 0 && isSingleToken) {
+      response = await requestPage(prefixFallbackQuery(), 0, limit);
+    }
+    return (response.hits || []).map(hit => transformMyGeneHit(hit));
   }
 
-  const queryParams = new URLSearchParams({
-    q,
-    species: 'human',
-    fields: 'symbol,name,entrezgene,genomic_pos,uniprot,omim',
-    size: String(limit),
-    from: String(offset),
-  });
+  // A genomic-interval clause (`<text> AND chrN:1-999999999`) must NEVER be
+  // sent: mygene's `q` parser discards every other clause once an interval
+  // token is present (issue #98), silently dropping the text query. Instead,
+  // keep genomic_pos in the field list and post-filter client-side on
+  // genomic_pos.chr — an object for single mappings, an array for
+  // multi-mappings/alt contigs (transformMyGeneHit reads both shapes and
+  // prefers the filtered chromosome's coordinates). Hits with no matching
+  // chr are dropped.
+  const matchesChromosome = (hit: MyGeneSearchResponse['hits'][number]): boolean => {
+    const pos = hit.genomic_pos;
+    if (!pos) return false;
+    return Array.isArray(pos) ? pos.some(p => p.chr === normalizedChr) : pos.chr === normalizedChr;
+  };
 
-  const response = await conn.request(`/query?${queryParams.toString()}`) as MyGeneSearchResponse;
+  const scanChromosomeMatches = async (q: string): Promise<{
+    rows: GeneSearchResult[];
+    truncated: boolean;
+    upstreamEmpty: boolean;
+  }> => {
+    const rows: GeneSearchResult[] = [];
+    let truncated = false;
+    let upstreamEmpty = false;
+    for (let page = 0; page < SCAN_MAX_PAGES; page++) {
+      const response = await requestPage(q, page * SCAN_PAGE_SIZE, SCAN_PAGE_SIZE);
+      const hits = response.hits || [];
+      if (hits.length === 0) {
+        if (page === 0) upstreamEmpty = true;
+        break; // upstream exhausted
+      }
+      for (const hit of hits) {
+        if (matchesChromosome(hit)) rows.push(transformMyGeneHit(hit, normalizedChr));
+      }
+      if (rows.length >= offset + limit) break; // enough filtered rows
+      if (hits.length < SCAN_PAGE_SIZE) break; // upstream exhausted (short page)
+      if (page === SCAN_MAX_PAGES - 1) truncated = true; // full-page cap reached, still short
+    }
+    return { rows, truncated, upstreamEmpty };
+  };
 
-  // Pass the filtered chromosome so multi-mapping hits (PAR genes etc.)
-  // display the coordinates the user filtered by.
-  return (response.hits || []).map(hit => transformMyGeneHit(hit, normalizedChr));
+  let outcome = await scanChromosomeMatches(query);
+  if (outcome.upstreamEmpty && isSingleToken) {
+    // The chromosome post-filter applies to the fallback results too.
+    outcome = await scanChromosomeMatches(prefixFallbackQuery());
+  }
+
+  const page = outcome.rows.slice(offset, offset + limit);
+  if (outcome.truncated) {
+    // Disclose the bounded scan window: completeness is limited by how deep
+    // upstream was scanned, not by the total number of matching genes.
+    const warning = `Results may be incomplete: the chromosome filter is applied client-side and the upstream scan window (top ~${SCAN_PAGE_SIZE * SCAN_MAX_PAGES} relevance-ranked hits) was exhausted before ${offset + limit} chromosome-${normalizedChr} genes were found.`;
+    for (const row of page) row._warning = warning;
+  }
+  return page;
 }
 
 async function resolveGeneAlias(query: string, signal?: AbortSignal): Promise<string | null> {
