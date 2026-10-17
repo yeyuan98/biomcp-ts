@@ -161,13 +161,13 @@ async function federatedSearch(
   const legs = dateRange
     ? [
         leg('pubmed', (signal) => searchPubMed(query, limit, offset, dateRange, warnings, pubmedOutcome, signal)),
-        leg('europepmc', (signal) => searchEuropePMC(query, limit, offset, undefined, dateRange, signal)),
+        leg('europepmc', (signal) => searchEuropePMC(query, limit, offset, undefined, dateRange, warnings, signal)),
         leg('semantic_scholar', (signal) => searchSemanticScholar(query, limit, offset, dateRange, signal)),
         leg('arxiv', (signal) => searchArxiv(query, limit, offset, dateRange, signal)),
       ]
     : [
         leg('pubmed', (signal) => searchPubMed(query, limit, offset, undefined, warnings, pubmedOutcome, signal)),
-        leg('europepmc', (signal) => searchEuropePMC(query, limit, offset, undefined, undefined, signal)),
+        leg('europepmc', (signal) => searchEuropePMC(query, limit, offset, undefined, undefined, warnings, signal)),
         leg('semantic_scholar', (signal) => searchSemanticScholar(query, limit, offset, undefined, signal)),
         leg('arxiv', (signal) => searchArxiv(query, limit, offset, undefined, signal)),
         leg('pubtator', (signal) => searchPubTator(query, limit, offset, signal)),
@@ -243,7 +243,7 @@ async function searchSingleSource(
   let rows: Article[];
   switch (source) {
     case 'pubmed': rows = await searchPubMed(query, limit, offset, dateRange, warnings); break;
-    case 'europepmc': rows = await searchEuropePMC(query, limit, offset, cursorMark, dateRange); break;
+    case 'europepmc': rows = await searchEuropePMC(query, limit, offset, cursorMark, dateRange, warnings); break;
     case 'semantic_scholar': rows = await searchSemanticScholar(query, limit, offset, dateRange); break;
     case 'pubtator': rows = await searchPubTator(query, limit, offset); break;
     case 'litsense': rows = await searchLitSense(query, limit, offset); break;

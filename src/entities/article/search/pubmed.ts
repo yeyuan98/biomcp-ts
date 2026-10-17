@@ -2,6 +2,7 @@ import { connectionManager } from '../../../connections/manager.js';
 import { parsePubMedXml } from '../transform/pubmed.js';
 import type { Article, ParsedDateRange } from '../types.js';
 import { backendErrorRow } from './backend-error.js';
+import { rewriteJournalPhrase } from './journal-titles.js';
 
 interface PubMedSearchResponse {
   esearchresult?: {
@@ -165,12 +166,26 @@ export async function searchPubMed(
   signal?: AbortSignal
 ): Promise<Article[]> {
   try {
+    // Journal-name rewrite (issue #121): PubMed journal scoping only
+    // matches NLM abbreviations, so a trailing full journal name would be
+    // silently dropped by term translation. When the query ENDS with a
+    // known full journal name (bundled NLM title list), hoist it into
+    // explicit `<Abbr>[Journal]` field syntax and disclose the rewrite —
+    // never silently. The rest of the query is preserved verbatim.
+    let searchTerm = query;
+    const journalRewrite = rewriteJournalPhrase(query);
+    if (journalRewrite) {
+      searchTerm = `${journalRewrite.rewrittenQuery} ${journalRewrite.medAbbr}[Journal]`.trim();
+      warnings?.push(
+        `Journal phrase rewritten: '${journalRewrite.originalPhrase}' → '${journalRewrite.medAbbr}[Journal]'.`
+      );
+    }
     // pdat (epub) vs displayed print date mismatch (issue #120): when a
     // dateRange is active, overfetch so the client-side displayed-date
     // filter below can drop out-of-window rows and still fill the page.
     const hasDateRange = Boolean(dateRange?.from || dateRange?.to);
     const retmax = hasDateRange ? Math.min(limit * 2, 100) : limit;
-    let searchUrl = `/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=${retmax}&retstart=${offset}&retmode=json`;
+    let searchUrl = `/esearch.fcgi?db=pubmed&term=${encodeURIComponent(searchTerm)}&retmax=${retmax}&retstart=${offset}&retmode=json`;
     if (hasDateRange && dateRange) {
       // NBK25499: mindate/maxdate must be used together — default the
       // missing bound so esearch always receives a complete range.
@@ -190,11 +205,13 @@ export async function searchPubMed(
     // refuse to return residue matches. Conservative by construction:
     // suppression only when EVERY meaningful token was dropped — partial
     // survival (some tokens recognized) still returns results, with an
-    // honest warning naming the ignored terms.
+    // honest warning naming the ignored terms. The analysis runs against
+    // the term ACTUALLY sent (searchTerm): a rewritten-away journal phrase
+    // is already disclosed above and must not double-report as "ignored".
     const translation = esearch?.querytranslation;
     if (typeof translation === 'string') {
-      const dropped = pubmedDroppedTokens(query, translation);
-      const meaningful = extractMeaningfulTokens(query);
+      const dropped = pubmedDroppedTokens(searchTerm, translation);
+      const meaningful = extractMeaningfulTokens(searchTerm);
       if (meaningful.length > 0 && dropped.length === meaningful.length) {
         if (outcome) outcome.suppressedAsGibberish = true;
         warnings?.push(
