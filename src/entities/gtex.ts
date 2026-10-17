@@ -1,4 +1,6 @@
 import { connectionManager } from '../connections/manager.js';
+import { isRetryableError } from '../connections/retry.js';
+import { errorMessageWithCause } from './errors.js';
 
 const PINNED_DATASET_ID = 'gtex_v10';
 const PINNED_GENCODE_VERSION = 'v39';
@@ -61,6 +63,31 @@ export interface GencodeIdResolution {
   gencodeId: string;
   geneSymbol: string;
   entrezGeneId?: number;
+}
+
+/** Structured failure envelope for the gtex entry points (house `_error`
+ *  pattern, cf. cross-entity): upstream failures surface as DATA instead of
+ *  a raw `HttpConnectionError` throw, so the tool layer stringifies a
+ *  source-attributed, remedy-carrying message with an explicit retry
+ *  classification (#132). `retryable` mirrors the connection layer's
+ *  classifier: network/transport failures and 5xx (and 429) are transient;
+ *  deterministic 4xx and validation errors are not. */
+export interface GTExErrorEnvelope {
+  _error: string;
+  source: 'gtex';
+  retryable: boolean;
+}
+
+function gtexErrorEnvelope(error: unknown): GTExErrorEnvelope {
+  const retryable = isRetryableError(error);
+  const remedy = retryable
+    ? 'Usually transient — retry once or twice, or try later.'
+    : 'Check the gene symbol, tissue ID, and request parameters, then retry.';
+  return {
+    _error: `GTEx request failed: ${errorMessageWithCause(error)}. ${remedy}`,
+    source: 'gtex',
+    retryable,
+  };
 }
 
 interface DatasetMetadataItem {
@@ -262,85 +289,93 @@ function notFoundInDataset(identifier: string, datasetId: string): Error {
 export async function gtexMedianExpression(
   geneIdentifier: string,
   options: { tissueSiteDetailId?: string; limit?: number } = {}
-): Promise<GTExMedianExpressionResult> {
-  const conn = connectionManager.getConnection('gtex');
-  const resolution = await resolveGencodeId(geneIdentifier);
-  const { datasetId } = await getActiveDataset();
+): Promise<GTExMedianExpressionResult | GTExErrorEnvelope> {
+  try {
+    const conn = connectionManager.getConnection('gtex');
+    const resolution = await resolveGencodeId(geneIdentifier);
+    const { datasetId } = await getActiveDataset();
 
-  const query = new URLSearchParams({ gencodeId: resolution.gencodeId, datasetId });
-  if (options.tissueSiteDetailId) query.set('tissueSiteDetailId', options.tissueSiteDetailId);
+    const query = new URLSearchParams({ gencodeId: resolution.gencodeId, datasetId });
+    if (options.tissueSiteDetailId) query.set('tissueSiteDetailId', options.tissueSiteDetailId);
 
-  const response = await conn.request(`/api/v2/expression/medianGeneExpression?${query.toString()}`) as MedianExpressionResponse;
-  const rows = Array.isArray(response.data) ? response.data : [];
-  const sorted = rows.slice().sort((a, b) => b.median - a.median);
-  const limit = options.limit !== undefined ? Math.max(0, options.limit) : sorted.length;
+    const response = await conn.request(`/api/v2/expression/medianGeneExpression?${query.toString()}`) as MedianExpressionResponse;
+    const rows = Array.isArray(response.data) ? response.data : [];
+    const sorted = rows.slice().sort((a, b) => b.median - a.median);
+    const limit = options.limit !== undefined ? Math.max(0, options.limit) : sorted.length;
 
-  return {
-    gene_symbol: resolution.geneSymbol,
-    gencode_id: resolution.gencodeId,
-    dataset: datasetId,
-    unit: rows[0]?.unit ?? 'TPM',
-    tissues: sorted.slice(0, limit).map(r => ({
-      tissue: r.tissueSiteDetailId,
-      median_tpm: r.median,
-      ontology_id: r.ontologyId ?? '',
-    })),
-  };
+    return {
+      gene_symbol: resolution.geneSymbol,
+      gencode_id: resolution.gencodeId,
+      dataset: datasetId,
+      unit: rows[0]?.unit ?? 'TPM',
+      tissues: sorted.slice(0, limit).map(r => ({
+        tissue: r.tissueSiteDetailId,
+        median_tpm: r.median,
+        ontology_id: r.ontologyId ?? '',
+      })),
+    };
+  } catch (error) {
+    return gtexErrorEnvelope(error);
+  }
 }
 
 export async function gtexEqtl(
   geneIdentifier: string,
   tissueSiteDetailId: string,
   options: { limit?: number } = {}
-): Promise<GTExEqtlResult> {
-  const conn = connectionManager.getConnection('gtex');
-  const { datasetId } = await getActiveDataset();
+): Promise<GTExEqtlResult | GTExErrorEnvelope> {
+  try {
+    const conn = connectionManager.getConnection('gtex');
+    const { datasetId } = await getActiveDataset();
 
-  const tissues = await getGtexTissues();
-  if (!tissues.some(t => t.tissueSiteDetailId === tissueSiteDetailId)) {
-    throw new Error(
-      `Invalid tissue '${tissueSiteDetailId}'. Use gtex tissues like 'Brain_Cortex', 'Whole_Blood' — see dataset/tissueSiteDetail (${tissues.length} tissues in ${datasetId})`
-    );
+    const tissues = await getGtexTissues();
+    if (!tissues.some(t => t.tissueSiteDetailId === tissueSiteDetailId)) {
+      throw new Error(
+        `Invalid tissue '${tissueSiteDetailId}'. Use gtex tissues like 'Brain_Cortex', 'Whole_Blood' — see dataset/tissueSiteDetail (${tissues.length} tissues in ${datasetId})`
+      );
+    }
+
+    const resolution = await resolveGencodeId(geneIdentifier);
+    const query = new URLSearchParams({
+      gencodeId: resolution.gencodeId,
+      datasetId,
+      tissueSiteDetailId,
+    });
+    const response = await conn.request(`/api/v2/association/singleTissueEqtl?${query.toString()}`) as SingleTissueEqtlResponse;
+
+    // NB: empty data with HTTP 200 is legitimate (no significant eQTLs).
+    const rows = Array.isArray(response.data) ? response.data : [];
+    const limit = Math.min(Math.max(options.limit ?? DEFAULT_EQTL_LIMIT, 1), MAX_EQTL_LIMIT);
+
+    // An empty list for a valid gene+tissue is a valid scientific result, but is
+    // indistinguishable from a gene/dataset mapping failure at a glance (#106).
+    // Attach an advisory note: one extra all-tissues query (same gencodeId +
+    // datasetId) lists where significant eQTLs DO exist. Diagnostic-only — if
+    // the extra call itself fails, return the plain empty result.
+    let note: string | undefined;
+    if (rows.length === 0) {
+      note = await buildEmptyEqtlNote(conn, resolution.geneSymbol || geneIdentifier, resolution.gencodeId, datasetId, tissueSiteDetailId);
+    }
+
+    const associations = rows
+      .slice()
+      .sort((a, b) => a.pValue - b.pValue)
+      .map(r => ({
+        variant_id: r.variantId,
+        p_value: r.pValue,
+        nes: r.nes,
+      }));
+
+    return {
+      gene_symbol: resolution.geneSymbol,
+      gencode_id: resolution.gencodeId,
+      tissue: tissueSiteDetailId,
+      associations: associations.slice(0, limit),
+      ...(note !== undefined ? { note } : {}),
+    };
+  } catch (error) {
+    return gtexErrorEnvelope(error);
   }
-
-  const resolution = await resolveGencodeId(geneIdentifier);
-  const query = new URLSearchParams({
-    gencodeId: resolution.gencodeId,
-    datasetId,
-    tissueSiteDetailId,
-  });
-  const response = await conn.request(`/api/v2/association/singleTissueEqtl?${query.toString()}`) as SingleTissueEqtlResponse;
-
-  // NB: empty data with HTTP 200 is legitimate (no significant eQTLs).
-  const rows = Array.isArray(response.data) ? response.data : [];
-  const limit = Math.min(Math.max(options.limit ?? DEFAULT_EQTL_LIMIT, 1), MAX_EQTL_LIMIT);
-
-  // An empty list for a valid gene+tissue is a valid scientific result, but is
-  // indistinguishable from a gene/dataset mapping failure at a glance (#106).
-  // Attach an advisory note: one extra all-tissues query (same gencodeId +
-  // datasetId) lists where significant eQTLs DO exist. Diagnostic-only — if
-  // the extra call itself fails, return the plain empty result.
-  let note: string | undefined;
-  if (rows.length === 0) {
-    note = await buildEmptyEqtlNote(conn, resolution.geneSymbol || geneIdentifier, resolution.gencodeId, datasetId, tissueSiteDetailId);
-  }
-
-  const associations = rows
-    .slice()
-    .sort((a, b) => a.pValue - b.pValue)
-    .map(r => ({
-      variant_id: r.variantId,
-      p_value: r.pValue,
-      nes: r.nes,
-    }));
-
-  return {
-    gene_symbol: resolution.geneSymbol,
-    gencode_id: resolution.gencodeId,
-    tissue: tissueSiteDetailId,
-    associations: associations.slice(0, limit),
-    ...(note !== undefined ? { note } : {}),
-  };
 }
 
 /** Query every tissue for the gene and render the "no eQTLs here, but N

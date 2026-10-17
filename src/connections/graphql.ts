@@ -90,6 +90,7 @@ export class GraphQLConnection implements IConnection<string, unknown> {
       maxRetries: Math.max((retry.attempts ?? 2) - 1, 0),
       baseDelayMs: retry.backoffMs ?? 1000,
       maxTotalMs: this.options.retryBudgetMs,
+      sourceId: this.sourceId,
       logger: { warn: (msg: string) => console.warn(`[${this.sourceId}] ${msg}`) },
     });
   }

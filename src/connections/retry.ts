@@ -52,13 +52,21 @@ export interface RetryOptions {
    * or the backoff wait plus a duration estimate of the next attempt (the
    * last attempt's observed duration) would exceed it, the last error is
    * rethrown instead of retrying — same error object and type, with a
-   * `retry budget exhausted` note appended to `message`.
+   * `retry budget exhausted` note (source, spend, attempts, remedy)
+   * replacing `message`.
    *
    * This caps retry amplification (#107): a retryable timeout must not let
    * attempts × timeoutMs stack into a minutes-long logical request.
    * Unset = no budget (legacy behavior: retries limited only by maxRetries).
    */
   maxTotalMs?: number;
+
+  /**
+   * Optional source identifier for error attribution, threaded in by the
+   * connection layer (`this.sourceId`). Included in the budget-exhausted
+   * note so a multi-source reply pinpoints WHICH upstream gave up (#132).
+   */
+  sourceId?: string;
 
   /**
    * Optional logger for warning messages during retries.
@@ -108,20 +116,46 @@ export function isRetryableError(error: unknown): boolean {
 }
 
 /**
- * Marker appended to a retryable error's message when `maxTotalMs` stops
- * the retry loop. Checked before appending so the note is never duplicated.
+ * Marker included in a retryable error's message when `maxTotalMs` stops
+ * the retry loop. Checked before annotating so the note is never duplicated.
  */
 const BUDGET_EXHAUSTED_NOTE = 'retry budget exhausted';
 
 /**
- * Annotate a budget-exhausted error in place: same object, same type, the
- * note appended to `message` only — string-matching consumers of the
- * original message keep working. Non-Error values are returned untouched.
+ * Annotate a budget-exhausted error in place: same object, same type —
+ * only `message` changes. `Object.defineProperty` is used instead of `+=`
+ * because some thrown values expose `message` as a getter-only prototype
+ * accessor: Node's `AbortSignal.timeout()` rejects fetch with a DOMException
+ * whose `message` lives on `DOMException.prototype`, and a strict-mode `+=`
+ * on it throws `TypeError: Cannot set property 'message' …`, REPLACING the
+ * real timeout error (#132). An own `value` property cleanly shadows the
+ * accessor — `instanceof` checks, `name`, and typed fields (`status`,
+ * `retryable`) are untouched, and string-matching consumers of the original
+ * message keep working (the original text is preserved verbatim as the
+ * prefix).
+ *
+ * Guard is a duck-type check on `message` (not `instanceof Error`): the
+ * thrown value may cross realms (undici/Node globals under Jest's vm), where
+ * `instanceof` false-FAILS while the property is still present — the same
+ * rationale as the name-based SyntaxError check in rest.ts. Values without a
+ * string `message` (plain strings, numbers) are returned untouched.
  */
-function noteBudgetExhausted(error: unknown, maxTotalMs: number): unknown {
-  if (error instanceof Error && !error.message.includes(BUDGET_EXHAUSTED_NOTE)) {
-    error.message += ` — ${BUDGET_EXHAUSTED_NOTE} (${maxTotalMs}ms)`;
+function noteBudgetExhausted(
+  error: unknown,
+  context: { sourceId?: string; maxTotalMs: number; elapsedMs: number; attempts: number }
+): unknown {
+  const message = (error as { message?: unknown } | null | undefined)?.message;
+  if (typeof message !== 'string' || message.includes(BUDGET_EXHAUSTED_NOTE)) {
+    return error;
   }
+  const source = context.sourceId ? `${context.sourceId} ` : '';
+  Object.defineProperty(error, 'message', {
+    value:
+      `${message} — ${source}${BUDGET_EXHAUSTED_NOTE} ` +
+      `(${context.maxTotalMs} ms; spent ${context.elapsedMs} ms over ${context.attempts} attempts). ` +
+      `Retry in a few minutes; if it persists, narrow the request.`,
+    configurable: true,
+  });
   return error;
 }
 
@@ -174,6 +208,7 @@ export async function withRetry<T>(
     isRetryable = isRetryableError,
     logger = console,
     maxTotalMs,
+    sourceId,
   } = options;
 
   const start = Date.now();
@@ -214,7 +249,12 @@ export async function withRetry<T>(
           logger.warn(
             `[retry] Attempt ${attempt + 1}/${maxRetries + 1} failed; ${BUDGET_EXHAUSTED_NOTE} (maxTotalMs ${maxTotalMs}, elapsed ${elapsed}ms, next retry projected +${Math.round(delay + lastAttemptMs)}ms)`
           );
-          throw noteBudgetExhausted(error, maxTotalMs);
+          throw noteBudgetExhausted(error, {
+            sourceId,
+            maxTotalMs,
+            elapsedMs: elapsed,
+            attempts: attempt + 1,
+          });
         }
 
         logger.warn(

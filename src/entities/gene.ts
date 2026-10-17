@@ -528,6 +528,12 @@ async function fetchCivic(geneSymbol: string, signal?: AbortSignal): Promise<{ v
 async function fetchExpression(geneSymbol: string): Promise<{ tissues?: Array<{ tissue: string; tpm: number }> }> {
   try {
     const expression = await gtexMedianExpression(geneSymbol, { limit: 20 });
+    // gtexMedianExpression surfaces upstream failures as a structured
+    // {_error, source, retryable} envelope instead of throwing (#132).
+    if ('_error' in expression) {
+      console.error('[fetchExpression] Error:', expression._error);
+      return { _error: expression._error } as any;
+    }
     if (expression.tissues.length === 0) {
       return { _error: `No GTEx expression data found for '${geneSymbol}' (${expression.gencode_id}). The gene may not be in the GTEx dataset.` } as any;
     }

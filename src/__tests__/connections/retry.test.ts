@@ -214,8 +214,8 @@ describe('retry', () => {
   });
 
   describe('withRetry total-time budget (maxTotalMs)', () => {
-    // Fresh error instances per test: giving up appends the budget note to
-    // the error's message in place, which must not leak across tests.
+    // Fresh error instances per test: giving up rewrites the error's
+    // `message` in place, which must not leak across tests.
     const fresh429 = () => new HttpConnectionError('HTTP 429: Too Many Requests', 429);
 
     // Simulate a timeout-bounded attempt under fake timers: each attempt
@@ -252,19 +252,99 @@ describe('retry', () => {
       await jest.runAllTimersAsync();
       await expectation;
       expect(fn).toHaveBeenCalledTimes(1);
+      try {
+        await promise;
+      } catch (error) {
+        // No sourceId threaded → the note starts right after the em-dash
+        // (no stray 'undefined' or double space).
+        expect((error as Error).message).toContain('— retry budget exhausted (1 ms; spent 0 ms over 1 attempts)');
+        expect((error as Error).message).not.toContain('undefined');
+      }
     });
 
-    it('rethrows the same error object (same type, note appended to message only)', async () => {
+    it('rethrows the same error object (type, status, retryable preserved; richer note)', async () => {
       const err = fresh429();
       const fn = jest.fn<(...args: any[]) => any>().mockRejectedValue(err);
-      const promise = withRetry(fn, { maxRetries: 2, baseDelayMs: 1000, maxTotalMs: 1 });
+      const promise = withRetry(fn, { maxRetries: 2, baseDelayMs: 1000, maxTotalMs: 1, sourceId: 'ensembl' });
       const expectation = expect(promise).rejects.toBe(err);
       await jest.runAllTimersAsync();
       await expectation;
       expect(fn).toHaveBeenCalledTimes(1);
       expect(err).toBeInstanceOf(HttpConnectionError);
+      // typed fields survive the annotation untouched
+      expect(err.status).toBe(429);
+      expect(err.retryable).toBe(true);
+      // message: original text + source-attributed budget note with spend,
+      // attempts, and a remedy (#132 house style)
       expect(err.message).toContain('HTTP 429');
-      expect(err.message).toContain('retry budget exhausted');
+      expect(err.message).toContain('ensembl retry budget exhausted');
+      expect(err.message).toMatch(/\(1 ms; spent 0 ms over 1 attempts\)/);
+      expect(err.message).toContain('Retry in a few minutes; if it persists, narrow the request.');
+    });
+
+    it('annotates a DOMException (getter-only prototype message) without the message-setter TypeError (#132)', async () => {
+      // Node's AbortSignal.timeout() rejects fetch with a DOMException whose
+      // `message` is a GETTER-ONLY accessor on DOMException.prototype; the
+      // old in-place `+=` threw `TypeError: Cannot set property 'message' …`,
+      // REPLACING the real timeout error on every budget-exhausted timeout.
+      // (typeof rather than instanceof Function: the accessor may hail from
+      // a different vm realm under Jest, where instanceof checks false-FAIL.)
+      expect(typeof Object.getOwnPropertyDescriptor(DOMException.prototype, 'message')?.get).toBe('function');
+      const domExc = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      const fn = jest.fn<(...args: any[]) => any>().mockImplementation(async () => {
+        jest.advanceTimersByTime(15000);
+        throw domExc;
+      });
+      // Under Jest's vm realm `DOMException instanceof Error` is FALSE
+      // (cross-realm artifact — in real Node ESM it is true, which is why
+      // the default classifier retries these in production), so force the
+      // retryable verdict to reach the budget-exhaustion path under test.
+      const promise = withRetry(fn, {
+        maxRetries: 3,
+        baseDelayMs: 500,
+        jitter: false,
+        maxTotalMs: 35000,
+        sourceId: 'ensembl',
+        isRetryable: () => true,
+      });
+      const expectation = expect(promise).rejects.toBe(domExc);
+      await jest.runAllTimersAsync();
+      await expectation;
+      // Same trace as the projection test above: stops after 2 attempts
+      // (30.5s elapsed; the next retry projects past the 35s budget).
+      expect(fn).toHaveBeenCalledTimes(2);
+      // Identity and type fully preserved — still the same DOMException.
+      expect(domExc).toBeInstanceOf(DOMException);
+      expect(domExc.name).toBe('TimeoutError');
+      // Message: original timeout text preserved + source, budget, spend,
+      // attempts, remedy. No TypeError ever escapes.
+      expect(domExc.message).toContain('The operation was aborted due to timeout');
+      expect(domExc.message).toContain('ensembl retry budget exhausted');
+      expect(domExc.message).toContain('(35000 ms; spent 30500 ms over 2 attempts)');
+      expect(domExc.message).toContain('Retry in a few minutes; if it persists, narrow the request.');
+    });
+
+    it('never double-annotates when the same error re-enters withRetry (dedup guard)', async () => {
+      const err = fresh429();
+      const first = withRetry(jest.fn<(...args: any[]) => any>().mockRejectedValue(err), {
+        maxRetries: 3, baseDelayMs: 500, maxTotalMs: 1, sourceId: 'ensembl',
+      });
+      // Attach the handler BEFORE advancing timers, mirroring the sibling
+      // tests — otherwise the rejection fires unhandled under fake timers.
+      const firstExpectation = expect(first).rejects.toThrow('retry budget exhausted');
+      await jest.runAllTimersAsync();
+      await firstExpectation;
+      const annotated = err.message;
+
+      // Re-wrap the SAME (already annotated) error in a second budget run.
+      const second = withRetry(jest.fn<(...args: any[]) => any>().mockRejectedValue(err), {
+        maxRetries: 3, baseDelayMs: 500, maxTotalMs: 1, sourceId: 'ensembl',
+      });
+      const secondExpectation = expect(second).rejects.toBe(err);
+      await jest.runAllTimersAsync();
+      await secondExpectation;
+      expect(err.message).toBe(annotated);
+      expect(err.message.match(/retry budget exhausted/g)).toHaveLength(1);
     });
 
     it('does not annotate or cut retries when maxTotalMs is unset (legacy behavior)', async () => {

@@ -1,6 +1,11 @@
 import { jest } from '@jest/globals';
 import { connectionManager } from '../../connections/manager.js';
 import { mockGlobalFetch } from '../helpers/mock-fetch.js';
+import type {
+  GTExEqtlResult,
+  GTExErrorEnvelope,
+  GTExMedianExpressionResult,
+} from '../../entities/gtex.js';
 
 const DATASETS = [
   {
@@ -128,6 +133,18 @@ function defaultRoutes(overrides: Record<string, RouteHandler> = {}): Record<str
 async function loadGtex() {
   jest.resetModules();
   return await import('../../entities/gtex.js');
+}
+
+/** Success-path narrows: fail fast (with the leaked message) when one of
+ *  the entry points unexpectedly returns a `_error` envelope (#132 union). */
+function expectMedianResult(r: GTExMedianExpressionResult | GTExErrorEnvelope): GTExMedianExpressionResult {
+  if ('_error' in r) throw new Error(`unexpected _error envelope: ${r._error}`);
+  return r;
+}
+
+function expectEqtlResult(r: GTExEqtlResult | GTExErrorEnvelope): GTExEqtlResult {
+  if ('_error' in r) throw new Error(`unexpected _error envelope: ${r._error}`);
+  return r;
 }
 
 function callUrls(): string[] {
@@ -285,7 +302,7 @@ describe('gtexMedianExpression', () => {
     const { gtexMedianExpression } = await loadGtex();
     mockFetchRoutes(defaultRoutes());
 
-    const result = await gtexMedianExpression('TP53');
+    const result = expectMedianResult(await gtexMedianExpression('TP53'));
 
     const medianUrl = urlsContaining('medianGeneExpression')[0];
     expect(medianUrl).toContain('gencodeId=ENSG00000141510.18');
@@ -318,7 +335,7 @@ describe('gtexMedianExpression', () => {
     const { gtexMedianExpression } = await loadGtex();
     mockFetchRoutes(defaultRoutes());
 
-    const result = await gtexMedianExpression('TP53', { limit: 2 });
+    const result = expectMedianResult(await gtexMedianExpression('TP53', { limit: 2 }));
 
     expect(result.tissues.map(t => t.tissue)).toEqual(['Adipose_Subcutaneous', 'Whole_Blood']);
   });
@@ -327,18 +344,49 @@ describe('gtexMedianExpression', () => {
     const { gtexMedianExpression } = await loadGtex();
     mockFetchRoutes(defaultRoutes({ '/api/v2/expression/medianGeneExpression': () => ({ data: [] }) }));
 
-    const result = await gtexMedianExpression('TP53');
+    const result = expectMedianResult(await gtexMedianExpression('TP53'));
 
     expect(result.tissues).toEqual([]);
     expect(result.unit).toBe('TPM');
     expect(result.gencode_id).toBe('ENSG00000141510.18');
   });
 
-  test('gene that cannot be resolved throws a readable error', async () => {
+  test('gene that cannot be resolved returns a structured _error envelope (not a throw)', async () => {
     const { gtexMedianExpression } = await loadGtex();
     mockFetchRoutes(defaultRoutes({ '/api/v2/reference/geneSearch': () => GENE_SEARCH_NO_MATCH }));
 
-    await expect(gtexMedianExpression('NOT_A_GENE')).rejects.toThrow("Gene 'NOT_A_GENE' not found in GTEx v10 gene reference");
+    const result = await gtexMedianExpression('NOT_A_GENE');
+
+    // #132: deterministic lookup failures surface as the house envelope
+    // {_error, source, retryable} instead of a raw throw.
+    expect(result).toMatchObject({ source: 'gtex', retryable: false });
+    if (!('_error' in result)) throw new Error('expected a _error envelope');
+    expect(result._error).toContain('GTEx request failed');
+    expect(result._error).toContain("Gene 'NOT_A_GENE' not found in GTEx v10 gene reference");
+    expect(result._error).not.toContain('Usually transient'); // wrong remedy for a deterministic miss
+  });
+
+  test('upstream 5xx returns a structured _error envelope classified retryable', async () => {
+    const { gtexMedianExpression } = await loadGtex();
+    mockFetchRoutes(defaultRoutes({
+      '/api/v2/expression/medianGeneExpression': () => ({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+        json: () => Promise.resolve({}),
+        headers: new Headers({ 'content-type': 'application/json' }),
+      } as any),
+    }));
+
+    const result = await gtexMedianExpression('TP53');
+
+    expect(result).toMatchObject({ source: 'gtex', retryable: true });
+    if (!('_error' in result)) throw new Error('expected a _error envelope');
+    expect(result._error).toContain('GTEx request failed');
+    expect(result._error).toContain('HTTP 503');
+    expect(result._error).toContain('Usually transient — retry once or twice, or try later.');
+    // gtex retries once (attempts: 2) before the envelope: two fetches.
+    expect(urlsContaining('medianGeneExpression')).toHaveLength(2);
   });
 });
 
@@ -350,13 +398,19 @@ describe('gtexEqtl', () => {
     connectionManager.closeAll();
   });
 
-  test('invalid tissue throws with hint listing valid tissue count', async () => {
+  test('invalid tissue returns a structured _error envelope (hint preserved, no association fetch)', async () => {
     const { gtexEqtl } = await loadGtex();
     mockFetchRoutes(defaultRoutes());
 
-    await expect(gtexEqtl('TP53', 'Not_A_Tissue')).rejects.toThrow(
-      "Invalid tissue 'Not_A_Tissue'. Use gtex tissues like 'Brain_Cortex', 'Whole_Blood' — see dataset/tissueSiteDetail (3 tissues in gtex_v10)"
-    );
+    const result = await gtexEqtl('TP53', 'Not_A_Tissue');
+
+    // #132: validation failures surface as the house envelope, carrying the
+    // original hint verbatim, classified non-retryable.
+    expect(result).toMatchObject({ source: 'gtex', retryable: false });
+    if (!('_error' in result)) throw new Error('expected a _error envelope');
+    expect(result._error).toContain("Invalid tissue 'Not_A_Tissue'");
+    expect(result._error).toContain("'Brain_Cortex', 'Whole_Blood'");
+    expect(result._error).toContain('3 tissues in gtex_v10');
     expect(urlsContaining('singleTissueEqtl')).toHaveLength(0);
   });
 
@@ -364,7 +418,7 @@ describe('gtexEqtl', () => {
     const { gtexEqtl } = await loadGtex();
     mockFetchRoutes(defaultRoutes({ '/api/v2/association/singleTissueEqtl': () => ({ data: [] }) }));
 
-    const result = await gtexEqtl('TP53', 'Whole_Blood');
+    const result = expectEqtlResult(await gtexEqtl('TP53', 'Whole_Blood'));
 
     expect(result).toEqual({
       gene_symbol: 'TP53',
@@ -394,7 +448,7 @@ describe('gtexEqtl', () => {
         url.searchParams.has('tissueSiteDetailId') ? { data: [] } : { data: allTissuesRows },
     }));
 
-    const result = await gtexEqtl('TP53', 'Whole_Blood');
+    const result = expectEqtlResult(await gtexEqtl('TP53', 'Whole_Blood'));
 
     // Exactly two association fetches: scoped, then the all-tissues diagnostic.
     const eqtlUrls = urlsContaining('singleTissueEqtl');
@@ -425,7 +479,7 @@ describe('gtexEqtl', () => {
       },
     }));
 
-    const result = await gtexEqtl('TP53', 'Brain_Cortex');
+    const result = expectEqtlResult(await gtexEqtl('TP53', 'Brain_Cortex'));
 
     expect(result.associations).toEqual([]);
     expect(result.note).toBe('TP53 has no significant cis-eQTLs in any GTEx v10 tissue');
@@ -443,7 +497,7 @@ describe('gtexEqtl', () => {
       },
     }));
 
-    const result = await gtexEqtl('TP53', 'Whole_Blood');
+    const result = expectEqtlResult(await gtexEqtl('TP53', 'Whole_Blood'));
 
     expect(result.associations).toEqual([]);
     expect(result.note).toBeUndefined();
@@ -454,7 +508,7 @@ describe('gtexEqtl', () => {
     const { gtexEqtl } = await loadGtex();
     mockFetchRoutes(defaultRoutes());
 
-    const result = await gtexEqtl('TP53', 'Whole_Blood', { limit: 2 });
+    const result = expectEqtlResult(await gtexEqtl('TP53', 'Whole_Blood', { limit: 2 }));
 
     const eqtlUrl = urlsContaining('singleTissueEqtl')[0];
     expect(eqtlUrl).toContain('gencodeId=ENSG00000141510.18');
@@ -470,14 +524,36 @@ describe('gtexEqtl', () => {
     const { gtexEqtl } = await loadGtex();
     mockFetchRoutes(defaultRoutes());
 
-    const result = await gtexEqtl('TP53', 'Whole_Blood');
+    const result = expectEqtlResult(await gtexEqtl('TP53', 'Whole_Blood'));
 
     expect(urlsContaining('singleTissueEqtl')).toHaveLength(1);
     expect(result.associations.length).toBeGreaterThan(0);
     expect('note' in result).toBe(false);
   });
 
-  test('HTTP 422 from the API surfaces as a readable Error', async () => {
+  test('upstream network rejection returns a structured _error envelope classified retryable', async () => {
+    const { gtexEqtl } = await loadGtex();
+    const networkReject = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
+    mockFetchRoutes(defaultRoutes({
+      '/api/v2/association/singleTissueEqtl': () => {
+        throw networkReject;
+      },
+    }));
+
+    const result = await gtexEqtl('TP53', 'Whole_Blood');
+
+    // #132: the raw HttpConnectionError throw is gone; the envelope names
+    // the cause signal (cause.code appended by errorMessageWithCause).
+    expect(result).toMatchObject({ source: 'gtex', retryable: true });
+    if (!('_error' in result)) throw new Error('expected a _error envelope');
+    expect(result._error).toContain('GTEx request failed');
+    expect(result._error).toContain('fetch failed (ECONNREFUSED)');
+    expect(result._error).toContain('Usually transient — retry once or twice, or try later.');
+    // gtex retries once (attempts: 2): two association fetches.
+    expect(urlsContaining('singleTissueEqtl')).toHaveLength(2);
+  });
+
+  test('HTTP 422 from the API surfaces as a non-retryable _error envelope', async () => {
     const { gtexEqtl } = await loadGtex();
     mockFetchRoutes(defaultRoutes({
       '/api/v2/association/singleTissueEqtl': () => ({
@@ -489,7 +565,12 @@ describe('gtexEqtl', () => {
       } as any),
     }));
 
-    await expect(gtexEqtl('TP53', 'Whole_Blood')).rejects.toThrow('HTTP 422');
+    const result = await gtexEqtl('TP53', 'Whole_Blood');
+
+    expect(result).toMatchObject({ source: 'gtex', retryable: false });
+    if (!('_error' in result)) throw new Error('expected a _error envelope');
+    expect(result._error).toContain('HTTP 422');
+    expect(result._error).toContain('Unprocessable Entity');
   });
 });
 

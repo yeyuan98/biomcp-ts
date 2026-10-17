@@ -112,9 +112,15 @@ describe('gtex tools (integration)', () => {
     expect(pValues).toEqual(sorted);
   }, 60000);
 
-  it('gtex_eqtl rejects an invalid tissue id', async () => {
-    await expect(
+  it('gtex_eqtl surfaces an invalid tissue id as the structured _error envelope', async () => {
+    const result = await retryOnRateLimit(() =>
       harness.callTool('gtex_eqtl', { gene: 'SORT1', tissue: 'Not_A_Tissue' })
-    ).rejects.toThrow(/invalid tissue/i);
+    );
+
+    // Since #132 validation/upstream failures RESOLVE with the house
+    // envelope {_error, source, retryable} instead of throwing a raw error
+    // (mirrors the unit-level gtex-tools pin).
+    expect(result).toMatchObject({ source: 'gtex', retryable: false });
+    expect(result._error).toMatch(/invalid tissue/i);
   }, 30000);
 });
