@@ -230,6 +230,100 @@ describe('patent dedup and normalization', () => {
   });
 });
 
+describe('ppubs recency ordering (#127)', () => {
+  let originalFetch: typeof global.fetch;
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+    installFakeTimers();
+  });
+
+  afterEach(async () => {
+    jest.useRealTimers();
+    global.fetch = originalFetch;
+    // Reset the ppubs singleton session so later describes never inherit it.
+    const { ppubsClient } = await import('../../entities/patent/ppubs-client.js');
+    ppubsClient.close();
+  });
+
+  function jsonResp(payload: unknown, headers: Record<string, string> = { 'content-type': 'application/json' }) {
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      headers: new Headers(headers),
+      text: () => Promise.resolve(JSON.stringify(payload)),
+      json: () => Promise.resolve(payload),
+    });
+  }
+
+  function ppubsSearchMock(patents: unknown[], searchBodies: Record<string, unknown>[] = []) {
+    return jest.fn<(...args: any[]) => any>().mockImplementation((url: any, init?: any) => {
+      const u = String(url);
+      if (u.includes('/api/users/me/session')) {
+        return jsonResp({ userCase: { caseId: 1 } }, { 'x-access-token': 'tok-1', 'content-type': 'application/json' });
+      }
+      if (u.includes('/api/searches/searchWithBeFamily')) {
+        searchBodies.push(JSON.parse(init.body));
+        return jsonResp({ patents, numberOfFamilies: patents.length });
+      }
+      return Promise.reject(new Error(`unexpected ${u}`));
+    });
+  }
+
+  // Issue #127 live shape: behind `date_publ desc` the upstream
+  // cross-database merge intermittently emits an out-of-order duplicate-date
+  // row (10-15 → 10-13 → 10-08 → 10-15) and rows can lack datePublished.
+  const RECENCY_ROWS = [
+    { guid: 'US-20260315701-A1', type: 'US-PGPUB', publicationReferenceDocumentNumber: '20260315701', inventionTitle: 'Newest, first upstream', datePublished: '2026-10-15T00:00:00Z' },
+    { guid: 'US-20260314440-A1', type: 'US-PGPUB', publicationReferenceDocumentNumber: '20260314440', inventionTitle: 'Older', datePublished: '2026-10-13T00:00:00Z' },
+    { guid: 'US-20260308220-A1', type: 'US-PGPUB', publicationReferenceDocumentNumber: '20260308220', inventionTitle: 'Oldest dated', datePublished: '2026-10-08T00:00:00Z' },
+    { guid: 'US-20260315880-B2', type: 'USPAT', publicationReferenceDocumentNumber: '20260315880', inventionTitle: 'Newest, out of order upstream', datePublished: '2026-10-15T00:00:00Z' },
+    { guid: 'US-20250111111-A1', type: 'US-PGPUB', publicationReferenceDocumentNumber: '20250111111', inventionTitle: 'Undated upstream' },
+  ];
+
+  test('sort_by recency re-orders the upstream page newest-first, undated last', async () => {
+    const bodies: Record<string, any>[] = [];
+    global.fetch = ppubsSearchMock(RECENCY_ROWS, bodies) as any;
+    const { searchPpubs } = await import('../../entities/patent/search/ppubs.js');
+    const out = await advanceUntilSettled(searchPpubs('mRNA display', { sort_by: 'recency', limit: 5 }));
+    // Page selection still delegates to the server sort.
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].sort).toBe('date_publ desc');
+    const dates = out.patents.map(p => p.publication_date);
+    for (let i = 1; i < dates.length; i++) {
+      expect((dates[i - 1] ?? '') >= (dates[i] ?? '')).toBe(true); // non-increasing
+    }
+    expect(dates.slice(0, 4)).toEqual(['2026-10-15', '2026-10-15', '2026-10-13', '2026-10-08']);
+    expect(out.patents.map(p => p.publication_number)).toEqual([
+      'US20260315701A1', // 2026-10-15 tie: ascending publication_number tie-break
+      'US20260315880B2',
+      'US20260314440A1',
+      'US20260308220A1',
+      'US20250111111A1', // missing date sorts last
+    ]);
+  });
+
+  test('sort_by relevance preserves upstream order verbatim (no client-side reorder)', async () => {
+    const scored = [
+      { guid: 'US-20260308220-A1', type: 'US-PGPUB', publicationReferenceDocumentNumber: '20260308220', inventionTitle: 'Top score, oldest date', datePublished: '2026-10-08T00:00:00Z', score: 13.3 },
+      { guid: 'US-20260315701-A1', type: 'US-PGPUB', publicationReferenceDocumentNumber: '20260315701', inventionTitle: 'Mid score, newest date', datePublished: '2026-10-15T00:00:00Z', score: 13.2 },
+      { guid: 'US-20260314440-A1', type: 'US-PGPUB', publicationReferenceDocumentNumber: '20260314440', inventionTitle: 'Low score', datePublished: '2026-10-13T00:00:00Z', score: 13.1 },
+    ];
+    const bodies: Record<string, any>[] = [];
+    global.fetch = ppubsSearchMock(scored, bodies) as any;
+    const { searchPpubs } = await import('../../entities/patent/search/ppubs.js');
+    const out = await advanceUntilSettled(searchPpubs('mRNA display', { sort_by: 'relevance', limit: 5 }));
+    expect(bodies[0].sort).toBe('score desc');
+    // Upstream (score) order kept as-is even though dates are out of order.
+    expect(out.patents.map(p => p.publication_number)).toEqual([
+      'US20260308220A1',
+      'US20260315701A1',
+      'US20260314440A1',
+    ]);
+    expect(out.patents.map(p => p.publication_date)).toEqual(['2026-10-08', '2026-10-15', '2026-10-13']);
+  });
+});
+
 describe('seminal prior-art mining', () => {
   let originalFetch: typeof global.fetch;
 
