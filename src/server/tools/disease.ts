@@ -2,7 +2,13 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { diseaseSearch, diseaseGet } from '../../entities/disease.js';
 import { connectionManager } from '../../connections/manager.js';
-import { applyLimit } from './utils.js';
+import { applyLimit, withToolTimeout, type CancellationCapableExtra } from './utils.js';
+
+// Deadline rationale (#107 phase 2): the mydisease core lookup (candidate
+// curie retries, 15s per attempt) plus the 8s-deadline section wave in
+// parallel — 40s covers the connection budget ceilings with headroom while
+// bounding work that ignores the abort.
+const DISEASE_GET_TIMEOUT_MS = 40000;
 
 const DISEASE_SECTIONS = [
   'core', 'gene_associations', 'phenotypes', 'pathways', 'all'
@@ -72,9 +78,13 @@ export function registerDiseaseTools(server: McpServer): void {
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
-    async ({ disease_id, sections, limit }) => {
+    async ({ disease_id, sections, limit }, extra: CancellationCapableExtra) => {
       try {
-        const result = await diseaseGet(disease_id, sections);
+        const result = await withToolTimeout(
+          () => diseaseGet(disease_id, sections),
+          DISEASE_GET_TIMEOUT_MS,
+          { signal: extra?.signal },
+        );
         const requestedSections = (sections ?? []).includes('all')
           ? DISEASE_ALL_SECTIONS
           : (sections ?? []);

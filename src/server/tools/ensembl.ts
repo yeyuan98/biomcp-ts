@@ -65,6 +65,7 @@ Use it for conservation questions ('is this gene conserved?', 'what is the mouse
       description: `Predict the functional consequence of a variant on demand via Ensembl VEP — works even for NOVEL variants absent from every database, and for non-human species.
 
 Input forms: HGVS c./p./g. notation ("NM_004333:c.1799T>A", "ENST00000288602:c.1799T>A") or a dbSNP rsID ("rs113488060"). Prefer HGVS over rsIDs when both are available — rsIDs are resolved through dbSNP's coordinate mapping, which can yield less specific consequences.
+Per-species rules: the variant must be valid on a transcript of THAT species — RefSeq NM_ accessions work cross-species only when the transcript belongs to it (e.g. "NM_011640:c.100A>G" + species 'mouse' is mouse Trp53; a human NM_ fed to species 'mouse' fails). Ensembl transcript IDs (ENST…, ENSMUST…) are accepted for their own species, and c./p. positions must be in range for the transcript. Invalid input returns the upstream VEP error explaining what could not be mapped.
 Returns the most severe consequence plus per-transcript effects (impact, codon/amino-acid change, SIFT/PolyPhen where available) and co-located known variants (ClinVar/COSMIC IDs, gnomAD/1000G frequencies when present).
 For KNOWN human variants, variant_get additionally provides deep pre-computed scores (CADD, REVEL, AlphaMissense, ClinVar stars) — prefer it there.`,
       inputSchema: {
@@ -90,6 +91,7 @@ For KNOWN human variants, variant_get additionally provides deep pre-computed sc
       description: `Query what lives in a genomic interval on the current assembly (GRCh38 for human): genes/transcripts (stable IDs, symbols, biotypes) and known variants (rsIDs, alleles, consequence terms, clinical significance).
 
 Ideal for locus triage — "what genes and known variants sit in this GWAS hit interval?".
+Genes/transcripts are always fetched for the FULL requested span, but variation density can reach ~100k variants in dense loci (which times out upstream), so when the span exceeds 50 kb variation is queried only for a 50 kb window centered on the region midpoint — the result echoes effective_variation_window (the coordinates actually queried for variation) and variation_truncated (names the dropped span) when this cap applies. To sweep variation across a large interval, issue adjacent region calls.
 Keep spans modest (<1 Mb recommended); output is capped at limit with a truncated marker. For sequence text use genbank_get; for entity-level annotation chain IDs into gene_get / variant_get.`,
       inputSchema: {
         region: z.string().describe('Genomic region chr:start-end (1-based, GRCh38 for human) — e.g. 7:140450000-140480000'),

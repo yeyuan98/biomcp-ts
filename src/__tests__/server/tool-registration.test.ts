@@ -341,6 +341,26 @@ describe('Tool registration', () => {
     expect(sections.safeParse(['not_a_section']).success).toBe(false);
   });
 
+  it('article_get description documents the implemented fulltext status contract (#105)', () => {
+    registerArticleTools(mockServer);
+    const articleGetCall = mockRegisterTool.mock.calls.find((call: any[]) => call[0] === 'article_get');
+    expect(articleGetCall).toBeDefined();
+    const description = (articleGetCall![1] as any).description as string;
+    // fulltext.status must name the real two-value enum — the description
+    // must not conflate it with the oa section's five-value vocabulary
+    expect(description).toContain('fulltext.status');
+    expect(description).toMatch(/"available"/);
+    expect(description).toMatch(/"unavailable"/);
+    // the five-value vocabulary is attributed to sections.open_access.status
+    expect(description).toContain('sections.open_access.status');
+    expect(description).toContain('open_access | free_to_read | paywalled | not_in_pmc | unknown');
+    // oa_status is echoed onto the fulltext result for standalone visibility
+    expect(description).toContain('fulltext.oa_status');
+    // request-name -> response-key mapping for renamed sections
+    expect(description).toMatch(/"oa".*sections\.open_access/);
+    expect(description).toMatch(/"graph".*sections\.citation_graph/);
+  });
+
   it('patent_get sections schema is usable (entity mock provides real constants)', () => {
     registerPatentTools(mockServer);
     const patentGetCall = mockRegisterTool.mock.calls.find((call: any[]) => call[0] === 'patent_get');

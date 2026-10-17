@@ -427,6 +427,132 @@ describe('RestConnection', () => {
     }
   });
 
+  describe('upstream error body extraction (non-OK responses)', () => {
+    test('request() appends ` — Upstream: <msg>` for a JSON error body (400)', async () => {
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        text: () => Promise.resolve('{"error":"boom detail"}'),
+      }) as any;
+
+      const conn = new RestConnection(baseOptions);
+      try {
+        await conn.request('/test');
+        fail('Expected an error to be thrown');
+      } catch (error) {
+        const err = error as HttpConnectionError;
+        expect(err).toBeInstanceOf(HttpConnectionError);
+        expect(err.status).toBe(400);
+        // Prefix (status line, URL, source, hint) is preserved verbatim; the
+        // upstream message is appended at the end.
+        expect(err.message).toContain('HTTP 400: Bad Request');
+        expect(err.message).toContain('The request was rejected by mygene');
+        expect(err.message).toContain(' — Upstream: boom detail');
+        expect(err.message.indexOf('Source: mygene')).toBeLessThan(err.message.indexOf('Upstream:'));
+      }
+    });
+
+    test('request() keeps the exact pre-extraction message for bodyless mocks (no .text())', async () => {
+      // Unit-test mocks across the suite stub non-OK responses without any
+      // body methods; extraction must be a no-op there — never a crash.
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        json: () => Promise.resolve({}),
+      }) as any;
+
+      const conn = new RestConnection(baseOptions);
+      try {
+        await conn.request('/test');
+        fail('Expected an error to be thrown');
+      } catch (error) {
+        const err = error as HttpConnectionError;
+        expect(err.message).toBe(
+          'HTTP 400: Bad Request — URL: https://mygene.info/v3/test — Source: mygene — The request was rejected by mygene. The record may not exist or may not be indexed yet. Verify the ID is correct and try an older/established record.'
+        );
+        expect(err.message).not.toContain('Upstream:');
+      }
+    });
+
+    test('request() leaves the message unchanged for an HTML (non-JSON) error body', async () => {
+      // Live Ensembl 500s answer with HTML error pages — no JSON parse attempt.
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        headers: new Headers({ 'content-type': 'text/html' }),
+        text: () => Promise.resolve('<html><body><h1>502 Bad Gateway</h1></body></html>'),
+      }) as any;
+
+      const conn = new RestConnection(baseOptions);
+      try {
+        await conn.request('/test');
+        fail('Expected an error to be thrown');
+      } catch (error) {
+        const err = error as HttpConnectionError;
+        expect(err.message).toContain('Server error from mygene');
+        expect(err.message).not.toContain('Upstream:');
+        expect(err.message).not.toContain('<html>');
+      }
+    });
+
+    test('request() swallows a throwing .text() and keeps the message unchanged', async () => {
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+        text: () => Promise.reject(new Error('Body is unusable')),
+      }) as any;
+
+      const conn = new RestConnection(baseOptions);
+      await expect(conn.request('/test')).rejects.toThrow('HTTP 503: Service Unavailable');
+    });
+
+    test('post() appends nested error.message objects the same way', async () => {
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        text: () => Promise.resolve('{"error":{"code":"X","message":"nested detail"}}'),
+      }) as any;
+
+      const conn = new RestConnection(baseOptions);
+      try {
+        await conn.post('/test', { q: 'brca1' });
+        fail('Expected an error to be thrown');
+      } catch (error) {
+        const err = error as HttpConnectionError;
+        expect(err).toBeInstanceOf(HttpConnectionError);
+        expect(err.status).toBe(400);
+        expect(err.message).toContain(' — Upstream: nested detail');
+      }
+    });
+
+    test('request() truncates oversized upstream messages (~300 chars)', async () => {
+      const long = 'x'.repeat(500);
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        text: () => Promise.resolve(JSON.stringify({ error: long })),
+      }) as any;
+
+      const conn = new RestConnection(baseOptions);
+      try {
+        await conn.request('/test');
+        fail('Expected an error to be thrown');
+      } catch (error) {
+        const err = error as HttpConnectionError;
+        const marker = ' — Upstream: ';
+        const extracted = err.message.slice(err.message.indexOf(marker) + marker.length);
+        expect(extracted.length).toBe(301); // 300 chars + ellipsis
+        expect(extracted.endsWith('…')).toBe(true);
+      }
+    });
+  });
+
   test('request() throws a typed error on 3xx when followRedirects is false', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: false,

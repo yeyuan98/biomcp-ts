@@ -1,7 +1,7 @@
 import { connectionManager } from '../../../connections/manager.js';
 import { withTimeout } from '../../../connections/fetch-utils.js';
 import { XMLParser } from 'fast-xml-parser';
-import type { OpenAccessResult } from './open-access.js';
+import type { OpenAccessResult, OpenAccessStatus } from './open-access.js';
 import { writeFullTextFile } from './fulltext-store.js';
 import { FULLTEXT_MAX_FILE_CHARS } from './fulltext-store.js';
 import type { OutlineEntry } from './fulltext-store.js';
@@ -36,6 +36,11 @@ export interface FullTextResult {
   title?: string;
   is_open_access?: boolean;
   license?: string;
+  /** oa classification echoed from the shared Europe PMC lookup — same
+   *  vocabulary as sections.open_access.status (open_access|free_to_read|
+   *  paywalled|not_in_pmc|unknown) — so paywalled vs not-in-PMC is visible
+   *  without requesting the oa section. Absent for preprints (no oa data). */
+  oa_status?: OpenAccessStatus;
   source?: 'europepmc' | 'eutils';
   format?: 'jats-xml' | 'markdown';
   /** 'file' (default): body is on disk, reply carries the handle below.
@@ -119,6 +124,7 @@ function buildUnavailable(
     pmcid: extra?.pmcid,
     is_open_access: extra?.oa?.is_open_access,
     license: extra?.oa?.license,
+    oa_status: extra?.oa?.status,
     links,
     note,
   };
@@ -234,6 +240,7 @@ export async function fetchFullText(pmcid: string | undefined, options: FullText
         title: options.title,
         is_open_access: options.oa?.is_open_access,
         license: options.oa?.license,
+        oa_status: options.oa?.status,
         source,
         format: 'markdown',
         file_path: write.file_path,
@@ -269,6 +276,7 @@ export async function fetchFullText(pmcid: string | undefined, options: FullText
     title: options.title,
     is_open_access: options.oa?.is_open_access,
     license: options.oa?.license,
+    oa_status: options.oa?.status,
     source,
     format: 'jats-xml',
     max_chars: effectiveMax,

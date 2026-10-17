@@ -24,20 +24,31 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     protocol: 'rest',
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
+    // gtexportal.org intermittently drops connections (observed ~1-in-3
+    // transient failures from datacenter IPs); one bounded retry smooths it.
+    retry: { attempts: 2, backoffMs: 500 },
   },
   // Ensembl REST (https://rest.ensembl.org): gene stable-ID lookup, Compara
   // homology, on-demand VEP consequences, region overlap. Keyless; verified
   // budget is 55,000 req/hour per IP — intervalMs 100 keeps a capacity-1
   // bucket well under it. Transient 500/503s are common upstream, hence the
-  // retry entry. See src/entities/ensembl.ts for endpoints deliberately
+  // retry entry. timeoutMs 30000: valid VEP calls have been observed taking
+  // 6.6–20.7 s (on-demand computation), which the former 15 s cap aborted
+  // mid-flight; attempts cut 3→2 in the same change so the worst-case retry
+  // stack (2×30 s + backoff) stays near the old 3×15 s instead of tripling
+  // to ~90 s. See src/entities/ensembl.ts for endpoints deliberately
   // excluded after repeated probe failures (/xrefs/*, /phenotype/*).
   ensembl: {
     sourceId: 'ensembl',
     baseUrl: 'https://rest.ensembl.org',
     protocol: 'rest',
-    handling: { timeoutMs: 15000 },
+    handling: { timeoutMs: 30000 },
     rateLimit: { intervalMs: 100 },
-    retry: { attempts: 3, backoffMs: 200 },
+    retry: { attempts: 2, backoffMs: 200 },
+    // #107: budget 70s so both 30s attempts + backoff fit, but never a third stack.
+    retryBudgetMs: 70000,
+    // #107: cap parallel queued fetches; the token bucket still sets the actual rate.
+    concurrency: 4,
   },
   string: {
     sourceId: 'string',
@@ -155,6 +166,10 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
       keyedRateLimitMs: 100,
     },
     retry: { attempts: 4, backoffMs: 500 },
+    // #107: budget 35s — 4 retryable 15s timeouts must not stack to ~63.5s.
+    retryBudgetMs: 35000,
+    // #107: cap parallel queued acquires; the token bucket still sets the actual rate.
+    concurrency: 6,
   },
   pubtator: {
     sourceId: 'pubtator',
@@ -180,6 +195,8 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
     retry: { attempts: 3, backoffMs: 200 },
+    // #107: budget 35s — retry-stacking source, cap at ~2× the 15s timeout.
+    retryBudgetMs: 35000,
   },
   semantic_scholar: {
     sourceId: 'semantic_scholar',
@@ -200,6 +217,11 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     // Compromise between the former per-call-site wrappers: search retried
     // once, citations up to 3 times (429-prone source).
     retry: { attempts: 3, backoffMs: 500 },
+    // #107: budget 35s — retry-stacking source, cap at ~2× the 15s timeout.
+    retryBudgetMs: 35000,
+    // #107: parallel tool calls pile up behind the 1-slot citation queue; 3
+    // in-flight fetches bound the wait without re-triggering the 429s.
+    concurrency: 3,
   },
   litsense: {
     sourceId: 'litsense',
@@ -233,6 +255,8 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     },
     rateLimit: { intervalMs: 100 },
     retry: { attempts: 3, backoffMs: 100 },
+    // #107: budget 35s — retry-stacking source, cap at ~2× the 15s timeout.
+    retryBudgetMs: 35000,
   },
   opencitations: {
     sourceId: 'opencitations',
@@ -258,6 +282,8 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 1000 },
     retry: { attempts: 2, backoffMs: 1000 },
+    // #107: budget 35s — 15s timeout × 2 attempts + backoff must not stack past it.
+    retryBudgetMs: 35000,
   },
   // arXiv Atom Query API (https://export.arxiv.org/api/query): preprint
   // literature search. Terms of Use (https://info.arxiv.org/help/api/tou.html)
@@ -279,6 +305,9 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     handling: { contentType: 'xml', timeoutMs: 10000 },
     rateLimit: { intervalMs: 3000 },
     retry: { attempts: 2, backoffMs: 3500 },
+    // #107: budget 35s — safety net above the ~26.5s worst case so the
+    // article_search tool cap still wins.
+    retryBudgetMs: 35000,
   },
   // ==========================================
   // CLINICAL TRIALS - REST (1 source)

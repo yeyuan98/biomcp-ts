@@ -253,3 +253,116 @@ describe('trial', () => {
     });
   });
 });
+
+describe('trialGet section deadlines (#107 phase 2)', () => {
+  mockGlobalFetch();
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    connectionManager.closeAll();
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  function studyBody(overrides: Record<string, unknown> = {}): unknown {
+    return {
+      studies: [{
+        protocolSection: {
+          identificationModule: { nctId: 'NCT00000001', briefTitle: 'Test Trial' },
+          statusModule: { overallStatus: 'RECRUITING', phases: [] },
+          descriptionModule: {},
+          armsInterventionsModule: {},
+          contactsLocationsModule: {},
+          ...overrides,
+        },
+      }],
+    };
+  }
+
+  test('a section fetch that ignores everything yields a section error by the section deadline; other sections still return', async () => {
+    // Call order is deterministic: core fetch first, then the section wave
+    // in requested order (eligibility, locations, outcomes).
+    let call = 0;
+    let eligibilitySignal: AbortSignal | undefined;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((_url: string, init?: { signal?: AbortSignal }) => {
+      call += 1;
+      if (call === 1) {
+        // Core fetch: resolves promptly.
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(studyBody()) });
+      }
+      if (call === 2) {
+        // Eligibility: hangs forever AND ignores the abort signal — the
+        // worst case the section deadline must still bound.
+        eligibilitySignal = init?.signal;
+        return new Promise(() => {});
+      }
+      if (call === 3) {
+        // Locations.
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(studyBody({
+            contactsLocationsModule: {
+              locations: [{ facility: 'Site A', city: 'Boston', state: 'MA', country: 'US' }],
+            },
+          })),
+        });
+      }
+      // Outcomes.
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(studyBody({
+          outcomesModule: {
+            primaryOutcomes: [{ measure: 'Overall survival', timeframe: '5 years' }],
+          },
+        })),
+      });
+    }) as any;
+
+    const pending = trialGet('NCT00000001', ['eligibility', 'locations', 'outcomes']);
+    // Advance past the 8s section deadline (plus rate-limiter spacing).
+    await jest.advanceTimersByTimeAsync(9000);
+    const result = await pending;
+
+    // Partial-results semantics preserved: the dead section becomes a
+    // section-level error entry, the healthy sections still return.
+    expect(result.nct_id).toBe('NCT00000001');
+    expect(result.sections).toBeDefined();
+    const sections = result.sections as Record<string, unknown>;
+    expect((sections.eligibility as { error?: string }).error).toContain('timed out after 8000ms');
+    expect(sections.locations).toEqual([
+      { facility: 'Site A', city: 'Boston', state: 'MA', country: 'US', zip: undefined, status: undefined },
+    ]);
+    expect(sections.outcomes).toEqual({
+      primary: [{ measure: 'Overall survival', timeframe: '5 years' }],
+      secondary: [],
+    });
+
+    // The phase 2 fix: the 8s race now actually ABORTS the hung request —
+    // the fetch's combined signal (deadline + connection timeout) fired.
+    expect(eligibilitySignal?.aborted).toBe(true);
+  });
+
+  test('threaded caller signal reaches section requests', async () => {
+    const seenSignals: Array<AbortSignal | undefined> = [];
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((_url: string, init?: { signal?: AbortSignal }) => {
+      seenSignals.push(init?.signal);
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(studyBody()) });
+    }) as any;
+
+    const callerController = new AbortController();
+    const pending = trialGet('NCT00000001', ['locations'], callerController.signal);
+    await jest.advanceTimersByTimeAsync(100);
+    const result = await pending;
+
+    expect(global.fetch).toHaveBeenCalledTimes(2); // core + locations
+    expect(result.sections).toBeDefined();
+    // Every request carried a signal derived from the caller's (combined
+    // with the connection-level timeout via AbortSignal.any in rest.ts —
+    // aborting the caller's signal stops them all).
+    callerController.abort();
+    for (const s of seenSignals) expect(s?.aborted).toBe(true);
+  });
+});

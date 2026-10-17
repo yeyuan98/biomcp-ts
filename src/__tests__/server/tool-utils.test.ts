@@ -1,5 +1,5 @@
-import { describe, test, expect } from '@jest/globals';
-import { applyLimit, sliceArraysRecursive } from '../../server/tools/utils.js';
+import { describe, test, expect, jest, beforeEach, afterEach } from '@jest/globals';
+import { applyLimit, sliceArraysRecursive, withToolTimeout } from '../../server/tools/utils.js';
 
 // ---------------------------------------------------------------------------
 // sliceArraysRecursive
@@ -215,5 +215,109 @@ describe('applyLimit', () => {
     const limited = applyLimit(sections, ['targets'], {}, { targets: [] }, 1);
     expect(limited.targets).toEqual([1]);
     expect(sections.targets).toEqual([1, 2, 3]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// withToolTimeout — deadline race that ABORTS the losing work (#107 phase 2)
+// ---------------------------------------------------------------------------
+describe('withToolTimeout', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  test('signal form: returns the value when work beats the deadline (signal not aborted)', async () => {
+    const result = await withToolTimeout(async () => 'fast', 5000);
+    expect(result).toBe('fast');
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  test('signal form: rejects at the deadline AND aborts the work (no zombie fetch)', async () => {
+    const sawAbort = jest.fn();
+    // Work that observes the signal (like a real fetch would) but is too slow.
+    const work = (signal: AbortSignal) =>
+      new Promise<string>((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          sawAbort();
+          reject(new Error('aborted'));
+        }, { once: true });
+      });
+
+    const expectation = expect(withToolTimeout(work, 3000)).rejects.toThrow(
+      'Tool execution timed out after 3000ms',
+    );
+    await jest.advanceTimersByTimeAsync(3000);
+    await expectation;
+    // The loser was actually told to stop — that is the phase 2 fix: the
+    // timer used to race WITHOUT aborting, leaving the fetch running.
+    expect(sawAbort).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  test('signal form: work that ignores the signal still yields the deadline rejection', async () => {
+    const p = withToolTimeout(() => new Promise<string>(() => {}), 1000);
+    const expectation = expect(p).rejects.toThrow('Tool execution timed out after 1000ms');
+    await jest.advanceTimersByTimeAsync(1000);
+    await expectation;
+  });
+
+  test('already-aborted external signal rejects without starting the work', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const started = jest.fn();
+    await expect(
+      withToolTimeout(async () => {
+        started();
+        return 'never';
+      }, 5000, { signal: controller.signal }),
+    ).rejects.toThrow('Tool execution aborted by the client');
+    expect(started).not.toHaveBeenCalled();
+  });
+
+  test('external signal aborting mid-flight rejects and aborts the work', async () => {
+    const controller = new AbortController();
+    const sawAbort = jest.fn();
+    const work = (signal: AbortSignal) =>
+      new Promise<string>((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          sawAbort();
+          reject(new Error('work aborted'));
+        }, { once: true });
+      });
+
+    const expectation = expect(
+      withToolTimeout(work, 30000, { signal: controller.signal }),
+    ).rejects.toThrow('Tool execution aborted by the client');
+    await jest.advanceTimersByTimeAsync(100);
+    controller.abort();
+    await expectation;
+    expect(sawAbort).toHaveBeenCalledTimes(1);
+    // The deadline timer must not leak after the early abort.
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  test('promise form (entity without signal support): deadline race still applies', async () => {
+    const p = withToolTimeout(new Promise<string>(() => {}), 2000);
+    const expectation = expect(p).rejects.toThrow('Tool execution timed out after 2000ms');
+    await jest.advanceTimersByTimeAsync(2000);
+    await expectation;
+  });
+
+  test('promise form: propagates the work rejection unchanged', async () => {
+    await expect(
+      withToolTimeout(Promise.reject(new Error('backend error')), 5000),
+    ).rejects.toThrow('backend error');
+  });
+
+  test('signal form: propagates the work rejection unchanged (before deadline)', async () => {
+    await expect(
+      withToolTimeout(async () => {
+        throw new Error('backend error');
+      }, 5000),
+    ).rejects.toThrow('backend error');
   });
 });

@@ -2,7 +2,13 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { drugSearch, drugGet, DRUG_ENTITY_ALL_SECTIONS } from '../../entities/drug.js';
 import { drugToTrials } from '../../entities/cross-entity.js';
-import { sliceArraysRecursive } from './utils.js';
+import { sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra } from './utils.js';
+
+// Deadline rationale (#107 phase 2): mychem core lookup + parallel section
+// wave (regulatory labels, ChEMBL, FAERS adverse events) where each section
+// carries an 8s deadline over 15s-per-attempt connections — 40s covers the
+// budget ceilings with headroom while bounding signal-ignoring stragglers.
+const DRUG_GET_TIMEOUT_MS = 40000;
 
 const DRUG_SECTIONS = [
   'core', 'us_regulatory', 'eu_regulatory', 'who_regulatory', 'safety', 'targets', 'indications', 'adverse_events', 'all'
@@ -60,9 +66,13 @@ export function registerDrugTools(server: McpServer): void {
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
-    async ({ name, sections, limit }) => {
+    async ({ name, sections, limit }, extra: CancellationCapableExtra) => {
       try {
-        const result = await drugGet(name, sections, limit);
+        const result = await withToolTimeout(
+          () => drugGet(name, sections, limit),
+          DRUG_GET_TIMEOUT_MS,
+          { signal: extra?.signal },
+        );
         const requestedSections = (sections ?? []).includes('all')
           ? DRUG_ALL_SECTIONS
           : (sections ?? []);

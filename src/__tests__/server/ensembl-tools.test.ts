@@ -128,13 +128,35 @@ describe('ensembl tools', () => {
     expect(decodeURIComponent(fetchUrls()[0])).toContain('/vep/human/hgvs/NM_004333:c.1799T>A');
   });
 
-  it('ensembl_region returns features for an interval', async () => {
+  it('ensembl_region returns features for an interval via split feature requests', async () => {
     mockFetchRoutes({ '/overlap/region': () => OVERLAP_FEATURES });
 
     const result = (await harness.callTool('ensembl_region', { region: '7:140450000-140480000' })) as any;
 
     expect(result.features[0].symbol).toBe('MKRN1');
-    expect(fetchUrls()[0]).toContain('?feature=gene;feature=variation');
+    const urls = fetchUrls();
+    expect(urls).toHaveLength(2);
+    expect(urls).toContainEqual(expect.stringContaining('?feature=gene'));
+    expect(urls).toContainEqual(expect.stringContaining('?feature=variation'));
+    // 30 kb span: below the 50 kb variation cap → full window echoed, no truncation.
+    expect(result.effective_variation_window).toEqual({ chr: '7', start: 140450000, end: 140480000 });
+    expect(result.variation_truncated).toBeUndefined();
+  });
+
+  it('ensembl_region caps variation to a 50kb center window on large spans', async () => {
+    mockFetchRoutes({ '/overlap/region': () => OVERLAP_FEATURES });
+
+    const result = (await harness.callTool('ensembl_region', { region: '7:140700000-140950000' })) as any;
+
+    const urls = fetchUrls();
+    expect(urls).toContainEqual(
+      expect.stringContaining('/overlap/region/human/7:140700000-140950000?feature=gene')
+    );
+    expect(urls).toContainEqual(
+      expect.stringContaining('/overlap/region/human/7:140800000-140849999?feature=variation')
+    );
+    expect(result.effective_variation_window).toEqual({ chr: '7', start: 140800000, end: 140849999 });
+    expect(result.variation_truncated).toContain('7:140800000-140849999');
   });
 
   it('ensembl_region rejects malformed regions via isError', async () => {

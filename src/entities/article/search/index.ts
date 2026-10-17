@@ -148,25 +148,30 @@ async function federatedSearch(
 ): Promise<Article[]> {
   // Throw-on-timeout invariant: a hung backend must REJECT so Promise.allSettled
   // records it as an error result — a null would crash `allArticles.push(...null)`.
+  // Signal-bearing leg form: when a leg loses the federated deadline race, the
+  // signal aborts its in-flight request so the loser stops consuming its
+  // connection's semaphore/rate slots instead of retrying in the background.
+  // Partial-results semantics are unchanged — the timeout still REJECTS into
+  // allSettled as an error result for the losing source.
   const pubmedOutcome: PubMedQueryOutcome = {};
-  const leg = (label: string, promise: Promise<Article[]>) => ({
+  const leg = (label: string, work: (signal: AbortSignal) => Promise<Article[]>) => ({
     label,
-    promise: withTimeout(promise, FEDERATED_SEARCH_TIMEOUT_MS, { onTimeout: 'throw', label: `${label} search` }),
+    promise: withTimeout(work, FEDERATED_SEARCH_TIMEOUT_MS, { onTimeout: 'throw', label: `${label} search` }),
   });
   const legs = dateRange
     ? [
-        leg('pubmed', searchPubMed(query, limit, offset, dateRange, warnings, pubmedOutcome)),
-        leg('europepmc', searchEuropePMC(query, limit, offset, undefined, dateRange)),
-        leg('semantic_scholar', searchSemanticScholar(query, limit, offset, dateRange)),
-        leg('arxiv', searchArxiv(query, limit, offset, dateRange)),
+        leg('pubmed', (signal) => searchPubMed(query, limit, offset, dateRange, warnings, pubmedOutcome, signal)),
+        leg('europepmc', (signal) => searchEuropePMC(query, limit, offset, undefined, dateRange, signal)),
+        leg('semantic_scholar', (signal) => searchSemanticScholar(query, limit, offset, dateRange, signal)),
+        leg('arxiv', (signal) => searchArxiv(query, limit, offset, dateRange, signal)),
       ]
     : [
-        leg('pubmed', searchPubMed(query, limit, offset, undefined, warnings, pubmedOutcome)),
-        leg('europepmc', searchEuropePMC(query, limit, offset)),
-        leg('semantic_scholar', searchSemanticScholar(query, limit, offset)),
-        leg('arxiv', searchArxiv(query, limit, offset)),
-        leg('pubtator', searchPubTator(query, limit, offset)),
-        leg('litsense', searchLitSense(query, limit, offset)),
+        leg('pubmed', (signal) => searchPubMed(query, limit, offset, undefined, warnings, pubmedOutcome, signal)),
+        leg('europepmc', (signal) => searchEuropePMC(query, limit, offset, undefined, undefined, signal)),
+        leg('semantic_scholar', (signal) => searchSemanticScholar(query, limit, offset, undefined, signal)),
+        leg('arxiv', (signal) => searchArxiv(query, limit, offset, undefined, signal)),
+        leg('pubtator', (signal) => searchPubTator(query, limit, offset, signal)),
+        leg('litsense', (signal) => searchLitSense(query, limit, offset, signal)),
       ];
 
   const settled = await Promise.allSettled(legs.map(l => l.promise));

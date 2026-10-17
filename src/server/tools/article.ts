@@ -1,19 +1,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { searchArticles, articleGet, fetchPreprintFullText, PREPRINT_FULLTEXT_TOOL_BUDGET_MS } from '../../entities/article/index.js';
-import { applyLimit } from './utils.js';
+import { applyLimit, withToolTimeout } from './utils.js';
 
 const TOOL_TIMEOUT_MS = 30000;
-
-function withToolTimeout<T>(promise: Promise<T>, timeoutMs = TOOL_TIMEOUT_MS): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>;
-  return Promise.race([
-    promise.finally(() => clearTimeout(timer)),
-    new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`Tool execution timed out after ${timeoutMs}ms`)), timeoutMs);
-    }),
-  ]);
-}
 
 const ARTICLE_SECTIONS = ['core', 'oa', 'fulltext', 'annotations', 'graph', 'citation', 'all'] as const;
 
@@ -51,7 +41,10 @@ export function registerArticleTools(server: McpServer): void {
     },
     async ({ query, source, limit, offset, dateRange }) => {
       try {
-        const response = await withToolTimeout(searchArticles(query, { source, limit, offset, dateRange }));
+        const response = await withToolTimeout(
+          searchArticles(query, { source, limit, offset, dateRange }),
+          TOOL_TIMEOUT_MS,
+        );
         return { content: [{ type: 'text', text: JSON.stringify(response) }] };
       } catch (error) {
         return {
@@ -65,7 +58,7 @@ export function registerArticleTools(server: McpServer): void {
   server.registerTool(
     'article_get',
     {
-      description: 'Get article by PMID/PMCID/DOI. Preprint DOIs (bioRxiv/medRxiv, e.g. "10.1101/2025.03.05.641768" or new prefix "10.64898/...") return the preprint record: all versions, license, category, funders, JATS full-text URL, published-version mapping, and (with sections=["citation"]) Europe PMC preprint citations. Journal articles: sections=["fulltext"] returns the ACTUAL full text when freely readable in PMC/Europe PMC (open-access AND free-to-read; check fulltext.status — paywalled/unavailable results carry the reason and alternatives, e.g. links.doi_url). Default (fulltext_output="file"): the complete text is written to a server-side markdown file and the reply carries file_path plus an outline with per-section line numbers and char counts — Read/Grep the file selectively instead of loading it into context; fulltext_output="inline" returns text sections inline capped by fulltext_max_chars (use only if you cannot read server-side files). sections=["oa"] returns license/access metadata and links ONLY (status: open_access|free_to_read|paywalled|not_in_pmc|unknown; pdf_url presence does not by itself mean the text is fetchable — use fulltext for content). "all" = oa+annotations+graph+citation WITHOUT fulltext (request ["fulltext"] separately). oa/fulltext do not apply to preprints (see the jatsxml_url link). Journal-article citation: fast mode (~4s, 4 providers, auto-fallback to PubMed) or full mode (~15-30s, all 5 providers incl. PubMed). Forward citation lists come from Europe PMC, Semantic Scholar, and OpenCitations; Crossref provides counts and references only.',
+      description: 'Get article by PMID/PMCID/DOI. Section response keys differ from request names: "oa" is stored as sections.open_access, "graph" as sections.citation_graph. Preprint DOIs (bioRxiv/medRxiv, e.g. "10.1101/2025.03.05.641768" or new prefix "10.64898/...") return the preprint record: all versions, license, category, funders, JATS full-text URL, published-version mapping, and (with sections=["citation"]) Europe PMC preprint citations. Journal articles, sections=["fulltext"]: returns the ACTUAL full text when freely readable in PMC/Europe PMC (open-access AND free-to-read). fulltext.status is "available" or "unavailable"; when unavailable, fulltext.reason is one of paywalled | no_pmcid | no_machine_readable_xml | not_implemented_for_preprints | fetch_failed (with alternatives in links, e.g. doi_url). The five-value open-access vocabulary — open_access | free_to_read | paywalled | not_in_pmc | unknown — is sections.open_access.status (request sections:["oa"]); fulltext.oa_status echoes it so paywalled vs not-in-PMC is visible without the oa section. Default (fulltext_output="file"): the complete text is written to a server-side markdown file and the reply carries file_path plus an outline with per-section line numbers and char counts — Read/Grep the file selectively instead of loading it into context. fulltext_output="inline" (use only if you cannot read server-side files): fulltext.sections is an ordered array of {heading, text, truncated} objects plus char_count/total_char_count/truncated/omitted_sections, capped by fulltext_max_chars. sections=["oa"] returns license/access metadata and links ONLY (pdf_url presence does not by itself mean the text is fetchable — use fulltext for content). "all" = oa+annotations+graph+citation WITHOUT fulltext (request ["fulltext"] separately). oa/fulltext do not apply to preprints (see the jatsxml_url link). Journal-article citation: fast mode (~4s, 4 providers, auto-fallback to PubMed) or full mode (~15-30s, all 5 providers incl. PubMed). Forward citation lists come from Europe PMC, Semantic Scholar, and OpenCitations; Crossref provides counts and references only.',
       inputSchema: {
         id: z.string().describe('Article identifier: PMID (numeric, e.g. "12345"), PMCID (e.g. "PMC1234567"), DOI (e.g. "10.1038/s41586-021-03819-2"), or preprint DOI (e.g. "10.1101/2021.10.25.465764", "10.64898/2026.08.11.744243")'),
         sections: z.array(z.enum(ARTICLE_SECTIONS)).optional().describe('Sections to include. ["fulltext"] = the complete article text (written to a file by default; see fulltext_output). ["oa"] = license/access metadata and links. ["citation"] = citation data. ["all"] = oa+annotations+graph+citation — fulltext is NOT included; request ["fulltext"] separately.'),

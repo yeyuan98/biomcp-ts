@@ -7,6 +7,7 @@ import {
 import { VERSION } from '../version.js';
 import { TokenBucketRateLimiter, RateLimiterFactory } from './rate-limiter.js';
 import { withRetry, isRetryableError } from './retry.js';
+import { getSourceSemaphore } from './concurrency.js';
 import { HttpConnectionError } from './errors.js';
 
 /**
@@ -43,6 +44,59 @@ function wrapTransportError(error: unknown): unknown {
   const wrapped = new HttpConnectionError(code ? `${original.message} (${code})` : original.message);
   wrapped.cause = original;
   return wrapped;
+}
+
+/**
+ * Best-effort extraction of an upstream error message from a non-OK response
+ * body, for appending to `HttpConnectionError` messages (` — Upstream: <msg>`).
+ *
+ * Why: non-2xx REST bodies often carry the actual diagnostic — Ensembl VEP
+ * answers an invalid HGVS with HTTP 400 and
+ * `{"error":"Unable to parse HGVS notation '…': Unable to map the cDNA
+ * coordinates … to genomic coordinates"}`, which is far more actionable than
+ * our generic status hint ("The record may not exist…" — actively misleading
+ * for a 400). Every failure mode is tolerated by design:
+ *
+ * - Bodyless response stand-ins (unit-test mocks without `.text()`), via a
+ *   typeof guard — message stays exactly as before.
+ * - Non-JSON bodies (live 500s frequently return HTML error pages): only
+ *   `{`-prefixed bodies within a bounded length are ever parsed.
+ * - JSON whose error fields are objects/non-strings: nothing is appended.
+ * - Any throw (stream already consumed, weird realms): swallowed.
+ *
+ * Extracted messages are truncated (~300 chars) so a chatty upstream cannot
+ * balloon tool error output.
+ */
+async function extractUpstreamErrorMessage(response: Response): Promise<string> {
+  try {
+    if (typeof response.text !== 'function') return '';
+    const body = (await response.text())?.trim();
+    // Only plausibly-JSON error bodies: starts with `{`, bounded size (live
+    // HTML error pages start with `<` and can be huge).
+    if (!body || !body.startsWith('{') || body.length > 2048) return '';
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return '';
+    }
+    if (typeof parsed !== 'object' || parsed === null) return '';
+    const error = (parsed as { error?: unknown }).error;
+    const message = (parsed as { message?: unknown }).message;
+    let extracted = '';
+    if (typeof error === 'string') {
+      extracted = error;
+    } else if (error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string') {
+      extracted = (error as { message: string }).message;
+    } else if (typeof message === 'string') {
+      extracted = message;
+    }
+    extracted = extracted.trim();
+    if (!extracted) return '';
+    return extracted.length > 300 ? `${extracted.slice(0, 300)}…` : extracted;
+  } catch {
+    return '';
+  }
 }
 
 function getHttpStatusHint(status: number, sourceId: string): string {
@@ -89,7 +143,9 @@ export class RestConnection implements IConnection<string, unknown> {
   }
   
   async request(path: string, _variables?: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<unknown> {
-    return this.withSourceRetry(() => this.requestOnce(path, options));
+    return this.withSourceRetry(() =>
+      this.withSourceConcurrency(() => this.requestOnce(path, options))
+    );
   }
 
   private async requestOnce(path: string, options?: { signal?: AbortSignal }): Promise<unknown> {
@@ -119,8 +175,7 @@ export class RestConnection implements IConnection<string, unknown> {
       if (this.options.followRedirects === false) {
         this.throwIfUnexpectedRedirect(response, url);
       }
-      const hint = getHttpStatusHint(response.status, this.sourceId);
-      throw new HttpConnectionError(`HTTP ${response.status}: ${response.statusText} — URL: ${url} — Source: ${this.sourceId}${hint}`, response.status);
+      await this.throwHttpError(response, url);
     }
     
     const contentType = response.headers?.get?.('content-type') || '';
@@ -128,6 +183,19 @@ export class RestConnection implements IConnection<string, unknown> {
       return this.parseJsonBody(response);
     }
     return response.text();
+  }
+
+  /** Build the non-OK error message: status hint plus, when the body is a
+   *  plausible JSON error document, the upstream's own explanation appended as
+   *  ` — Upstream: <msg>` (see extractUpstreamErrorMessage). */
+  private async throwHttpError(response: Response, url: string): Promise<never> {
+    const hint = getHttpStatusHint(response.status, this.sourceId);
+    const upstream = await extractUpstreamErrorMessage(response);
+    const upstreamSuffix = upstream ? ` — Upstream: ${upstream}` : '';
+    throw new HttpConnectionError(
+      `HTTP ${response.status}: ${response.statusText} — URL: ${url} — Source: ${this.sourceId}${hint}${upstreamSuffix}`,
+      response.status
+    );
   }
 
   /**
@@ -185,7 +253,9 @@ export class RestConnection implements IConnection<string, unknown> {
   /** `body` may be a plain string — sent verbatim as text/plain (e.g. Reactome
    *  AnalysisService identifier posts); objects are sent as JSON. */
   async post(path: string, body: Record<string, unknown> | string, options?: { signal?: AbortSignal }): Promise<unknown> {
-    return this.withSourceRetry(() => this.postOnce(path, body, options));
+    return this.withSourceRetry(() =>
+      this.withSourceConcurrency(() => this.postOnce(path, body, options))
+    );
   }
 
   private async postOnce(path: string, body: Record<string, unknown> | string, options?: { signal?: AbortSignal }): Promise<unknown> {
@@ -219,8 +289,7 @@ export class RestConnection implements IConnection<string, unknown> {
       if (this.options.followRedirects === false) {
         this.throwIfUnexpectedRedirect(response, url);
       }
-      const hint = getHttpStatusHint(response.status, this.sourceId);
-      throw new HttpConnectionError(`HTTP ${response.status}: ${response.statusText} — URL: ${url} — Source: ${this.sourceId}${hint}`, response.status);
+      await this.throwHttpError(response, url);
     }
 
     const contentType = response.headers?.get?.('content-type') || '';
@@ -259,8 +328,22 @@ export class RestConnection implements IConnection<string, unknown> {
     return withRetry(fn, {
       maxRetries: Math.max((retry.attempts ?? 2) - 1, 0),
       baseDelayMs: retry.backoffMs ?? 1000,
+      maxTotalMs: this.options.retryBudgetMs,
       logger: { warn: (msg: string) => console.warn(`[${this.sourceId}] ${msg}`) },
     });
+  }
+
+  /**
+   * Acquire the source's concurrency slot around ONE attempt (rate-limit
+   * wait + fetch + body read). Chosen over wrapping the whole withRetry
+   * call so retry backoff sleeps never hold a slot and a queued retry
+   * re-enters at the back of the FIFO. No-op unless the registry sets
+   * `concurrency` for the source (#107).
+   */
+  private withSourceConcurrency<T>(fn: () => Promise<T>): Promise<T> {
+    const limit = this.options.concurrency;
+    if (!limit || limit < 1) return fn();
+    return getSourceSemaphore(this.sourceId, limit).run(fn);
   }
 
   private throwIfUnexpectedRedirect(response: Response, url: string): void {

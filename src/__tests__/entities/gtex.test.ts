@@ -371,7 +371,83 @@ describe('gtexEqtl', () => {
       gencode_id: 'ENSG00000141510.18',
       tissue: 'Whole_Blood',
       associations: [],
+      note: 'TP53 has no significant cis-eQTLs in any GTEx v10 tissue',
     });
+  });
+
+  test('empty in the queried tissue triggers one all-tissues diagnostic call whose note ranks other tissues', async () => {
+    const { gtexEqtl } = await loadGtex();
+    // Tissue-scoped query: empty. All-tissues query: rows in 7 tissues with
+    // distinct-enough counts to pin the ranking (ties fall back to the order
+    // tissues first appear in the response).
+    const allTissuesRows = [
+      ...Array(4).fill(0).map((_, i) => ({ variantId: `kc_${i}`, pValue: 1e-5, nes: 0.2, tissueSiteDetailId: 'Kidney_Cortex' })),
+      ...Array(3).fill(0).map((_, i) => ({ variantId: `nt_${i}`, pValue: 1e-5, nes: -0.1, tissueSiteDetailId: 'Nerve_Tibial' })),
+      ...Array(2).fill(0).map((_, i) => ({ variantId: `haa_${i}`, pValue: 1e-5, nes: 0.3, tissueSiteDetailId: 'Heart_Atrial_Appendage' })),
+      ...Array(2).fill(0).map((_, i) => ({ variantId: `snse_${i}`, pValue: 1e-5, nes: 0.4, tissueSiteDetailId: 'Skin_Not_Sun_Exposed' })),
+      { variantId: 'em_0', pValue: 1e-5, nes: 0.5, tissueSiteDetailId: 'Esophagus_Muscularis' },
+      { variantId: 'fb_0', pValue: 1e-5, nes: -0.2, tissueSiteDetailId: 'Fibroblasts' },
+      { variantId: 'pit_0', pValue: 1e-5, nes: 0.6, tissueSiteDetailId: 'Pituitary' },
+    ];
+    mockFetchRoutes(defaultRoutes({
+      '/api/v2/association/singleTissueEqtl': (url) =>
+        url.searchParams.has('tissueSiteDetailId') ? { data: [] } : { data: allTissuesRows },
+    }));
+
+    const result = await gtexEqtl('TP53', 'Whole_Blood');
+
+    // Exactly two association fetches: scoped, then the all-tissues diagnostic.
+    const eqtlUrls = urlsContaining('singleTissueEqtl');
+    expect(eqtlUrls).toHaveLength(2);
+    expect(eqtlUrls[0]).toContain('tissueSiteDetailId=Whole_Blood');
+    expect(eqtlUrls[0]).toContain('gencodeId=ENSG00000141510.18');
+    expect(eqtlUrls[0]).toContain('datasetId=gtex_v10');
+    expect(eqtlUrls[1]).not.toContain('tissueSiteDetailId=');
+    expect(eqtlUrls[1]).toContain('gencodeId=ENSG00000141510.18');
+    expect(eqtlUrls[1]).toContain('datasetId=gtex_v10');
+
+    expect(result.associations).toEqual([]);
+    expect(result.note).toBe(
+      'TP53 has no significant cis-eQTLs in Whole_Blood in GTEx v10, but has 14 in other tissues: '
+      + 'Kidney_Cortex (4), Nerve_Tibial (3), Heart_Atrial_Appendage (2), Skin_Not_Sun_Exposed (2), '
+      + 'Esophagus_Muscularis (1), and 2 more'
+    );
+  });
+
+  test('empty everywhere yields the any-tissue note', async () => {
+    const { gtexEqtl } = await loadGtex();
+    // Both the scoped and the diagnostic query return empty data.
+    let calls = 0;
+    mockFetchRoutes(defaultRoutes({
+      '/api/v2/association/singleTissueEqtl': () => {
+        calls += 1;
+        return { data: [] };
+      },
+    }));
+
+    const result = await gtexEqtl('TP53', 'Brain_Cortex');
+
+    expect(result.associations).toEqual([]);
+    expect(result.note).toBe('TP53 has no significant cis-eQTLs in any GTEx v10 tissue');
+    expect(calls).toBe(2);
+  });
+
+  test('a failed diagnostic call does not fail the empty result', async () => {
+    const { gtexEqtl } = await loadGtex();
+    let calls = 0;
+    mockFetchRoutes(defaultRoutes({
+      '/api/v2/association/singleTissueEqtl': (url) => {
+        calls += 1;
+        if (!url.searchParams.has('tissueSiteDetailId')) throw new Error('diagnostic down');
+        return { data: [] };
+      },
+    }));
+
+    const result = await gtexEqtl('TP53', 'Whole_Blood');
+
+    expect(result.associations).toEqual([]);
+    expect(result.note).toBeUndefined();
+    expect(calls).toBe(2);
   });
 
   test('associations are sorted by pValue ascending and limited', async () => {
@@ -388,6 +464,17 @@ describe('gtexEqtl', () => {
     expect(result.associations.map(a => a.p_value)).toEqual([1.2e-12, 2.1e-8]);
     expect(result.associations[0].variant_id).toBe('chr17_7676409_C_T_b38');
     expect(result.associations[0]).toMatchObject({ nes: -0.28 });
+  });
+
+  test('non-empty tissue result makes exactly one association fetch and carries no note', async () => {
+    const { gtexEqtl } = await loadGtex();
+    mockFetchRoutes(defaultRoutes());
+
+    const result = await gtexEqtl('TP53', 'Whole_Blood');
+
+    expect(urlsContaining('singleTissueEqtl')).toHaveLength(1);
+    expect(result.associations.length).toBeGreaterThan(0);
+    expect('note' in result).toBe(false);
   });
 
   test('HTTP 422 from the API surfaces as a readable Error', async () => {

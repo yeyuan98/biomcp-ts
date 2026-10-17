@@ -7,6 +7,7 @@ import {
 import { VERSION } from '../version.js';
 import { TokenBucketRateLimiter, RateLimiterFactory } from './rate-limiter.js';
 import { withRetry, isRetryableError } from './retry.js';
+import { getSourceSemaphore } from './concurrency.js';
 import { HttpConnectionError } from './errors.js';
 
 /**
@@ -79,15 +80,24 @@ export class GraphQLConnection implements IConnection<string, unknown> {
     options?: { signal?: AbortSignal; rootField?: string }
   ): Promise<unknown> {
     const retry = this.options.retry;
-    const fn = () => this.requestOnce(query, variables, options);
+    // Concurrency slot acquired per attempt (inside withRetry), mirroring
+    // the REST connection — backoff sleeps never hold a slot (#107).
+    const fn = () => this.withSourceConcurrency(() => this.requestOnce(query, variables, options));
     if (!retry) {
       return fn();
     }
     return withRetry(fn, {
       maxRetries: Math.max((retry.attempts ?? 2) - 1, 0),
       baseDelayMs: retry.backoffMs ?? 1000,
+      maxTotalMs: this.options.retryBudgetMs,
       logger: { warn: (msg: string) => console.warn(`[${this.sourceId}] ${msg}`) },
     });
+  }
+
+  private withSourceConcurrency<T>(fn: () => Promise<T>): Promise<T> {
+    const limit = this.options.concurrency;
+    if (!limit || limit < 1) return fn();
+    return getSourceSemaphore(this.sourceId, limit).run(fn);
   }
 
   private async requestOnce(

@@ -213,6 +213,111 @@ describe('retry', () => {
     });
   });
 
+  describe('withRetry total-time budget (maxTotalMs)', () => {
+    // Fresh error instances per test: giving up appends the budget note to
+    // the error's message in place, which must not leak across tests.
+    const fresh429 = () => new HttpConnectionError('HTTP 429: Too Many Requests', 429);
+
+    // Simulate a timeout-bounded attempt under fake timers: each attempt
+    // consumes 15s of (fake) wall-clock time before failing retryably.
+    const slowTimeoutFn = () =>
+      jest.fn<(...args: any[]) => any>().mockImplementation(async () => {
+        jest.advanceTimersByTime(15000);
+        throw new Error('Connection timeout');
+      });
+
+    it('stops retrying when the next retry is projected to exceed maxTotalMs', async () => {
+      const fn = slowTimeoutFn();
+      // Legacy worst case: 4 × 15s attempts + 3.5s backoffs ≈ 63.5s.
+      const promise = withRetry(fn, {
+        maxRetries: 3,
+        baseDelayMs: 500,
+        jitter: false,
+        maxTotalMs: 35000,
+      });
+      const expectation = expect(promise).rejects.toThrow('retry budget exhausted');
+      await jest.runAllTimersAsync();
+      await expectation;
+      // 15s + 0.5s backoff + 15s = 30.5s fits; the retry after that is
+      // projected at 46.5s > 35s, so withRetry gives up after 2 attempts.
+      expect(fn).toHaveBeenCalledTimes(2);
+    });
+
+    it('always runs the first attempt, even when the budget is already blown', async () => {
+      const fn = jest.fn<(...args: any[]) => any>().mockRejectedValue(fresh429());
+      const promise = withRetry(fn, { maxRetries: 3, baseDelayMs: 500, maxTotalMs: 1 });
+      // The first attempt is never budget-gated; every projected retry
+      // exceeds a 1ms budget, so exactly one attempt runs.
+      const expectation = expect(promise).rejects.toThrow('HTTP 429');
+      await jest.runAllTimersAsync();
+      await expectation;
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
+
+    it('rethrows the same error object (same type, note appended to message only)', async () => {
+      const err = fresh429();
+      const fn = jest.fn<(...args: any[]) => any>().mockRejectedValue(err);
+      const promise = withRetry(fn, { maxRetries: 2, baseDelayMs: 1000, maxTotalMs: 1 });
+      const expectation = expect(promise).rejects.toBe(err);
+      await jest.runAllTimersAsync();
+      await expectation;
+      expect(fn).toHaveBeenCalledTimes(1);
+      expect(err).toBeInstanceOf(HttpConnectionError);
+      expect(err.message).toContain('HTTP 429');
+      expect(err.message).toContain('retry budget exhausted');
+    });
+
+    it('does not annotate or cut retries when maxTotalMs is unset (legacy behavior)', async () => {
+      const fn = slowTimeoutFn();
+      const promise = withRetry(fn, { maxRetries: 2, baseDelayMs: 500, jitter: false });
+      const expectation = expect(promise).rejects.toThrow('Connection timeout');
+      await jest.runAllTimersAsync();
+      await expectation;
+      expect(fn).toHaveBeenCalledTimes(3);
+      try {
+        await promise;
+      } catch (error) {
+        expect((error as Error).message).not.toContain('retry budget exhausted');
+      }
+    });
+
+    it('a budget with room for a retry does not cut a successful retry short', async () => {
+      const fn = jest.fn<(...args: any[]) => any>()
+        .mockRejectedValueOnce(fresh429())
+        .mockResolvedValue('recovered');
+      const promise = withRetry(fn, {
+        maxRetries: 3,
+        baseDelayMs: 500,
+        jitter: false,
+        maxTotalMs: 35000,
+      });
+      await jest.runAllTimersAsync();
+      await expect(promise).resolves.toBe('recovered');
+      expect(fn).toHaveBeenCalledTimes(2);
+    });
+
+    it('leaves fast-failing retry loops untouched when they fit the budget', async () => {
+      // Instant failures (no attempt duration): even a tight-ish budget
+      // allows all retries because elapsed stays near zero.
+      const fn = jest.fn<(...args: any[]) => any>().mockRejectedValue(fresh429());
+      const promise = withRetry(fn, {
+        maxRetries: 2,
+        baseDelayMs: 100,
+        jitter: false,
+        maxTotalMs: 35000,
+      });
+      const expectation = expect(promise).rejects.toThrow('HTTP 429');
+      await jest.runAllTimersAsync();
+      await expectation;
+      expect(fn).toHaveBeenCalledTimes(3);
+      try {
+        await promise;
+      } catch (error) {
+        expect((error as Error).message).not.toContain('retry budget exhausted');
+      }
+    });
+  });
+
   describe('isRetryableError', () => {
     it('identifies typed 429 errors as retryable', () => {
       expect(isRetryableError(new HttpConnectionError('HTTP 429: Too Many Requests', 429))).toBe(true);

@@ -5,6 +5,7 @@ const PINNED_GENCODE_VERSION = 'v39';
 const GENE_SEARCH_MAX_PAGES = 2;
 const DEFAULT_EQTL_LIMIT = 20;
 const MAX_EQTL_LIMIT = 100;
+const NOTE_TOP_TISSUES = 5;
 
 export interface GTExDatasetInfo {
   datasetId: string;
@@ -50,6 +51,10 @@ export interface GTExEqtlResult {
   gencode_id: string;
   tissue: string;
   associations: GTExEqtlAssociation[];
+  /** Advisory context attached only when `associations` is empty: distinguishes
+   *  "gene tested, nothing significant in this tissue" from a mapping failure,
+   *  and lists other tissues where significant eQTLs do exist (#106). */
+  note?: string;
 }
 
 export interface GencodeIdResolution {
@@ -95,6 +100,7 @@ interface SingleTissueEqtlResponse {
     variantId: string;
     pValue: number;
     nes: number;
+    tissueSiteDetailId?: string;
   }>;
 }
 
@@ -306,7 +312,20 @@ export async function gtexEqtl(
   const response = await conn.request(`/api/v2/association/singleTissueEqtl?${query.toString()}`) as SingleTissueEqtlResponse;
 
   // NB: empty data with HTTP 200 is legitimate (no significant eQTLs).
-  const associations = (Array.isArray(response.data) ? response.data : [])
+  const rows = Array.isArray(response.data) ? response.data : [];
+  const limit = Math.min(Math.max(options.limit ?? DEFAULT_EQTL_LIMIT, 1), MAX_EQTL_LIMIT);
+
+  // An empty list for a valid gene+tissue is a valid scientific result, but is
+  // indistinguishable from a gene/dataset mapping failure at a glance (#106).
+  // Attach an advisory note: one extra all-tissues query (same gencodeId +
+  // datasetId) lists where significant eQTLs DO exist. Diagnostic-only — if
+  // the extra call itself fails, return the plain empty result.
+  let note: string | undefined;
+  if (rows.length === 0) {
+    note = await buildEmptyEqtlNote(conn, resolution.geneSymbol || geneIdentifier, resolution.gencodeId, datasetId, tissueSiteDetailId);
+  }
+
+  const associations = rows
     .slice()
     .sort((a, b) => a.pValue - b.pValue)
     .map(r => ({
@@ -314,14 +333,52 @@ export async function gtexEqtl(
       p_value: r.pValue,
       nes: r.nes,
     }));
-  const limit = Math.min(Math.max(options.limit ?? DEFAULT_EQTL_LIMIT, 1), MAX_EQTL_LIMIT);
 
   return {
     gene_symbol: resolution.geneSymbol,
     gencode_id: resolution.gencodeId,
     tissue: tissueSiteDetailId,
     associations: associations.slice(0, limit),
+    ...(note !== undefined ? { note } : {}),
   };
+}
+
+/** Query every tissue for the gene and render the "no eQTLs here, but N
+ *  elsewhere" / "no eQTLs anywhere" advisory note. Never throws. */
+async function buildEmptyEqtlNote(
+  conn: ReturnType<typeof connectionManager.getConnection>,
+  geneSymbol: string,
+  gencodeId: string,
+  datasetId: string,
+  queriedTissue: string
+): Promise<string | undefined> {
+  try {
+    const query = new URLSearchParams({ gencodeId, datasetId });
+    const response = await conn.request(`/api/v2/association/singleTissueEqtl?${query.toString()}`) as SingleTissueEqtlResponse;
+    const rows = Array.isArray(response.data) ? response.data : [];
+
+    const counts = new Map<string, number>();
+    for (const row of rows) {
+      const tissue = row.tissueSiteDetailId;
+      if (!tissue || tissue === queriedTissue) continue;
+      counts.set(tissue, (counts.get(tissue) ?? 0) + 1);
+    }
+
+    const release = datasetId.replace(/^gtex_/, '');
+    if (counts.size === 0) {
+      return `${geneSymbol} has no significant cis-eQTLs in any GTEx ${release} tissue`;
+    }
+    const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    const total = ranked.reduce((sum, [, count]) => sum + count, 0);
+    const listed = ranked
+      .slice(0, NOTE_TOP_TISSUES)
+      .map(([tissue, count]) => `${tissue} (${count})`);
+    const remaining = ranked.length - listed.length;
+    if (remaining > 0) listed.push(`and ${remaining} more`);
+    return `${geneSymbol} has no significant cis-eQTLs in ${queriedTissue} in GTEx ${release}, but has ${total} in other tissues: ${listed.join(', ')}`;
+  } catch {
+    return undefined;
+  }
 }
 
 export function getGtexTissues(): Promise<GTExTissueInfo[]> {

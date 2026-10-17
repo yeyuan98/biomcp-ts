@@ -138,10 +138,21 @@ async function resolveGeneAlias(query: string, signal?: AbortSignal): Promise<st
 export async function geneGet(
   symbol: string,
   sections?: string[],
-  smart?: boolean
+  smart?: boolean,
+  signal?: AbortSignal
 ): Promise<GeneResult> {
   const overallController = new AbortController();
   const overallTimeoutId = setTimeout(() => overallController.abort(), 30000);
+
+  // Caller cancellation (tool layer passes the MCP request's extra.signal):
+  // aborting it trips the SAME overall controller, so every request and
+  // retry this function already threads through overallController.signal
+  // stops immediately instead of running out the internal 30s budget.
+  const onExternalAbort = (): void => overallController.abort(signal!.reason);
+  if (signal) {
+    if (signal.aborted) overallController.abort(signal.reason);
+    else signal.addEventListener('abort', onExternalAbort, { once: true });
+  }
 
   try {
     const SECTION_ALIASES: Record<string, string> = {
@@ -255,6 +266,7 @@ export async function geneGet(
     return result;
   } finally {
     clearTimeout(overallTimeoutId);
+    if (signal) signal.removeEventListener('abort', onExternalAbort);
   }
 }
 

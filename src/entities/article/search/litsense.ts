@@ -31,7 +31,7 @@ export function transformLitSense(a: LitSenseResult): Article {
   };
 }
 
-export async function searchLitSense(query: string, limit: number, offset: number): Promise<Article[]> {
+export async function searchLitSense(query: string, limit: number, offset: number, signal?: AbortSignal): Promise<Article[]> {
   try {
     const conn = connectionManager.getConnection('litsense');
 
@@ -40,7 +40,9 @@ export async function searchLitSense(query: string, limit: number, offset: numbe
     // mirroring the PubTator pagination pattern.
     const fetchLimit = Math.min(limit + offset, 300);
     const response = await conn.request(
-      `/sentences/?query=${encodeURIComponent(query)}&limit=${fetchLimit}`
+      `/sentences/?query=${encodeURIComponent(query)}&limit=${fetchLimit}`,
+      undefined,
+      { signal }
     ) as LitSenseResponse;
 
     return (Array.isArray(response) ? response : []).slice(offset, offset + limit).map(transformLitSense);

@@ -2,7 +2,13 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { geneSearch, geneGet } from '../../entities/gene.js';
 import { geneToDrugs, geneToTrials, geneToArticles, geneEnrichment } from '../../entities/cross-entity.js';
-import { applyLimit, sliceArraysRecursive } from './utils.js';
+import { applyLimit, sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra } from './utils.js';
+
+// Deadline rationale (#107 phase 2): geneGet already enforces its own 30s
+// overall abort internally (threaded into every section fetch), so the tool
+// deadline only needs to sit above that ceiling plus retry backoff — 40s
+// lets entity semantics win while still bounding signal-ignoring stragglers.
+const GENE_GET_TIMEOUT_MS = 40000;
 
 const GENE_SECTIONS = [
   'core', 'pathways', 'ontology', 'diseases', 'protein',
@@ -74,9 +80,13 @@ export function registerGeneTools(server: McpServer): void {
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
-    async ({ symbol, sections, limit, smart }) => {
+    async ({ symbol, sections, limit, smart }, extra: CancellationCapableExtra) => {
       try {
-        const result = await geneGet(symbol, sections, smart);
+        const result = await withToolTimeout(
+          (signal) => geneGet(symbol, sections, smart, signal),
+          GENE_GET_TIMEOUT_MS,
+          { signal: extra?.signal },
+        );
         const requestedSections = (sections ?? []).includes('all')
           ? GENE_ALL_SECTIONS
           : (sections ?? []);
