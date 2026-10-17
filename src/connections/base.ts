@@ -63,6 +63,23 @@ export interface ConnectionOptions {
    * only retryable failures (network errors, 429, 5xx) are retried.
    */
   retry?: RetryConfig;
+  /**
+   * Total wall-clock budget (ms) per logical request — all attempts plus
+   * backoff delays. When the next retry is projected to exceed it, the last
+   * error is rethrown (with a 'retry budget exhausted' note appended; type
+   * unchanged). Caps retry amplification (#107): attempts × timeoutMs must
+   * not stack into a minutes-long request. Unset = no budget (legacy
+   * behavior). Size it to always allow one full attempt (timeoutMs + one
+   * backoff).
+   */
+  retryBudgetMs?: number;
+  /**
+   * Max simultaneous in-flight fetch attempts against this source, enforced
+   * by a per-source FIFO semaphore acquired around each attempt (backoffs
+   * wait outside). Caps fan-out pileup when parallel tool calls hit one
+   * upstream (#107). Unset = unlimited (legacy behavior).
+   */
+  concurrency?: number;
 }
 
 export interface IConnection<TRequest = string, TResponse = unknown> {

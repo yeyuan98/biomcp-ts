@@ -45,6 +45,22 @@ export interface RetryOptions {
   isRetryable?: (error: unknown) => boolean;
 
   /**
+   * Optional total wall-clock budget (ms) for the whole `withRetry` call —
+   * all attempts plus backoff delays. Checked before starting each RETRY
+   * (the first attempt always runs, unconditionally, so callers can size
+   * the budget as timeoutMs + one backoff). If the budget is already spent,
+   * or the backoff wait plus a duration estimate of the next attempt (the
+   * last attempt's observed duration) would exceed it, the last error is
+   * rethrown instead of retrying — same error object and type, with a
+   * `retry budget exhausted` note appended to `message`.
+   *
+   * This caps retry amplification (#107): a retryable timeout must not let
+   * attempts × timeoutMs stack into a minutes-long logical request.
+   * Unset = no budget (legacy behavior: retries limited only by maxRetries).
+   */
+  maxTotalMs?: number;
+
+  /**
    * Optional logger for warning messages during retries.
    * Should implement a `warn` method compatible with `console.warn`.
    * @default console
@@ -89,6 +105,24 @@ export function isRetryableError(error: unknown): boolean {
     return NETWORK_ERROR_RE.test(error.message) || NETWORK_ERROR_RE.test(cause);
   }
   return false;
+}
+
+/**
+ * Marker appended to a retryable error's message when `maxTotalMs` stops
+ * the retry loop. Checked before appending so the note is never duplicated.
+ */
+const BUDGET_EXHAUSTED_NOTE = 'retry budget exhausted';
+
+/**
+ * Annotate a budget-exhausted error in place: same object, same type, the
+ * note appended to `message` only — string-matching consumers of the
+ * original message keep working. Non-Error values are returned untouched.
+ */
+function noteBudgetExhausted(error: unknown, maxTotalMs: number): unknown {
+  if (error instanceof Error && !error.message.includes(BUDGET_EXHAUSTED_NOTE)) {
+    error.message += ` — ${BUDGET_EXHAUSTED_NOTE} (${maxTotalMs}ms)`;
+  }
+  return error;
 }
 
 /**
@@ -139,11 +173,14 @@ export async function withRetry<T>(
     jitter = true,
     isRetryable = isRetryableError,
     logger = console,
+    maxTotalMs,
   } = options;
 
+  const start = Date.now();
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const attemptStart = Date.now();
     try {
       return await fn();
     } catch (error) {
@@ -159,6 +196,26 @@ export async function withRetry<T>(
 
         // Apply max delay cap
         const delay = Math.min(exponentialDelay + jitterMs, maxDelayMs);
+
+        // Total-time budget (checked before starting a RETRY only — the
+        // first attempt above is never gated). Give up when the budget is
+        // already spent, or when the backoff wait plus an estimate of the
+        // next attempt (the last attempt's observed duration — attempts are
+        // timeout-bounded, so the previous one is the best cheap estimate)
+        // would exceed it. Fast-failing errors (near-zero duration) are
+        // unaffected, so legitimate quick retry loops still run to
+        // maxRetries.
+        const elapsed = Date.now() - start;
+        const lastAttemptMs = Date.now() - attemptStart;
+        if (
+          maxTotalMs !== undefined &&
+          (elapsed >= maxTotalMs || elapsed + delay + lastAttemptMs > maxTotalMs)
+        ) {
+          logger.warn(
+            `[retry] Attempt ${attempt + 1}/${maxRetries + 1} failed; ${BUDGET_EXHAUSTED_NOTE} (maxTotalMs ${maxTotalMs}, elapsed ${elapsed}ms, next retry projected +${Math.round(delay + lastAttemptMs)}ms)`
+          );
+          throw noteBudgetExhausted(error, maxTotalMs);
+        }
 
         logger.warn(
           `[retry] Attempt ${attempt + 1}/${maxRetries + 1} failed, retrying in ${Math.round(delay)}ms`
