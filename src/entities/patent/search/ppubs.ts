@@ -70,6 +70,28 @@ export function transformPpubsResult(record: PpubsRecord): PatentSearchResult {
   };
 }
 
+/**
+ * Recency key for the client-side final sort (issue #127): the upstream
+ * cross-database merge behind `date_publ desc` intermittently returns
+ * out-of-order rows (observed 10-15 → 10-13 → 10-08 → 10-15). Dates are
+ * sliced ISO strings by the time they reach the comparator; missing, empty,
+ * or unparseable values count as the oldest so they sort to the page end.
+ */
+function recencyTime(date: string | undefined): number {
+  if (!date) return Number.NEGATIVE_INFINITY;
+  const t = Date.parse(date);
+  return Number.isNaN(t) ? Number.NEGATIVE_INFINITY : t;
+}
+
+function compareByRecencyDesc(a: PatentSearchResult, b: PatentSearchResult): number {
+  const ta = recencyTime(a.publication_date);
+  const tb = recencyTime(b.publication_date);
+  if (ta !== tb) return tb - ta;
+  // Deterministic pages on equal dates, mirroring the tie-break rationale
+  // in orderFederatedByRelevance (search/index.ts).
+  return a.publication_number.localeCompare(b.publication_number);
+}
+
 function buildPpubsQuery(query: string, options: PatentSearchOptions): string {
   const parts: string[] = [];
   if (query.trim()) parts.push(query.trim());
@@ -135,10 +157,20 @@ export async function searchPpubs(
   if (relevance) {
     records = records.slice(offset, offset + limit);
   }
+  const patents = records.map(transformPpubsResult);
+  // Final guarantee of the documented `recency` contract: server-side
+  // `date_publ desc` still selects the page, but the merged order is only
+  // intermittently correct (issue #127), so re-sort client-side. Relevance
+  // mode keeps the upstream score order untouched. Only this backend sorts
+  // (the contract says recency affects the ppubs backend only; sorting
+  // mixed-source federated pages would misorder them).
+  if (!relevance) {
+    patents.sort(compareByRecencyDesc);
+  }
   // numberOfFamilies is the stable match count; totalResults/numFound are
   // window sizes that vary with sort mode.
   return {
-    patents: records.map(transformPpubsResult),
+    patents,
     total: parsed.numberOfFamilies ?? parsed.totalResults ?? parsed.numFound,
   };
 }
