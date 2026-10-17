@@ -439,19 +439,37 @@ describe('ensembl entity', () => {
   });
 
   describe('ensemblRegion', () => {
-    it('builds repeated feature params and maps gene/variation features', async () => {
+    // The gene and variation legs are distinct fetches distinguished by
+    // their feature param — route handlers inspect url.search.
+    function overlapRoutes(
+      geneResponse: unknown = okJson(OVERLAP_FEATURES.filter(f => f.feature_type === 'gene')),
+      variationResponse: unknown = okJson(OVERLAP_FEATURES.filter(f => f.feature_type === 'variation')),
+    ): Record<string, RouteHandler> {
+      return {
+        '/overlap/region': (url: URL) => (url.searchParams.getAll('feature').includes('variation') ? variationResponse : geneResponse),
+      };
+    }
+
+    it('splits gene and variation into parallel full-span requests and merges genes-first', async () => {
       const { ensemblRegion } = await loadEnsembl();
-      mockFetchRoutes({
-        '/overlap/region': () => okJson(OVERLAP_FEATURES),
-      });
+      mockFetchRoutes(overlapRoutes());
 
       const result = await ensemblRegion('7:140450000-140480000');
 
-      const url = callUrls()[0];
-      expect(url).toContain('/overlap/region/human/7:140450000-140480000?feature=gene;feature=variation');
+      const urls = callUrls();
+      expect(urls).toHaveLength(2);
+      // 30 kb span: no cap, so both legs cover the full requested region.
+      expect(urls).toContainEqual(
+        expect.stringContaining('/overlap/region/human/7:140450000-140480000?feature=gene')
+      );
+      expect(urls).toContainEqual(
+        expect.stringContaining('/overlap/region/human/7:140450000-140480000?feature=variation')
+      );
       expect(result.region).toBe('7:140450000-140480000');
       expect(result.total).toBe(2);
       expect(result.truncated).toBe(false);
+      expect(result.effective_variation_window).toEqual({ chr: '7', start: 140450000, end: 140480000 });
+      expect(result.variation_truncated).toBeUndefined();
 
       const gene = result.features[0];
       expect(gene.type).toBe('gene');
@@ -465,6 +483,122 @@ describe('ensembl entity', () => {
       expect(variation.alleles).toEqual(['T', 'C']);
       expect(variation.consequence_types).toEqual(['intron_variant']);
     });
+
+    it('issues both feature requests before either response settles (parallel legs)', async () => {
+      const { ensemblRegion } = await loadEnsembl();
+      let releaseVariation: () => void = () => {};
+      const variationGate = new Promise<unknown>(resolve => {
+        releaseVariation = () => resolve(okJson(OVERLAP_FEATURES.filter(f => f.feature_type === 'variation')));
+      });
+      mockFetchRoutes(overlapRoutes(undefined, variationGate));
+
+      const pending = ensemblRegion('7:140450000-140480000');
+      // While the variation response is still gated, the gene leg must
+      // already have gone out (and vice versa) — a sequential implementation
+      // could not have both URLs fetched at this point.
+      await Promise.race([pending.then(() => 'settled'), new Promise(r => setTimeout(r, 500))]).then(v => {
+        expect(v).not.toBe('settled');
+      });
+      expect(callUrls()).toContainEqual(
+        expect.stringContaining('/overlap/region/human/7:140450000-140480000?feature=gene')
+      );
+      expect(callUrls()).toContainEqual(
+        expect.stringContaining('/overlap/region/human/7:140450000-140480000?feature=variation')
+      );
+
+      releaseVariation();
+      const result = await pending;
+      expect(result.total).toBe(2);
+    });
+
+    it('combines gene+transcript into one full-span leg', async () => {
+      const { ensemblRegion } = await loadEnsembl();
+      mockFetchRoutes(overlapRoutes());
+
+      await ensemblRegion('7:140450000-140480000', { features: ['gene', 'transcript'] });
+
+      expect(callUrls()).toHaveLength(1);
+      expect(callUrls()[0]).toContain('?feature=gene;feature=transcript');
+      expect(callUrls()[0]).toContain('/overlap/region/human/7:140450000-140480000');
+    });
+
+    it('caps the variation window at 50kb centered on the region midpoint (#104)', async () => {
+      const { ensemblRegion } = await loadEnsembl();
+      mockFetchRoutes(overlapRoutes());
+
+      // 250,001 bp — the issue's repro span.
+      const result = await ensemblRegion('7:140700000-140950000', { limit: 20 });
+
+      const urls = callUrls();
+      expect(urls).toHaveLength(2);
+      // Genes keep the full span…
+      expect(urls).toContainEqual(
+        expect.stringContaining('/overlap/region/human/7:140700000-140950000?feature=gene')
+      );
+      // …variation is a 50kb window at the midpoint (140825000 ± 25kb).
+      expect(urls).toContainEqual(
+        expect.stringContaining('/overlap/region/human/7:140800000-140849999?feature=variation')
+      );
+      expect(result.effective_variation_window).toEqual({ chr: '7', start: 140800000, end: 140849999 });
+      expect(result.variation_truncated).toBe(
+        'variation restricted to 7:140800000-140849999 (center 50kb of requested 250kb)'
+      );
+    });
+
+    it('does not cap a 20kb span (effective window equals the requested region)', async () => {
+      const { ensemblRegion } = await loadEnsembl();
+      mockFetchRoutes(overlapRoutes());
+
+      const result = await ensemblRegion('7:140450000-140470000');
+
+      const urls = callUrls();
+      expect(urls).toContainEqual(
+        expect.stringContaining('/overlap/region/human/7:140450000-140470000?feature=variation')
+      );
+      expect(result.effective_variation_window).toEqual({ chr: '7', start: 140450000, end: 140470000 });
+      expect(result.variation_truncated).toBeUndefined();
+      expect(result.feature_errors).toBeUndefined();
+    });
+
+    it('returns genes with a feature error when the variation leg fails', async () => {
+      const { ensemblRegion } = await loadEnsembl();
+      mockFetchRoutes({
+        '/overlap/region': (url: URL) => {
+          if (url.searchParams.getAll('feature').includes('variation')) {
+            return {
+              ok: false,
+              status: 500,
+              statusText: 'Internal Server Error',
+              json: () => Promise.resolve({}),
+              headers: new Headers(),
+            };
+          }
+          return okJson(OVERLAP_FEATURES.filter(f => f.feature_type === 'gene'));
+        },
+      });
+
+      const result = await ensemblRegion('7:140450000-140480000');
+
+      expect(result.total).toBe(1);
+      expect(result.features[0].symbol).toBe('MKRN1');
+      expect(result.feature_errors?.variation).toMatch(/HTTP 500/);
+      expect(result.effective_variation_window).toBeUndefined();
+    });
+
+    it('throws when every feature leg fails', async () => {
+      const { ensemblRegion } = await loadEnsembl();
+      mockFetchRoutes({
+        '/overlap/region': () => ({
+          ok: false,
+          status: 503,
+          statusText: 'Service Unavailable',
+          json: () => Promise.resolve({}),
+          headers: new Headers(),
+        }),
+      });
+
+      await expect(ensemblRegion('7:140450000-140480000')).rejects.toThrow(/HTTP 503/);
+    }, 15000);
 
     it('slices to the limit with a truncated marker', async () => {
       const { ensemblRegion } = await loadEnsembl();

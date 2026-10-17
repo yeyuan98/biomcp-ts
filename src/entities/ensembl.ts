@@ -22,6 +22,16 @@ const REGION_ALLOWED_FEATURES = ['gene', 'transcript', 'variation'] as const;
 // NB: upstream rejects spans > 5,000,000 bp ("greater than the maximum
 // allowed length of 5000000") — verified live; keep the client cap in sync.
 const REGION_MAX_SPAN_BP = 5_000_000;
+// Variation rows scale brutally with span: measured live on the densest
+// human locus (BRAF, chr7:140700000+), /overlap/region …feature=variation
+// took 2.0 s @ 5 kb, 12.9 s @ 20 kb, 16.7 s @ 50 kb, 36.6 s @ 100 kb
+// (~95k rows / 23 MB at a 250 kb sweep) — past 50 kb a single attempt
+// blows the 30 s registry timeout and the retry doubles the wall clock
+// (issue #104's deterministic 46-52 s TimeoutError). Variation is therefore
+// queried over a window capped at 50 kb; genes/transcripts stay cheap
+// (~5 s @ 250 kb) and keep the full requested span. regulatory would be
+// the only other dense feature but is upstream-deprecated (see header).
+const VARIATION_MAX_SPAN_BP = 50_000;
 
 const ENSEMBL_GENE_ID_RE = /^ENS[A-Z]{0,4}G\d+(\.\d+)?$/i;
 // NB: /lookup/id and /homology/id accept BARE stable IDs only — a versioned
@@ -149,6 +159,17 @@ export interface EnsemblRegionResult {
   returned: number;
   truncated: boolean;
   features: EnsemblRegionFeature[];
+  /** Window actually queried for `variation` (present when variation was
+   *  requested and its leg succeeded; smaller than `region` when the
+   *  50 kb variation cap applied — see VARIATION_MAX_SPAN_BP). */
+  effective_variation_window?: { chr: string; start: number; end: number };
+  /** Names the variation span dropped by the cap; absent when the full
+   *  requested region was queried for variation. */
+  variation_truncated?: string;
+  /** Per-feature request failures (message from the failed leg). Present
+   *  only when some — not all — feature legs failed; the remaining
+   *  features are still returned. */
+  feature_errors?: Record<string, string>;
 }
 
 interface RawGene {
@@ -540,19 +561,69 @@ export async function ensemblRegion(
     throw new Error(`Region span ${(end - start + 1).toLocaleString()} bp exceeds the ${REGION_MAX_SPAN_BP / 1_000_000} Mb upstream limit — narrow it`);
   }
 
+  // Issue #104: a single combined gene+variation sweep over a dense locus
+  // returns ~95k variation rows (~23 MB, 26-28 s upstream) — over the 30 s
+  // single-attempt timeout, so the retry doubles it into a deterministic
+  // 46-52 s TimeoutError. Instead, features are fetched as PARALLEL legs:
+  //   - gene/transcript: one full-span request (cheap at any legal span).
+  //   - variation: one request over an effective window capped at
+  //     VARIATION_MAX_SPAN_BP, anchored at the region's midpoint so the
+  //     window covers the genes the caller is looking at. Clamped to the
+  //     region bounds (defensive — a center-anchored cap-sized window always
+  //     fits once span > cap).
+  const spanBp = end - start + 1;
+  const fastFeatures = features.filter(f => f !== 'variation');
+  let variationWindow: { chr: string; start: number; end: number } | null = null;
+  if (features.includes('variation')) {
+    if (spanBp > VARIATION_MAX_SPAN_BP) {
+      const wStart = Math.max(start, Math.floor((start + end) / 2) - Math.floor(VARIATION_MAX_SPAN_BP / 2));
+      variationWindow = { chr, start: wStart, end: Math.min(end, wStart + VARIATION_MAX_SPAN_BP - 1) };
+    } else {
+      variationWindow = { chr, start, end };
+    }
+  }
+
   // NB: Ensembl requires REPEATED feature params (comma lists are rejected).
   // The semicolon-matrix form was verified live and passes through new URL()
   // untouched because buildUrl never touches searchParams without auth/env
   // query groups.
-  const query = features.map(f => `feature=${f}`).join(';');
-  const response = await ensemblConn().request(
-    `/overlap/region/${encodeURIComponent(species)}/${chr}:${start}-${end}?${query}`
-  );
+  const legs: Array<{ legFeatures: string[]; path: string }> = [];
+  if (fastFeatures.length > 0) {
+    legs.push({
+      legFeatures: fastFeatures,
+      path: `/overlap/region/${encodeURIComponent(species)}/${chr}:${start}-${end}?${fastFeatures
+        .map(f => `feature=${f}`)
+        .join(';')}`,
+    });
+  }
+  if (variationWindow) {
+    legs.push({
+      legFeatures: ['variation'],
+      path: `/overlap/region/${encodeURIComponent(species)}/${chr}:${variationWindow.start}-${variationWindow.end}?feature=variation`,
+    });
+  }
 
-  const rows = Array.isArray(response) ? (response as Array<Record<string, unknown>>) : [];
+  // Per-leg failures degrade, not fail, the call: surviving features are
+  // returned with a feature_errors entry (all legs failing still throws).
+  const settled = await Promise.allSettled(legs.map(leg => ensemblConn().request(leg.path)));
+  const rows: Array<Record<string, unknown>> = [];
+  const featureErrors: Record<string, string> = {};
+  settled.forEach((outcome, i) => {
+    if (outcome.status === 'fulfilled') {
+      if (Array.isArray(outcome.value)) rows.push(...(outcome.value as Array<Record<string, unknown>>));
+    } else {
+      const message = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+      for (const f of legs[i].legFeatures) featureErrors[f] = message;
+    }
+  });
+  if (legs.length > 0 && settled.every(o => o.status === 'rejected')) {
+    throw (settled[0] as PromiseRejectedResult).reason;
+  }
+
+  // Legs are genes-first, so the merged order matches the combined request's
+  // upstream ordering (genes before variation) — slice(0, limit) keeps genes.
   const limit = Math.max(1, options.limit ?? DEFAULT_REGION_LIMIT);
-
-  return {
+  const result: EnsemblRegionResult = {
     region: `${chr}:${start}-${end}`,
     species,
     features_requested: [...features],
@@ -561,4 +632,14 @@ export async function ensemblRegion(
     truncated: rows.length > limit,
     features: rows.slice(0, limit).map(mapRegionFeature),
   };
+  if (variationWindow && !featureErrors['variation']) {
+    result.effective_variation_window = { ...variationWindow };
+    if (spanBp > VARIATION_MAX_SPAN_BP) {
+      result.variation_truncated =
+        `variation restricted to ${chr}:${variationWindow.start}-${variationWindow.end}` +
+        ` (center ${VARIATION_MAX_SPAN_BP / 1_000}kb of requested ${Math.round(spanBp / 1_000)}kb)`;
+    }
+  }
+  if (Object.keys(featureErrors).length > 0) result.feature_errors = featureErrors;
+  return result;
 }

@@ -91,6 +91,7 @@ For KNOWN human variants, variant_get additionally provides deep pre-computed sc
       description: `Query what lives in a genomic interval on the current assembly (GRCh38 for human): genes/transcripts (stable IDs, symbols, biotypes) and known variants (rsIDs, alleles, consequence terms, clinical significance).
 
 Ideal for locus triage — "what genes and known variants sit in this GWAS hit interval?".
+Genes/transcripts are always fetched for the FULL requested span, but variation density can reach ~100k variants in dense loci (which times out upstream), so when the span exceeds 50 kb variation is queried only for a 50 kb window centered on the region midpoint — the result echoes effective_variation_window (the coordinates actually queried for variation) and variation_truncated (names the dropped span) when this cap applies. To sweep variation across a large interval, issue adjacent region calls.
 Keep spans modest (<1 Mb recommended); output is capped at limit with a truncated marker. For sequence text use genbank_get; for entity-level annotation chain IDs into gene_get / variant_get.`,
       inputSchema: {
         region: z.string().describe('Genomic region chr:start-end (1-based, GRCh38 for human) — e.g. 7:140450000-140480000'),
