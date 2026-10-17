@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, jest } from '@jest/globals';
+import { readFileSync } from 'node:fs';
 import { createMcpTestHarness } from '../../helpers/mcp-harness.js';
 import { retryOnRateLimit } from '../../helpers/retry.js';
 
@@ -15,7 +16,7 @@ afterAll(async () => {
 });
 
 describe('genbank tools (integration)', () => {
-  it('genbank_get returns TP53 RefSeqGene NG_017013.2 as fasta', async () => {
+  it('genbank_get returns TP53 RefSeqGene NG_017013.2 as fasta (file mode, full data on disk)', async () => {
     const result = await retryOnRateLimit(() =>
       harness.callTool('genbank_get', { accession: 'NG_017013.2', format: 'fasta' })
     );
@@ -26,8 +27,18 @@ describe('genbank tools (integration)', () => {
     expect(result.format).toBe('fasta');
     // Fixed for a versioned RefSeq accession.
     expect(result.length_bp).toBe(32772);
-    expect(result.sequence_text.startsWith('>')).toBe(true);
-    expect(result.sequence_text).toContain('NG_017013.2');
+    // 32,772 bp of FASTA far exceeds the 1k-char inline ceiling: the reply
+    // carries a file handle and NO inline sequence_text; the file holds the
+    // complete record (never truncated).
+    expect(result.mode).toBe('file');
+    expect(result.truncated).toBe(false);
+    expect(result.sequence_text).toBeUndefined();
+    expect(result.char_count).toBe(result.total_char_count);
+    expect(result.char_count).toBeGreaterThan(32_772);
+    expect(result.file_path).toContain('NG_017013.2.fasta');
+    const text = readFileSync(result.file_path, 'utf8');
+    expect(text.startsWith('>')).toBe(true);
+    expect(text).toContain('NG_017013.2');
   }, 60000);
 
   it('genbank_get errors on oversized whole-record fetch without a region', async () => {
@@ -43,11 +54,16 @@ describe('genbank tools (integration)', () => {
         format: 'genbank',
         seq_start: 1,
         seq_stop: 100,
+        // Explicit inline opt-in: a GenBank flat file headers/features block
+        // sits near the 1k-char auto-file ceiling, so pin the output mode
+        // this assertion is about (the region echo + inline text).
+        sequence_output: 'inline',
       })
     );
     expect(result.accession).toBe('NC_000001.11');
     expect(result.format).toBe('genbank');
     expect(result.sequence_text).toContain('LOCUS');
+    expect(result.truncated).toBe(false);
     expect(result.region).toEqual({ start: 1, stop: 100, strand: 1 });
   }, 60000);
 
