@@ -94,7 +94,7 @@ function unavailableNote(reason: FullTextUnavailableReason): string {
     case 'no_machine_readable_xml':
       return 'A PMC record exists but carries no machine-readable body (e.g. an author manuscript withdrawn from distribution); retrying will not help. Alternatives: the abstract is in the top-level abstract field; the publisher page is links.doi_url.';
     case 'not_implemented_for_preprints':
-      return 'Full-text retrieval is not implemented for preprints (www.biorxiv.org throttles automated downloads). Fetch links.jatsxml_url directly for the JATS XML, or use article_get on the published version of record.';
+      return 'article_get serves preprint full text as a link only; call the preprint_fulltext tool with the preprint DOI for the on-demand JATS download (cached per version, rate-limit aware).';
     case 'fetch_failed':
       return 'Both full-text sources (Europe PMC and PubMed Central E-utilities) failed to answer; this may be transient — one retry is reasonable.';
   }
@@ -289,13 +289,13 @@ export async function fetchFullText(pmcid: string | undefined, options: FullText
   };
 }
 
-interface ExtractedJats {
+export interface ExtractedJats {
   sections: FullTextSection[];
   total_char_count: number;
   hasReferences: boolean;
 }
 
-interface ParsedFullText {
+export interface ParsedFullText {
   sections: FullTextSection[];
   char_count: number;
   total_char_count: number;
@@ -305,8 +305,10 @@ interface ParsedFullText {
 }
 
 /** Apply the inline char budget to extracted sections (truncation is
- *  flagged honestly; empty sections carry nothing to omit). */
-function applyCharBudget(extracted: ExtractedJats, maxChars: number): ParsedFullText {
+ * flagged honestly; empty sections carry nothing to omit). Exported for
+ * the preprint fulltext path, which applies the same budget to sections
+ * restored from its (doi, version) cache. */
+export function applyCharBudget(extracted: ExtractedJats, maxChars: number): ParsedFullText {
   const out: FullTextSection[] = [];
   const omitted: string[] = [];
   let budget = maxChars;

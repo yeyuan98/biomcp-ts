@@ -70,6 +70,9 @@ jest.mock('../../entities/trial.js', () => mockLoudModule('entities/trial', {
 jest.mock('../../entities/article/index.js', () => mockLoudModule('entities/article', {
   articleSearch: jest.fn(),
   articleGet: jest.fn(),
+  fetchPreprintFullText: jest.fn(),
+  // Mirrors PREPRINT_FULLTEXT_TOOL_BUDGET_MS from src/entities/article/detail/preprint-fulltext.ts.
+  PREPRINT_FULLTEXT_TOOL_BUDGET_MS: 120_000,
   Article: undefined,
 }));
 
@@ -200,9 +203,9 @@ describe('Tool registration', () => {
     expect(mockRegisterTool).toHaveBeenCalledTimes(2);
   });
 
-  it('registerArticleTools calls registerTool 2 times', () => {
+  it('registerArticleTools calls registerTool 3 times', () => {
     registerArticleTools(mockServer);
-    expect(mockRegisterTool).toHaveBeenCalledTimes(2);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(3);
   });
 
   it('registerUtilityTools calls registerTool 2 times', () => {
@@ -246,7 +249,7 @@ describe('Tool registration', () => {
     expect(mockRegisterTool.mock.calls[0][0]).toBe('biomcp_configure');
   });
 
-  it('total registerTool calls across all registrations = 41', () => {
+  it('total registerTool calls across all registrations = 42', () => {
     registerGeneTools(mockServer);
     registerDrugTools(mockServer);
     registerVariantTools(mockServer);
@@ -262,7 +265,7 @@ describe('Tool registration', () => {
     registerGtexTools(mockServer);
     registerEnsemblTools(mockServer);
     registerConfigureTool(mockServer);
-    expect(mockRegisterTool).toHaveBeenCalledTimes(41);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(42);
   });
 
   it('no duplicate tool names across all registrations', () => {
@@ -310,7 +313,7 @@ describe('Tool registration', () => {
       'variant_search', 'variant_get', 'variant_oncokb', 'variant_trials',
       'drug_search', 'drug_get', 'drug_trials',
       'disease_search', 'disease_get', 'disease_drugs', 'disease_trials',
-      'article_search', 'article_get',
+      'article_search', 'article_get', 'preprint_fulltext',
       'trial_search', 'trial_get',
       'discover', 'batch_get',
       'pdb',

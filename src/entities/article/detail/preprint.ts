@@ -39,7 +39,7 @@ interface BiorxivFunder {
   award?: string;
 }
 
-interface BiorxivDetailsRecord {
+export interface BiorxivDetailsRecord {
   doi?: string;
   title?: string;
   /** semicolon-joined "Last, F.; Last, F." — different from EPMC's comma style */
@@ -99,7 +99,7 @@ export function splitSemicolonAuthors(authors?: string): string[] | undefined {
   return parts.length > 0 ? parts : undefined;
 }
 
-function normalizeServer(server?: string): 'bioRxiv' | 'medRxiv' {
+export function normalizeServer(server?: string): 'bioRxiv' | 'medRxiv' {
   return String(server || '').toLowerCase() === 'medrxiv' ? 'medRxiv' : 'bioRxiv';
 }
 
@@ -157,10 +157,22 @@ export const PREPRINT_PUBS_SKIP_THRESHOLD_MS = 20_000;
  * or the /details `published` DOI field with a note on `published`. The
  * PPR citation leg is not the binding constraint (10 s-capped via
  * DEFAULT_PROVIDER_TIMEOUT_MS). No AbortSignal plumbing — skip-and-note
- * suffices because every /pubs consumer has a fallback. */
-async function fetchOfficialDetails(
+ * suffices because every /pubs consumer has a fallback.
+ *
+ * Exported (with a kind-discriminated result) since the preprint
+ * full-text path (preprint-fulltext.ts) reuses the same resolution and
+ * needs to distinguish "no posts found" from a transport failure.
+ */
+export type OfficialDetailsResult =
+  | { kind: 'ok'; server: 'biorxiv' | 'medrxiv'; records: BiorxivDetailsRecord[] }
+  /** soft miss on both servers: the DOI is not a biorxiv/medrxiv post */
+  | { kind: 'not_found' }
+  /** transport-level failure (timeout, network, HTTP error status) */
+  | { kind: 'unreachable' };
+
+export async function fetchOfficialDetails(
   doi: string
-): Promise<{ server: 'biorxiv' | 'medrxiv'; records: BiorxivDetailsRecord[] } | undefined> {
+): Promise<OfficialDetailsResult> {
   const conn = connectionManager.getConnection('biorxiv');
   for (const server of ['biorxiv', 'medrxiv'] as const) {
     try {
@@ -170,7 +182,7 @@ async function fetchOfficialDetails(
       const status = response.messages?.[0]?.status;
       const records = response.collection ?? [];
       if (status === 'ok' && records.length > 0) {
-        return { server, records };
+        return { kind: 'ok', server, records };
       }
       // Soft miss ("no posts found") or empty collection → try the other server.
     } catch (error) {
@@ -178,10 +190,10 @@ async function fetchOfficialDetails(
       // Transport-level failure: the same host serves both collections,
       // so medrxiv would fail identically — return immediately and let
       // the EPMC fallback cover the data.
-      return undefined;
+      return { kind: 'unreachable' };
     }
   }
-  return undefined;
+  return { kind: 'not_found' };
 }
 
 async function fetchEpmcPreprint(doi: string): Promise<EuropePMCPreprintRecord | undefined> {
@@ -425,10 +437,14 @@ export async function getPreprintArticle(
   // the 60 s article_get tool cap.
   const startedAt = Date.now();
 
-  const [official, epmc] = await Promise.all([
+  const [officialResult, epmc] = await Promise.all([
     fetchOfficialDetails(doi),
     fetchEpmcPreprint(doi),
   ]);
+  // The kind-discriminated result distinguishes not-found from unreachable
+  // for the preprint-fulltext path; this path keeps treating both as
+  // "official API unavailable" (pre-existing behavior).
+  const official = officialResult.kind === 'ok' ? officialResult : undefined;
 
   let result: ArticleResult;
   let server: 'biorxiv' | 'medrxiv';
@@ -545,16 +561,17 @@ export async function getPreprintArticle(
   // Opt-in only, mirroring the journal-article path ("all" excludes fulltext).
   const wantsFullText = options?.sections?.includes('fulltext');
   if (wantsFullText) {
-    // Preprint JATS XML is deliberately served as a link only —
-    // www.biorxiv.org throttles automated downloads (see jatsxml_url).
+    // article_get deliberately keeps this section link-only — the JATS
+    // download is gated/rate-limited and lives in the dedicated
+    // preprint_fulltext tool (issue #44), not in this 60 s-capped path.
     (result.sections = result.sections || {})['fulltext'] = {
       status: 'unavailable',
       reason: 'not_implemented_for_preprints',
       max_chars: 0,
       links: result.jatsxml_url ? { jatsxml_url: result.jatsxml_url } : undefined,
-      note: 'Full-text retrieval is not implemented for preprints (www.biorxiv.org throttles automated downloads). '
+      note: 'article_get serves preprint full text as a link only. Call the preprint_fulltext tool with this DOI for the on-demand JATS download (cached per version, rate-limit aware with cooldown). '
         + (result.jatsxml_url
-          ? 'Fetch links.jatsxml_url directly for the JATS XML, or use article_get on the published version of record.'
+          ? 'Direct link if you must: links.jatsxml_url (www.biorxiv.org throttles automated downloads — the tool paces them).'
           : 'No JATS XML URL is available for this preprint.'),
     };
   }

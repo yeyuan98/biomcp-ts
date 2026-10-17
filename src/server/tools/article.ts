@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { searchArticles, articleGet } from '../../entities/article/index.js';
+import { searchArticles, articleGet, fetchPreprintFullText, PREPRINT_FULLTEXT_TOOL_BUDGET_MS } from '../../entities/article/index.js';
 import { applyLimit, withToolTimeout } from './utils.js';
 
 const TOOL_TIMEOUT_MS = 30000;
@@ -85,6 +85,38 @@ export function registerArticleTools(server: McpServer): void {
         if (result.sections) {
           result.sections = applyLimit(result.sections, requestedSections, ARTICLE_STORAGE_KEYS, ARTICLE_ARRAY_KEYS, limit);
         }
+        return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+      } catch (error) {
+        return {
+          content: [{ type: 'text', text: String(error) }],
+          isError: true
+        };
+      }
+    }
+  );
+
+  // Separate from article_get on purpose (issue #44): the JATS download is
+  // paced (>=3s spacing) and may wait out a cooldown, which cannot fit
+  // article_get's 60s cap — and full text for preprints must stay strictly
+  // on-demand, never automatic during search/get.
+  server.registerTool(
+    'preprint_fulltext',
+    {
+      description: 'On-demand bioRxiv/medRxiv preprint full text (JATS XML, parsed to sections). Input: a preprint DOI (e.g. "10.1101/2025.03.05.641768"), optional version (default: latest). Downloads are strictly on-demand (never run during search), paced, and cached per (doi, version) — JATS per version is immutable, so repeat calls are served from cache without re-downloading. www.biorxiv.org rate-limits aggressively: on a 429/Cloudflare verdict this tool pauses downloads for >=60s (Retry-After honored) and every call during the cooldown returns an honest unavailable/rate_limited envelope with retry_after_sec — cached copies are still served instantly. The per-article license (cc by, cc by-nc-nd, na, ...) rides on every reply and governs reuse; for corpus-scale text mining use the bioRxiv/medRxiv monthly S3 buckets (see https://www.biorxiv.org/tdm). Output "file" (default): complete text written to a server-side markdown file, reply carries file_path + outline (Read/Grep selectively); "inline": capped text sections (fulltext_max_chars, default 40000).',
+      inputSchema: {
+        id: z.string().describe('bioRxiv/medRxiv preprint DOI (e.g. "10.1101/2021.10.25.465764", "10.64898/2026.08.11.744243"); journal-article identifiers are rejected — use article_get for those'),
+        version: z.number().int().min(1).optional().describe('Preprint version to fetch (default: latest). Pinned versions are served from cache with zero network when already fetched.'),
+        output: z.enum(['file', 'inline']).optional().describe('"file" (default): complete text in a server-side markdown file; the reply carries file_path + outline. "inline": text sections returned inline, capped by fulltext_max_chars.'),
+        fulltext_max_chars: z.number().int().min(1000).max(200000).optional().describe('Inline-mode only (output="inline"); default 40000. Ignored in file mode — files carry the complete text (2MB safety cap).'),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true }
+    },
+    async ({ id, version, output, fulltext_max_chars }) => {
+      try {
+        const result = await withToolTimeout(
+          fetchPreprintFullText(id, { version, output, maxChars: fulltext_max_chars }),
+          PREPRINT_FULLTEXT_TOOL_BUDGET_MS
+        );
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       } catch (error) {
         return {

@@ -68,7 +68,9 @@ export function fulltextDir(): string {
   return join(cacheDir(), 'fulltext');
 }
 
-function sanitizeLine(text: string, maxChars: number): string {
+/** Coerce one line of agent-facing text to a single sanitized line (shared
+ * with the preprint fulltext cache). */
+export function sanitizeLine(text: string, maxChars: number): string {
   const single = text.replace(/[\r\n\t]+/g, ' ').replace(/[^\S ]+/g, '');
   return single.length > maxChars ? `${single.slice(0, maxChars - 1)}…` : single;
 }
@@ -91,7 +93,9 @@ function wrapLine(line: string, cols: number): string[] {
   return out;
 }
 
-function wrapText(text: string, cols: number): string {
+/** Hard-wrap text at word boundaries (shared with the preprint fulltext
+ * cache; over-long words stay on their own line rather than being split). */
+export function wrapText(text: string, cols: number): string {
   return text
     .split('\n')
     .flatMap(line => wrapLine(line, cols))
@@ -99,8 +103,9 @@ function wrapText(text: string, cols: number): string {
 }
 
 /** JSON strings are valid YAML 1.2 double-quoted scalars — reuse them
- * instead of adding a yaml dependency for a write-only artifact. */
-function fmValue(value: unknown): string {
+ * instead of adding a yaml dependency for a write-only artifact (shared
+ * with the preprint fulltext cache). */
+export function fmValue(value: unknown): string {
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   return JSON.stringify(String(value ?? '').replace(/\r/g, ''));
 }
