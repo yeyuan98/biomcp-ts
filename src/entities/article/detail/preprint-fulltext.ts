@@ -252,8 +252,9 @@ async function downloadJats(url: string): Promise<DownloadOutcome> {
     if (text.length > MAX_JATS_CHARS) {
       return { kind: 'failed', detail: `payload too large (${text.length} chars)` };
     }
-    if (RATE_LIMIT_BODY_RE.test(text)) {
-      // Cloudflare challenge/1015 page served with HTTP 200.
+    // Cloudflare challenge/1015 pages carry their markers in the first KB; a
+    // legitimate JATS body can contain the phrase in prose, so never scan deeper.
+    if (RATE_LIMIT_BODY_RE.test(text.slice(0, 1024))) {
       const cooldownMs = enterCooldown(undefined);
       return { kind: 'rate_limited', cooldownMs };
     }

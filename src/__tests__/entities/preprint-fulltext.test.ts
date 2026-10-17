@@ -207,6 +207,16 @@ describe('preprint-fulltext', () => {
     expect(result).toMatchObject({ status: 'unavailable', reason: 'rate_limited' });
   });
 
+  test('challenge-phrase text deep in a legitimate JATS body is not misclassified', async () => {
+    // 2KB of real XML prose before the phrase: the 1KB-prefix scan must miss it on purpose.
+    const padding = '<sec id="pad"><title>Filler</title><p>' + 'lorem ipsum '.repeat(180) + '</p></sec>';
+    const doc = JATS_DOC.replace('<sec id="s2">', `${padding}<sec id="s2"><p>As we waited, the page said: Just a moment...</p>`);
+    global.fetch = standardRouter({ jats: () => Promise.resolve(xmlResponse(doc)) }) as any;
+    const result = await fetchPreprintFullText(DOI);
+    expect(result.status).toBe('available');
+    expect(result.reason).toBeUndefined();
+  });
+
   test('during cooldown, the newest cached version is served with a disclosure', async () => {
     // v1 downloads fine; v2 trips the cooldown
     global.fetch = standardRouter({
