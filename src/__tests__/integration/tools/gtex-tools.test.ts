@@ -76,6 +76,42 @@ describe('gtex tools (integration)', () => {
     expect(pValues).toEqual(sorted);
   }, 60000);
 
+  it('gtex_eqtl TP53 in Whole_Blood: empty is valid, note lists other tissues', async () => {
+    const result = await retryOnRateLimit(() =>
+      harness.callTool('gtex_eqtl', { gene: 'TP53', tissue: 'Whole_Blood' })
+    );
+    expect(result.gene_symbol).toBe('TP53');
+    expect(result.tissue).toBe('Whole_Blood');
+    // Verified against live GTEx v10: TP53 has zero significant cis-eQTLs in
+    // Whole_Blood — the empty list is the correct scientific answer (#106).
+    expect(Array.isArray(result.associations)).toBe(true);
+    expect(result.associations).toHaveLength(0);
+    // ...and the diagnostic note points at the tissues that DO have them.
+    expect(typeof result.note).toBe('string');
+    expect(result.note).toContain('TP53 has no significant cis-eQTLs in Whole_Blood in GTEx v10');
+    expect(result.note).toMatch(/but has \d+ in other tissues: /);
+    expect(result.note).toContain('Kidney_Cortex');
+  }, 60000);
+
+  it('gtex_eqtl TP53 in Kidney_Cortex returns non-empty associations', async () => {
+    const result = await retryOnRateLimit(() =>
+      harness.callTool('gtex_eqtl', { gene: 'TP53', tissue: 'Kidney_Cortex', limit: 5 })
+    );
+    expect(result.gene_symbol).toBe('TP53');
+    expect(result.tissue).toBe('Kidney_Cortex');
+    expect(Array.isArray(result.associations)).toBe(true);
+    expect(result.associations.length).toBeGreaterThan(0);
+    expect(result.note).toBeUndefined();
+    for (const a of result.associations) {
+      expect(a.variant_id).toBeTruthy();
+      expect(typeof a.p_value).toBe('number');
+      expect(a.p_value).toBeGreaterThanOrEqual(0);
+    }
+    const pValues = result.associations.map((a: any) => a.p_value);
+    const sorted = [...pValues].sort((a, b) => a - b);
+    expect(pValues).toEqual(sorted);
+  }, 60000);
+
   it('gtex_eqtl rejects an invalid tissue id', async () => {
     await expect(
       harness.callTool('gtex_eqtl', { gene: 'SORT1', tissue: 'Not_A_Tissue' })

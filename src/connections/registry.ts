@@ -24,6 +24,9 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     protocol: 'rest',
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
+    // gtexportal.org intermittently drops connections (observed ~1-in-3
+    // transient failures from datacenter IPs); one bounded retry smooths it.
+    retry: { attempts: 2, backoffMs: 500 },
   },
   // Ensembl REST (https://rest.ensembl.org): gene stable-ID lookup, Compara
   // homology, on-demand VEP consequences, region overlap. Keyless; verified
