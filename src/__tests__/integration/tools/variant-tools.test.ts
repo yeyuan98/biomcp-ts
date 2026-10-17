@@ -93,6 +93,24 @@ describe('variant_get', () => {
       harness.callTool('variant_get', { id: 'NOTAVARIANT999999' })
     ).rejects.toThrow();
   }, 30000);
+
+  it('surfaces all ClinVar alleles for multi-allelic rs28934575', async () => {
+    // Live GET /v1/variant/rs28934575 (TP53 p.Gly245) returns 3 allele docs:
+    // C>G is displayed Uncertain while C>T / C>A are Pathogenic. The
+    // top-level record keeps one allele; every allele must also appear
+    // under 'alleles' with a '_warning' (issue #101).
+    const result = await retryOnRateLimit(() =>
+      harness.callTool('variant_get', { id: 'rs28934575', sections: ['core'] })
+    );
+    expectVariantGetResult(result);
+    expect(result.alleles).toHaveLength(3);
+    const pathogenicAlleles = (result.alleles as Array<Record<string, any>>).filter(
+      (a) => String(a.significance || '').toLowerCase().includes('pathogenic')
+    );
+    expect(pathogenicAlleles.length).toBeGreaterThanOrEqual(2);
+    expect(typeof result._warning).toBe('string');
+    expect(String(result._warning)).toContain('multi-allelic');
+  }, 60000);
 });
 
 describe('variant_oncokb', () => {

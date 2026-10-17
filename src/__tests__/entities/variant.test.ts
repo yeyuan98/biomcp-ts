@@ -414,6 +414,100 @@ describe('variant', () => {
 
     // Should select the one with gnomad data and highest _version (rs2 has _version 3)
     expect(result.id).toBe('rs2');
+    // Multi-allelic: every doc survives under 'alleles' (in doc order, not
+    // selection order) plus a _warning naming the reflected allele.
+    expect(result.alleles).toHaveLength(3);
+    expect(result.alleles!.map(a => a.id)).toEqual(['rs1', 'rs2', 'rs3']);
+    expect(result._warning).toContain('multi-allelic (3 ClinVar alleles)');
+    expect(result._warning).toContain('chr7:2');
+    expect(result._warning).toContain("See 'alleles' for all records");
+  });
+
+  test('variantGet() multi-allelic rsID surfaces every ClinVar allele (live rs28934575 shape)', async () => {
+    // Live GET /v1/variant/rs28934575 (TP53 p.Gly245) returns a 3-doc array,
+    // one per ALT allele; TP53 is on the minus strand so genomic C>G is
+    // coding G>C. Both gnomad-carrying docs share _version 2 and the stable
+    // sort keeps C>G (Uncertain) first — the Pathogenic C>T / C>A alleles
+    // must still be visible under 'alleles' (issue #101).
+    const pathogenicRcvs = (n: number) => Array.from({ length: n }, (_, i) => ({
+      clinical_significance: i === 3 ? 'Pathogenic/Likely pathogenic' : i === 7 ? 'Likely pathogenic' : 'Pathogenic',
+      conditions: [{ name: 'Li-Fraumeni syndrome 1 (LFS)' }],
+    }));
+
+    const variantArray = [
+      {
+        _id: 'chr17:g.7577548C>G', _version: 2,
+        dbsnp: { rsid: 'rs28934575', gene: { symbol: 'TP53' } },
+        snpeff: { ann: [{ genename: 'TP53', hgvs_c: 'c.733G>C' }] },
+        gnomad_exome: { af: { af: 0.0001 } },
+        clinvar: { variant_id: 376604, rcv: [
+          { clinical_significance: 'Uncertain significance', conditions: [{ name: 'Li-Fraumeni syndrome (LFS)' }] },
+          { clinical_significance: 'Pathogenic', conditions: [{ name: 'Hereditary cancer-predisposing syndrome' }] },
+          { clinical_significance: 'Likely pathogenic', conditions: [{ name: 'Li-Fraumeni syndrome 1 (LFS)' }] },
+        ] },
+      },
+      {
+        _id: 'chr17:g.7577548C>T', _version: 2,
+        dbsnp: { rsid: 'rs28934575', gene: { symbol: 'TP53' } },
+        snpeff: { ann: [{ genename: 'TP53', hgvs_c: 'c.733G>A', hgvs_p: 'p.Gly245Ser' }] },
+        gnomad_exome: { af: { af: 0.000009 } },
+        gnomad_genome: { af: { af: 0.000012 } },
+        clinvar: { variant_id: 376605, rcv: pathogenicRcvs(18) },
+      },
+      {
+        _id: 'chr17:g.7577548C>A', _version: 2,
+        dbsnp: { rsid: 'rs28934575', gene: { symbol: 'TP53' } },
+        snpeff: { ann: [{ genename: 'TP53', hgvs_c: 'c.733G>T' }] },
+        clinvar: { variant_id: 376606, rcv: pathogenicRcvs(5) },
+      },
+    ];
+
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(variantArray),
+    }) as any;
+
+    const result = await variantGet('rs28934575', []);
+
+    // Top-level selection is unchanged: C>G wins the gnomad-preferred,
+    // stable-_version sort, so its (Uncertain) significance stays on top.
+    expect(result.hgvs_c).toBe('c.733G>C');
+    expect(result.significance).toBe('Uncertain significance');
+    // Alleles keep doc order and mirror transformMyVariantHit extraction —
+    // variant_get and variant_search can never disagree on an allele.
+    expect(result.alleles!.map(a => a.significance)).toEqual([
+      'Uncertain significance', 'Pathogenic', 'Pathogenic',
+    ]);
+    expect(result.alleles!.map(a => a.hgvs_c)).toEqual(['c.733G>C', 'c.733G>A', 'c.733G>T']);
+    expect(result.alleles!.map(a => a.gene)).toEqual(['TP53', 'TP53', 'TP53']);
+    // normalizeProteinChange is applied exactly as in search core records.
+    expect(result.alleles![1].hgvs_p).toBe('G245S');
+    expect(result.alleles![0].conditions).toEqual(expect.arrayContaining(['Li-Fraumeni syndrome (LFS)']));
+    expect(result._warning).toBe(
+      'rs28934575 is multi-allelic (3 ClinVar alleles); the top-level record reflects chr17:g.7577548C>G (c.733G>C). See \'alleles\' for all records.'
+    );
+  });
+
+  test('variantGet() single-doc responses attach no alleles or _warning', async () => {
+    // A plain object response (and a 1-doc array) must stay back-compat:
+    // no 'alleles' array, no '_warning'.
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ _id: 'chr7:g.140453136A>T', dbsnp: { rsid: 'rs113488022' } }),
+    }) as any;
+
+    const result = await variantGet('rs113488022', []);
+    expect(result.alleles).toBeUndefined();
+    expect(result._warning).toBeUndefined();
+
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([{ _id: 'chr7:g.140453136A>T', dbsnp: { rsid: 'rs113488022' } }]),
+    }) as any;
+
+    const singleDocArray = await variantGet('rs113488022', []);
+    expect(singleDocArray.alleles).toBeUndefined();
+    expect(singleDocArray._warning).toBeUndefined();
   });
 
   test('variantGet() with HGVS input resolves to genomic ID', async () => {
