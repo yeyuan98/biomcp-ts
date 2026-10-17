@@ -20,7 +20,7 @@ export function transformEuropePMC(a: EuropePMCRecord): Article {
   };
 }
 
-export async function searchEuropePMC(query: string, limit: number, offset: number, cursorMark?: string, dateRange?: ParsedDateRange): Promise<Article[]> {
+export async function searchEuropePMC(query: string, limit: number, offset: number, cursorMark?: string, dateRange?: ParsedDateRange, signal?: AbortSignal): Promise<Article[]> {
   try {
     const rows = await epmcSearchWindow<EuropePMCRecord>({
       query,
@@ -29,6 +29,7 @@ export async function searchEuropePMC(query: string, limit: number, offset: numb
       offset,
       cursorMark,
       dateRange,
+      signal,
     });
     return rows.map(transformEuropePMC);
   } catch (error) {

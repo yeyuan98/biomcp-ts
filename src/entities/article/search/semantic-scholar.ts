@@ -58,7 +58,7 @@ export function transformSemanticScholar(a: SemanticScholarPaper): Article {
 
 // Retry policy lives on the registry 'semantic_scholar' source config; the
 // shared S2 queue serializes this traffic with citation lookups.
-export async function searchSemanticScholar(query: string, limit: number, offset: number, dateRange?: ParsedDateRange): Promise<Article[]> {
+export async function searchSemanticScholar(query: string, limit: number, offset: number, dateRange?: ParsedDateRange, signal?: AbortSignal): Promise<Article[]> {
   try {
     const conn = connectionManager.getConnection('semantic_scholar');
 
@@ -70,10 +70,12 @@ export async function searchSemanticScholar(query: string, limit: number, offset
     }
 
     // withTimeout INSIDE the queue slot: a hung fetch must release the queue
-    // for the next S2 caller instead of poisoning it.
+    // for the next S2 caller instead of poisoning it. Signal-bearing form so
+    // the deadline ABORTS the fetch (and thus frees the queue slot now, not
+    // when the connection-level timeout eventually fires).
     const response = await s2RequestQueue.enqueue(
       () => withTimeout(
-        conn.request(searchUrl) as Promise<SemanticScholarResponse>,
+        (deadlineSignal) => conn.request(searchUrl, undefined, { signal: deadlineSignal }) as Promise<SemanticScholarResponse>,
         15000,
         { onTimeout: 'throw', label: 'SemanticScholar search' }
       )

@@ -112,14 +112,17 @@ export async function trialSearch(
 
 export async function trialGet(
   nctId: string,
-  sections?: string[]
+  sections?: string[],
+  signal?: AbortSignal
 ): Promise<TrialResult> {
   const sectionConfig = sections || ['core'];
-  
+
   const conn = connectionManager.getConnection('clinicaltrials');
-  
+
   const rawResponse = await conn.request(
-    `/studies/${encodeURIComponent(nctId)}?format=json`
+    `/studies/${encodeURIComponent(nctId)}?format=json`,
+    undefined,
+    { signal }
   );
   
   const response = rawResponse as any;
@@ -162,11 +165,18 @@ export async function trialGet(
 
   if (sectionsToFetch.length > 0) {
     const sectionPromises = sectionsToFetch.map(section => {
-      return fetchWithTimeout(async () => {
+      return fetchWithTimeout(async (deadlineSignal) => {
+        // Combine the section deadline with any caller-provided signal so
+        // BOTH stop the section's request (the deadline previously raced a
+        // timer without aborting anything — a zombie fetch kept its
+        // connection slot until the connection-level timeout).
+        const combinedSignal = deadlineSignal && signal
+          ? AbortSignal.any([deadlineSignal, signal])
+          : (deadlineSignal ?? signal);
         switch (section) {
-          case 'eligibility': return { section: 'eligibility', data: await fetchEligibility(nctId) };
-          case 'locations': return { section: 'locations', data: await fetchLocations(nctId) };
-          case 'outcomes': return { section: 'outcomes', data: await fetchOutcomes(nctId) };
+          case 'eligibility': return { section: 'eligibility', data: await fetchEligibility(nctId, combinedSignal) };
+          case 'locations': return { section: 'locations', data: await fetchLocations(nctId, combinedSignal) };
+          case 'outcomes': return { section: 'outcomes', data: await fetchOutcomes(nctId, combinedSignal) };
           default: return { section, data: null };
         }
       }, SECTION_TIMEOUT_MS);
@@ -197,12 +207,14 @@ export async function trialGet(
   return result;
 }
 
-async function fetchEligibility(nctId: string): Promise<{ criteria?: string; minimum_age?: string; maximum_age?: string; sex?: string; healthy_volunteers?: boolean }> {
+async function fetchEligibility(nctId: string, signal?: AbortSignal): Promise<{ criteria?: string; minimum_age?: string; maximum_age?: string; sex?: string; healthy_volunteers?: boolean }> {
   try {
     const conn = connectionManager.getConnection('clinicaltrials');
-    
+
     const response = await conn.request(
-      `/studies/${encodeURIComponent(nctId)}?format=json`
+      `/studies/${encodeURIComponent(nctId)}?format=json`,
+      undefined,
+      { signal }
     ) as any;
     
     const trial = extractTrial(response);
@@ -223,12 +235,14 @@ async function fetchEligibility(nctId: string): Promise<{ criteria?: string; min
   }
 }
 
-async function fetchLocations(nctId: string): Promise<Array<{ facility?: string; city?: string; state?: string; country?: string; zip?: string; status?: string }>> {
+async function fetchLocations(nctId: string, signal?: AbortSignal): Promise<Array<{ facility?: string; city?: string; state?: string; country?: string; zip?: string; status?: string }>> {
   try {
     const conn = connectionManager.getConnection('clinicaltrials');
-    
+
     const response = await conn.request(
-      `/studies/${encodeURIComponent(nctId)}?format=json`
+      `/studies/${encodeURIComponent(nctId)}?format=json`,
+      undefined,
+      { signal }
     ) as any;
     
     const trial = extractTrial(response);
@@ -250,12 +264,14 @@ async function fetchLocations(nctId: string): Promise<Array<{ facility?: string;
   }
 }
 
-async function fetchOutcomes(nctId: string): Promise<{ primary?: Array<{ measure?: string; timeframe?: string }>; secondary?: Array<{ measure?: string; timeframe?: string }> }> {
+async function fetchOutcomes(nctId: string, signal?: AbortSignal): Promise<{ primary?: Array<{ measure?: string; timeframe?: string }>; secondary?: Array<{ measure?: string; timeframe?: string }> }> {
   try {
     const conn = connectionManager.getConnection('clinicaltrials');
-    
+
     const response = await conn.request(
-      `/studies/${encodeURIComponent(nctId)}?format=json`
+      `/studies/${encodeURIComponent(nctId)}?format=json`,
+      undefined,
+      { signal }
     ) as any;
     
     const trial = extractTrial(response);

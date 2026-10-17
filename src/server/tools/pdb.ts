@@ -1,6 +1,13 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { pdbSearch, pdbGet, pdbDownload } from '../../entities/pdb.js';
+import { withToolTimeout, type CancellationCapableExtra } from './utils.js';
+
+// Deadline rationale (#107 phase 2): entry metadata (15s), the parallel
+// 8s-deadline section wave, and the optional structure download (pdb_files,
+// 15s streaming) — 40s covers the per-leg budget ceilings with headroom
+// while bounding signal-ignoring stragglers.
+const PDB_TOOL_TIMEOUT_MS = 40000;
 
 const PDB_SECTIONS = [
   'core', 'polymer_entities', 'ligands', 'assembly', 'experiment', 'citation', 'all',
@@ -36,7 +43,7 @@ export function registerPdbTools(server: McpServer): void {
       },
       annotations: { readOnlyHint: false, openWorldHint: true },
     },
-    async ({ query, pdb_id, sections, download, format, limit, offset }) => {
+    async ({ query, pdb_id, sections, download, format, limit, offset }, extra: CancellationCapableExtra) => {
       try {
         if (!query && !pdb_id) {
           return {
@@ -46,17 +53,29 @@ export function registerPdbTools(server: McpServer): void {
         }
 
         if (pdb_id) {
-          const metadata = await pdbGet(pdb_id, sections);
+          const metadata = await withToolTimeout(
+            () => pdbGet(pdb_id, sections),
+            PDB_TOOL_TIMEOUT_MS,
+            { signal: extra?.signal },
+          );
 
           if (download) {
-            const fileInfo = await pdbDownload(pdb_id, format ?? 'cif');
+            const fileInfo = await withToolTimeout(
+              () => pdbDownload(pdb_id, format ?? 'cif'),
+              PDB_TOOL_TIMEOUT_MS,
+              { signal: extra?.signal },
+            );
             return { content: [{ type: 'text', text: JSON.stringify({ ...metadata, file: fileInfo }) }] };
           }
 
           return { content: [{ type: 'text', text: JSON.stringify(metadata) }] };
         }
 
-        const results = await pdbSearch(query!, { limit, offset });
+        const results = await withToolTimeout(
+          () => pdbSearch(query!, { limit, offset }),
+          PDB_TOOL_TIMEOUT_MS,
+          { signal: extra?.signal },
+        );
         return { content: [{ type: 'text', text: JSON.stringify(results) }] };
       } catch (error) {
         return {

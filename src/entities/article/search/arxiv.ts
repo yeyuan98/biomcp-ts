@@ -51,7 +51,8 @@ export async function searchArxiv(
   query: string,
   limit: number,
   offset: number,
-  dateRange?: ParsedDateRange
+  dateRange?: ParsedDateRange,
+  signal?: AbortSignal
 ): Promise<Article[]> {
   try {
     // A query reduced to nothing by sanitization (pure syntax characters)
@@ -81,7 +82,7 @@ export async function searchArxiv(
     // arXiv always answers application/atom+xml, so the connection returns
     // response text. Retry/rate-limit policy lives on the registry entry.
     const conn = connectionManager.getConnection('arxiv');
-    const xml = await conn.request(path) as string;
+    const xml = await conn.request(path, undefined, { signal }) as string;
 
     return parseArxivAtomXml(xml);
   } catch (error) {
