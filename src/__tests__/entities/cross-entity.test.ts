@@ -198,6 +198,157 @@ describe('cross-entity', () => {
     }
   });
 
+  test('batchGet() article item WITHOUT sections returns metadata + abstract, no fulltext handle (issue #125)', async () => {
+    // Documented default contract: with no sections on the item, the batch
+    // reply is metadata + inline abstract only — no sections.fulltext key,
+    // no file_path. Full text (and its file handle) is opt-in via
+    // sections:["fulltext"] on the item, never automatic.
+    global.fetch = jest.fn((url: unknown) => {
+      const { hostname, pathname } = parseMockUrl(url);
+      if (hostname === 'eutils.ncbi.nlm.nih.gov' && pathname.endsWith('/efetch.fcgi')) {
+        return Promise.resolve({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(`<?xml version="1.0"?>
+<PubmedArticleSet><PubmedArticle>
+<MedlineCitation Status="MEDLINE" Owner="NLM"><PMID Version="1">12345</PMID>
+<Article PubModel="Electronic"><Journal><Title>T</Title><ISOAbbreviation>T</ISOAbbreviation></Journal>
+<ArticleTitle>Batched article</ArticleTitle>
+<Abstract><AbstractText>The abstract stays inline in the default batch reply.</AbstractText></Abstract>
+</Article></MedlineCitation>
+<PubmedData><ArticleIdList><ArticleId IdType="pubmed">12345</ArticleId>
+<ArticleId IdType="doi">10.1234/test.2018</ArticleId><ArticleId IdType="pmc">PMC9999999</ArticleId></ArticleIdList>
+</PubmedData></PubmedArticle></PubmedArticleSet>`),
+        });
+      }
+      return Promise.reject(new Error(`unexpected url ${url}`));
+    }) as any;
+
+    const results = await batchGet([{ entity: 'article', id: '12345' }]);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].success).toBe(true);
+    const data = results[0].data as any;
+    expect(data.title).toBe('Batched article');
+    expect(String(data.abstract)).toContain('The abstract stays inline');
+    // Even though the record HAS a PMCID, the default reply carries no
+    // fulltext section and no file handle anywhere.
+    expect(data.sections?.fulltext).toBeUndefined();
+    expect(data.sections).toBeUndefined();
+    expect(JSON.stringify(data)).not.toContain('file_path');
+    // No fulltext was requested, so no Europe PMC / PMC-XML calls fired.
+    const urls = (global.fetch as any).mock.calls.map((c: any[]) => parseMockUrl(c[0]).hostname);
+    expect(urls.length).toBeGreaterThan(0);
+    expect(urls.every((h: string) => h === 'eutils.ncbi.nlm.nih.gov')).toBe(true);
+  });
+
+  test('batchGet() sections:["fulltext"] parity: handle-or-unavailable per article, errors never sink the batch (issue #125)', async () => {
+    // Three article items requesting fulltext: OA-in-PMC (must yield the
+    // file handle), paywalled-in-PMC (must yield an explicit unavailable +
+    // reason — a data state, not an error), nonexistent PMID (per-item
+    // error; the batch continues). Every fulltext-requested item that
+    // resolves yields handle-or-unavailable, never a silent downgrade.
+    const pubmedXml = (pmid: string, title: string, pmcid?: string) => `<?xml version="1.0"?>
+<PubmedArticleSet><PubmedArticle>
+<MedlineCitation Status="MEDLINE" Owner="NLM"><PMID Version="1">${pmid}</PMID>
+<Article PubModel="Electronic"><Journal><Title>T</Title><ISOAbbreviation>T</ISOAbbreviation></Journal>
+<ArticleTitle>${title}</ArticleTitle></Article></MedlineCitation>
+<PubmedData><ArticleIdList><ArticleId IdType="pubmed">${pmid}</ArticleId>
+<ArticleId IdType="doi">10.1234/test.2018</ArticleId>${pmcid ? `<ArticleId IdType="pmc">${pmcid}</ArticleId>` : ''}</ArticleIdList>
+</PubmedData></PubmedArticle></PubmedArticleSet>`;
+    const emptyXml = '<?xml version="1.0"?><PubmedArticleSet></PubmedArticleSet>';
+
+    global.fetch = jest.fn((url: unknown) => {
+      const u = parseMockUrl(url);
+      if (u.hostname === 'eutils.ncbi.nlm.nih.gov' && u.pathname.endsWith('/efetch.fcgi')) {
+        const id = u.searchParams.get('id');
+        const xml = id === '12345'
+          ? pubmedXml('12345', 'OA batched article', 'PMC9999999')
+          : id === '77777'
+            ? pubmedXml('77777', 'Paywalled batched article', 'PMC8888888')
+            : emptyXml; // nonexistent PMID: PubMed answers an empty set
+        return Promise.resolve({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(xml),
+        });
+      }
+      if (u.hostname === 'www.ebi.ac.uk' && u.pathname.endsWith('/search')) {
+        // One shared Europe PMC core lookup per article: OA for PMC9999999,
+        // paywalled (in PMC, not open, no free links) for PMC8888888.
+        const paywalled = (u.searchParams.get('query') ?? '').includes('PMC8888888');
+        return Promise.resolve({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ hitCount: 1, resultList: { result: [paywalled
+            ? { pmcid: 'PMC8888888', doi: '10.1234/test.2018', isOpenAccess: 'N', inPMC: 'Y', inEPMC: 'Y', fullTextUrlList: { fullTextUrl: [] } }
+            : { pmcid: 'PMC9999999', doi: '10.1234/test.2018', isOpenAccess: 'Y', inPMC: 'Y', inEPMC: 'Y', license: 'cc by', fullTextUrlList: { fullTextUrl: [] } },
+          ] } }),
+        });
+      }
+      if (u.hostname === 'www.ebi.ac.uk' && u.pathname.endsWith('/fullTextXML')) {
+        // Only the OA article reaches the XML leg (paywalled is cut short
+        // by the oa classification; the nonexistent PMID never resolves).
+        return Promise.resolve({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve('<?xml version="1.0"?><article><body><sec><title>Intro</title><p>Body text lives in the file, never the batch reply.</p></sec></body><back><ref-list/></back></article>'),
+        });
+      }
+      return Promise.reject(new Error(`unexpected url ${url}`));
+    }) as any;
+
+    // File-mode writes must stay out of the real cache dir
+    const savedCache = process.env.BIOMCP_CACHE_DIR;
+    const cacheRoot = mkdtempSync(join(tmpdir(), 'biomcp-batch-parity-'));
+    process.env.BIOMCP_CACHE_DIR = cacheRoot;
+    try {
+      const results = await batchGet([
+        { entity: 'article', id: '12345', sections: ['fulltext'] },
+        { entity: 'article', id: '77777', sections: ['fulltext'] },
+        { entity: 'article', id: '99999999', sections: ['fulltext'] },
+      ]);
+
+      // The per-item error does not sink the batch.
+      expect(results).toHaveLength(3);
+
+      // OA / PMC: the file handle (never body text inline).
+      const oa = results.find(r => r.id === '12345')!;
+      expect(oa.success).toBe(true);
+      const oaFt = (oa.data as any)?.sections?.fulltext;
+      expect(oaFt.status).toBe('available');
+      expect(oaFt.mode).toBe('file');
+      expect(oaFt.outline.length).toBeGreaterThan(0);
+      expect(oaFt.sections).toBeUndefined();
+      expect(existsSync(oaFt.file_path)).toBe(true);
+
+      // Paywalled / no free PMC text: explicit unavailable + reason.
+      const pw = results.find(r => r.id === '77777')!;
+      expect(pw.success).toBe(true);
+      const pwFt = (pw.data as any)?.sections?.fulltext;
+      expect(pwFt.status).toBe('unavailable');
+      expect(pwFt.reason).toBe('paywalled');
+      expect(pwFt.file_path).toBeUndefined();
+      expect(String(pwFt.note)).toBeTruthy();
+
+      // Nonexistent PMID: per-item error with the batch intact.
+      const missing = results.find(r => r.id === '99999999')!;
+      expect(missing.success).toBe(false);
+      expect(String(missing.error)).toMatch(/not exist in PubMed/);
+
+      // Parity invariant: every fulltext-requested item that resolved
+      // yields handle-or-unavailable.
+      for (const r of [oa, pw]) {
+        const ft = (r.data as any)?.sections?.fulltext;
+        expect(['available', 'unavailable']).toContain(ft.status);
+      }
+    } finally {
+      if (savedCache === undefined) delete process.env.BIOMCP_CACHE_DIR;
+      else process.env.BIOMCP_CACHE_DIR = savedCache;
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
+  });
+
   test('batchGet() supports patent entity with invalid-id error capture', async () => {
     const results = await batchGet([{ entity: 'patent', id: 'not-a-patent' }]);
     expect(results).toHaveLength(1);
