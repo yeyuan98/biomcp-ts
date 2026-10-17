@@ -57,10 +57,13 @@ describe('disease_get', () => {
   it('accepts the docstring UMLS CUI example (C0018794)', async () => {
     // The docstring's golden example: previously rejected with "Supported ID
     // formats: MONDO/DOID/OMIM". C0018794 resolves to the UMLS-sourced
-    // HP:0012722 document via the umls: curie fallback.
+    // HP:0012722 document (a nameless stub in mydisease), whose real name —
+    // "Heart block" — comes from MedGen enrichment (issue #100).
     const result = await retryOnRateLimit(() => harness.callTool('disease_get', { disease_id: 'C0018794' }));
     expectDiseaseGetResult(result);
     expect(result.disease_id).toBe('HP:0012722');
+    expect((result.name as string).toLowerCase()).toMatch(/heart block/);
+    expect(result.ontology).toBe('umls');
   }, 60000);
 
   it('throws for invalid disease ID', async () => {

@@ -2,6 +2,7 @@ import { connectionManager } from '../connections/manager.js';
 import { fetchWithTimeout } from '../connections/fetch-utils.js';
 import { fetchDisgenetGdaSummary } from './disgenet.js';
 import { otGenesForDisease } from './opentargets.js';
+import { parseEutilsResponse } from './eutils-utils.js';
 
 const SECTION_TIMEOUT_MS = 8000;
 
@@ -22,11 +23,13 @@ export interface DiseaseGetOptions {
 }
 
 export interface DiseaseResult {
-  name: string;
+  /** null only when a nameless UMLS stub could not be enriched (see _warning). */
+  name: string | null;
   disease_id: string;
   description?: string;
   ontology?: string;
   sections?: Record<string, unknown>;
+  _warning?: string;
 }
 
 export async function diseaseSearch(
@@ -85,6 +88,62 @@ async function resolveUmlsCui(cui: string, conn: { request: (path: string) => Pr
   return response.hits?.[0]?._id ?? null;
 }
 
+interface MedGenEsearchResponse {
+  esearchresult?: { idlist?: string[]; error?: unknown };
+}
+
+interface MedGenEsummaryDoc {
+  conceptid?: string;
+  title?: string;
+  definition?: { value?: string };
+}
+
+interface MedGenEsummaryResponse {
+  result?: { uids?: string[]; error?: unknown } & Record<string, unknown>;
+}
+
+/**
+ * Enrich a nameless mydisease UMLS stub with MedGen's preferred title and
+ * definition (issue #100): mydisease resolves some CUIs to UMLS-sourced
+ * documents that carry neither a mondo label nor a disease_ontology name
+ * (live: /disease/umls:C0018794 → {_id: "HP:0012722"}). Runs on the shared
+ * eutils connection: esearch db=medgen maps the CUI to a MedGen id, esummary
+ * returns the title. esearch matches the bare term against [All Fields], so
+ * the esummary `conceptid` must echo the input CUI — any other concept is
+ * treated as a resolution failure. Returns null on any failure; callers must
+ * not echo the input id as the disease name in that case.
+ */
+async function enrichFromMedGen(cui: string): Promise<{ name: string; description?: string } | null> {
+  try {
+    const conn = connectionManager.getConnection('eutils');
+
+    const searchQuery = new URLSearchParams({ db: 'medgen', term: cui, retmode: 'json' });
+    const searchResponse = await conn.request(`/esearch.fcgi?${searchQuery.toString()}`);
+    const searchParsed = parseEutilsResponse<MedGenEsearchResponse>(
+      searchResponse,
+      `MedGen esearch for CUI '${cui}'`
+    );
+    const medgenId = searchParsed.esearchresult?.idlist?.[0];
+    if (!medgenId) return null;
+
+    const summaryQuery = new URLSearchParams({ db: 'medgen', id: medgenId, retmode: 'json' });
+    const summaryResponse = await conn.request(`/esummary.fcgi?${summaryQuery.toString()}`);
+    const summaryParsed = parseEutilsResponse<MedGenEsummaryResponse>(
+      summaryResponse,
+      `MedGen esummary for id '${medgenId}'`
+    );
+    const doc = summaryParsed.result?.[medgenId] as MedGenEsummaryDoc | undefined;
+    if (!doc?.title) return null;
+    if (doc.conceptid !== cui) return null;
+
+    return { name: doc.title, description: doc.definition?.value };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error(`[diseaseGet] MedGen enrichment for CUI '${cui}' failed: ${msg}`);
+    return null;
+  }
+}
+
 export async function diseaseGet(
   diseaseId: string,
   sections?: string[]
@@ -102,9 +161,10 @@ export async function diseaseGet(
   // resolve to UMLS-sourced documents whose own id /disease/ will not serve
   // (live: C0018794 → HP:0012722 404s, while /disease/umls:C0018794 works).
   let lookupId = diseaseId;
+  let cui: string | undefined;
   const cuiMatch = UMLS_CUI_PATTERN.exec(diseaseId.trim());
   if (cuiMatch) {
-    const cui = cuiMatch[0].toUpperCase();
+    cui = cuiMatch[0].toUpperCase();
     try {
       lookupId = (await resolveUmlsCui(cui, conn)) ?? `umls:${cui}`;
     } catch (error) {
@@ -119,22 +179,45 @@ export async function diseaseGet(
   // often paste MONDO_0007254, and vice versa). A free-text `q=<id>` query
   // returns 0 hits for IDs, so it is not used as a fallback.
   const candidates = altCurieForm(lookupId) ? [lookupId, altCurieForm(lookupId)!] : [lookupId];
-  if (cuiMatch) {
-    const umlsCurie = `umls:${cuiMatch[0].toUpperCase()}`;
+  if (cui) {
+    const umlsCurie = `umls:${cui}`;
     if (!candidates.includes(umlsCurie)) candidates.push(umlsCurie);
   }
+  let stubWarning: string | undefined;
   for (const candidate of candidates) {
     try {
       const directResponse = await conn.request(`/disease/${encodeURIComponent(candidate)}`) as any;
       if (directResponse && directResponse._id) {
         const doData = directResponse.disease_ontology || {};
         const mondoData = directResponse.mondo || {};
-        disease = {
-          name: mondoData.label || doData.name || diseaseId,
-          diseaseid: directResponse._id || diseaseId,
-          description: doData.def || '',
-          ontology: mondoData.label ? 'mondo' : 'disease_ontology',
-        };
+        const resolvedName = (mondoData.label || doData.name) as string | undefined;
+        if (resolvedName) {
+          disease = {
+            name: resolvedName,
+            diseaseid: directResponse._id || diseaseId,
+            description: doData.def || '',
+            ontology: mondoData.label ? 'mondo' : 'disease_ontology',
+          };
+        } else {
+          // Nameless UMLS stub (issue #100): the document has neither a
+          // mondo label nor a disease_ontology name, so the old code echoed
+          // the input id as `name` and mislabeled `ontology`. Enrich from
+          // MedGen via the CUI (the document's own umls.umls when present,
+          // else the input CUI) and never echo the input id as the name.
+          const stubCui = typeof directResponse.umls?.umls === 'string'
+            ? directResponse.umls.umls.toUpperCase()
+            : cui;
+          const enriched = stubCui ? await enrichFromMedGen(stubCui) : null;
+          disease = {
+            name: enriched?.name ?? null,
+            diseaseid: directResponse._id || diseaseId,
+            description: doData.def || enriched?.description || '',
+            ontology: 'umls',
+          };
+          if (!enriched) {
+            stubWarning = `resolved to ${disease.diseaseid} via UMLS CUI ${stubCui ?? '(unknown)'} but no disease name could be retrieved`;
+          }
+        }
         break;
       }
     } catch (error) {
@@ -152,6 +235,7 @@ export async function diseaseGet(
     description: disease.description,
     ontology: disease.ontology,
   };
+  if (stubWarning) result._warning = stubWarning;
   
   const sectionsToFetch = sectionConfig.includes('all')
     ? ['gene_associations', 'phenotypes', 'pathways']
@@ -161,7 +245,7 @@ export async function diseaseGet(
     const sectionPromises = sectionsToFetch.map(section => {
       return fetchWithTimeout(async () => {
         switch (section) {
-          case 'gene_associations': return { section: 'gene_associations', data: await fetchGeneAssociations(disease.diseaseid, disease.name) };
+          case 'gene_associations': return { section: 'gene_associations', data: await fetchGeneAssociations(disease.diseaseid, disease.name ?? undefined) };
           case 'phenotypes': return { section: 'phenotypes', data: await fetchPhenotypes(disease.diseaseid) };
           case 'pathways': return { section: 'pathways', data: await fetchPathways(disease.diseaseid) };
           default: return { section, data: null };
@@ -289,7 +373,7 @@ interface MyDiseaseSearchResponse {
 }
 
 interface MyDiseaseRecord {
-  name: string;
+  name: string | null;
   diseaseid: string;
   description?: string;
   ontology?: string;
