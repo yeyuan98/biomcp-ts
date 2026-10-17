@@ -10,3 +10,6 @@ opencode.jsonc
 
 # local-only development plan docs (never committed/pushed)
 docs/development/*-PLAN.md
+
+# zcode agent workspace (local-only, never committed)
+.zcode/
