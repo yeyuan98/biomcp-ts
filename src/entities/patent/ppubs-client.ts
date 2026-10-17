@@ -46,7 +46,7 @@ function searchBody(
       q,
       queryName: q,
       userEnteredQuery: q,
-      highlights: '1',
+      highlights: '0',
       qt: 'brs',
       spellCheck: false,
       viewName: 'tile',

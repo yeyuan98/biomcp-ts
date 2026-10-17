@@ -90,6 +90,54 @@ describe('patent search transforms', () => {
     expect(app.status).toBe('application');
   });
 
+  test('transformPpubsResult strips USPTO highlight markup from titles (#103)', async () => {
+    const { transformPpubsResult } = await import('../../entities/patent/search/ppubs.js');
+    // Verbatim strings from issue #103: PPUBS wraps query-term matches in
+    // inventionTitle with highlight spans regardless of the highlights flag.
+    const clean = transformPpubsResult({
+      guid: 'US-5045843-A',
+      publicationReferenceDocumentNumber: '5045843',
+      type: 'USPAT',
+      inventionTitle:
+        'Method for simultaneous identification of differentially expressed <span term="mrnas" class="highlight18">mRNAs</span> and measurement of relative concentrations',
+    });
+    expect(clean.title).toBe(
+      'Method for simultaneous identification of differentially expressed mRNAs and measurement of relative concentrations',
+    );
+
+    // Doubled-quote variant: term=""mrna"" (malformed attribute quoting).
+    const doubled = transformPpubsResult({
+      guid: 'US-20040009577-A1',
+      publicationReferenceDocumentNumber: '20040009577',
+      type: 'US-PGPUB',
+      inventionTitle: 'IN VIVO <span term=""mrna"" class="highlight18">mRNA</span> DISPLAY',
+    });
+    expect(doubled.title).toBe('IN VIVO mRNA DISPLAY');
+
+    // Nested spans unwrap fully; whitespace runs collapse and trim.
+    const nested = transformPpubsResult({
+      guid: 'US-1111111-B2',
+      publicationReferenceDocumentNumber: '1111111',
+      type: 'USPAT',
+      inventionTitle:
+        '  <span term="mrna" class="highlight18"><span term="display" class="highlight17">mRNA  display</span></span>  methods',
+    });
+    expect(nested.title).toBe('mRNA display methods');
+
+    // Span-free titles pass through untouched.
+    const plain = transformPpubsResult({
+      guid: 'US-2222222-B2',
+      publicationReferenceDocumentNumber: '2222222',
+      type: 'USPAT',
+      inventionTitle: 'Compositions comprising synthetic polynucleotides',
+    });
+    expect(plain.title).toBe('Compositions comprising synthetic polynucleotides');
+
+    // Empty / missing titles stay as-is.
+    expect(transformPpubsResult({ type: 'USPAT' }).title).toBeUndefined();
+    expect(transformPpubsResult({ type: 'USPAT', inventionTitle: '' }).title).toBe('');
+  });
+
   test('transformOpsSearchHit parses BadgerFish biblio', async () => {
     const { transformOpsSearchHit } = await import('../../entities/patent/search/ops.js');
     const hit = transformOpsSearchHit({
@@ -981,6 +1029,65 @@ describe('patent search federation', () => {
     expect(response.patents).toEqual([]); // the hint is a warning, never a results item
     expect(response.warnings?.some(w => w.includes('bounded relevance window'))).toBe(true);
     expect(response.total_hits?.ppubs).toBe(88262);
+    gp.resetGooglePatentsBreaker();
+    (await import('../../connections/manager.js')).connectionManager.closeAll();
+  });
+
+  test('patentSearch: ppubs titles arrive span-marked and reach users clean (#103)', async () => {
+    const gp = await import('../../entities/patent/search/google-patents.js');
+    gp.resetGooglePatentsBreaker();
+    let searchBodySeen: any;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any, init?: any) => {
+      const u = String(url);
+      if (u.includes('/api/users/me/session')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'x-access-token': 'tok-1', 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ userCase: { caseId: 1 } })),
+        });
+      }
+      if (u.includes('/api/searches/searchWithBeFamily')) {
+        searchBodySeen = JSON.parse(init.body);
+        // Verbatim issue #103 markup (clean-quote and doubled-quote variants).
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({
+            patents: [
+              {
+                guid: 'US-5045843-A',
+                type: 'USPAT',
+                publicationReferenceDocumentNumber: '5045843',
+                inventionTitle:
+                  'Method for simultaneous identification of differentially expressed <span term="mrnas" class="highlight18">mRNAs</span> and measurement of relative concentrations',
+                score: 12,
+              },
+              {
+                guid: 'US-20040009577-A1',
+                type: 'US-PGPUB',
+                publicationReferenceDocumentNumber: '20040009577',
+                inventionTitle: 'IN VIVO <span term=""mrna"" class="highlight18">mRNA</span> DISPLAY',
+                score: 11,
+              },
+            ],
+            numberOfFamilies: 2,
+          })),
+        });
+      }
+      // Worldwide leg fails hard so the page is purely the ppubs results.
+      return Promise.reject(new HttpConnectionError('HTTP 503: Service Unavailable', 503));
+    }) as any;
+
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await advanceUntilSettled(patentSearch('"mRNA display"', { limit: 5 }));
+    expect(response.patents.map(p => p.title)).toEqual([
+      'Method for simultaneous identification of differentially expressed mRNAs and measurement of relative concentrations',
+      'IN VIVO mRNA DISPLAY',
+    ]);
+    // Highlights are not requested in the first place (belt-and-braces).
+    expect(searchBodySeen.query.highlights).toBe('0');
     gp.resetGooglePatentsBreaker();
     (await import('../../connections/manager.js')).connectionManager.closeAll();
   });
