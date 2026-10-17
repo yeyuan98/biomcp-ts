@@ -105,11 +105,11 @@ describe('drug_get sections', () => {
     expectDrugAdverseEventsSection(result);
   }, 90000);
 
-  it('sections=["all"] includes all seven sections incl. adverse_events', async () => {
+  it('sections=["all"] includes all six sections incl. adverse_events', async () => {
     const result = await retryOnRateLimit(() => harness.callTool('drug_get', { name: 'aspirin', sections: ['all'], limit: 5 }));
     expect(result.sections).toBeDefined();
     expect(Object.keys(result.sections).sort()).toEqual(
-      ['adverse_events', 'eu_regulatory', 'indications', 'safety', 'targets', 'us_regulatory', 'who_regulatory'].sort()
+      ['adverse_events', 'indications', 'safety', 'targets', 'us_regulatory', 'who_regulatory'].sort()
     );
     expectDrugAdverseEventsSection(result);
   }, 90000);

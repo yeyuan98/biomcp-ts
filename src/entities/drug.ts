@@ -13,7 +13,7 @@ const SECTION_TIMEOUT_MS = 8000;
  * the tool layer's limit-slicing list must stay identical to this.
  */
 export const DRUG_ENTITY_ALL_SECTIONS = [
-  'us_regulatory', 'eu_regulatory', 'who_regulatory', 'safety', 'targets', 'indications', 'adverse_events',
+  'us_regulatory', 'who_regulatory', 'safety', 'targets', 'indications', 'adverse_events',
 ] as const;
 
 export interface DrugSearchOptions {
@@ -428,12 +428,11 @@ export async function drugGet(
     ]);
 
     const sectionPromises = sectionsToFetch.map(section => {
-      return fetchWithTimeout(async () => {
+      return fetchWithTimeout(async (signal?: AbortSignal) => {
         switch (section) {
           case 'us_regulatory': return { section: 'us_regulatory', data: extractUSRegulatory(openFDALabel) };
           case 'safety': return { section: 'safety', data: extractSafety(openFDALabel) };
-          case 'eu_regulatory': return { section: 'eu_regulatory', data: await fetchEURegulatory(lookupName) };
-          case 'who_regulatory': return { section: 'who_regulatory', data: await fetchWHORegulatory(lookupName) };
+          case 'who_regulatory': return { section: 'who_regulatory', data: await fetchWHORegulatory(lookupName, signal) };
           case 'targets': return { section: 'targets', data: await fetchTargets(chemblId ?? null) };
           case 'indications': return { section: 'indications', data: await fetchIndications(chemblId ?? null) };
           case 'adverse_events': return { section: 'adverse_events', data: await fetchAdverseEvents(lookupName, limit) };
@@ -573,12 +572,233 @@ function extractSafety(results: OpenFDAResponse['results'] | null): { box_warnin
   };
 }
 
-async function fetchEURegulatory(_drugName: string): Promise<{ authorized?: boolean; url?: string }> {
-  return { authorized: false };
+// ---------------------------------------------------------------------------
+// WHO Prequalification lookup (who_regulatory)
+//
+// eu_regulatory was REMOVED (issue #135 / tracked for re-adding in #138): it
+// was a hardcoded `{ authorized: false }` stub — no lookup ever ran — and no
+// trustworthy free EMA data path exists today (API hosts are NXDOMAIN; the
+// nightly bulk XLSX is bot-blocked from datacenter IPs). who_regulatory was
+// the same kind of fake false and is now a real lookup below.
+// ---------------------------------------------------------------------------
+
+/**
+ * Official anonymous CSV export of WHO-prequalified finished pharmaceutical
+ * products (live-verified 2026-10-17: ~655 rows, no auth, no key). Columns:
+ * `WHO Reference Number`, `INN, Dosage Form and Strength`, `Product Type`,
+ * `Therapeutic Area`, `Applicant`, `Dosage Form`, `Basis of Listing`,
+ * `Date of Prequalification`. Several columns (including the header itself)
+ * contain commas inside quoted fields, so parsing must be quote-aware.
+ */
+const WHO_PQ_CSV_URL =
+  'https://extranet.who.int/prequal/medicines/prequalified/finished-pharmaceutical-products/export?page&_format=csv';
+
+/** The listing changes slowly; re-fetch at most once per 24h per process. */
+const WHO_PQ_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+export interface WhoPqProduct {
+  who_ref: string;
+  inn_form: string;
+  applicant?: string;
+  date?: string;
 }
 
-async function fetchWHORegulatory(_drugName: string): Promise<{ prequalified?: boolean; url?: string }> {
-  return { prequalified: false };
+export interface WHORegulatoryResult {
+  prequalified: boolean;
+  /** Matching PQ products; `[]` on a true negative, absent on failure. */
+  products?: WhoPqProduct[];
+  /** Scope note attached to a true negative (name simply not PQ-listed). */
+  note?: string;
+  /** True only when the lookup itself failed — never a confident false. */
+  unavailable?: boolean;
+  _error?: string;
+  source?: string;
+}
+
+/** Module-level cache: { fetchedAt, rows } — no disk cache needed (simple,
+ * adequate for a slowly-changing ~650-row listing). `whoPqInFlight` dedupes
+ * concurrent cold fetches. */
+let whoPqCache: { fetchedAt: number; rows: string[][] } | null = null;
+let whoPqInFlight: Promise<string[][]> | null = null;
+
+export function resetWhoPqCacheForTests(): void {
+  whoPqCache = null;
+  whoPqInFlight = null;
+}
+
+/**
+ * Minimal RFC-4180-style CSV parser (no dependencies): double-quoted fields,
+ * `""` escapes, commas/line breaks inside quotes, tolerant of CRLF and a
+ * leading BOM. A final line without a trailing newline is still emitted.
+ */
+function parseCsv(text: string): string[][] {
+  const clean = text.replace(/^\uFEFF/, '');
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let inQuotes = false;
+  for (let i = 0; i < clean.length; i++) {
+    const c = clean[i]!;
+    if (inQuotes) {
+      if (c === '"') {
+        if (clean[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else {
+        field += c;
+      }
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === ',') {
+      row.push(field);
+      field = '';
+    } else if (c === '\n') {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+    } else if (c !== '\r') {
+      field += c;
+    }
+  }
+  if (field !== '' || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows;
+}
+
+/**
+ * Extract the candidate INN lead-phrases (lowercased) from an
+ * `INN, Dosage Form and Strength` value such as
+ * "Artemether/Lumefantrine Tablet 20mg/120mg",
+ * "Abacavir (sulfate) Solution, Oral 20mg/ml", or
+ * "Dolutegravir (sodium) Tablet, Film-coated 50mg".
+ *
+ * Rule (chosen against the live export's real value shapes):
+ *  1. Cut at the FIRST comma — sub-form qualifiers (", Oral", ", hard",
+ *     ", Film-coated") always sit after it; the INN always sits before.
+ *  2. Split on "/" — fixed-dose combos separate their INNs with slashes
+ *     ("Artemether/Lumefantrine"); strength fragments ("120mg") split off
+ *     here too and are dropped by step 3.
+ *  3. Keep each fragment's LEADING run of purely alphabetic words — a salt
+ *     marker ("(sulfate)", "(sodium)") or a strength ("20mg") is the first
+ *     non-alpha token and ends the run; dosage-form words ("Tablet",
+ *     "Solution") may trail the run and are handled by the caller's
+ *     leading-token-run match.
+ */
+export function innLeadPhrases(innFormValue: string): string[] {
+  const head = (innFormValue.split(',')[0] ?? innFormValue).trim();
+  const phrases: string[] = [];
+  for (const fragment of head.split('/')) {
+    const words: string[] = [];
+    for (const token of fragment.trim().split(/\s+/)) {
+      if (!/^[A-Za-z][A-Za-z-]*$/.test(token)) break;
+      words.push(token);
+    }
+    if (words.length > 0) phrases.push(words.join(' ').toLowerCase());
+  }
+  return phrases;
+}
+
+/**
+ * Parse the header row into lowercase trimmed names and resolve the column
+ * indices we read. Returns null when the expected columns are absent — the
+ * caller treats that as a non-CSV response (e.g. an HTML error page).
+ */
+function whoPqColumns(headerRow: string[] | undefined): {
+  refI: number; innI: number; applicantI: number; dateI: number;
+} | null {
+  const header = (headerRow ?? []).map(c => c.trim().toLowerCase());
+  const refI = header.indexOf('who reference number');
+  const innI = header.findIndex(c => c.startsWith('inn'));
+  if (refI < 0 || innI < 0) return null;
+  return {
+    refI,
+    innI,
+    applicantI: header.indexOf('applicant'),
+    dateI: header.indexOf('date of prequalification'),
+  };
+}
+
+async function loadWhoPqRows(signal?: AbortSignal): Promise<string[][]> {
+  if (whoPqCache && Date.now() - whoPqCache.fetchedAt < WHO_PQ_CACHE_TTL_MS) {
+    return whoPqCache.rows;
+  }
+  if (whoPqInFlight) return whoPqInFlight;
+  whoPqInFlight = (async () => {
+    const response = await fetch(WHO_PQ_CSV_URL, { signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const rows = parseCsv(await response.text());
+    // Shape sniff before caching: the official export's header names both key
+    // columns. Anything else (a proxied error page, a redirect body) is a
+    // fetch failure, never a zero-match "false".
+    if (!whoPqColumns(rows[0])) throw new Error('response is not the WHO PQ CSV export');
+    whoPqCache = { fetchedAt: Date.now(), rows };
+    return rows;
+  })();
+  try {
+    return await whoPqInFlight;
+  } finally {
+    whoPqInFlight = null;
+  }
+}
+
+/**
+ * WHO Prequalification status for a drug name.
+ *
+ * Scope: WHO PQ LISTING only (~650 global-health priority products across
+ * HIV/TB/malaria/reproductive health) — it is not a general "approved
+ * anywhere" registry. Honest semantics both ways: a negative for a name that
+ * simply is not in the list carries a scope note, and a failed lookup
+ * returns `{ prequalified: false, unavailable: true, _error, source: 'who' }`
+ * instead of a fake confident false. Never throws.
+ */
+export async function fetchWHORegulatory(drugName: string, signal?: AbortSignal): Promise<WHORegulatoryResult> {
+  const query = stripSaltSuffixTokens(drugName.trim().toLowerCase());
+  try {
+    const rows = await loadWhoPqRows(signal);
+    const cols = whoPqColumns(rows[0]);
+    if (!cols) throw new Error('unexpected CSV layout');
+    const { refI, innI, applicantI, dateI } = cols;
+
+    const products: WhoPqProduct[] = [];
+    for (const row of rows.slice(1)) {
+      const innForm = (row[innI] ?? '').trim();
+      // Case-insensitive leading-token-run match: the query equals a lead
+      // phrase or is a leading whole-word prefix of one ("lumefantrine"
+      // matches "Lumefantrine Tablet"; "tenofovir disoproxil fumarate"
+      // matches "Tenofovir disoproxil fumarate Tablet"). Trailing salt
+      // tokens on the query were stripped above ("dolutegravir sodium" ->
+      // "dolutegravir" matches "Dolutegravir (sodium) Tablet").
+      const matched = innLeadPhrases(innForm).some(
+        p => p === query || p.startsWith(`${query} `)
+      );
+      if (!matched) continue;
+      const applicant = applicantI >= 0 ? (row[applicantI] ?? '').trim() : '';
+      const date = dateI >= 0 ? (row[dateI] ?? '').replace(/\s+/g, ' ').trim() : '';
+      products.push({
+        who_ref: (row[refI] ?? '').trim(),
+        inn_form: innForm,
+        applicant: applicant || undefined,
+        date: date || undefined,
+      });
+    }
+
+    if (products.length > 0) return { prequalified: true, products };
+    return {
+      prequalified: false,
+      products: [],
+      note: 'Not WHO-prequalified; WHO PQ covers ~650 global-health priority products (HIV/TB/malaria/reproductive health).',
+    };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return {
+      prequalified: false,
+      unavailable: true,
+      _error: `WHO PQ lookup failed: ${msg}. Usually transient — retry later.`,
+      source: 'who',
+    };
+  }
 }
 
 async function resolveDrugChemblId(drugName: string): Promise<string | null> {

@@ -38,7 +38,7 @@ jest.mock('../../entities/drug.js', () => mockLoudModule('entities/drug', {
   drugGet: jest.fn(),
   // Mirrors DRUG_ENTITY_ALL_SECTIONS from src/entities/drug.ts (schema constant).
   DRUG_ENTITY_ALL_SECTIONS: [
-    'us_regulatory', 'eu_regulatory', 'who_regulatory', 'safety', 'targets', 'indications', 'adverse_events',
+    'us_regulatory', 'who_regulatory', 'safety', 'targets', 'indications', 'adverse_events',
   ],
   DrugSearchResult: undefined,
   DrugResult: undefined,

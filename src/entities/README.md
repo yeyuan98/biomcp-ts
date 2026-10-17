@@ -125,8 +125,7 @@ transformMyChemResponse(data: Record<string, unknown>): DrugResult
 | Section | Upstream API | Auth | Notes |
 |---------|-------------|------|-------|
 | `us_regulatory` | OpenFDA | None | FDA label data (approval status, NDC codes, brand name) |
-| `eu_regulatory` | — | — | **Stub**: always returns `{ authorized: false }` |
-| `who_regulatory` | — | — | **Stub**: always returns `{ prequalified: false }` |
+| `who_regulatory` | WHO Prequalification extranet (CSV export) | None | Real lookup against the official PQ listing (~650 global-health priority products). `prequalified:false` means not PQ-listed (with a scope note) — not banned or unapproved anywhere; fetch failures return `unavailable:true` + `_error` instead of a fake false. (An `eu_regulatory` section was removed — hardcoded stub, no trustworthy free EMA data path; re-adding it is tracked in #138.) |
 | `safety` | OpenFDA | None | Box warnings, warnings, adverse reactions from drug label |
 | `targets` | OpenTargets (GraphQL) | None | Fetches mechanisms of action with gene targets using the resolved `chembl_id` directly (falls back to OpenTargets search when absent) |
 | `indications` | OpenTargets (GraphQL) | None | Drug indications with max clinical stage, using the resolved `chembl_id` directly (falls back to OpenTargets search when absent) |
