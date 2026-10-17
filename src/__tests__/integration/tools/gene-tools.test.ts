@@ -67,12 +67,40 @@ describe('gene_search', () => {
     const results = await retryOnRateLimit(() => harness.callTool('gene_search', { query: 'ribosomal protein', chromosome: 'Y', limit: 10 }));
     expectGeneSearchResult(results);
     expect(results.length).toBeGreaterThan(0);
-    // mygene /query has no `chr` param — the filter rides in q as a genome-
-    // interval clause, so every returned row must map to chromosome Y
-    // (multi-mapping PAR genes display the Y coordinates).
+    // The chromosome filter is client-side (an interval clause in q would
+    // make mygene drop the text query, issue #98), so every returned row
+    // must map to chromosome Y (multi-mapping PAR genes display the Y
+    // coordinates).
     for (const r of results) {
       expect((r as Record<string, any>).genomic_coordinates?.chromosome).toBe('Y');
     }
+  }, 60000);
+
+  it('chromosome filter no longer drops the text query: BRAF on chr7 (issue #98)', async () => {
+    // Regression: `q=BRAF AND chr7:1-999999999` made mygene discard the
+    // BRAF clause entirely (0 results). With client-side filtering the top
+    // relevance hit for BRAF survives the chr7 filter.
+    const results = await retryOnRateLimit(() => harness.callTool('gene_search', { query: 'BRAF', chromosome: '7' }));
+    expectGeneSearchResult(results);
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].symbol).toBe('BRAF');
+    expect((results[0] as Record<string, any>).genomic_coordinates?.chromosome).toBe('7');
+  }, 60000);
+
+  it('chromosome filter excludes non-mapping genes: BRAF is not on chr17 (issue #98)', async () => {
+    const results = await retryOnRateLimit(() => harness.callTool('gene_search', { query: 'BRAF', chromosome: '17' }));
+    expectGeneSearchResult(results);
+    expect(results.length).toBe(0);
+  }, 60000);
+
+  it('single-token prefix fallback: BRCA returns BRCA1 and BRCA2 (issue #99)', async () => {
+    // mygene's dismax is exact-token only: q=BRCA returns 0 hits upstream;
+    // the symbol:BRCA* retry must surface the prefixed symbols.
+    const results = await retryOnRateLimit(() => harness.callTool('gene_search', { query: 'BRCA' }));
+    expectGeneSearchResult(results);
+    const symbols = results.map((r: any) => r.symbol);
+    expect(symbols).toContain('BRCA1');
+    expect(symbols).toContain('BRCA2');
   }, 60000);
 });
 

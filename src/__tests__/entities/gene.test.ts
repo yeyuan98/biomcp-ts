@@ -77,43 +77,73 @@ describe('geneSearch with options', () => {
     connectionManager.closeAll();
   });
 
-  test('geneSearch() appends the chromosome filter as a genome-interval clause in q', async () => {
-    // mygene's /query has no `chr` URL param (it is silently ignored), so the
-    // filter must ride inside the q string: `TP53 AND chr17:1-999999999`.
+  test('geneSearch() sends the plain query and filters hits client-side on genomic_pos.chr', async () => {
+    // Issue #98: mygene's q parser DISCARDS the text query whenever a
+    // genomic-interval clause (chrN:start-end) rides along in q, so the
+    // chromosome filter must never be sent upstream — hits are post-filtered
+    // on genomic_pos.chr (object OR array shaped) instead.
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ hits: [] }),
+      json: () => Promise.resolve({
+        hits: [
+          { symbol: 'BRAF', name: 'B-Raf proto-oncogene', entrezgene: 673, genomic_pos: { chr: '7', start: 140719327, end: 140924929 } },
+          { symbol: 'TP53', name: 'Tumor protein p53', entrezgene: 7157, genomic_pos: { chr: '17', start: 7661779, end: 7687538 } },
+          // Multi-mapping (PAR-style) array without a chr7 entry — dropped.
+          { symbol: 'PARGENE', name: 'PAR gene', entrezgene: 1, genomic_pos: [{ chr: 'X', start: 1, end: 2 }, { chr: 'Y', start: 3, end: 4 }] },
+          // Array-shaped genomic_pos including chr7 — kept, and the row
+          // shows the chr7 coordinates (preferChromosome).
+          { symbol: 'ARRAY7', name: 'Alt contig gene', entrezgene: 2, genomic_pos: [{ chr: '3', start: 5, end: 6 }, { chr: '7', start: 7, end: 8 }] },
+          // No genomic_pos at all — dropped.
+          { symbol: 'MIR123', name: 'microRNA 123', entrezgene: 100000 },
+        ],
+      }),
     }) as any;
 
-    await geneSearch('TP53', { chromosome: '17' });
+    const results = await geneSearch('BRAF', { chromosome: '7' });
 
+    // The plain text query rides alone in q (never an interval clause), and
+    // the filtered scan pages upstream with size=100 from=0 — limit/offset
+    // apply to the FILTERED list, not to the upstream request.
     const callUrl = (global.fetch as any).mock.calls[0][0] as string;
-    const queryParam = new URL(callUrl).searchParams.get('q') || '';
-    expect(queryParam).toContain('TP53');
-    expect(queryParam).toContain('chr17:1-999999999');
-    // The broken form (a `chr` URL param, silently ignored by mygene) is gone.
-    expect(new URL(callUrl).searchParams.get('chr')).toBeNull();
+    const url = new URL(callUrl);
+    expect(url.searchParams.get('q')).toBe('BRAF');
+    expect(url.searchParams.get('size')).toBe('100');
+    expect(url.searchParams.get('from')).toBe('0');
+
+    expect(results.map(r => r.symbol)).toEqual(['BRAF', 'ARRAY7']);
+    expect(results[0].genomic_coordinates).toEqual({ chromosome: '7', start: 140719327, end: 140924929 });
+    expect(results[1].genomic_coordinates).toEqual({ chromosome: '7', start: 7, end: 8 });
   });
 
-  test('geneSearch() normalizes chromosome input (prefix, case, M→MT) into the interval clause', async () => {
+  test('geneSearch() normalizes chromosome input (prefix, case, M→MT) for the client-side filter', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ hits: [] }),
+      json: () => Promise.resolve({
+        hits: [
+          { symbol: 'G17', name: 'Gene 17', entrezgene: 101, genomic_pos: { chr: '17', start: 1, end: 2 } },
+          { symbol: 'G7', name: 'Gene 7', entrezgene: 102, genomic_pos: { chr: '7', start: 3, end: 4 } },
+          { symbol: 'GX', name: 'Gene X', entrezgene: 103, genomic_pos: { chr: 'X', start: 5, end: 6 } },
+          { symbol: 'GMT', name: 'Gene MT', entrezgene: 104, genomic_pos: { chr: 'MT', start: 7, end: 8 } },
+        ],
+      }),
     }) as any;
 
-    const cases: Array<[string, string]> = [
-      ['chr17', 'chr17:1-999999999'],
-      ['CHR7', 'chr7:1-999999999'],
-      ['x', 'chrX:1-999999999'],
-      ['M', 'chrMT:1-999999999'], // mygene keys mitochondrial as MT (chrM: 0 hits, live)
-      ['MT', 'chrMT:1-999999999'],
+    const cases: Array<[string, string, string]> = [
+      ['chr17', '17', 'G17'],
+      ['CHR7', '7', 'G7'],
+      ['x', 'X', 'GX'],
+      ['M', 'MT', 'GMT'], // mygene keys mitochondrial as MT
+      ['MT', 'MT', 'GMT'],
     ];
-    for (const [input, expected] of cases) {
+    for (const [input, expectedChr, expectedSymbol] of cases) {
       (global.fetch as any).mockClear();
-      await geneSearch('BRAF', { chromosome: input });
+      const results = await geneSearch('BRAF', { chromosome: input });
+      // q stays the plain query — the normalized chromosome only feeds the
+      // client-side filter value.
       const callUrl = (global.fetch as any).mock.calls[0][0] as string;
-      const queryParam = new URL(callUrl).searchParams.get('q') || '';
-      expect(queryParam).toContain(expected);
+      expect(new URL(callUrl).searchParams.get('q')).toBe('BRAF');
+      expect(results.map(r => r.symbol)).toEqual([expectedSymbol]);
+      expect(results[0].genomic_coordinates?.chromosome).toBe(expectedChr);
     }
   });
 
@@ -259,33 +289,34 @@ describe('geneSearch genomic_pos transformation', () => {
     });
   });
 
-  test('geneSearch() with chromosome filter passes the mocked response through and lands the clause in q', async () => {
+  test('geneSearch() with chromosome filter keeps only matching rows from the plain-query response', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
-        hits: [{
-          symbol: 'RPS4Y1',
-          name: 'Ribosomal protein S4 Y-linked 1',
-          entrezgene: 6192,
-          genomic_pos: { chr: 'Y', start: 2714846, end: 2717537 },
-        }],
+        hits: [
+          { symbol: 'RPS4Y1', name: 'Ribosomal protein S4 Y-linked 1', entrezgene: 6192, genomic_pos: { chr: 'Y', start: 2714846, end: 2717537 } },
+          { symbol: 'RPS4X', name: 'Ribosomal protein S4 X-linked', entrezgene: 6191, genomic_pos: { chr: 'X', start: 1, end: 2 } },
+          // Multi-mapping hit: kept because one mapping is on Y, and the row
+          // displays the Y coordinates.
+          { symbol: 'PARGENE', name: 'PAR gene', entrezgene: 1, genomic_pos: [{ chr: 'X', start: 3, end: 4 }, { chr: 'Y', start: 111, end: 222 }] },
+          { symbol: 'NOPOS', name: 'No mapping', entrezgene: 2 },
+        ],
       }),
     }) as any;
 
     const results = await geneSearch('ribosomal protein', { chromosome: 'Y' });
 
-    // The chromosome clause lands in the q string (URL-decoded)…
+    // The plain query rides alone in q (URL-decoded)…
     const callUrl = (global.fetch as any).mock.calls[0][0] as string;
-    const queryParam = new URL(callUrl).searchParams.get('q') || '';
-    expect(queryParam).toBe('ribosomal protein AND chrY:1-999999999');
-    // …and the mocked mygene response is transformed and passed through.
-    expect(results).toHaveLength(1);
-    expect(results[0].symbol).toBe('RPS4Y1');
+    expect(new URL(callUrl).searchParams.get('q')).toBe('ribosomal protein');
+    // …and only Y-mapped rows survive the client-side filter.
+    expect(results.map(r => r.symbol)).toEqual(['RPS4Y1', 'PARGENE']);
     expect(results[0].genomic_coordinates).toEqual({
       chromosome: 'Y',
       start: 2714846,
       end: 2717537,
     });
+    expect(results[1].genomic_coordinates).toEqual({ chromosome: 'Y', start: 111, end: 222 });
   });
 
   test('geneSearch() handles result without genomic_pos', async () => {
@@ -346,6 +377,215 @@ describe('geneSearch genomic_pos transformation', () => {
 
     expect(results).toHaveLength(1);
     expect(results[0].uniprot_id).toBe('P04637');
+  });
+});
+
+// ============================================================
+// geneSearch chromosome-filter upstream paging (issue #98)
+// ============================================================
+describe('geneSearch chromosome-filter paging', () => {
+  mockGlobalFetch();
+
+  /** A page of filler hits all mapping to `chr` (no chr7 matches). */
+  function fillerHits(count: number, chr: string): Array<Record<string, unknown>> {
+    return Array.from({ length: count }, (_, i) => ({
+      symbol: `FILLER${i}`,
+      name: `Filler gene ${i}`,
+      entrezgene: 900000 + i,
+      genomic_pos: { chr, start: 1000 + i, end: 2000 + i },
+    }));
+  }
+
+  function replyWith(pages: Record<string, Array<Record<string, unknown>>>) {
+    return jest.fn<(...args: any[]) => any>().mockImplementation((input: any) => {
+      const from = parseMockUrl(input).searchParams.get('from') || '0';
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ hits: pages[from] || [] }),
+      });
+    }) as any;
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    connectionManager.closeAll();
+  });
+
+  test('pages upstream (size=100) until enough filtered rows are collected', async () => {
+    // Page 1 is a FULL page (100 hits) with one chr7 match — not enough for
+    // limit=3, so the scan must fetch page 2 (from=100) and merge.
+    const pages: Record<string, Array<Record<string, unknown>>> = {
+      '0': [
+        { symbol: 'MATCH1', name: 'Match 1', entrezgene: 1, genomic_pos: { chr: '7', start: 11, end: 12 } },
+        ...fillerHits(99, '1'),
+      ],
+      '100': [
+        { symbol: 'MATCH2', name: 'Match 2', entrezgene: 2, genomic_pos: { chr: '7', start: 21, end: 22 } },
+        { symbol: 'MATCH3', name: 'Match 3', entrezgene: 3, genomic_pos: { chr: '7', start: 31, end: 32 } },
+        ...fillerHits(98, '1'),
+      ],
+    };
+    global.fetch = replyWith(pages);
+
+    const results = await geneSearch('kinase', { chromosome: '7', limit: 3 });
+
+    expect((global.fetch as any).mock.calls).toHaveLength(2);
+    const urls = (global.fetch as any).mock.calls.map((c: any[]) => new URL(c[0] as string));
+    expect(urls[0].searchParams.get('from')).toBe('0');
+    expect(urls[1].searchParams.get('from')).toBe('100');
+    expect(urls[0].searchParams.get('size')).toBe('100');
+    // Relevance order is preserved across the merged pages.
+    expect(results.map(r => r.symbol)).toEqual(['MATCH1', 'MATCH2', 'MATCH3']);
+    expect(results.map(r => r.genomic_coordinates?.chromosome)).toEqual(['7', '7', '7']);
+  });
+
+  test('stops paging on a short upstream page without a truncation warning', async () => {
+    // Page 2 is short (50 hits): upstream ran out of hits, so the scan is
+    // complete even though fewer than `limit` rows were gathered — no fetch
+    // beyond page 2, no _warning.
+    const pages: Record<string, Array<Record<string, unknown>>> = {
+      '0': fillerHits(100, '1'),
+      '100': [
+        { symbol: 'MATCH1', name: 'Match 1', entrezgene: 1, genomic_pos: { chr: '7', start: 11, end: 12 } },
+        ...fillerHits(49, '1'),
+      ],
+    };
+    global.fetch = replyWith(pages);
+
+    const results = await geneSearch('kinase', { chromosome: '7' });
+
+    expect((global.fetch as any).mock.calls).toHaveLength(2);
+    expect(results.map(r => r.symbol)).toEqual(['MATCH1']);
+    expect(results[0]._warning).toBeUndefined();
+  });
+
+  test('warns when the 3-page scan cap exhausts before enough filtered rows', async () => {
+    // Three FULL pages with only two chr7 matches in total: the bounded scan
+    // window (top ~300 relevance hits) is exhausted → every returned row
+    // carries a _warning disclosing possibly-incomplete results.
+    const pages: Record<string, Array<Record<string, unknown>>> = {
+      '0': [
+        { symbol: 'MATCH1', name: 'Match 1', entrezgene: 1, genomic_pos: { chr: '7', start: 11, end: 12 } },
+        ...fillerHits(99, '1'),
+      ],
+      '100': fillerHits(100, '1'),
+      '200': [
+        { symbol: 'MATCH2', name: 'Match 2', entrezgene: 2, genomic_pos: { chr: '7', start: 21, end: 22 } },
+        ...fillerHits(99, '1'),
+      ],
+    };
+    global.fetch = replyWith(pages);
+
+    const results = await geneSearch('kinase', { chromosome: '7' });
+
+    expect((global.fetch as any).mock.calls).toHaveLength(3);
+    expect(results.map(r => r.symbol)).toEqual(['MATCH1', 'MATCH2']);
+    for (const row of results) {
+      expect(row._warning).toMatch(/may be incomplete[\s\S]*scan window[\s\S]*exhausted/);
+    }
+    // Every upstream fetch carried the plain query — no interval clause and
+    // no symbol fallback (the initial search was non-empty).
+    for (const c of (global.fetch as any).mock.calls) {
+      expect(new URL(c[0] as string).searchParams.get('q')).toBe('kinase');
+    }
+  });
+});
+
+// ============================================================
+// geneSearch 0-hit single-token prefix fallback (issue #99)
+// ============================================================
+describe('geneSearch prefix fallback (issue #99)', () => {
+  mockGlobalFetch();
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    connectionManager.closeAll();
+  });
+
+  test('retries once with symbol:<token>* when a single-token query returns 0 hits', async () => {
+    // mygene's dismax is exact-token only: q=BRCA → 0 hits, while
+    // symbol:BRCA* prefix-matches BRCA1/BRCA2/... case-insensitively.
+    let callIndex = 0;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
+      callIndex++;
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(callIndex === 1
+          ? { hits: [] }
+          : {
+            hits: [
+              { symbol: 'BRCA1', name: 'BRCA1 DNA repair', entrezgene: 672, genomic_pos: { chr: '17', start: 43044295, end: 43125370 } },
+              { symbol: 'BRCA2', name: 'BRCA2 DNA repair', entrezgene: 675, genomic_pos: { chr: '13', start: 32315086, end: 32400266 } },
+            ],
+          }),
+      });
+    }) as any;
+
+    const results = await geneSearch('BRCA');
+
+    expect((global.fetch as any).mock.calls).toHaveLength(2);
+    const urls = (global.fetch as any).mock.calls.map((c: any[]) => new URL(c[0] as string));
+    expect(urls[0].searchParams.get('q')).toBe('BRCA');
+    expect(urls[1].searchParams.get('q')).toBe('symbol:BRCA*');
+    expect(results.map(r => r.symbol)).toEqual(['BRCA1', 'BRCA2']);
+  });
+
+  test('does not retry for multi-word queries (exactly one fetch)', async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ hits: [] }),
+    }) as any;
+
+    const results = await geneSearch('dna repair gene');
+
+    expect((global.fetch as any).mock.calls).toHaveLength(1);
+    expect(results).toEqual([]);
+  });
+
+  test('escapes Lucene specials in the fallback token', async () => {
+    let callIndex = 0;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
+      callIndex++;
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(callIndex === 1
+          ? { hits: [] }
+          : { hits: [{ symbol: 'BRCA1', name: 'BRCA1 DNA repair' }] }),
+      });
+    }) as any;
+
+    await geneSearch('BRCA1/2');
+
+    const urls = (global.fetch as any).mock.calls.map((c: any[]) => new URL(c[0] as string));
+    expect(urls[1].searchParams.get('q')).toBe('symbol:BRCA1\\/2*');
+  });
+
+  test('applies the chromosome post-filter to fallback results too', async () => {
+    let callIndex = 0;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
+      callIndex++;
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(callIndex === 1
+          ? { hits: [] } // plain q=KRAS: 0 upstream hits
+          : {
+            hits: [
+              { symbol: 'KRAS', name: 'KRAS proto-oncogene', entrezgene: 3845, genomic_pos: { chr: '7', start: 140719327, end: 140924929 } },
+              { symbol: 'KRASP8', name: 'KRAS pseudogene 8', entrezgene: 1, genomic_pos: { chr: '8', start: 1, end: 2 } },
+              { symbol: 'NOMATCH', name: 'No mapping', entrezgene: 2 },
+            ],
+          }),
+      });
+    }) as any;
+
+    const results = await geneSearch('KRAS', { chromosome: '7' });
+
+    const urls = (global.fetch as any).mock.calls.map((c: any[]) => new URL(c[0] as string));
+    expect((global.fetch as any).mock.calls).toHaveLength(2);
+    expect(urls[0].searchParams.get('q')).toBe('KRAS');
+    expect(urls[1].searchParams.get('q')).toBe('symbol:KRAS*');
+    expect(results.map(r => r.symbol)).toEqual(['KRAS']);
+    expect(results[0].genomic_coordinates?.chromosome).toBe('7');
   });
 });
 
