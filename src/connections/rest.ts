@@ -7,6 +7,7 @@ import {
 import { VERSION } from '../version.js';
 import { TokenBucketRateLimiter, RateLimiterFactory } from './rate-limiter.js';
 import { withRetry, isRetryableError } from './retry.js';
+import { getSourceSemaphore } from './concurrency.js';
 import { HttpConnectionError } from './errors.js';
 
 /**
@@ -142,7 +143,9 @@ export class RestConnection implements IConnection<string, unknown> {
   }
   
   async request(path: string, _variables?: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<unknown> {
-    return this.withSourceRetry(() => this.requestOnce(path, options));
+    return this.withSourceRetry(() =>
+      this.withSourceConcurrency(() => this.requestOnce(path, options))
+    );
   }
 
   private async requestOnce(path: string, options?: { signal?: AbortSignal }): Promise<unknown> {
@@ -250,7 +253,9 @@ export class RestConnection implements IConnection<string, unknown> {
   /** `body` may be a plain string — sent verbatim as text/plain (e.g. Reactome
    *  AnalysisService identifier posts); objects are sent as JSON. */
   async post(path: string, body: Record<string, unknown> | string, options?: { signal?: AbortSignal }): Promise<unknown> {
-    return this.withSourceRetry(() => this.postOnce(path, body, options));
+    return this.withSourceRetry(() =>
+      this.withSourceConcurrency(() => this.postOnce(path, body, options))
+    );
   }
 
   private async postOnce(path: string, body: Record<string, unknown> | string, options?: { signal?: AbortSignal }): Promise<unknown> {
@@ -323,8 +328,22 @@ export class RestConnection implements IConnection<string, unknown> {
     return withRetry(fn, {
       maxRetries: Math.max((retry.attempts ?? 2) - 1, 0),
       baseDelayMs: retry.backoffMs ?? 1000,
+      maxTotalMs: this.options.retryBudgetMs,
       logger: { warn: (msg: string) => console.warn(`[${this.sourceId}] ${msg}`) },
     });
+  }
+
+  /**
+   * Acquire the source's concurrency slot around ONE attempt (rate-limit
+   * wait + fetch + body read). Chosen over wrapping the whole withRetry
+   * call so retry backoff sleeps never hold a slot and a queued retry
+   * re-enters at the back of the FIFO. No-op unless the registry sets
+   * `concurrency` for the source (#107).
+   */
+  private withSourceConcurrency<T>(fn: () => Promise<T>): Promise<T> {
+    const limit = this.options.concurrency;
+    if (!limit || limit < 1) return fn();
+    return getSourceSemaphore(this.sourceId, limit).run(fn);
   }
 
   private throwIfUnexpectedRedirect(response: Response, url: string): void {
