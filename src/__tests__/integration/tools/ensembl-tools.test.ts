@@ -129,6 +129,47 @@ describe('ensembl tools (integration)', () => {
     }
   }, 60000);
 
+  // Issue #104 repro: this exact call used to issue one combined
+  // gene+variation sweep (~95k rows / 23 MB, 26-28 s upstream) that timed
+  // out on every attempt — 46-52 s wall clock, then TimeoutError. With the
+  // split legs + 50 kb variation cap it must complete well inside that.
+  it('ensembl_region completes the issue #104 repro (250kb BRAF span, gene+variation)', async () => {
+    const t0 = Date.now();
+    const result = await retryOnRateLimit(() =>
+      harness.callTool(
+        'ensembl_region',
+        { region: '7:140700000-140950000', features: ['gene', 'variation'], limit: 20 },
+        { timeoutMs: 90000 }
+      )
+    );
+    const elapsedMs = Date.now() - t0;
+
+    expect(result.total).toBeGreaterThan(0);
+    expect(result.features.length).toBeGreaterThan(0);
+    const symbols = result.features.map((f: any) => f.symbol);
+    expect(symbols).toContain('BRAF');
+    // Variation was capped to the centered 50 kb window and the result says so.
+    expect(result.effective_variation_window).toEqual({ chr: '7', start: 140800000, end: 140849999 });
+    expect(result.variation_truncated).toContain('7:140800000-140849999');
+    // The old failure mode burned 46-52 s before erroring; the fixed call
+    // (variation leg ≈ 17 s worst case + parallel gene leg) must beat that
+    // even with one retry after a transient upstream 500.
+    expect(elapsedMs).toBeLessThan(90_000);
+  }, 120000);
+
+  it('ensembl_region queries variation for the full span below the 50kb cap', async () => {
+    const result = await retryOnRateLimit(() =>
+      harness.callTool('ensembl_region', {
+        region: '7:140450000-140470000',
+        features: ['gene', 'variation'],
+        limit: 20,
+      })
+    );
+    expect(result.total).toBeGreaterThan(0);
+    expect(result.effective_variation_window).toEqual({ chr: '7', start: 140450000, end: 140470000 });
+    expect(result.variation_truncated).toBeUndefined();
+  }, 60000);
+
   it('ensembl_region rejects malformed regions', async () => {
     await expect(
       harness.callTool('ensembl_region', { region: 'bogus' })
