@@ -158,11 +158,14 @@ describe('gtex tools', () => {
     expect(result.associations[0].p_value).toBe(1.2e-12);
   });
 
-  it('gtex_eqtl rejects an unknown tissueSiteDetailId with isError', async () => {
+  it('gtex_eqtl surfaces an unknown tissueSiteDetailId as the structured _error envelope', async () => {
     mockFetchRoutes(defaultRoutes());
 
-    await expect(harness.callTool('gtex_eqtl', { gene: 'TP53', tissue: 'Not_A_Tissue' })).rejects.toThrow(
-      /Invalid tissue 'Not_A_Tissue'/
-    );
+    // Since #132 upstream/validation failures return the house envelope
+    // {_error, source, retryable} as tool data instead of a raw throw.
+    const result = (await harness.callTool('gtex_eqtl', { gene: 'TP53', tissue: 'Not_A_Tissue' })) as any;
+
+    expect(result).toMatchObject({ source: 'gtex', retryable: false });
+    expect(result._error).toMatch(/Invalid tissue 'Not_A_Tissue'/);
   });
 });

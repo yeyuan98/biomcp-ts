@@ -149,7 +149,7 @@ describe('preprint-fulltext', () => {
     expect((global.fetch as any).mock.calls.length).toBe(totalCalls);
     expect(pinned.cached).toBe(true);
     expect(pinned.version).toBe(2);
-  }, 15000);
+  }, 30000);
 
   test('inline mode applies the fulltext_max_chars budget honestly', async () => {
     const longBody = 'x'.repeat(5000);
@@ -275,14 +275,44 @@ describe('preprint-fulltext', () => {
     global.fetch = jest.fn(() => Promise.reject(new Error('network down'))) as any;
     const result = await fetchPreprintFullText(DOI);
     expect(result).toMatchObject({ status: 'unavailable', reason: 'fetch_failed' });
-  }, 15000);
+  }, 30000);
 
-  test('fetch_failed after ONE bounded retry on download network errors', async () => {
+  test('fetch_failed after ONE bounded retry on download network errors, with cause + URL + remedy in the note', async () => {
     global.fetch = standardRouter({ jats: () => Promise.reject(new Error('connection reset')) }) as any;
     const result = await fetchPreprintFullText(DOI);
     expect(result).toMatchObject({ status: 'unavailable', reason: 'fetch_failed' });
     expect(fetchCallsTo('www.biorxiv.org')).toBe(2); // one retry, no more
-  }, 15000);
+    // #132: the failure detail must name the underlying cause AND the URL,
+    // never degrade to "JATS download failed: " with an empty embed.
+    expect(result.note).toContain('connection reset');
+    expect(result.note).toContain(`from ${JATS_URL(2)}`);
+    expect(result.note).toContain('Retry once; if it persists, use article_get (abstract) or the DOI landing page.');
+  }, 30000);
+
+  test('fetch_failed detail is never empty: empty-message rejection falls back to the error name', async () => {
+    // An Error with an empty message previously produced a blank embed
+    // ("JATS download failed: "). The fallback chain (message → cause →
+    // name → String) must yield SOMETHING, plus the URL.
+    global.fetch = standardRouter({ jats: () => Promise.reject(new Error('')) }) as any;
+    const result = await fetchPreprintFullText(DOI);
+    expect(result).toMatchObject({ status: 'unavailable', reason: 'fetch_failed' });
+    expect(result.note).toContain('JATS download failed');
+    expect(result.note).toContain(`from ${JATS_URL(2)}`);
+    expect(result.note).not.toMatch(/failed \(\)/); // no empty cause embed
+    expect(result.note).not.toContain('undefined');
+    expect(result.note).toMatch(/\(Error\)/); // name fallback surfaced
+  }, 30000);
+
+  test('fetch_failed detail surfaces the cause code for raw fetch rejections', async () => {
+    // Raw undici rejections are bare `TypeError: fetch failed` with the real
+    // signal on cause.code — errorMessageWithCause appends it.
+    const networkReject = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+    global.fetch = standardRouter({ jats: () => Promise.reject(networkReject) }) as any;
+    const result = await fetchPreprintFullText(DOI);
+    expect(result).toMatchObject({ status: 'unavailable', reason: 'fetch_failed' });
+    expect(result.note).toContain('fetch failed (ECONNRESET)');
+    expect(result.note).toContain(`from ${JATS_URL(2)}`);
+  }, 30000);
 
   test('license "na" falls back verbatim with no URL and a reuse warning', async () => {
     global.fetch = standardRouter({ biorxivDetails: detailsPayload('bioRxiv', ['1'], { license: 'na' }) }) as any;

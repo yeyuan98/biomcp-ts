@@ -1,5 +1,6 @@
 import { TokenBucketRateLimiter } from '../../../connections/rate-limiter.js';
 import { VERSION } from '../../../version.js';
+import { errorMessageWithCause } from '../../errors.js';
 import { isPreprintDoi } from './id-resolution.js';
 import {
   fetchOfficialDetails,
@@ -229,7 +230,15 @@ async function downloadJats(url: string): Promise<DownloadOutcome> {
         await sleep(RETRY_BACKOFF_MS);
         continue;
       }
-      const msg = error instanceof Error ? error.message : String(error);
+      // Fallback chain so the detail is never empty (#132): some rejections
+      // carry no message at all (DOMException variants, empty-message
+      // errors) — fall back to the cause signal, then the error name, then
+      // String() as the last resort.
+      const name = (error as { name?: unknown } | null | undefined)?.name;
+      const msg =
+        errorMessageWithCause(error) ||
+        (typeof name === 'string' && name ? name : '') ||
+        String(error);
       return { kind: 'failed', detail: `network/timeout after ${attempt} attempts (${msg})` };
     }
     if (resp.status === 429 || resp.status === 403) {
@@ -555,7 +564,7 @@ export async function fetchPreprintFullText(
       jatsxml_url: jatsUrl,
       reason: 'fetch_failed',
       maxChars,
-      detail: `JATS download failed: ${dl.detail}.`,
+      detail: `JATS download failed (${dl.detail}) from ${jatsUrl}. Retry once; if it persists, use article_get (abstract) or the DOI landing page.`,
     });
   }
 

@@ -2174,7 +2174,9 @@ describe('geneGet with expression section', () => {
     const result = await geneGet('NOGTEX1', ['expression']);
 
     const expression = result.sections!.expression as { _error: string };
-    expect(expression._error).toContain('Expression lookup failed');
+    // Since #132 the gtex entity returns a structured envelope instead of
+    // throwing; the section surfaces that envelope's message verbatim.
+    expect(expression._error).toContain('GTEx request failed');
     expect(expression._error).toContain("Gene 'NOGTEX1' not found in GTEx v10");
   });
 
