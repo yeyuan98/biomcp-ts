@@ -51,6 +51,32 @@ describe('genbank tools (integration)', () => {
     expect(result.region).toEqual({ start: 1, stop: 100, strand: 1 });
   }, 60000);
 
+  it('accepts the docstring accession example KJ668569.1', async () => {
+    const result = await retryOnRateLimit(() =>
+      harness.callTool('genbank_get', { accession: 'KJ668569.1', format: 'fasta' })
+    );
+    expect(result.accession).toBe('KJ668569.1');
+    expect(result.length_bp).toBe(600);
+    expect(result.organism).toContain('Botryobasidium');
+  }, 60000);
+
+  it('genbank_get returns a 200 bp region slice of the NC_000908.2 genome', async () => {
+    const result = await retryOnRateLimit(() =>
+      harness.callTool('genbank_get', {
+        accession: 'NC_000908.2',
+        format: 'fasta',
+        seq_start: 1,
+        seq_stop: 200,
+      })
+    );
+    expect(result.accession).toBe('NC_000908.2');
+    expect(result.region).toEqual({ start: 1, stop: 200, strand: 1 });
+    expect(result.sequence_text.startsWith('>')).toBe(true);
+    // 200 bp of sequence plus the FASTA header and line wrapping.
+    expect(result.sequence_text.length).toBeGreaterThanOrEqual(200);
+    expect(result.sequence_text.length).toBeLessThanOrEqual(300);
+  }, 60000);
+
   it('genbank_search finds TP53 human records', async () => {
     const results = await retryOnRateLimit(() =>
       harness.callTool('genbank_search', {

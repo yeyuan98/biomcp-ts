@@ -145,7 +145,7 @@ function validateAccession(accession: string): string {
   const trimmed = accession.trim();
   if (!ACCESSION_RE.test(trimmed)) {
     throw new Error(
-      `Invalid GenBank accession '${accession}'. Expected forms like NC_000023.11, NG_017013.2, CP002059.1 (RefSeq) or U12345, KJ668569.2 (GenBank/INSDC).`
+      `Invalid GenBank accession '${accession}'. Expected forms like NC_000023.11, NG_017013.2, CP002059.1 (RefSeq) or U12345, KJ668569.1 (GenBank/INSDC).`
     );
   }
   return trimmed;

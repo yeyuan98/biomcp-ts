@@ -126,7 +126,7 @@ describe('InputValidation.genbankAccession', () => {
   it('accepts versioned and bare RefSeq/GenBank accessions', () => {
     expect(InputValidation.genbankAccession.safeParse('NC_000023.11').success).toBe(true);
     expect(InputValidation.genbankAccession.safeParse('NG_017013.2').success).toBe(true);
-    expect(InputValidation.genbankAccession.safeParse('KJ668569.2').success).toBe(true);
+    expect(InputValidation.genbankAccession.safeParse('KJ668569.1').success).toBe(true);
     expect(InputValidation.genbankAccession.safeParse('U12345').success).toBe(true);
   });
 

@@ -51,7 +51,7 @@ Queries may be plain terms, an accession, or NCBI field syntax ("TP53[Gene Name]
 
 Whole-record fetches are capped at 2,000,000 bp — larger records require a seq_start/seq_stop region (1-based, inclusive, up to 10 Mb span; set strand=2 for a reverse-strand slice where seq_start > seq_stop — the region field echoes the request as given, while NCBI's text shows complement(min..max)). Output guard: sequence_text is truncated to its first 200,000 characters when oversized — request a narrower region for the full text.`,
       inputSchema: {
-        accession: z.string().describe('GenBank/RefSeq accession, versioned or bare — NC_000023.11, NG_017013.2, KJ668569.2'),
+        accession: z.string().describe('GenBank/RefSeq accession, versioned or bare — NC_000023.11, NG_017013.2, KJ668569.1, NC_000908.2'),
         format: z.enum(['genbank', 'fasta']).default('genbank').describe('Record format: genbank flat file (default) or fasta'),
         seq_start: z.number().int().min(1).optional().describe('Region start (1-based, inclusive) — required with seq_stop for records over 2 Mb'),
         seq_stop: z.number().int().min(1).optional().describe('Region stop (1-based, inclusive)'),

@@ -34,7 +34,7 @@ export const InputValidation = {
   patentId: z.string().regex(/^[A-Za-z]{2}\s?(?:RE|PP|H)?\s?\d{5,}\s?(?:[A-Za-z]\d{0,2})?$/, 'Patent ID must be a publication number like US11027025B2, EP3904939, US20260240819A1'),
   geoAccession: z.string().regex(/^(GSE|GSM|GPL|GDS)\d+$/, 'GEO accession must be a series (GSE...), sample (GSM...), platform (GPL...), or curated dataset (GDS...) like GSE183947'),
   sraAccession: z.string().regex(/^SR[PXRS]\d+$/, 'NCBI SRA accession must be SRP/SRX/SRR/SRS followed by digits, like SRR14432476'),
-  genbankAccession: z.string().regex(/^[A-Z]{1,6}_?\d+(\.\d+)?$/i, 'GenBank/RefSeq accession like NC_000023.11, NG_017013.2, or KJ668569.2'),
+  genbankAccession: z.string().regex(/^[A-Z]{1,6}_?\d+(\.\d+)?$/i, 'GenBank/RefSeq accession like NC_000023.11, NG_017013.2, or KJ668569.1'),
   limit: z.number().int().min(1).max(100),
   offset: z.number().int().min(0),
 };
@@ -92,7 +92,7 @@ export function getEntitySuggestions(entity: string): string {
     case 'sra':
       return 'Use sra_search to find valid NCBI SRA accessions (SRP/SRX/SRR/SRS — e.g., "SRR14432476")';
     case 'genbank':
-      return 'Use genbank_search to find valid nucleotide accessions (e.g., "NC_000023.11", "KJ668569.2")';
+      return 'Use genbank_search to find valid nucleotide accessions (e.g., "NC_000023.11", "KJ668569.1")';
     default:
       return 'Check the entity type and try again.';
   }
