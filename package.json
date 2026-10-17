@@ -37,11 +37,13 @@
     "dist/db.js",
     "dist/biowasm.js",
     "dist/biowasm-worker.js",
+    "dist/assets/journal-titles.tsv.gz",
     "LICENSE",
     "NOTICE",
     "README.md"
   ],
   "scripts": {
+    "prebuild": "node --import tsx scripts/build/fetch-journal-list.ts",
     "build": "tsc && esbuild dist/server/index.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --external:webr --outfile=dist/bundle.js && esbuild dist/cli/main.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --external:webr --outfile=dist/cli.js && esbuild dist/cli/serve-entry.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --external:webr --outfile=dist/remote.js && esbuild dist/db/index.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --external:webr --outfile=dist/db.js && esbuild dist/biowasm/index.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --external:webr --outfile=dist/biowasm.js && esbuild dist/biowasm/worker.js --bundle --platform=node --format=esm --minify --external:undici --external:mysql2 --external:node:sqlite --external:webr --outfile=dist/biowasm-worker.js",
     "build:bundle": "npm run build",
     "prepack": "npm run build",

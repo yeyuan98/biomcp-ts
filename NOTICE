@@ -9,6 +9,12 @@ This product is adapted from BioMCP (https://github.com/genomoncology/biomcp),
 copyright genomoncology, originally licensed under the MIT License.
 The upstream license notice is reproduced below.
 
+This product includes the NLM journal-title list (J_Entrez), downloaded at
+build time from the U.S. National Library of Medicine / NCBI FTP
+(https://ftp.ncbi.nlm.nih.gov/pubmed/J_Entrez.gz) and redistributed in
+normalized form as a bundled data asset. Data courtesy of the U.S. National
+Library of Medicine / National Center for Biotechnology Information.
+
 --------------------------------------------------------------------------------
 MIT License
 

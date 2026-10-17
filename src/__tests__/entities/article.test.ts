@@ -10,6 +10,8 @@ import { writeFullTextFile } from '../../entities/article/detail/fulltext-store.
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
+import { resetJournalTitleMap } from '../../entities/article/search/journal-titles.js';
 import { getPreprintArticle } from '../../entities/article/detail/preprint.js';
 import { applyLimit } from '../../server/tools/utils.js';
 import { connectionManager } from '../../connections/manager.js';
@@ -187,10 +189,17 @@ describe('article', () => {
     jest.clearAllMocks();
     connectionManager.closeAll();
     process.env.NCBI_API_KEY = '';
+    // Pin the journal-titles asset to a nonexistent sentinel so unit tests
+    // are deterministic even when a real dist/assets asset exists (a prior
+    // local `npm run build`): the rewrite tests below override this with
+    // their own fixture; every other search keeps today's no-rewrite URLs.
+    process.env.BIOMCP_JOURNAL_TITLES_PATH = '/nonexistent/biomcp-journal-titles-unit-tests.tsv.gz';
   });
 
   afterEach(() => {
     delete process.env.NCBI_API_KEY;
+    delete process.env.BIOMCP_JOURNAL_TITLES_PATH;
+    resetJournalTitleMap();
     clearCitationCache();
     clearWorkCache();
     clearCitedInCache();
@@ -2429,6 +2438,123 @@ describe('article', () => {
       const err = '<?xml version="1.0"?><eFetchResult><ERROR>Supplied id parameter is empty.</ERROR></eFetchResult>';
       expect(parseFullTextJats(err, FULLTEXT_DEFAULT_MAX_CHARS)).toBeNull();
       expect(parseFullTextJats('<?xml version="1.0"?><article><front/></article>', FULLTEXT_DEFAULT_MAX_CHARS)).toBeNull();
+    });
+  });
+
+  // Issue #121: a trailing full journal name is rewritten to the NLM
+  // abbreviation on the pubmed and europepmc journal legs, with a warnings
+  // disclosure. The asset map is a small fixture injected through the
+  // BIOMCP_JOURNAL_TITLES_PATH env override (the outer beforeEach pins a
+  // nonexistent sentinel for every other test in this suite).
+  describe('journal name rewrite (trailing full title → NLM abbreviation)', () => {
+    let assetDir: string;
+
+    beforeEach(() => {
+      assetDir = mkdtempSync(join(tmpdir(), 'biomcp-journal-asset-'));
+      const tsv = 'new england journal of medicine\tN Engl J Med\nnature genetics\tNat Genet\n';
+      process.env.BIOMCP_JOURNAL_TITLES_PATH = join(assetDir, 'journal-titles.tsv.gz');
+      writeFileSync(process.env.BIOMCP_JOURNAL_TITLES_PATH, gzipSync(Buffer.from(tsv, 'utf8')));
+      resetJournalTitleMap();
+    });
+
+    afterEach(() => {
+      rmSync(assetDir, { recursive: true, force: true });
+      resetJournalTitleMap(); // the outer afterEach restores the env sentinel
+    });
+
+    test('pubmed leg hoists a trailing full journal title into Abbr[Journal] and warns', async () => {
+      global.fetch = jest.fn<(...args: any[]) => any>()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ esearchresult: { idlist: ['12345'], count: '1' } }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'text/xml' }),
+          text: () => Promise.resolve(SINGLE_ARTICLE_XML),
+        }) as any;
+
+      const response = await searchArticles('Huntington disease New England Journal of Medicine', { source: 'pubmed' });
+
+      const searchCallUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(searchCallUrl).toContain('esearch.fcgi');
+      expect(searchCallUrl).toContain(`term=${encodeURIComponent('Huntington disease N Engl J Med[Journal]')}`);
+      expect(searchCallUrl).not.toContain(encodeURIComponent('England'));
+      expect(response.warnings).toContain(
+        `Journal phrase rewritten: 'New England Journal of Medicine' → 'N Engl J Med[Journal]'.`
+      );
+    });
+
+    test('europepmc journal leg converts a trailing full title into a JOURNAL clause and warns', async () => {
+      global.fetch = jest.fn((url: unknown) => {
+        const { hostname, pathname } = parseMockUrl(url);
+        if (hostname === 'www.ebi.ac.uk' && pathname.endsWith('/search')) {
+          return Promise.resolve({
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: () => Promise.resolve({ resultList: { result: [] } }),
+          });
+        }
+        return Promise.reject(new Error(`unexpected url ${url}`));
+      }) as any;
+
+      const response = await searchArticles('Huntington disease New England Journal of Medicine', { source: 'europepmc' });
+
+      const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(callUrl).toContain(`query=${encodeURIComponent('(Huntington disease) AND JOURNAL:"N Engl J Med"')}`);
+      expect(response.warnings).toContain(
+        `Journal phrase rewritten: 'New England Journal of Medicine' → 'JOURNAL:"N Engl J Med"'.`
+      );
+    });
+
+    test('whole-query journal name rewrites to the bare journal constraint', async () => {
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ esearchresult: { idlist: [] } }),
+      }) as any;
+
+      await searchArticles('New England Journal of Medicine', { source: 'pubmed' });
+
+      const searchCallUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(searchCallUrl).toContain(`term=${encodeURIComponent('N Engl J Med[Journal]')}`);
+    });
+
+    test('query with no trailing journal name is sent verbatim, with no warning', async () => {
+      global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ esearchresult: { idlist: [] } }),
+      }) as any;
+
+      const response = await searchArticles('Huntington disease', { source: 'pubmed' });
+
+      const searchCallUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(searchCallUrl).toContain(`term=${encodeURIComponent('Huntington disease')}`);
+      expect(response.warnings).toBeUndefined();
+    });
+
+    test('preprint path is untouched even when the query ends with a journal name', async () => {
+      global.fetch = jest.fn((url: unknown) => {
+        const { hostname, pathname } = parseMockUrl(url);
+        if (hostname === 'www.ebi.ac.uk' && pathname.endsWith('/search')) {
+          return Promise.resolve({
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: () => Promise.resolve({ resultList: { result: [] } }),
+          });
+        }
+        return Promise.reject(new Error(`unexpected url ${url}`));
+      }) as any;
+
+      const response = await searchArticles('Huntington disease New England Journal of Medicine', { source: 'preprint_only' });
+
+      const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+      expect(callUrl).toContain(encodeURIComponent('(Huntington disease New England Journal of Medicine'));
+      expect(callUrl).toContain(encodeURIComponent('SRC:PPR'));
+      expect(callUrl).not.toContain(encodeURIComponent('JOURNAL:"'));
+      expect(response.warnings).toBeUndefined();
     });
   });
 });
