@@ -1797,6 +1797,9 @@ describe('article', () => {
       expect(global.fetch).toHaveBeenCalledTimes(2);
       const ft = result.sections?.fulltext as any;
       expect(ft).toMatchObject({ status: 'unavailable', reason: 'no_pmcid' });
+      // the implied oa lookup's classification is echoed standalone:
+      // not_in_pmc, not paywalled — distinguishable without sections=["oa"]
+      expect(ft.oa_status).toBe('not_in_pmc');
       expect(ft.links?.doi_url).toBe('https://doi.org/10.1234/test.2018');
       expect(ft.note).toContain('abstract');
       // fulltext implies the oa metadata lookup, but no open_access section
@@ -1860,6 +1863,7 @@ describe('article', () => {
       expect(ft.status).toBe('available');
       expect(ft.max_chars).toBe(5000);
       expect(ft.is_open_access).toBe(true);
+      expect(ft.oa_status).toBe('open_access');
       // one shared Europe PMC search backs oa metadata + fulltext header
       expect(result.sections?.open_access).toBeUndefined();
       expect(result.is_open_access).toBe(true);
@@ -1966,6 +1970,7 @@ describe('article', () => {
       expect(result.source).toBe('europepmc');
       expect(result.format).toBe('jats-xml');
       expect(result.is_open_access).toBe(true);
+      expect(result.oa_status).toBe('open_access');
       expect(result.license).toBe('cc by');
       expect(result.truncated).toBe(false);
       const headings = (result.sections ?? []).map(s => s.heading);
@@ -2016,6 +2021,9 @@ describe('article', () => {
       expect(global.fetch).not.toHaveBeenCalled();
       expect(result.status).toBe('unavailable');
       expect(result.reason).toBe('paywalled');
+      // oa classification is echoed standalone: paywalled is visible
+      // without requesting the oa section
+      expect(result.oa_status).toBe('paywalled');
       expect(result.note).toContain('not free to read');
       // no DOI known -> the note must not point at a nonexistent links.doi_url
       expect(result.note).not.toContain('doi_url');
@@ -2070,6 +2078,7 @@ describe('article', () => {
       expect(result.mode).toBe('file');
       expect(result.format).toBe('markdown');
       expect(result.status).toBe('available');
+      expect(result.oa_status).toBe('open_access');
       expect(result.file_path).toBeDefined();
       expect(existsSync(result.file_path!)).toBe(true);
       expect(result.sections).toBeUndefined(); // the body never enters the reply
