@@ -103,10 +103,12 @@ describe('disease', () => {
     expect(result.name).toBe('Breast Cancer');
   });
 
-  test('diseaseGet() falls back to the umls: curie when the resolved id is not servable by /disease/', async () => {
-    // Live shape of the docstring's golden example: C0018794 resolves to
-    // HP:0012722, a UMLS-sourced document whose own id /disease/ will not
-    // serve (404) — the `umls:{cui}` curie form fetches the same document.
+  test('diseaseGet() falls back to the umls: curie and enriches the nameless stub via MedGen', async () => {
+    // Live shape of the docstring's example: C0018794 resolves to HP:0012722,
+    // a UMLS-sourced document whose own id /disease/ will not serve (404) —
+    // the `umls:{cui}` curie form fetches the same document. That stub has
+    // no mondo/disease_ontology name (issue #100), so the record's own
+    // umls.umls CUI drives a MedGen esearch+esummary enrichment.
     global.fetch = jest.fn<(...args: any[]) => any>()
       .mockImplementationOnce(() => Promise.resolve({
         ok: true,
@@ -121,6 +123,24 @@ describe('disease', () => {
           original_id: 'UMLS:C0018794',
           umls: { umls: 'C0018794' },
         }),
+      }))
+      .mockImplementationOnce(() => Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ esearchresult: { idlist: ['42363'] } }),
+      }))
+      .mockImplementationOnce(() => Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          result: {
+            uids: ['42363'],
+            '42363': {
+              uid: '42363',
+              conceptid: 'C0018794',
+              title: 'Heart block',
+              definition: { value: 'Impaired conduction of cardiac impulse.' },
+            },
+          },
+        }),
       })) as any;
 
     const result = await diseaseGet('C0018794');
@@ -131,7 +151,90 @@ describe('disease', () => {
     expect(urls[1]).toContain('/disease/HP%3A0012722');
     expect(urls[2]).toContain('/disease/HP_0012722');
     expect(urls[3]).toContain('/disease/umls%3AC0018794');
+    // MedGen enrichment legs on the shared eutils connection.
+    const esearchUrl = new URL(urls[4]);
+    const esummaryUrl = new URL(urls[5]);
+    expect(esearchUrl.hostname).toBe('eutils.ncbi.nlm.nih.gov');
+    expect(esearchUrl.pathname).toBe('/entrez/eutils/esearch.fcgi');
+    expect(esearchUrl.searchParams.get('db')).toBe('medgen');
+    expect(esearchUrl.searchParams.get('term')).toBe('C0018794');
+    expect(esummaryUrl.pathname).toBe('/entrez/eutils/esummary.fcgi');
+    expect(esummaryUrl.searchParams.get('db')).toBe('medgen');
+    expect(esummaryUrl.searchParams.get('id')).toBe('42363');
     expect(result.disease_id).toBe('HP:0012722');
+    expect(result.name).toBe('Heart block');
+    expect(result.ontology).toBe('umls');
+    expect(result.description).toBe('Impaired conduction of cardiac impulse.');
+    expect(result._warning).toBeUndefined();
+  });
+
+  test('diseaseGet() never echoes the CUI as name when MedGen enrichment fails', async () => {
+    // Same nameless stub as above, but the MedGen esearch leg fails: name
+    // must be null (NOT the raw CUI) and a _warning must explain why.
+    global.fetch = jest.fn<(...args: any[]) => any>()
+      .mockImplementationOnce(() => Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ hits: [{ _id: 'HP:0012722' }] }),
+      }))
+      .mockImplementationOnce(() => Promise.resolve({ ok: false, status: 404 }))
+      .mockImplementationOnce(() => Promise.resolve({ ok: false, status: 404 }))
+      .mockImplementationOnce(() => Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          _id: 'HP:0012722',
+          original_id: 'UMLS:C0018794',
+          umls: { umls: 'C0018794' },
+        }),
+      }))
+      .mockImplementationOnce(() => Promise.reject(new Error('eutils unreachable'))) as any;
+
+    const result = await diseaseGet('C0018794');
+
+    expect(result.disease_id).toBe('HP:0012722');
+    expect(result.name).not.toBe('C0018794');
+    expect(result.name).toBeNull();
+    expect(result.ontology).toBe('umls');
+    expect(result._warning).toContain('HP:0012722');
+    expect(result._warning).toContain('C0018794');
+    expect(result._warning).toContain('no disease name');
+  });
+
+  test('diseaseGet() treats a MedGen conceptid mismatch as enrichment failure', async () => {
+    // esearch's bare-term match is not exact: if the esummary doc belongs to
+    // a different concept (conceptid !== CUI), the enrichment is discarded.
+    global.fetch = jest.fn<(...args: any[]) => any>()
+      .mockImplementationOnce(() => Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ hits: [{ _id: 'HP:0012722' }] }),
+      }))
+      .mockImplementationOnce(() => Promise.resolve({ ok: false, status: 404 }))
+      .mockImplementationOnce(() => Promise.resolve({ ok: false, status: 404 }))
+      .mockImplementationOnce(() => Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          _id: 'HP:0012722',
+          original_id: 'UMLS:C0018794',
+          umls: { umls: 'C0018794' },
+        }),
+      }))
+      .mockImplementationOnce(() => Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ esearchresult: { idlist: ['99999'] } }),
+      }))
+      .mockImplementationOnce(() => Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          result: {
+            uids: ['99999'],
+            '99999': { uid: '99999', conceptid: 'C0006142', title: 'Breast Neoplasms' },
+          },
+        }),
+      })) as any;
+
+    const result = await diseaseGet('C0018794');
+
+    expect(result.name).toBeNull();
+    expect(result._warning).toBeDefined();
   });
 
   test('diseaseGet() retries the alternate curie form when the primary lookup fails', async () => {
