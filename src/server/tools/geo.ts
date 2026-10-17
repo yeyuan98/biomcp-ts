@@ -8,7 +8,7 @@ export function registerGeoTools(server: McpServer): void {
     {
       description: `Search NCBI GEO (Gene Expression Omnibus) for functional genomics studies — expression microarrays, RNA-seq, and other high-throughput sequencing series.
 
-Queries accept plain terms ("breast cancer RNA-seq", "melanoma single cell") or NCBI field syntax ("GSE183947[Accession]"). Each result carries cross-links for chaining: sra_project → sra_get, bioproject, pubmed_ids → article_get, and accession → geo_get for full details.`,
+Queries accept plain terms ("breast cancer RNA-seq", "melanoma single cell") or NCBI field syntax ("GSE183947[Accession]"). Every result carries accession (→ geo_get for full details), bioproject, and pubmed_ids (→ article_get). sra_project (→ sra_get) appears only when NCBI has linked the SRA study to the series — many newer series lack the link — so geo_get(accession) is the reliable route to SRA accessions (its sra field).`,
       inputSchema: {
         query: z.string().trim().min(1, 'Query must be a non-empty string after trimming').describe('Free-text GEO search terms, e.g. "breast cancer RNA-seq", "melanoma single cell"'),
         entry_type: z.enum(['gse', 'gsm', 'gpl', 'gds']).optional().describe('GEO entry type — gse=study (default), gsm=sample, gpl=platform, gds=curated dataset'),
