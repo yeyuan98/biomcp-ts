@@ -96,7 +96,7 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
 | `discover` | `query: string` | Free-text concept resolution | readOnly |
-| `batch_get` | `inputs: { entity: "gene" \| "variant" \| "drug" \| "disease" \| "trial" \| "article" \| "patent", id: string, sections?: string[] }[]` | Get multiple entities in parallel. Article fulltext is file-only here: each article returns a small handle (file_path + outline), never body text; for inline text use `article_get` with `fulltext_output="inline"` | readOnly |
+| `batch_get` | `inputs: { entity: "gene" \| "variant" \| "drug" \| "disease" \| "trial" \| "article" \| "patent", id: string, sections?: string[] }[]` | Get multiple entities in parallel. Article items return metadata (with inline abstract) by default; for full text pass `sections:["fulltext"]` on the item — PMC articles then return a small file handle (file_path + outline, never body text inline) while non-PMC articles return an explicit unavailable + reason. Nonexistent PMIDs yield a per-item error and the batch continues; for inline text use `article_get` with `fulltext_output="inline"` | readOnly |
 
 ### PDB Tools (`tools/pdb.ts`) — 1 tool
 

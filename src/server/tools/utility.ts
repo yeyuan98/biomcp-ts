@@ -25,7 +25,7 @@ export function registerUtilityTools(server: McpServer): void {
   server.registerTool(
     'batch_get',
     {
-      description: 'Get multiple entities in parallel. Article fulltext is file-only here: each article returns a small handle (file_path + outline), never body text; for inline text use article_get with fulltext_output="inline"',
+      description: 'Get multiple entities in parallel. Article items return metadata (with inline abstract) by default; for full text pass sections:["fulltext"] on the item — PMC articles then return a small file handle (file_path + outline, never body text inline) while non-PMC articles return an explicit unavailable + reason. Nonexistent PMIDs yield a per-item error and the batch continues. For inline text use article_get with fulltext_output="inline"',
       inputSchema: {
         inputs: z.array(z.object({
           entity: z.enum(['gene', 'variant', 'drug', 'disease', 'trial', 'article', 'patent']),

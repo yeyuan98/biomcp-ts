@@ -868,9 +868,12 @@ export async function batchGet(inputs: BatchGetInput[]): Promise<BatchGetResult[
         }
         case 'article': {
           const { articleGet } = await import('./article/index.js');
-          // Batch fulltext is file-only: each article returns a small
-          // handle (path + outline), never body text. Inline fulltext is
-          // available via article_get with fulltext_output="inline".
+          // Batch fulltext is opt-in per item: without sections the reply
+          // is metadata + abstract only; with sections:["fulltext"] PMC
+          // articles return a small file handle (path + outline, never
+          // body text) and non-PMC ones an explicit unavailable + reason.
+          // Inline fulltext is available via article_get with
+          // fulltext_output="inline".
           data = await articleGet(input.id, input.sections, { fulltextOutput: 'file' });
           break;
         }
