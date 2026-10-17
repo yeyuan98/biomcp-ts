@@ -99,16 +99,23 @@ export async function geneSearch(
 
   // mygene's dismax `q` is exact-token only (issue #99): `q=BRCA` returns 0
   // hits while `q=symbol:BRCA*` prefix-matches BRCA1/BRCA2/... case-
-  // insensitively. Single-token queries that return nothing are retried once
-  // with the Lucene-escaped token starred; multi-word queries never are (a
-  // starred phrase would not express prefix search).
+  // insensitively. Single-token queries whose result is genuinely empty
+  // (total === 0, not merely an empty page at a deep offset) are retried
+  // once with the Lucene-escaped token starred; multi-word queries never
+  // are (a starred phrase would not express prefix search).
   const isSingleToken = !/\s/.test(query.trim());
   const prefixFallbackQuery = () => `symbol:${query.trim().replace(LUCENE_SPECIALS, '\\$&')}*`;
 
   if (!normalizedChr) {
     let response = await requestPage(query, offset, limit);
-    if ((response.hits || []).length === 0 && isSingleToken) {
-      response = await requestPage(prefixFallbackQuery(), 0, limit);
+    // Fire the fallback only on a GENUINELY empty result: mygene keeps the
+    // full `total` for offsets past the end (live: q=BRAF&from=20 with
+    // total=16 → hits: []), and re-querying from 0 on such a page would wrap
+    // pagination back to the first page (issue #122). `total` is the field
+    // mygene always returns; total === 0 means the query itself matched
+    // nothing, which is the only case the #99 prefix retry can rescue.
+    if (response.total === 0 && isSingleToken) {
+      response = await requestPage(prefixFallbackQuery(), offset, limit);
     }
     return (response.hits || []).map(hit => transformMyGeneHit(hit));
   }
@@ -753,6 +760,10 @@ async function fetchFunding(geneSymbol: string, signal?: AbortSignal): Promise<{
 }
 
 interface MyGeneSearchResponse {
+  // Total hits matching the query across all pages. mygene reports it even
+  // when the requested `from` is past the end (then hits: [] but total
+  // intact) — the signal that separates end-of-pagination from no-match.
+  total?: number;
   hits: Array<{
     symbol: string;
     name: string;

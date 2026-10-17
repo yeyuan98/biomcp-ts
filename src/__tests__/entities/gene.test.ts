@@ -503,16 +503,18 @@ describe('geneSearch prefix fallback (issue #99)', () => {
   });
 
   test('retries once with symbol:<token>* when a single-token query returns 0 hits', async () => {
-    // mygene's dismax is exact-token only: q=BRCA → 0 hits, while
-    // symbol:BRCA* prefix-matches BRCA1/BRCA2/... case-insensitively.
+    // mygene's dismax is exact-token only: q=BRCA → total 0 / 0 hits, while
+    // symbol:BRCA* prefix-matches BRCA1/BRCA2/... case-insensitively. The
+    // genuinely-empty signal is total === 0 (mygene always reports total).
     let callIndex = 0;
     global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
       callIndex++;
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve(callIndex === 1
-          ? { hits: [] }
+          ? { total: 0, hits: [] }
           : {
+            total: 2,
             hits: [
               { symbol: 'BRCA1', name: 'BRCA1 DNA repair', entrezgene: 672, genomic_pos: { chr: '17', start: 43044295, end: 43125370 } },
               { symbol: 'BRCA2', name: 'BRCA2 DNA repair', entrezgene: 675, genomic_pos: { chr: '13', start: 32315086, end: 32400266 } },
@@ -533,7 +535,7 @@ describe('geneSearch prefix fallback (issue #99)', () => {
   test('does not retry for multi-word queries (exactly one fetch)', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ hits: [] }),
+      json: () => Promise.resolve({ total: 0, hits: [] }),
     }) as any;
 
     const results = await geneSearch('dna repair gene');
@@ -549,8 +551,8 @@ describe('geneSearch prefix fallback (issue #99)', () => {
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve(callIndex === 1
-          ? { hits: [] }
-          : { hits: [{ symbol: 'BRCA1', name: 'BRCA1 DNA repair' }] }),
+          ? { total: 0, hits: [] }
+          : { total: 1, hits: [{ symbol: 'BRCA1', name: 'BRCA1 DNA repair' }] }),
       });
     }) as any;
 
@@ -567,8 +569,9 @@ describe('geneSearch prefix fallback (issue #99)', () => {
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve(callIndex === 1
-          ? { hits: [] } // plain q=KRAS: 0 upstream hits
+          ? { total: 0, hits: [] } // plain q=KRAS: 0 upstream hits
           : {
+            total: 3,
             hits: [
               { symbol: 'KRAS', name: 'KRAS proto-oncogene', entrezgene: 3845, genomic_pos: { chr: '7', start: 140719327, end: 140924929 } },
               { symbol: 'KRASP8', name: 'KRAS pseudogene 8', entrezgene: 1, genomic_pos: { chr: '8', start: 1, end: 2 } },
@@ -586,6 +589,89 @@ describe('geneSearch prefix fallback (issue #99)', () => {
     expect(urls[1].searchParams.get('q')).toBe('symbol:KRAS*');
     expect(results.map(r => r.symbol)).toEqual(['KRAS']);
     expect(results[0].genomic_coordinates?.chromosome).toBe('7');
+  });
+
+  test('offset past the end returns an empty page — no fallback re-query (exactly one fetch)', async () => {
+    // Live-verified mygene contract (issue #122): q=BRAF&from=20 with
+    // total=16 returns hits: [] with total intact. A zero-hit page at a
+    // deep offset is graceful end-of-pagination, NOT an unmatched token —
+    // the #99 prefix fallback must not fire (it would re-query from=0 and
+    // wrap pagination back to the first page).
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ total: 16, hits: [] }),
+    }) as any;
+
+    const results = await geneSearch('BRAF', { limit: 5, offset: 20 });
+
+    expect((global.fetch as any).mock.calls).toHaveLength(1);
+    const urls = (global.fetch as any).mock.calls.map((c: any[]) => new URL(c[0] as string));
+    expect(urls[0].searchParams.get('q')).toBe('BRAF');
+    expect(urls[0].searchParams.get('from')).toBe('20');
+    expect(results).toEqual([]);
+  });
+
+  test('offset pagination is monotonic: offsets past the end stay empty (no wrap to page 0)', async () => {
+    // Issue #122 sweep on a 2-hit result set: offsets 0 / 2 (= total) /
+    // 7 (= total+5) / 1000 must yield [full page, [], [], []] — never the
+    // first page again.
+    const allHits = [
+      { symbol: 'BRAF', name: 'B-Raf proto-oncogene', entrezgene: 673, genomic_pos: { chr: '7', start: 140719327, end: 140924929 } },
+      { symbol: 'BRAFP1', name: 'BRAF pseudogene 1', entrezgene: 228211, genomic_pos: { chr: 'X', start: 36633374, end: 36664497 } },
+    ];
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((input: any) => {
+      const from = parseInt(new URL(input as string).searchParams.get('from') || '0', 10);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ total: allHits.length, hits: allHits.slice(from) }),
+      });
+    }) as any;
+
+    const pages = [];
+    for (const offset of [0, 2, 7, 1000]) {
+      pages.push(await geneSearch('BRAF', { limit: 5, offset }));
+    }
+
+    expect(pages.map(p => p.map(r => r.symbol))).toEqual([
+      ['BRAF', 'BRAFP1'],
+      [],
+      [],
+      [],
+    ]);
+    // Exactly one upstream fetch per page — no prefix fallback, no wrap.
+    expect((global.fetch as any).mock.calls).toHaveLength(4);
+    const froms = (global.fetch as any).mock.calls.map(
+      (c: any[]) => new URL(c[0] as string).searchParams.get('from')
+    );
+    expect(froms).toEqual(['0', '2', '7', '1000']);
+  });
+
+  test('fallback still fires when total === 0, re-requesting at the caller offset', async () => {
+    // #99 regression guard: total === 0 is the genuinely-empty signal the
+    // prefix fallback keys on. The re-request must carry the caller's
+    // offset (never a hardcoded from=0), so a fallback that fires on a
+    // deep page still respects pagination.
+    for (const offset of [0, 5]) {
+      jest.clearAllMocks();
+      let callIndex = 0;
+      global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
+        callIndex++;
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(callIndex === 1
+            ? { total: 0, hits: [] }
+            : { total: 1, hits: [{ symbol: 'BRCA1', name: 'BRCA1 DNA repair' }] }),
+        });
+      }) as any;
+
+      await geneSearch('BRCA', { limit: 5, offset });
+
+      expect((global.fetch as any).mock.calls).toHaveLength(2);
+      const urls = (global.fetch as any).mock.calls.map((c: any[]) => new URL(c[0] as string));
+      expect(urls[0].searchParams.get('from')).toBe(String(offset));
+      expect(urls[1].searchParams.get('q')).toBe('symbol:BRCA*');
+      expect(urls[1].searchParams.get('from')).toBe(String(offset));
+    }
   });
 });
 
