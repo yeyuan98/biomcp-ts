@@ -26,12 +26,14 @@ export interface DrugSearchResult {
   molecular_weight?: number;
   chebi_id?: string;
   unii?: string;
+  cas?: string;
 }
 
 export interface DrugResult {
   name: string;
   chembl_id?: string;
   aliases?: string[];
+  cas?: string;
   molecular_formula?: string;
   molecular_weight?: number;
   smiles?: string;
@@ -104,6 +106,7 @@ function countNonEmptyDrugFields(drug: DrugSearchResult): number {
   if (drug.inchi_key) count++;
   if (drug.chebi_id) count++;
   if (drug.unii) count++;
+  if (drug.cas) count++;
   if (drug.molecular_formula) count++;
   if (drug.molecular_weight !== undefined) count++;
   if (drug.synonyms && drug.synonyms.length > 0) count++;
@@ -192,7 +195,7 @@ export async function drugSearch(
 
   const queryParams = new URLSearchParams({
     q: query,
-    fields: 'chebi.name,chebi.id,chebi.formula,chebi.mass,chebi.inchikey,unii.smiles,unii.molecular_formula,unii.display_name,unii.registry_number,unichem.chembl,chembl.pref_name,chembl.molecule_chembl_id,chembl.inchi_key,chembl.molecule_properties,ndc.nonproprietaryname,ndc.substancename,fda_orphan_drug',
+    fields: 'chebi.name,chebi.id,chebi.formula,chebi.mass,chebi.inchikey,unii.smiles,unii.molecular_formula,unii.display_name,unii.unii,unii.registry_number,unichem.chembl,chembl.pref_name,chembl.molecule_chembl_id,chembl.inchi_key,chembl.molecule_properties,ndc.nonproprietaryname,ndc.substancename,fda_orphan_drug',
     size: String(limit),
     from: String(offset),
   });
@@ -277,7 +280,7 @@ export function resolveBestMatch(
 
 /** Fields we request from MyChem when resolving a drug by name. */
 const DRUG_GET_FIELDS =
-  'chebi.name,chebi.formula,chebi.mass,chebi.inchi,chebi.inchikey,chebi.id,chebi.name_synonyms,unii.smiles,unii.molecular_formula,unii.display_name,unii.registry_number,unichem.chembl,chembl.pref_name,chembl.molecule_chembl_id,chembl.smiles,chembl.inchi,chembl.inchi_key,chembl.molecule_properties,ndc.nonproprietaryname,ndc.substancename';
+  'chebi.name,chebi.formula,chebi.mass,chebi.inchi,chebi.inchikey,chebi.id,chebi.name_synonyms,unii.smiles,unii.molecular_formula,unii.display_name,unii.unii,unii.registry_number,unichem.chembl,chembl.pref_name,chembl.molecule_chembl_id,chembl.smiles,chembl.inchi,chembl.inchi_key,chembl.molecule_properties,ndc.nonproprietaryname,ndc.substancename';
 
 export async function drugGet(
   name: string,
@@ -328,12 +331,15 @@ export async function drugGet(
     molecular_formula: (chebi?.formula as string) || (unii?.molecular_formula as string) || (chemblProps?.full_molformula as string) || undefined,
   };
 
+  // The CAS registry number (unii.registry_number) rides in its own `cas`
+  // field (issue #123) — it is not a name synonym, so it no longer pollutes
+  // `aliases`, which stays reserved for true synonyms.
   if (unii?.registry_number) {
-    result.aliases = [unii.registry_number as string];
+    result.cas = unii.registry_number as string;
   }
 
-  // Cross-hit field consolidation: if primary hit is missing chembl_id or aliases,
-  // backfill from other matching candidate hits in the response.
+  // Cross-hit field consolidation: if the primary hit is missing chembl_id or
+  // cas, backfill from other matching candidate hits in the response.
   for (const other of response.hits || []) {
     if (other === hit) continue;
     const otherScore = resolveBestMatch(name, [other])?.score ?? 0;
@@ -344,10 +350,10 @@ export async function drugGet(
         const cId = (otherUnichem?.chembl as string) || (otherChembl?.molecule_chembl_id as string);
         if (cId) result.chembl_id = cId;
       }
-      if (!result.aliases) {
+      if (!result.cas) {
         const otherUnii = other.unii as Record<string, unknown> | undefined;
         if (otherUnii?.registry_number) {
-          result.aliases = [otherUnii.registry_number as string];
+          result.cas = otherUnii.registry_number as string;
         }
       }
     }
@@ -670,7 +676,13 @@ export function transformMyChemHit(hit: Record<string, unknown>): DrugSearchResu
     molecular_formula: (chebi?.formula as string) || (unii?.molecular_formula as string) || (chemblProps?.full_molformula as string) || undefined,
     molecular_weight: (chebi?.mass as number) || (chemblProps?.full_mwt as number) || undefined,
     chebi_id: (chebi?.id as string) || undefined,
-    unii: (unii?.registry_number as string) || undefined,
+    // MyChem's unii sub-document carries TWO distinct identifiers (issue
+    // #123): `unii` is the FDA UNII, `registry_number` is the CAS registry
+    // number. They must never be conflated — a dash-separated CAS is close
+    // enough in shape to a UNII that downstream consumers silently join on
+    // the wrong identifier.
+    unii: (unii?.unii as string) || undefined,
+    cas: (unii?.registry_number as string) || undefined,
   };
 }
 

@@ -41,6 +41,15 @@ describe('drug_search', () => {
         expect(r.chembl_id || r.inchi_key).toBeTruthy();
       }
     }
+    // Issue #123: `unii` carries the FDA UNII, never the CAS registry number
+    // (dash-separated digits) — that value rides in `cas` (live-verified on
+    // mychem.info: the imatinib base row maps unii=BKJ8M8G5HI / cas=152459-95-5).
+    expect(hit.unii ?? '').not.toMatch(/^\d{2,7}-\d{2}-\d$/);
+    expect(hit.cas ?? '').toMatch(/^\d{2,7}-\d{2}-\d$/);
+    for (const r of envelope.results) {
+      if (r.unii !== undefined) expect(r.unii).not.toMatch(/^\d{2,7}-\d{2}-\d$/);
+      if (r.cas !== undefined) expect(r.cas).toMatch(/^\d{2,7}-\d{2}-\d$/);
+    }
   }, 60000);
 
   it('returns an empty-results envelope with a hint for nonsense query', async () => {

@@ -50,7 +50,7 @@ describe('drug', () => {
           {
             _id: 'BSIYZIXJDXWZKO-UHFFFAOYSA-N',
             chebi: { name: 'Aspirin', formula: 'C9H8O4', mass: 180.16, inchikey: 'BSIYZIXJDXWZKO-UHFFFAOYSA-N' },
-            unii: { smiles: 'CC(=O)Oc1ccccc1C(=O)O', registry_number: 'R16CO5Y76E' },
+            unii: { smiles: 'CC(=O)Oc1ccccc1C(=O)O', unii: 'R16CO5Y76E', registry_number: '50-78-2' },
             unichem: { chembl: 'CHEMBL25' },
           },
         ],
@@ -64,6 +64,43 @@ describe('drug', () => {
     expect(results[0].chembl_id).toBe('CHEMBL25');
     expect(results[0].molecular_weight).toBe(180.16);
     expect(results[0].molecular_formula).toBe('C9H8O4');
+    expect(results[0].unii).toBe('R16CO5Y76E');
+    expect(results[0].cas).toBe('50-78-2');
+  });
+
+  // Regression for GitHub issue #123: the `unii` output field carried the CAS
+  // registry number (MyChem's unii.registry_number) instead of the FDA UNII
+  // (unii.unii). Live-verified shapes on mychem.info: imatinib (CHEMBL941
+  // row) → unii BKJ8M8G5HI / registry_number 152459-95-5; aspirin →
+  // R16CO5Y76E / 50-78-2.
+  test('drugSearch() maps the FDA UNII and the CAS registry number to separate fields', async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        hits: [
+          {
+            _id: 'KTUFNOKKBVMGRW-UHFFFAOYSA-N',
+            unii: { display_name: 'IMATINIB', unii: 'BKJ8M8G5HI', registry_number: '152459-95-5' },
+            unichem: { chembl: 'CHEMBL941' },
+          },
+        ],
+      }),
+    }) as any;
+
+    const results = await drugSearch('imatinib');
+
+    expect(results).toHaveLength(1);
+    expect(results[0].name).toBe('IMATINIB');
+    expect(results[0].unii).toBe('BKJ8M8G5HI');
+    expect(results[0].cas).toBe('152459-95-5');
+    // The two identifiers must never cross over: a UNII is 10 alphanumeric
+    // characters, a CAS is dash-separated digits.
+    expect(results[0].unii).not.toMatch(/^\d{2,7}-\d{2}-\d$/);
+    expect(results[0].cas).toMatch(/^\d{2,7}-\d{2}-\d$/);
+    // The projection requests BOTH members of MyChem's unii sub-document.
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(callUrl).toContain('unii.unii');
+    expect(callUrl).toContain('unii.registry_number');
   });
 
   test('drugSearch() maps chembl fields when chebi is absent', async () => {
@@ -119,7 +156,7 @@ describe('drug', () => {
           {
             _id: '354355033',
             chebi: { name: 'pembrolizumab' },
-            unii: { registry_number: 'Q153Y5Z106' },
+            unii: { unii: 'DPT0O3T46P', registry_number: '1374853-91-4' },
             unichem: { chembl: 'CHEMBL3338463' },
           },
         ],
@@ -524,7 +561,10 @@ describe('drug', () => {
     expect(result.chembl_id).toBe('CHEMBL438243');
     expect(result.molecular_formula).toBe('C92H150N22O25');
     expect(result.molecular_weight).toBe(1964.34);
-    expect(result.aliases).toEqual(['27061-78-5']);
+    // Issue #123: the CAS registry number rides in `cas` — `aliases` stays
+    // reserved for true name synonyms (none sourced today).
+    expect(result.cas).toBe('27061-78-5');
+    expect(result.aliases).toBeUndefined();
   });
 
   describe('resolveBestMatch', () => {
