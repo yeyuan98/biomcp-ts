@@ -27,8 +27,8 @@ export function registerTrialTools(server: McpServer): void {
       inputSchema: {
         query: z.string().trim().min(1, 'Query must be a non-empty string after trimming').describe('Condition, intervention, or keyword to search for'),
         status: z.string().optional().describe('Filter by status (Recruiting, Completed, etc.)'),
-        phase: z.string().optional().describe('Filter by phase (Phase 1, Phase 2, etc.)'),
-        intervention_type: z.string().optional().describe('Filter by intervention type (Drug, Device, etc.)'),
+        phase: z.string().optional().describe('Filter by phase (Phase 1, Phase 2, etc.). The matched phase(s) are echoed per row in the "phase" array (e.g. ["PHASE1","PHASE2"]) so the filter is verifiable from each result'),
+        intervention_type: z.string().optional().describe('Filter by intervention type (Drug, Device, etc.); verifiable per row via the "interventions" strings ("TYPE: name")'),
         limit: z.number().int().min(1).max(50).default(10).describe('Maximum results'),
         page_token: z.string().optional().describe('Page token from previous response for pagination'),
       },

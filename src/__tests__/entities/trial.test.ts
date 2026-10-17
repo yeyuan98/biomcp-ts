@@ -19,7 +19,9 @@ describe('trial', () => {
           protocolSection: {
             identificationModule: { nctId: 'NCT00000001', briefTitle: 'Test Trial' },
             statusModule: {},
-            descriptionModule: {},
+            designModule: {},
+            conditionsModule: {},
+            sponsorCollaboratorsModule: {},
             armsInterventionsModule: {},
           },
         }],
@@ -41,9 +43,11 @@ describe('trial', () => {
       json: () => Promise.resolve({
         studies: [{
           protocolSection: {
-            identificationModule: { nctId: 'NCT00000001', briefTitle: 'Test Trial', sponsors: [{ name: 'NIH' }] },
-            statusModule: { overallStatus: 'RECRUITING', phases: ['PHASE2'] },
-            descriptionModule: { conditions: ['Breast Cancer'] },
+            identificationModule: { nctId: 'NCT00000001', briefTitle: 'Test Trial' },
+            statusModule: { overallStatus: 'RECRUITING' },
+            designModule: { phases: ['PHASE2'] },
+            conditionsModule: { conditions: ['Breast Cancer'] },
+            sponsorCollaboratorsModule: { leadSponsor: { name: 'NIH' }, collaborators: [{ name: 'Mayo Clinic' }] },
             armsInterventionsModule: { interventions: [{ type: 'Drug', name: 'Aspirin' }] },
           },
         }],
@@ -57,6 +61,8 @@ describe('trial', () => {
     expect(response.studies[0].title).toBe('Test Trial');
     expect(response.studies[0].status).toBe('RECRUITING');
     expect(response.studies[0].sponsor).toBe('NIH');
+    expect(response.studies[0].phase).toEqual(['PHASE2']);
+    expect(response.studies[0].conditions).toEqual(['Breast Cancer']);
   });
 
   test('trialGet() calls connection with correct endpoint', async () => {
@@ -65,9 +71,11 @@ describe('trial', () => {
       json: () => Promise.resolve({
         studies: [{
           protocolSection: {
-            identificationModule: { nctId: 'NCT00000001', briefTitle: 'Test Trial', sponsors: [], collaborators: [] },
-            statusModule: { overallStatus: 'RECRUITING', phases: [] },
-            descriptionModule: {},
+            identificationModule: { nctId: 'NCT00000001', briefTitle: 'Test Trial' },
+            statusModule: { overallStatus: 'RECRUITING' },
+            designModule: {},
+            conditionsModule: {},
+            sponsorCollaboratorsModule: {},
             armsInterventionsModule: {},
             contactsLocationsModule: {},
           },
@@ -178,7 +186,9 @@ describe('trial', () => {
           protocolSection: {
             identificationModule: { nctId: 'NCT00000002', briefTitle: 'Page 2 Trial' },
             statusModule: {},
-            descriptionModule: {},
+            designModule: {},
+            conditionsModule: {},
+            sponsorCollaboratorsModule: {},
             armsInterventionsModule: {},
           },
         }],
@@ -202,7 +212,9 @@ describe('trial', () => {
           protocolSection: {
             identificationModule: { nctId: 'NCT00000001', briefTitle: 'Test' },
             statusModule: {},
-            descriptionModule: {},
+            designModule: {},
+            conditionsModule: {},
+            sponsorCollaboratorsModule: {},
             armsInterventionsModule: {},
           },
         }],
@@ -223,7 +235,9 @@ describe('trial', () => {
           protocolSection: {
             identificationModule: { nctId: 'NCT00000001', briefTitle: 'Test' },
             statusModule: {},
-            descriptionModule: {},
+            designModule: {},
+            conditionsModule: {},
+            sponsorCollaboratorsModule: {},
             armsInterventionsModule: {},
           },
         }],
@@ -239,7 +253,8 @@ describe('trial', () => {
     const input = {
       protocolSection: {
         identificationModule: { nctId: 'NCT00000001', briefTitle: 'Test Trial' },
-        statusModule: { overallStatus: 'RECRUITING', phases: ['PHASE2'] },
+        statusModule: { overallStatus: 'RECRUITING' },
+        designModule: { phases: ['PHASE2'] },
       },
     };
 
@@ -249,8 +264,91 @@ describe('trial', () => {
       nct_id: 'NCT00000001',
       title: 'Test Trial',
       status: 'RECRUITING',
-      phase: 'PHASE2',
+      phase: ['PHASE2'],
     });
+  });
+
+  // ========== #131: filter-verifiability — phase/sponsor/conditions in results ==========
+
+  test('trialGet() core exposes phase, sponsor, collaborator, and conditions from the v2 payload modules', async () => {
+    // v2 locations (live-verified): designModule.phases, conditionsModule.conditions,
+    // sponsorCollaboratorsModule.leadSponsor/collaborators — the v1-era
+    // statusModule.phases / descriptionModule.conditions /
+    // identificationModule.sponsors paths never existed in v2, so these
+    // fields were silently undefined on every trial_get (#131).
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        studies: [{
+          protocolSection: {
+            identificationModule: { nctId: 'NCT00000001', briefTitle: 'Combined-Phase Trial' },
+            statusModule: { overallStatus: 'RECRUITING' },
+            designModule: { phases: ['PHASE1', 'PHASE2'] },
+            conditionsModule: { conditions: ['Glioblastoma', 'Astrocytoma'] },
+            sponsorCollaboratorsModule: {
+              leadSponsor: { name: 'National Cancer Institute' },
+              collaborators: [{ name: 'Mayo Clinic' }, { name: 'Dana-Farber' }],
+            },
+            armsInterventionsModule: {},
+            contactsLocationsModule: {},
+          },
+        }],
+      }),
+    }) as any;
+
+    const result = await trialGet('NCT00000001');
+
+    expect(result.phase).toEqual(['PHASE1', 'PHASE2']); // full array, not [0]
+    expect(result.conditions).toEqual(['Glioblastoma', 'Astrocytoma']);
+    expect(result.sponsor).toBe('National Cancer Institute');
+    expect(result.collaborator).toBe('Mayo Clinic');
+  });
+
+  test('filter-visibility invariant: a phase-filtered search returns rows whose own phase array contains that phase', async () => {
+    // Rows mock what AREA[Phase]PHASE2 actually returns upstream: a PHASE2-only
+    // study and a combined PHASE1+PHASE2 study. Every row's own `phase` array
+    // must contain PHASE2 (the combined row must NOT be collapsed to [0]).
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        studies: [
+          {
+            protocolSection: {
+              identificationModule: { nctId: 'NCT00000001', briefTitle: 'Phase 2 Only' },
+              statusModule: { overallStatus: 'RECRUITING' },
+              designModule: { phases: ['PHASE2'] },
+              conditionsModule: {},
+              sponsorCollaboratorsModule: { leadSponsor: { name: 'NIH' } },
+              armsInterventionsModule: {},
+            },
+          },
+          {
+            protocolSection: {
+              identificationModule: { nctId: 'NCT00000002', briefTitle: 'Combined Phase 1/2' },
+              statusModule: { overallStatus: 'RECRUITING' },
+              designModule: { phases: ['PHASE1', 'PHASE2'] },
+              conditionsModule: {},
+              sponsorCollaboratorsModule: { leadSponsor: { name: 'NCI' } },
+              armsInterventionsModule: {},
+            },
+          },
+        ],
+      }),
+    }) as any;
+
+    const response = await trialSearch('glioblastoma', { phase: 'Phase 2' });
+
+    // The filter request itself used the phase clause...
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(callUrl).toContain('AREA%5BPhase%5DPHASE2');
+    // ...and every returned row proves it satisfied the filter from its own fields.
+    expect(response.studies).toHaveLength(2);
+    for (const row of response.studies) {
+      expect(Array.isArray(row.phase)).toBe(true);
+      expect(row.phase).toContain('PHASE2');
+    }
+    // Combined phases stay intact — consumers join, we do not collapse to [0].
+    expect(response.studies[1].phase).toEqual(['PHASE1', 'PHASE2']);
   });
 });
 
@@ -272,8 +370,10 @@ describe('trialGet section deadlines (#107 phase 2)', () => {
       studies: [{
         protocolSection: {
           identificationModule: { nctId: 'NCT00000001', briefTitle: 'Test Trial' },
-          statusModule: { overallStatus: 'RECRUITING', phases: [] },
-          descriptionModule: {},
+          statusModule: { overallStatus: 'RECRUITING' },
+          designModule: {},
+          conditionsModule: {},
+          sponsorCollaboratorsModule: {},
           armsInterventionsModule: {},
           contactsLocationsModule: {},
           ...overrides,
