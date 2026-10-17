@@ -24,6 +24,7 @@ export interface VariantSearchResult {
   significance?: string;
   clinvar_stars?: number;
   gnomad_af?: number;
+  cadd_phred?: number;
 }
 
 export interface VariantGetOptions {
@@ -887,6 +888,8 @@ export function transformMyVariantHit(hit: any): VariantSearchResult {
     significance: extractClinvarSignificance(hit.clinvar) || (hit as any).dbnsfp?.clinvar?.clnsig,
     clinvar_stars: hit.clinvar?.stars,
     gnomad_af: hit.gnomad_exome?.af?.af ?? hit.gnomad_genome?.af?.af,
+    // Echoed so the min_cadd filter is verifiable from the row itself (#131).
+    cadd_phred: (hit as any).cadd?.phred,
   };
 }
 

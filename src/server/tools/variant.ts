@@ -33,7 +33,7 @@ Do NOT use compound free-text like "BRAF V600E" — use separate gene and hgvsp 
         gene: z.string().optional().describe('Filter by gene symbol (e.g., "BRAF"). Use together with hgvsp for protein change queries.'),
         significance: z.enum(['benign', 'likely_benign', 'pathogenic', 'likely_pathogenic', 'uncertain']).optional().describe('ClinVar significance category, matched exactly — records displayed as "Pathogenic/Likely pathogenic" match both pathogenic and likely_pathogenic; "Conflicting interpretations of pathogenicity" matches none of these'),
         max_frequency: z.number().optional().describe('Maximum allele frequency (0-1)'),
-        min_cadd: z.number().optional().describe('Minimum CADD score'),
+        min_cadd: z.number().optional().describe('Minimum CADD score; echoed per row as cadd_phred so the filter is verifiable from each result'),
         consequence: z.string().optional().describe('Variant consequence (e.g., missense, synonymous)'),
         rsid: z.string().optional().describe('dbSNP rsID'),
         hgvsp: z.string().optional().describe('Protein change (e.g., V600E). Use with gene parameter for compound queries.'),

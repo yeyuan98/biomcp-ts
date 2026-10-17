@@ -25,7 +25,8 @@ export interface TrialSearchResult {
   nct_id: string;
   title?: string;
   status?: string;
-  phase?: string;
+  /** Full v2 designModule.phases array (e.g. ["PHASE1","PHASE2"]); consumers join. */
+  phase?: string[];
   conditions?: string[];
   interventions?: string[];
   sponsor?: string;
@@ -40,7 +41,8 @@ export interface TrialResult {
   title?: string;
   short_title?: string;
   status?: string;
-  phase?: string;
+  /** Full v2 designModule.phases array (e.g. ["PHASE1","PHASE2"]); consumers join. */
+  phase?: string[];
   conditions?: string[];
   interventions?: string[];
   sponsor?: string;
@@ -134,20 +136,22 @@ export async function trialGet(
   
   const identificationModule = trial.protocolSection?.identificationModule;
   const statusModule = trial.protocolSection?.statusModule;
-  const descriptionModule = trial.protocolSection?.descriptionModule;
+  const designModule = trial.protocolSection?.designModule;
+  const conditionsModule = trial.protocolSection?.conditionsModule;
+  const sponsorCollaboratorsModule = trial.protocolSection?.sponsorCollaboratorsModule;
   const armsInterventionsModule = trial.protocolSection?.armsInterventionsModule;
   const contactsLocationsModule = trial.protocolSection?.contactsLocationsModule;
-  
+
   const result: TrialResult = {
     nct_id: identificationModule?.nctId || nctId,
     title: identificationModule?.briefTitle,
     short_title: identificationModule?.shortTitle,
     status: statusModule?.overallStatus,
-    phase: statusModule?.phases?.[0],
-    conditions: descriptionModule?.conditions,
+    phase: designModule?.phases,
+    conditions: conditionsModule?.conditions,
     interventions: armsInterventionsModule?.interventions?.map((i: { type: string; name: string }) => `${i.type}: ${i.name}`),
-    sponsor: identificationModule?.sponsors?.[0]?.name,
-    collaborator: identificationModule?.collaborators?.[0]?.name,
+    sponsor: sponsorCollaboratorsModule?.leadSponsor?.name,
+    collaborator: sponsorCollaboratorsModule?.collaborators?.[0]?.name,
   };
   
   if (contactsLocationsModule?.contacts) {
@@ -300,6 +304,11 @@ async function fetchOutcomes(nctId: string, signal?: AbortSignal): Promise<{ pri
   }
 }
 
+// ClinicalTrials.gov v2 study payload shape (live-verified): phases live in
+// designModule, conditions in conditionsModule, and sponsor/collaborators in
+// sponsorCollaboratorsModule — NOT in statusModule/descriptionModule/
+// identificationModule.sponsors (v1-era paths that silently yielded
+// undefined; issue #131).
 interface ClinicalTrialsSearchResponse {
   nextPageToken?: string;
   studies?: Array<{
@@ -307,57 +316,22 @@ interface ClinicalTrialsSearchResponse {
       identificationModule?: {
         nctId?: string;
         briefTitle?: string;
-        sponsors?: Array<{ name: string }>;
       };
       statusModule?: {
         overallStatus?: string;
+      };
+      designModule?: {
         phases?: string[];
       };
-      descriptionModule?: {
+      conditionsModule?: {
         conditions?: string[];
+      };
+      sponsorCollaboratorsModule?: {
+        leadSponsor?: { name?: string };
+        collaborators?: Array<{ name?: string }>;
       };
       armsInterventionsModule?: {
         interventions?: Array<{ type: string; name: string }>;
-      };
-    };
-  }>;
-}
-
-interface ClinicalTrialsDetailResponse {
-  studies?: Array<{
-    protocolSection?: {
-      identificationModule?: {
-        nctId?: string;
-        briefTitle?: string;
-        shortTitle?: string;
-        sponsors?: Array<{ name: string }>;
-        collaborators?: Array<{ name: string }>;
-      };
-      statusModule?: {
-        overallStatus?: string;
-        phases?: string[];
-      };
-      descriptionModule?: {
-        conditions?: string[];
-        briefSummary?: string;
-      };
-      armsInterventionsModule?: {
-        interventions?: Array<{ type: string; name: string }>;
-      };
-      contactsLocationsModule?: {
-        contacts?: Array<{ role?: string; name?: string; phone?: string; email?: string }>;
-        locations?: Array<{ facility?: string; city?: string; state?: string; country?: string; zip?: string; status?: string }>;
-      };
-      eligibilityModule?: {
-        eligibilityCriteria?: string;
-        minimumAge?: string;
-        maximumAge?: string;
-        sex?: string;
-        healthyVolunteers?: boolean;
-      };
-      outcomesModule?: {
-        primaryOutcomes?: Array<{ measure?: string; timeframe?: string }>;
-        secondaryOutcomes?: Array<{ measure?: string; timeframe?: string }>;
       };
     };
   }>;
@@ -366,17 +340,21 @@ interface ClinicalTrialsDetailResponse {
 export function transformTrialSearchResult(trial: ClinicalTrialsSearchStudy): TrialSearchResult {
   const identificationModule = trial.protocolSection?.identificationModule;
   const statusModule = trial.protocolSection?.statusModule;
-  const descriptionModule = trial.protocolSection?.descriptionModule;
+  const designModule = trial.protocolSection?.designModule;
+  const conditionsModule = trial.protocolSection?.conditionsModule;
+  const sponsorCollaboratorsModule = trial.protocolSection?.sponsorCollaboratorsModule;
   const armsInterventionsModule = trial.protocolSection?.armsInterventionsModule;
-  
+
   return {
     nct_id: identificationModule?.nctId || '',
     title: identificationModule?.briefTitle,
     status: statusModule?.overallStatus,
-    phase: statusModule?.phases?.[0],
-    conditions: descriptionModule?.conditions,
+    // Full array: a combined PHASE1/PHASE2 study must keep both entries so
+    // a phase-filtered search is verifiable from the row itself (#131).
+    phase: designModule?.phases,
+    conditions: conditionsModule?.conditions,
     interventions: armsInterventionsModule?.interventions?.map((i: { type: string; name: string }) => `${i.type}: ${i.name}`),
-    sponsor: identificationModule?.sponsors?.[0]?.name,
+    sponsor: sponsorCollaboratorsModule?.leadSponsor?.name,
   };
 }
 
@@ -385,7 +363,7 @@ export function transformTrialResponse(data: ClinicalTrialsDetailStudy): TrialRe
     nct_id: data.protocolSection?.identificationModule?.nctId || '',
     title: data.protocolSection?.identificationModule?.briefTitle,
     status: data.protocolSection?.statusModule?.overallStatus,
-    phase: data.protocolSection?.statusModule?.phases?.[0],
+    phase: data.protocolSection?.designModule?.phases,
   };
 }
 
@@ -394,14 +372,19 @@ interface ClinicalTrialsSearchStudy {
     identificationModule?: {
       nctId?: string;
       briefTitle?: string;
-      sponsors?: Array<{ name: string }>;
     };
     statusModule?: {
       overallStatus?: string;
+    };
+    designModule?: {
       phases?: string[];
     };
-    descriptionModule?: {
+    conditionsModule?: {
       conditions?: string[];
+    };
+    sponsorCollaboratorsModule?: {
+      leadSponsor?: { name?: string };
+      collaborators?: Array<{ name?: string }>;
     };
     armsInterventionsModule?: {
       interventions?: Array<{ type: string; name: string }>;
@@ -415,15 +398,21 @@ interface ClinicalTrialsDetailStudy {
       nctId?: string;
       briefTitle?: string;
       shortTitle?: string;
-      sponsors?: Array<{ name: string }>;
-      collaborators?: Array<{ name: string }>;
     };
     statusModule?: {
       overallStatus?: string;
+    };
+    designModule?: {
       phases?: string[];
     };
-    descriptionModule?: {
+    conditionsModule?: {
       conditions?: string[];
+    };
+    sponsorCollaboratorsModule?: {
+      leadSponsor?: { name?: string };
+      collaborators?: Array<{ name?: string }>;
+    };
+    descriptionModule?: {
       briefSummary?: string;
     };
     armsInterventionsModule?: {

@@ -258,6 +258,30 @@ describe('variant', () => {
     expect(callUrl).toContain('cadd.phred:[20 TO *]');
   });
 
+  test('variantSearch() with min_cadd echoes the score per row as cadd_phred so the filter is verifiable', async () => {
+    // The cadd field is already requested in `fields=`; the transform must
+    // project it (mirroring the gnomad_af precedent) — otherwise min_cadd is
+    // unfalsifiable from the output (#131).
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        hits: [
+          { _id: 'chr7:g.140453136A>T', cadd: { phred: 24.1 } },
+          { _id: 'chr17:g.7577548C>T', cadd: { phred: 20.0 } },
+        ],
+      }),
+    }) as any;
+
+    const results = await variantSearch({ gene: 'TP53', min_cadd: 20 });
+
+    expect(results[0].cadd_phred).toBe(24.1);
+    expect(results[1].cadd_phred).toBe(20);
+    // Filter-visibility invariant: every row's echoed score satisfies the filter.
+    for (const row of results) {
+      expect(row.cadd_phred).toBeGreaterThanOrEqual(20);
+    }
+  });
+
   test('variantSearch() with max_frequency uses real gnomad AF fields in OR-clause', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
@@ -663,6 +687,15 @@ describe('variant', () => {
     expect(result.hgvs_c).toBeUndefined();
     expect(result.significance).toBeUndefined();
     expect(result.gnomad_af).toBeUndefined();
+    expect(result.cadd_phred).toBeUndefined();
+  });
+
+  test('transformMyVariantHit() projects cadd.phred as cadd_phred, undefined when the hit carries no cadd', () => {
+    const withCadd = transformMyVariantHit({ _id: 'chr7:g.1A>T', cadd: { phred: 24.1 } });
+    expect(withCadd.cadd_phred).toBe(24.1);
+
+    const withoutCadd = transformMyVariantHit({ _id: 'chr7:g.2C>G' });
+    expect(withoutCadd.cadd_phred).toBeUndefined();
   });
 
   // --- Helper function tests ---
