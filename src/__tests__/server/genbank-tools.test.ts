@@ -1,4 +1,8 @@
 import { jest, describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { connectionManager } from '../../connections/manager.js';
 import { createMcpTestHarness, type McpTestHarness } from '../helpers/mcp-harness.js';
 import { mockGlobalFetch } from '../helpers/mock-fetch.js';
@@ -150,27 +154,17 @@ describe('genbank tools', () => {
       format: 'fasta',
       sequence_text: '>NC_000023.11:1-60\nACGT\n',
       region: { start: 1, stop: 60, strand: 1 },
+      char_count: '>NC_000023.11:1-60\nACGT\n'.length,
+      total_char_count: '>NC_000023.11:1-60\nACGT\n'.length,
+      truncated: false,
     });
+    expect(record.mode).toBeUndefined();
 
     const efetchUrl = fetchUrls().find(u => u.includes('efetch.fcgi'))!;
     const parsed = new URL(efetchUrl);
     expect(parsed.searchParams.get('rettype')).toBe('fasta');
     expect(parsed.searchParams.get('seq_start')).toBe('1');
     expect(parsed.searchParams.get('seq_stop')).toBe('60');
-  });
-
-  it('genbank_get truncates oversized sequence_text with a truncation marker', async () => {
-    const oversized = 'A'.repeat(250_000);
-    mockFetchRoutes(defaultRoutes({ efetchText: oversized }));
-
-    const record = (await harness.callTool('genbank_get', {
-      accession: 'NC_000023.11',
-    })) as any;
-
-    const expectedMarker =
-      '\n...[truncated 50000 of 250000 chars — request a seq_start/seq_stop region for the full text]';
-    expect(record.sequence_text).toBe('A'.repeat(200_000) + expectedMarker);
-    expect(record.sequence_text).toContain('request a seq_start/seq_stop region');
   });
 
   it('genbank_get surfaces entity validation errors for malformed accessions', async () => {
@@ -189,6 +183,118 @@ describe('genbank tools', () => {
     expect(result).toEqual({
       gene_ids: [7157, 29087],
       note: 'NCBI Gene IDs — usable as entrezgene IDs with MyGene tools',
+    });
+  });
+
+  describe('genbank_get output modes (file store)', () => {
+    let savedCacheDir: string | undefined;
+    let cacheRoot: string;
+
+    beforeEach(() => {
+      savedCacheDir = process.env.BIOMCP_CACHE_DIR;
+      cacheRoot = mkdtempSync(join(tmpdir(), 'biomcp-gbtools-'));
+      process.env.BIOMCP_CACHE_DIR = cacheRoot;
+    });
+
+    afterEach(() => {
+      if (savedCacheDir === undefined) delete process.env.BIOMCP_CACHE_DIR;
+      else process.env.BIOMCP_CACHE_DIR = savedCacheDir;
+      rmSync(cacheRoot, { recursive: true, force: true });
+    });
+
+    it('small records (<=1k chars) stay inline with honest counts and no file written', async () => {
+      const text = 'LOCUS       NC_000023\nORIGIN\n//';
+      mockFetchRoutes(defaultRoutes({ efetchText: text }));
+
+      const record = (await harness.callTool('genbank_get', { accession: 'NC_000023.11' })) as any;
+
+      expect(record.sequence_text).toBe(text);
+      expect(record.truncated).toBe(false);
+      expect(record.char_count).toBe(text.length);
+      expect(record.total_char_count).toBe(text.length);
+      expect(record.mode).toBeUndefined();
+      expect(existsSync(join(cacheRoot, 'genbank'))).toBe(false);
+    });
+
+    it('large records default to file mode: full text on disk, handle in the reply', async () => {
+      const text = `LOCUS       NC_000023\n${'ACGT'.repeat(1500)}\n//`;
+      expect(text.length).toBeGreaterThan(1_000);
+      mockFetchRoutes(defaultRoutes({ efetchText: text }));
+
+      const record = (await harness.callTool('genbank_get', { accession: 'NC_000023.11' })) as any;
+
+      expect(record.sequence_text).toBeUndefined();
+      expect(record.mode).toBe('file');
+      expect(record.file_path).toBe(join(cacheRoot, 'genbank', 'NC_000023.11.genbank'));
+      expect(record.char_count).toBe(text.length);
+      expect(record.total_char_count).toBe(text.length);
+      expect(record.truncated).toBe(false);
+      expect(record.length_bp).toBe(1000);
+      expect(record.note).toContain('server-local');
+      // The file carries the FULL text — never truncated.
+      expect(readFileSync(record.file_path, 'utf8')).toBe(text);
+    });
+
+    it('sequence_output:"inline" opts a large record back into the old 200k-cap behavior', async () => {
+      const oversized = 'A'.repeat(250_000);
+      mockFetchRoutes(defaultRoutes({ efetchText: oversized }));
+
+      const record = (await harness.callTool('genbank_get', {
+        accession: 'NC_000023.11',
+        sequence_output: 'inline',
+      })) as any;
+
+      const expectedMarker =
+        '\n...[truncated 50000 of 250000 chars — request a seq_start/seq_stop region for the full text]';
+      expect(record.sequence_text).toBe('A'.repeat(200_000) + expectedMarker);
+      expect(record.truncated).toBe(true);
+      expect(record.total_char_count).toBe(250_000);
+      expect(record.mode).toBeUndefined();
+      expect(existsSync(join(cacheRoot, 'genbank'))).toBe(false);
+    });
+
+    it('store failure falls back to truncated inline output, disclosed', async () => {
+      // A cache dir under a regular file cannot be created — every store
+      // write fails, so the tool must fall back rather than error.
+      const blocker = join(cacheRoot, 'blocker');
+      writeFileSync(blocker, 'x');
+      process.env.BIOMCP_CACHE_DIR = join(blocker, 'nested');
+
+      const oversized = 'A'.repeat(250_000);
+      mockFetchRoutes(defaultRoutes({ efetchText: oversized }));
+
+      const record = (await harness.callTool('genbank_get', { accession: 'NC_000023.11' })) as any;
+
+      expect(record.sequence_text).toContain('truncated 50000 of 250000 chars');
+      expect(record.sequence_text.startsWith('A'.repeat(200_000))).toBe(true);
+      expect(record.truncated).toBe(true);
+      expect(record.mode).toBeUndefined();
+      expect(record.note).toContain('File output was requested but unavailable');
+    });
+
+    it('region requests produce per-region file names', async () => {
+      const text = `>NC_000023.11 region\n${'ACGT'.repeat(400)}\n`;
+      mockFetchRoutes(defaultRoutes({ efetchText: text }));
+
+      const first = (await harness.callTool('genbank_get', {
+        accession: 'NC_000023.11',
+        format: 'fasta',
+        seq_start: 1,
+        seq_stop: 100,
+      })) as any;
+      const second = (await harness.callTool('genbank_get', {
+        accession: 'NC_000023.11',
+        format: 'fasta',
+        seq_start: 101,
+        seq_stop: 200,
+        strand: 2,
+      })) as any;
+
+      expect(first.file_path).toBe(join(cacheRoot, 'genbank', 'NC_000023.11.fasta_r1-100_s1'));
+      expect(second.file_path).toBe(join(cacheRoot, 'genbank', 'NC_000023.11.fasta_r101-200_s2'));
+      expect(first.file_path).not.toBe(second.file_path);
+      expect(existsSync(first.file_path)).toBe(true);
+      expect(existsSync(second.file_path)).toBe(true);
     });
   });
 });
