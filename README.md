@@ -108,7 +108,7 @@ Full tool schemas (params, enums, defaults) live in [src/server/README.md](src/s
 
 | Tool | Description |
 |------|-------------|
-| `geo_search` | Search NCBI GEO for functional genomics studies (expression microarrays, RNA-seq, single-cell series) by entry type (GSE/GSM/GPL/GDS) and organism; results carry cross-links (sra_project, bioproject, pubmed_ids) for chaining |
+| `geo_search` | Search NCBI GEO for functional genomics studies (expression microarrays, RNA-seq, single-cell series) by entry type (GSE/GSM/GPL/GDS) and organism; results carry cross-links (bioproject, pubmed_ids; sra_project when NCBI links the SRA study — otherwise geo_get's sra field) for chaining |
 | `geo_get` | Get the full SOFT record for a GEO series/sample/platform: summary, organisms, sample preview (≤20), supplementary file URLs, and cross-references; optionally download the first supplementary file |
 
 ### SRA (2)

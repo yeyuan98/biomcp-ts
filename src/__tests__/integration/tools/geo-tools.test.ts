@@ -29,6 +29,11 @@ describe('geo tools (integration)', () => {
     expect(hit.title.toLowerCase()).toContain('cytotoxicity');
     expect(hit.organism).toBe('Homo sapiens');
     expect(hit.pubmed_ids.map(String)).toContain('35046993');
+    // #124: deterministic cross-link pin on the exact-accession row — NCBI
+    // has linked the SRA study for this series, so the projected fields are
+    // stable (most newer series legitimately lack the sra_project link).
+    expect(hit.sra_project).toBe('SRP336638');
+    expect(hit.bioproject).toBe('PRJNA762469');
   }, 60000);
 
   it('geo_get returns series details for GSE183947', async () => {
