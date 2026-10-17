@@ -11,7 +11,7 @@ import { sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra } 
 const DRUG_GET_TIMEOUT_MS = 40000;
 
 const DRUG_SECTIONS = [
-  'core', 'us_regulatory', 'eu_regulatory', 'who_regulatory', 'safety', 'targets', 'indications', 'adverse_events', 'all'
+  'core', 'us_regulatory', 'who_regulatory', 'safety', 'targets', 'indications', 'adverse_events', 'all'
 ] as const;
 
 // Keep limit slicing in lockstep with the entity-side 'all' expansion.
@@ -21,6 +21,7 @@ const DRUG_ARRAY_KEYS: Record<string, string[]> = {
   targets: [],
   indications: [],
   adverse_events: ['reactions'],
+  who_regulatory: ['products'],
 };
 
 export function registerDrugTools(server: McpServer): void {
@@ -61,7 +62,7 @@ export function registerDrugTools(server: McpServer): void {
       description: 'Get detailed drug information by name',
       inputSchema: {
         name: z.string().describe('Drug name (e.g., "imatinib", "aspirin")'),
-        sections: z.array(z.enum(DRUG_SECTIONS)).optional().describe('Sections to include (adverse_events = FDA FAERS adverse reactions ranked by report count; limit applies to reaction rows; indications = OpenTargets indications ranked by max clinical phase descending, then trial-report count, then disease name)'),
+        sections: z.array(z.enum(DRUG_SECTIONS)).optional().describe('Sections to include (adverse_events = FDA FAERS adverse reactions ranked by report count; limit applies to reaction rows; indications = OpenTargets indications ranked by max clinical phase descending, then trial-report count, then disease name; who_regulatory = WHO Prequalification listing only, ~650 global-health priority products — prequalified:false means not PQ-listed, not banned or unapproved anywhere; limit applies to product rows)'),
         limit: z.number().int().min(1).max(100).default(20),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }

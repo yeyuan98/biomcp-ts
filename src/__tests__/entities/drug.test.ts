@@ -3,6 +3,9 @@ import {
   drugSearch,
   drugGet,
   fetchAdverseEvents,
+  fetchWHORegulatory,
+  innLeadPhrases,
+  resetWhoPqCacheForTests,
   transformMyChemResponse,
   resolveBestMatch,
   collapseSaltVariants,
@@ -22,6 +25,7 @@ describe('drug', () => {
     jest.clearAllMocks();
     connectionManager.closeAll();
     process.env.MYCHEM_API_KEY = '';
+    resetWhoPqCacheForTests();
   });
 
   afterEach(() => {
@@ -570,7 +574,168 @@ describe('drug', () => {
     expect(probeUrl).toContain('patient.drug.openfda.substance_name:"we\\"ird\\\\name"');
   });
 
-  test('drugGet() sections=["all"] includes adverse_events alongside the six legacy sections', async () => {
+  // Regression for GitHub issue #135 (part 2, WHO half): who_regulatory was a
+  // hardcoded `{ prequalified: false }` stub — no lookup ever ran. It is now a
+  // real lookup against WHO Prequalification's official anonymous CSV export
+  // (live-verified 2026-10-17, ~655 rows). The fixture below is a real slice
+  // of that export (header + artemether fixed-dose combo rows + rows chosen
+  // to exercise quoted commas, parenthesized salts, and empty dates).
+  const WHO_PQ_FIXTURE_CSV = [
+    '"WHO Reference Number","INN, Dosage Form and Strength","Product Type","Therapeutic Area",Applicant,"Dosage Form","Basis of Listing","Date of Prequalification"',
+    'MA026,"Artemether/Lumefantrine Tablet 20mg/120mg","Finished Pharmaceutical Product",Malaria,"Novartis Pharma AG",Tablet,"Prequalification - Abridged","26  Apr,  2004"',
+    'MA062,"Artemether/Lumefantrine Tablet 20mg/120mg","Finished Pharmaceutical Product",Malaria,"Ipca Laboratories Ltd",Tablet,"Prequalification - Full","15  Dec,  2009"',
+    'MA069,"Artemether/Lumefantrine Tablet, Dispersible 20mg/120mg","Finished Pharmaceutical Product",Malaria,"Novartis Pharma AG","Tablet, Dispersible","Prequalification - Abridged","27  Feb,  2009"',
+    'HA107,"Abacavir (sulfate) Solution, Oral 20mg/mL","Finished Pharmaceutical Product",HIV/AIDS,"ViiV Healthcare BV","Solution, Oral","Prequalification - Abridged","20  Mar,  2002"',
+    'HA634,"Dolutegravir (sodium) Tablet, Film-coated 50mg","Finished Pharmaceutical Product",HIV/AIDS,"ViiV Healthcare BV","Tablet, Film-coated","Prequalification - Abridged","14  Oct,  2014"',
+    '"ANDA 077268 USFDA","Zidovudine Solution, Oral 10mg/ml","Finished Pharmaceutical Product",HIV/AIDS,"Aurobindo Pharma Ltd","Solution, Oral","Alternative Listing",',
+  ].join('\n');
+
+  const mockWhoPqHosts = (whoCsv: string | Error = WHO_PQ_FIXTURE_CSV) => {
+    return jest.fn<(...args: any[]) => any>().mockImplementation(async (input: any) => {
+      const url = typeof input === 'string' ? input : input?.url ?? String(input);
+      const u = new URL(url);
+      if (u.hostname === 'mychem.info') {
+        return {
+          ok: true,
+          json: () => Promise.resolve({ hits: [{ chebi: { name: 'Artemether' }, unichem: { chembl: 'CHEMBL123' } }] }),
+        };
+      }
+      expect(u.hostname).toBe('extranet.who.int');
+      if (whoCsv instanceof Error) throw whoCsv;
+      return { ok: true, text: () => Promise.resolve(whoCsv) };
+    }) as any;
+  };
+
+  const whoFetchCount = (): number =>
+    (global.fetch as any).mock.calls.filter((c: unknown[]) => {
+      const url = typeof c[0] === 'string' ? c[0] : (c[0] as any)?.url ?? String(c[0]);
+      return new URL(url).hostname === 'extranet.who.int';
+    }).length;
+
+  test('innLeadPhrases() extracts INN lead phrases from real column shapes', () => {
+    // Fixed-dose combo: both components, strength fragments dropped.
+    expect(innLeadPhrases('Artemether/Lumefantrine Tablet 20mg/120mg'))
+      .toEqual(['artemether', 'lumefantrine tablet']);
+    // Comma-separated sub-form qualifier cut; salt parens stop the word-run.
+    expect(innLeadPhrases('Dolutegravir (sodium) Tablet, Film-coated 50mg'))
+      .toEqual(['dolutegravir']);
+    expect(innLeadPhrases('Abacavir (sulfate) Solution, Oral 20mg/mL'))
+      .toEqual(['abacavir']);
+    // Multi-word INN: the form word may trail the phrase (prefix-matched).
+    expect(innLeadPhrases('Emtricitabine/Tenofovir disoproxil fumarate Tablet 200mg/300mg'))
+      .toEqual(['emtricitabine', 'tenofovir disoproxil fumarate tablet']);
+    // Plain single-INN row.
+    expect(innLeadPhrases('Zidovudine Solution, Oral 10mg/ml')).toEqual(['zidovudine solution']);
+  });
+
+  test('fetchWHORegulatory() returns prequalified true with products for artemether', async () => {
+    global.fetch = mockWhoPqHosts();
+
+    const result = await fetchWHORegulatory('artemether');
+
+    expect(result.prequalified).toBe(true);
+    expect(result.unavailable).toBeUndefined();
+    // All three artemether combo rows in the fixture (incl. the Dispersible
+    // one whose form qualifier sits behind a comma).
+    expect(result.products).toHaveLength(3);
+    expect(result.products?.[0]).toEqual({
+      who_ref: 'MA026',
+      inn_form: 'Artemether/Lumefantrine Tablet 20mg/120mg',
+      applicant: 'Novartis Pharma AG',
+      date: '26 Apr, 2004', // double-space date collapsed, comma kept
+    });
+  });
+
+  test('fetchWHORegulatory() matches a combo component and a salt-suffixed query', async () => {
+    global.fetch = mockWhoPqHosts();
+
+    // "lumefantrine" is the second slash-component; the trailing form word
+    // "Tablet" must not defeat the leading-token-run match.
+    const combo = await fetchWHORegulatory('lumefantrine');
+    expect(combo.prequalified).toBe(true);
+    expect(combo.products?.every(p => p.inn_form.toLowerCase().includes('lumefantrine'))).toBe(true);
+
+    // Trailing salt token on the query is stripped; the row's "(sodium)" salt
+    // marker is handled by the phrase extraction.
+    const salt = await fetchWHORegulatory('Dolutegravir Sodium');
+    expect(salt.prequalified).toBe(true);
+    expect(salt.products?.map(p => p.who_ref)).toEqual(['HA634']);
+  });
+
+  test('fetchWHORegulatory() quote-containing INN row parses with its comma intact', async () => {
+    global.fetch = mockWhoPqHosts();
+
+    const result = await fetchWHORegulatory('zidovudine');
+
+    // "Zidovudine Solution, Oral 10mg/ml" — the comma lives INSIDE the quoted
+    // field and must not split the row (a naive split would shift every later
+    // column and break applicant/date extraction).
+    expect(result.prequalified).toBe(true);
+    const row = result.products?.find(p => p.who_ref === 'ANDA 077268 USFDA');
+    expect(row?.inn_form).toBe('Zidovudine Solution, Oral 10mg/ml');
+    expect(row?.applicant).toBe('Aurobindo Pharma Ltd');
+    expect(row?.date).toBeUndefined(); // trailing empty date column
+  });
+
+  test('fetchWHORegulatory() false for a name outside PQ scope carries the scope note', async () => {
+    global.fetch = mockWhoPqHosts();
+
+    const result = await fetchWHORegulatory('aspirin');
+
+    expect(result.prequalified).toBe(false);
+    expect(result.products).toEqual([]);
+    expect(result.unavailable).toBeUndefined();
+    expect(result.note).toBe(
+      'Not WHO-prequalified; WHO PQ covers ~650 global-health priority products (HIV/TB/malaria/reproductive health).'
+    );
+  });
+
+  test('fetchWHORegulatory() fetch rejection returns the unavailable/_error envelope, never a fake false', async () => {
+    global.fetch = mockWhoPqHosts(new Error('network down'));
+
+    const result = await fetchWHORegulatory('artemether');
+
+    expect(result).toEqual({
+      prequalified: false,
+      unavailable: true,
+      _error: 'WHO PQ lookup failed: network down. Usually transient — retry later.',
+      source: 'who',
+    });
+  });
+
+  test('fetchWHORegulatory() non-CSV response is a fetch failure, not a zero-match false', async () => {
+    global.fetch = mockWhoPqHosts('<html><body>403 Forbidden</body></html>');
+
+    const result = await fetchWHORegulatory('artemether');
+
+    expect(result.prequalified).toBe(false);
+    expect(result.unavailable).toBe(true);
+    expect(result._error).toContain('not the WHO PQ CSV export');
+    expect(result.note).toBeUndefined(); // failure and out-of-scope are distinct answers
+  });
+
+  test('fetchWHORegulatory() caches the CSV for 24h — a second lookup does not refetch', async () => {
+    global.fetch = mockWhoPqHosts();
+
+    await fetchWHORegulatory('artemether');
+    await fetchWHORegulatory('zidovudine'); // same process, different drug
+
+    expect(whoFetchCount()).toBe(1);
+  });
+
+  test('drugGet() who_regulatory section wires the real lookup through the section pipeline', async () => {
+    global.fetch = mockWhoPqHosts();
+
+    const result = await drugGet('artemether', ['who_regulatory']);
+
+    const section = result.sections?.who_regulatory as { prequalified: boolean; products: Array<{ who_ref: string }> };
+    expect(section.prequalified).toBe(true);
+    expect(section.products.map(p => p.who_ref)).toEqual(['MA026', 'MA062', 'MA069']);
+    // eu_regulatory is gone from the section switch: no key, no stub.
+    expect(result.sections?.eu_regulatory).toBeUndefined();
+  });
+
+  test('drugGet() sections=["all"] includes all six sections incl. adverse_events', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(async (input: any) => {
       const url = typeof input === 'string' ? input : input?.url ?? String(input);
       // Route on the parsed hostname (never substring matching — the query
@@ -602,7 +767,7 @@ describe('drug', () => {
     const result = await drugGet('aspirin', ['all']);
 
     expect(Object.keys(result.sections ?? {}).sort()).toEqual(
-      ['adverse_events', 'eu_regulatory', 'indications', 'safety', 'targets', 'us_regulatory', 'who_regulatory'].sort()
+      ['adverse_events', 'indications', 'safety', 'targets', 'us_regulatory', 'who_regulatory'].sort()
     );
     expect((result.sections?.adverse_events as any).total_reports).toBe(10);
   });

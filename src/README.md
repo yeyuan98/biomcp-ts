@@ -69,7 +69,7 @@ entityGet(id, sections?)      → { ...core, sections: Record<string, unknown> }
 |--------|----------|-----------------|
 | `gene.ts` | 14 (pathways, protein, ontology, go, interactions, clinical_evidence, expression, protein_atlas, druggability, dosage_sensitivity, constraint, disease_associations, diseases, funding) | MyGene.info, Reactome, UniProt, STRING-db, CIViC, GTEx, HPA, DGIdb, OpenTargets, gnomAD, DisGeNET, NIH Reporter |
 | `variant.ts` | 4 + stub (core, frequency, predictions, clinical; `alphagenome_scores` currently returns an error stub pending reimplementation) | MyVariant.info, CIViC, OncoKB |
-| `drug.ts` | 7 (us_regulatory, eu_regulatory, who_regulatory, safety, targets, indications, adverse_events) | MyChem.info, OpenFDA, OpenTargets |
+| `drug.ts` | 6 (us_regulatory, who_regulatory, safety, targets, indications, adverse_events) | MyChem.info, OpenFDA, OpenTargets, WHO Prequalification |
 | `disease.ts` | 3 (gene_associations, phenotypes, pathways) | MyDisease.info, DisGeNET, Monarch, Reactome |
 | `article/` | 5 (open_access, fulltext, annotations, citation_graph, citation) | PubMed (incl. efetch db=pmc full text), Europe PMC (incl. fullTextXML), Semantic Scholar, PubTator, LitSense, NCBI ID Converter, Crossref, OpenCitations; fulltext written as markdown under BIOMCP_CACHE_DIR/fulltext |
 | `trial.ts` | 3 (eligibility, locations, outcomes) | ClinicalTrials.gov |

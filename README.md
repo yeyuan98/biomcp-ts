@@ -57,7 +57,7 @@ Full tool schemas (params, enums, defaults) live in [src/server/README.md](src/s
 | Tool | Description |
 |------|-------------|
 | `drug_search` | Search drugs by name, mechanism, or keyword |
-| `drug_get` | Get detailed drug info with optional sections (us_regulatory, eu_regulatory, who_regulatory, safety, targets, indications, adverse_events — FDA FAERS reactions ranked by report count) |
+| `drug_get` | Get detailed drug info with optional sections (us_regulatory, who_regulatory, safety, targets, indications, adverse_events — FDA FAERS reactions ranked by report count; WHO PQ listing lookup, ~650 global-health priority products) |
 | `drug_trials` | Find clinical trials for a drug |
 
 ### Disease (4)
