@@ -54,6 +54,21 @@ describe('fetchWithTimeout', () => {
     expect(receivedSignal).not.toBeNull();
     expect(result.error).toBeDefined();
   });
+
+  // #107 phase 2: the deadline must settle the call even when fn IGNORES the
+  // signal (legacy section fetchers, retry loops that only check between
+  // attempts) — the old implementation awaited fn(...) directly and hung
+  // forever in that case.
+  it('settles at the deadline even when fn ignores the signal and never resolves', async () => {
+    const promise = fetchWithTimeout(
+      () => new Promise<string>(() => {}),
+      10,
+    );
+    await jest.advanceTimersByTimeAsync(20);
+    const result = await promise;
+    expect(result.error).toContain('timed out after 10ms');
+    expect(result.data).toBeUndefined();
+  });
 });
 
 describe('withTimeout', () => {
@@ -118,6 +133,56 @@ describe('withTimeout', () => {
       await expect(
         withTimeout(Promise.reject(new Error('quick error')), 100, { onTimeout: 'throw', label: 'X' })
       ).rejects.toThrow('quick error');
+    });
+  });
+
+  describe('signal-bearing fn form (#107 phase 2: the loser stops consuming)', () => {
+    it('aborts the work signal when the deadline wins the race', async () => {
+      const sawAbort = jest.fn();
+      const p = withTimeout(
+        (signal: AbortSignal) =>
+          new Promise<string>((_resolve, reject) => {
+            signal.addEventListener('abort', () => {
+              sawAbort();
+              reject(new Error('work aborted late'));
+            }, { once: true });
+          }),
+        50,
+        { onTimeout: 'throw', label: 'Federated leg' },
+      );
+      const expectation = expect(p).rejects.toThrow('Federated leg timed out after 50ms');
+      await jest.advanceTimersByTimeAsync(50);
+      await expectation;
+      // The losing fetch was told to stop instead of running to its own
+      // connection-level timeout while holding its concurrency slot.
+      expect(sawAbort).toHaveBeenCalledTimes(1);
+      expect(jest.getTimerCount()).toBe(0);
+    });
+
+    it('forwards an external abort to the work signal (without settling the race)', async () => {
+      const external = new AbortController();
+      const sawAbort = jest.fn();
+      const p = withTimeout(
+        (signal: AbortSignal) =>
+          new Promise<string>((_resolve, reject) => {
+            signal.addEventListener('abort', () => {
+              sawAbort();
+              reject(new Error('work aborted'));
+            }, { once: true });
+          }),
+        5000,
+        { onTimeout: 'throw', label: 'X', signal: external.signal },
+      );
+      const expectation = expect(p).rejects.toThrow('work aborted');
+      external.abort();
+      await expectation;
+      expect(sawAbort).toHaveBeenCalledTimes(1);
+      expect(jest.getTimerCount()).toBe(0);
+    });
+
+    it('fn form resolves normally when work beats the deadline', async () => {
+      const result = await withTimeout(async () => 'fast', 100, { onTimeout: 'null' });
+      expect(result).toBe('fast');
     });
   });
 

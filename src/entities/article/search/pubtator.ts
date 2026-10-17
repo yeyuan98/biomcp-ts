@@ -42,7 +42,7 @@ export function transformPubTator(a: PubTatorResult): Article {
   };
 }
 
-export async function searchPubTator(query: string, limit: number, offset: number): Promise<Article[]> {
+export async function searchPubTator(query: string, limit: number, offset: number, signal?: AbortSignal): Promise<Article[]> {
   try {
     if (limit <= 0) return [];
     const conn = connectionManager.getConnection('pubtator');
@@ -56,7 +56,9 @@ export async function searchPubTator(query: string, limit: number, offset: numbe
     const start = offset - (page - 1) * size;
 
     const response = await conn.request(
-      `/search/?text=${encodeURIComponent(query)}&page=${page}&size=${size}`
+      `/search/?text=${encodeURIComponent(query)}&page=${page}&size=${size}`,
+      undefined,
+      { signal }
     ) as PubTatorResponse;
 
     return (response.results || []).slice(start, start + limit).map(transformPubTator);

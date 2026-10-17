@@ -88,7 +88,8 @@ export async function searchPubMed(
   offset: number,
   dateRange?: ParsedDateRange,
   warnings?: string[],
-  outcome?: PubMedQueryOutcome
+  outcome?: PubMedQueryOutcome,
+  signal?: AbortSignal
 ): Promise<Article[]> {
   try {
     let searchUrl = `/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=${limit}&retstart=${offset}&retmode=json`;
@@ -102,7 +103,7 @@ export async function searchPubMed(
 
     // Retry policy lives on the registry 'eutils' source config.
     const conn = connectionManager.getConnection('eutils');
-    const searchResponse = await conn.request(searchUrl) as PubMedSearchResponse;
+    const searchResponse = await conn.request(searchUrl, undefined, { signal }) as PubMedSearchResponse;
     const esearch = searchResponse.esearchresult;
 
     // PubMed's translation silently drops unrecognized tokens and matches
@@ -142,7 +143,9 @@ export async function searchPubMed(
 
     const ids = esearch.idlist.join(',');
     const xmlString = await conn.request(
-      `/efetch.fcgi?db=pubmed&id=${ids}&rettype=abstract`
+      `/efetch.fcgi?db=pubmed&id=${ids}&rettype=abstract`,
+      undefined,
+      { signal }
     ) as string;
 
     return parsePubMedXml(xmlString);

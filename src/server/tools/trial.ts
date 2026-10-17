@@ -1,7 +1,14 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { trialSearch, trialGet } from '../../entities/trial.js';
-import { applyLimit } from './utils.js';
+import { applyLimit, withToolTimeout, type CancellationCapableExtra } from './utils.js';
+
+// Deadline rationale (#107 phase 2): the core ClinicalTrials.gov fetch is
+// bounded by its connection budget (15s per attempt x2 attempts + backoff),
+// and the section wave carries its own 8s section deadlines running in
+// parallel. 45s covers the retry ceiling with headroom while still bounding
+// work that ignores the abort (no more zombie fetches past the deadline).
+const TRIAL_GET_TIMEOUT_MS = 45000;
 
 const TRIAL_SECTIONS = ['core', 'eligibility', 'locations', 'outcomes', 'all'] as const;
 
@@ -51,9 +58,13 @@ export function registerTrialTools(server: McpServer): void {
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
-    async ({ nct_id, sections, limit }) => {
+    async ({ nct_id, sections, limit }, extra: CancellationCapableExtra) => {
       try {
-        const result = await trialGet(nct_id, sections);
+        const result = await withToolTimeout(
+          (signal) => trialGet(nct_id, sections, signal),
+          TRIAL_GET_TIMEOUT_MS,
+          { signal: extra?.signal },
+        );
         const requestedSections = (sections ?? []).includes('all')
           ? TRIAL_ALL_SECTIONS
           : (sections ?? []);

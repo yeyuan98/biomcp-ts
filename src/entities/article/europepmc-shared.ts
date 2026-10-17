@@ -186,6 +186,7 @@ export async function epmcSearchWindow<Row = unknown>(options: {
   offset: number;
   cursorMark?: string;
   dateRange?: { from?: string; to?: string };
+  signal?: AbortSignal;
 }): Promise<Row[]> {
   const conn = connectionManager.getConnection('europepmc');
 
@@ -197,7 +198,9 @@ export async function epmcSearchWindow<Row = unknown>(options: {
   const fetchLimit = fromCursor ? options.limit : Math.min(options.limit + options.offset, 1000);
   const cursor = options.cursorMark || '*';
   const response = await conn.request(
-    `/search?query=${encodeURIComponent(queryString)}&${options.resultTypeParam}&format=json&pageSize=${fetchLimit}&cursorMark=${encodeURIComponent(cursor)}`
+    `/search?query=${encodeURIComponent(queryString)}&${options.resultTypeParam}&format=json&pageSize=${fetchLimit}&cursorMark=${encodeURIComponent(cursor)}`,
+    undefined,
+    { signal: options.signal }
   ) as EuropePMCSearchResponse<Row>;
 
   const rows = response.resultList?.result || [];

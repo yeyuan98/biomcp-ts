@@ -2,7 +2,13 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { variantSearch, variantGet, fetchOncoKbAnnotation, getVariantSearchFilters } from '../../entities/variant.js';
 import { variantToTrials } from '../../entities/cross-entity.js';
-import { sliceArraysRecursive } from './utils.js';
+import { sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra } from './utils.js';
+
+// Deadline rationale (#107 phase 2): myvariant core lookup + parallel
+// section wave (frequency/clinical/predictions, each with an 8s section
+// deadline over 15s-per-attempt connections) — 40s covers the budget
+// ceilings with headroom while bounding signal-ignoring stragglers.
+const VARIANT_GET_TIMEOUT_MS = 40000;
 
 const VARIANT_GET_SECTIONS = ['core', 'frequency', 'predictions', 'clinical', 'alphagenome_scores', 'all'] as const;
 const VARIANT_SEARCH_FILTERS = getVariantSearchFilters();
@@ -102,9 +108,13 @@ Do NOT use compound free-text like "BRAF V600E" — use separate gene and hgvsp 
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
-    async ({ id, sections, limit }) => {
+    async ({ id, sections, limit }, extra: CancellationCapableExtra) => {
       try {
-        const result = await variantGet(id, sections);
+        const result = await withToolTimeout(
+          () => variantGet(id, sections),
+          VARIANT_GET_TIMEOUT_MS,
+          { signal: extra?.signal },
+        );
         const requestedSections = (sections ?? []).includes('all')
           ? VARIANT_ALL_SECTIONS
           : (sections ?? []);

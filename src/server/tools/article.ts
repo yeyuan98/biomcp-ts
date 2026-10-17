@@ -1,19 +1,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { searchArticles, articleGet } from '../../entities/article/index.js';
-import { applyLimit } from './utils.js';
+import { applyLimit, withToolTimeout } from './utils.js';
 
 const TOOL_TIMEOUT_MS = 30000;
-
-function withToolTimeout<T>(promise: Promise<T>, timeoutMs = TOOL_TIMEOUT_MS): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>;
-  return Promise.race([
-    promise.finally(() => clearTimeout(timer)),
-    new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`Tool execution timed out after ${timeoutMs}ms`)), timeoutMs);
-    }),
-  ]);
-}
 
 const ARTICLE_SECTIONS = ['core', 'oa', 'fulltext', 'annotations', 'graph', 'citation', 'all'] as const;
 
@@ -51,7 +41,10 @@ export function registerArticleTools(server: McpServer): void {
     },
     async ({ query, source, limit, offset, dateRange }) => {
       try {
-        const response = await withToolTimeout(searchArticles(query, { source, limit, offset, dateRange }));
+        const response = await withToolTimeout(
+          searchArticles(query, { source, limit, offset, dateRange }),
+          TOOL_TIMEOUT_MS,
+        );
         return { content: [{ type: 'text', text: JSON.stringify(response) }] };
       } catch (error) {
         return {
