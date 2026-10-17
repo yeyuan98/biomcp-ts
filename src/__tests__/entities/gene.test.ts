@@ -1477,6 +1477,60 @@ describe('geneGet with GO section', () => {
     expect(goTerms.some(t => t.aspect === 'MF')).toBe(true);
     expect(goTerms.some(t => t.aspect === 'CC')).toBe(true);
   });
+
+  // Regression for GitHub issue #135 (part 4): MyGene repeats GO ids within
+  // and across categories (live: TP53 shows 46 duplicated ids among ~130
+  // annotations), and the old collect-then-slice let duplicates displace
+  // unique terms from the 50-row cap. Dedup happens on GO id BEFORE the
+  // slice now (same seen-set idiom as the ontology section).
+  test('geneGet() GO section dedupes repeated term ids so no unique term is displaced from the 50-row cap', async () => {
+    const dup = { id: 'GO:0000122', term: 'negative regulation of transcription by RNA polymerase II' };
+    const bpUniques = Array.from({ length: 47 }, (_, i) => ({
+      id: `GO:${String(1000000 + i)}`,
+      term: `BP unique term ${i}`,
+    }));
+    const mfUnique = { id: 'GO:0009999', term: 'MF unique term' };
+    const ccUnique = { id: 'GO:0008888', term: 'CC unique term' };
+    let callIndex = 0;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
+      callIndex++;
+      if (callIndex === 1) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ hits: [tp53TumorSuppressorHit] }),
+          headers: new Headers({ 'content-type': 'application/json' }),
+        });
+      }
+      // 51 raw items (dup listed twice), 50 unique ids. Without the dedup,
+      // slice(0, 50) would keep the duplicate and DROP the trailing CC term.
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          hits: [{
+            go: {
+              BP: [dup, ...bpUniques, { ...dup }],
+              MF: [mfUnique],
+              CC: [ccUnique],
+            },
+          }],
+        }),
+        headers: new Headers({ 'content-type': 'application/json' }),
+      });
+    }) as any;
+
+    const result = await geneGet('TP53', ['go']);
+
+    const goTerms = result.sections!.go as Array<{ id: string; term: string; aspect: string }>;
+    expect(goTerms).toHaveLength(50);
+    // No repeated ids at all.
+    const ids = goTerms.map(t => t.id);
+    expect(new Set(ids).size).toBe(50);
+    // The duplicate appears exactly once, under its first-seen category.
+    expect(ids.filter(id => id === 'GO:0000122')).toHaveLength(1);
+    expect(goTerms.find(t => t.id === 'GO:0000122')!.aspect).toBe('BP');
+    // The last-collected CC term survived the cap — proving dedup ran first.
+    expect(goTerms.some(t => t.id === 'GO:0008888' && t.aspect === 'CC')).toBe(true);
+  });
 });
 
 // ============================================================

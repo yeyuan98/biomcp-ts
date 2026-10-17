@@ -1,6 +1,10 @@
 import { connectionManager } from '../connections/manager.js';
 import { fetchWithTimeout } from '../connections/fetch-utils.js';
 import { HttpConnectionError } from '../connections/errors.js';
+// Circular with cross-entity.ts (which imports drug helpers back): both
+// sides only reference function declarations at call time, never during
+// module evaluation, so the cycle is safe in ESM and CJS alike.
+import { clinicalStageRank } from './cross-entity.js';
 
 const SECTION_TIMEOUT_MS = 8000;
 
@@ -39,6 +43,14 @@ export interface DrugResult {
   smiles?: string;
   inchi?: string;
   inchi_key?: string;
+  /**
+   * Raw ChEBI preferred label, exposed verbatim whenever ChEBI provides
+   * one — even when it equals `name`. ChEBI labels some molecules with a
+   * fully systematic (IUPAC-style) name instead of a common drug name
+   * (tetrabenazine), so `drug_get` keeps such strings out of `name` and
+   * surfaces them here instead.
+   */
+  iupac?: string;
   sections?: Record<string, unknown>;
 }
 
@@ -282,6 +294,29 @@ export function resolveBestMatch(
 const DRUG_GET_FIELDS =
   'chebi.name,chebi.formula,chebi.mass,chebi.inchi,chebi.inchikey,chebi.id,chebi.name_synonyms,unii.smiles,unii.molecular_formula,unii.display_name,unii.unii,unii.registry_number,unichem.chembl,chembl.pref_name,chembl.molecule_chembl_id,chembl.smiles,chembl.inchi,chembl.inchi_key,chembl.molecule_properties,ndc.nonproprietaryname,ndc.substancename';
 
+/**
+ * Recognize a systematic (IUPAC-style) chemical name — the shape ChEBI
+ * occasionally uses as its preferred label (issue #135, live-verified
+ * 2026-10-17: tetrabenazine's ChEBI name is the 83-char
+ * "9,10-dimethoxy-3-isobutyl-1,3,4,6,7,11b-hexahydro-2H-pyrido[2,1-a]isoquinolin-2-one"
+ * while ChEMBL's pref_name is the usable "TETRABENAZINE"). A name is treated
+ * as systematic when ANY of:
+ *  - length >= 50 (common drug names stay far below; systematic ones run long);
+ *  - it contains a bracket locant like "[2,1-a]" (fused-ring nomenclature only);
+ *  - it carries >= 3 digit/hyphen locant characters (e.g. "9,10-dimethoxy-3-...").
+ * Deliberately strict so real drug names pass through untouched
+ * ("acetylsalicylic acid" scores 0, "5-aminolevulinic acid" and "vitamin B12"
+ * score 2); a borderline semi-systematic name ("morphine-3-glucuronide", 3)
+ * demoting is acceptable — another curated source's display name is still a
+ * better `name`. Exported for tests.
+ */
+export function looksLikeSystematicChemicalName(name: string): boolean {
+  if (!name) return false;
+  if (name.length >= 50) return true;
+  if (/\[\d/.test(name)) return true;
+  return (name.match(/[\d-]/g) || []).length >= 3;
+}
+
 export async function drugGet(
   name: string,
   sections?: string[],
@@ -321,8 +356,23 @@ export async function drugGet(
   const chembl = hit.chembl as Record<string, unknown> | undefined;
   const chemblProps = chembl?.molecule_properties as Record<string, unknown> | undefined;
 
+  // Name fallback chain, strongest identity source first — with one guard
+  // (issue #135): when ChEBI's preferred label is itself a fully systematic
+  // IUPAC-style name, it is demoted out of the chain (it would make
+  // `name` useless for name-based joins) and exposed as `iupac` instead;
+  // the chain then falls through to the remaining sources unchanged.
+  const chebiName = (chebi?.name as string) || '';
   const result: DrugResult = {
-    name: (chebi?.name || unii?.display_name || chembl?.pref_name || ndc?.nonproprietaryname || ndc?.substancename || unii?.registry_number || name) as string,
+    name: (!looksLikeSystematicChemicalName(chebiName) ? chebiName : '') ||
+      (unii?.display_name as string) ||
+      (chembl?.pref_name as string) ||
+      (ndc?.nonproprietaryname as string) ||
+      (ndc?.substancename as string) ||
+      (unii?.registry_number as string) ||
+      name,
+    // Raw ChEBI label always exposed verbatim when present (even when it
+    // equals `name`) — one predictable contract, no consumer-side diffing.
+    iupac: chebiName || undefined,
     chembl_id: (unichem?.chembl as string) || (chembl?.molecule_chembl_id as string) || undefined,
     smiles: (unii?.smiles as string) || (chembl?.smiles as string) || undefined,
     inchi: (chebi?.inchi as string) || (chembl?.inchi as string) || undefined,
@@ -599,16 +649,35 @@ async function fetchIndications(chemblId: string | null): Promise<Array<{ diseas
       drug(chemblId: $chemblId) {
         id name
         indications {
-          rows { maxClinicalStage disease { id name } }
+          rows { maxClinicalStage clinicalReports { id } disease { id name } }
         }
       }
     }`;
 
     const raw = await conn.request(query, { chemblId }, { rootField: 'drug' }) as any;
     const data = JSON.parse(JSON.stringify(raw));
-    const rows = data?.data?.drug?.indications?.rows || [];
+    const rows: Array<{ maxClinicalStage?: string; clinicalReports?: Array<{ id?: string }>; disease?: { name?: string } }> =
+      data?.data?.drug?.indications?.rows || [];
 
-    return rows.slice(0, 20).map((r: { maxClinicalStage?: string; disease?: { name?: string } }) => ({
+    // Rank BEFORE the slice (issue #135): OpenTargets returns indication rows
+    // unranked, so slicing the raw order could discard APPROVAL rows below
+    // lower-phase ones. Same comparator family the gene_drugs/disease_drugs
+    // paths already use (rankOtDrugRows): max-clinical-stage rank descending
+    // (clinicalStageRank), then trial-report count descending, then disease
+    // name ascending case-insensitively for a deterministic order.
+    const reportCount = (r: { clinicalReports?: Array<{ id?: string }> }) =>
+      Array.isArray(r.clinicalReports) ? r.clinicalReports.length : 0;
+    const ranked = [...rows].sort((a, b) => {
+      const stageDiff = clinicalStageRank(b.maxClinicalStage) - clinicalStageRank(a.maxClinicalStage);
+      if (stageDiff !== 0) return stageDiff;
+      const reportDiff = reportCount(b) - reportCount(a);
+      if (reportDiff !== 0) return reportDiff;
+      const nameA = (a.disease?.name ?? '').toLowerCase();
+      const nameB = (b.disease?.name ?? '').toLowerCase();
+      return nameA < nameB ? -1 : nameA > nameB ? 1 : 0;
+    });
+
+    return ranked.slice(0, 20).map(r => ({
       disease_name: r.disease?.name || '',
       phase: r.maxClinicalStage || '',
       source: 'opentargets',

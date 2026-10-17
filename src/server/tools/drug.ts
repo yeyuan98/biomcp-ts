@@ -61,7 +61,7 @@ export function registerDrugTools(server: McpServer): void {
       description: 'Get detailed drug information by name',
       inputSchema: {
         name: z.string().describe('Drug name (e.g., "imatinib", "aspirin")'),
-        sections: z.array(z.enum(DRUG_SECTIONS)).optional().describe('Sections to include (adverse_events = FDA FAERS adverse reactions ranked by report count; limit applies to reaction rows)'),
+        sections: z.array(z.enum(DRUG_SECTIONS)).optional().describe('Sections to include (adverse_events = FDA FAERS adverse reactions ranked by report count; limit applies to reaction rows; indications = OpenTargets indications ranked by max clinical phase descending, then trial-report count, then disease name)'),
         limit: z.number().int().min(1).max(100).default(20),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
