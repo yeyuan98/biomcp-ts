@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Issue and pull-request templates + Discussions for questions** (`.github/ISSUE_TEMPLATE/bug_report.md`, `.github/ISSUE_TEMPLATE/enhancement.md`, `.github/ISSUE_TEMPLATE/config.yml`, `.github/PULL_REQUEST_TEMPLATE.md`) — formalizes the house issue formats that evolved during the QA campaigns: a bug-report template carrying the severity/failure-class/tool/found header table (with the P0–P3 legend — P0 advertised-feature-broken/wrong-data, P1 agent-UX gap, P2 minor bug/consistency, P3 chore/docs — and the reproduction/root-cause/suggested-fix sections) and an enhancement/follow-up template carrying the context/proposed-design/effort sections; classic Markdown templates (not issue forms) so the header table survives and `gh`/API filings keep working unchanged. `config.yml` disables blank issues and routes questions to the newly enabled Discussions. The PR template mirrors the AGENTS.md conventions: what & why, itemized changes, a verification checklist (typecheck, unit-test tally, integration left to CI with the Ensembl/arXiv known-offender note from #164, CHANGELOG entry) and a breaking-changes/migration section.
+
 ## [1.6.0-alpha.4] - 2026-10-18
 
 Systematic tool-suite QA campaign (issues #120–#136): 8 P0 advertised-feature fixes (date-range enforcement, journal-name rewriting via a build-time NLM list, gene_search pagination, drug UNII/CAS separation, honest geo/batch/genbank contracts, strict patent recency) and 9 P1 agent-UX fixes (actionable error messages, v2-correct trial fields, CADD echo, genbank file-mode output, drug name/indications/GO semantics, real WHO PQ lookup, federated relevance + crowd-out disclosure + DOI-transitive dedup, chaining closure across sra/ensembl/patent/pdb, section-key symmetry, uniform input validation, and the standard list-result envelope). Plus EMA regulatory lookup deferred to #138.
