@@ -25,6 +25,29 @@ import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 const REAL_TIME_AT_LOAD = Date.now();
 let fakeTimersInstalled = 0;
 
+function installFakeTimers(): void {
+  fakeTimersInstalled++;
+  jest.useFakeTimers({ now: REAL_TIME_AT_LOAD + fakeTimersInstalled * 3_600_000 });
+}
+
+// Await a promise that internally sleeps on module timers (token-bucket rate
+// limiters, retry backoffs) under fake timers, stepping the clock until the
+// promise settles. Same pattern as patent.test.ts / citation.test.ts.
+async function advanceUntilSettled<T>(p: Promise<T>): Promise<T> {
+  let settled = false;
+  let value: T | undefined;
+  let failure: { error: unknown } | undefined;
+  p.then(
+    v => { value = v; settled = true; },
+    e => { failure = { error: e }; settled = true; },
+  );
+  while (!settled) {
+    await jest.advanceTimersByTimeAsync(250);
+  }
+  if (failure) throw failure.error;
+  return value as T;
+}
+
 const SINGLE_ARTICLE_XML = `<?xml version="1.0"?>
 <PubmedArticleSet>
 <PubmedArticle>
@@ -2741,10 +2764,18 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     jest.clearAllMocks();
     connectionManager.closeAll();
     process.env.NCBI_API_KEY = '';
+    // biorxiv pacing (registry intervalMs=1000, capacity-1 bucket) and retry
+    // backoffs sleep on module timers — run the whole describe on a fake
+    // clock (installed after closeAll so lazily constructed limiters see the
+    // fake now) and await via advanceUntilSettled.
+    installFakeTimers();
   });
 
   afterEach(() => {
     delete process.env.NCBI_API_KEY;
+    jest.useRealTimers();
+    // fresh limiters for later suites (they were constructed against the fake clock)
+    connectionManager.closeAll();
   });
 
   const jsonResponse = (body: unknown) => ({
@@ -2838,7 +2869,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
   test('articleSearch preprint_only builds the PPR publisher query with resultType=core', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(jsonResponse(preprintCorePage(10))) as any;
 
-    const result = await articleSearch('crispr', { source: 'preprint_only' });
+    const result = await advanceUntilSettled(articleSearch('crispr', { source: 'preprint_only' }));
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
     const url = (global.fetch as any).mock.calls[0][0] as string;
@@ -2862,7 +2893,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
   test('articleSearch preprint_only applies date range and offset window', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(jsonResponse(preprintCorePage(10))) as any;
 
-    const result = await articleSearch('vaccine', { source: 'preprint_only', limit: 3, offset: 5, dateRange: '2025-01-01/2025-12-31' });
+    const result = await advanceUntilSettled(articleSearch('vaccine', { source: 'preprint_only', limit: 3, offset: 5, dateRange: '2025-01-01/2025-12-31' }));
 
     const url = (global.fetch as any).mock.calls[0][0] as string;
     expect(url).toContain(encodeURIComponent('AND FIRST_PDATE:[2025-01-01 TO 2025-12-31]'));
@@ -2874,7 +2905,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
   test('articleSearch preprint_only date clause is day-granular and follows the PPR wrapper', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(jsonResponse(preprintCorePage(3))) as any;
 
-    await articleSearch('vaccine', { source: 'preprint_only', dateRange: '2020-06-15/2021-03-01' });
+    await advanceUntilSettled(articleSearch('vaccine', { source: 'preprint_only', dateRange: '2020-06-15/2021-03-01' }));
 
     const url = (global.fetch as any).mock.calls[0][0] as string;
     const decoded = decodeURIComponent(url);
@@ -2884,7 +2915,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
   test('articleSearch preprint_only explicit cursorMark takes precedence over offset', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(jsonResponse(preprintCorePage(6))) as any;
 
-    const result = await articleSearch('crispr', { source: 'preprint_only', limit: 2, offset: 4, cursorMark: 'AoIIQCC9' });
+    const result = await advanceUntilSettled(articleSearch('crispr', { source: 'preprint_only', limit: 2, offset: 4, cursorMark: 'AoIIQCC9' }));
 
     const url = (global.fetch as any).mock.calls[0][0] as string;
     expect(url).toContain('pageSize=2');
@@ -2898,7 +2929,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
   test('articleSearch preprint_only empty resultList.result yields []', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(jsonResponse({ resultList: {} })) as any;
 
-    const result = await articleSearch('crispr', { source: 'preprint_only' });
+    const result = await advanceUntilSettled(articleSearch('crispr', { source: 'preprint_only' }));
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(result).toEqual([]);
@@ -2907,7 +2938,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
   test('articleSearch preprint_only surfaces transport failure as an envelope error (#87)', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(new Error('network down')) as any;
 
-    const response = await searchArticles('crispr', { source: 'preprint_only' });
+    const response = await advanceUntilSettled(searchArticles('crispr', { source: 'preprint_only' }));
 
     expect(response.results).toEqual([]);
     expect(response.errors).toHaveLength(1);
@@ -2941,7 +2972,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
-    const result = await articleGet('10.1101/2025.03.05.641768');
+    const result = await advanceUntilSettled(articleGet('10.1101/2025.03.05.641768'));
 
     // official core: semicolon authors, versions sorted, license, jatsxml
     expect(result.title).toBe('Rationality self-organizes beyond subjective reasonings');
@@ -2975,7 +3006,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
-    const result = await articleGet('10.1101/2025.03.05.641768', ['fulltext']);
+    const result = await advanceUntilSettled(articleGet('10.1101/2025.03.05.641768', ['fulltext']));
 
     const ft = result.sections?.fulltext as any;
     expect(ft).toMatchObject({ status: 'unavailable', reason: 'not_implemented_for_preprints' });
@@ -2993,7 +3024,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
-    const result = await articleGet('10.1101/2025.03.05.641768', ['all']);
+    const result = await advanceUntilSettled(articleGet('10.1101/2025.03.05.641768', ['all']));
 
     expect(result.sections?.fulltext).toBeUndefined();
   });
@@ -3013,14 +3044,14 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
-    const result = await articleGet('10.1101/2025.03.05.641768');
+    const result = await advanceUntilSettled(articleGet('10.1101/2025.03.05.641768'));
 
     expect(result.preprint_server).toBe('medRxiv');
     expect(result.journal).toBe('medRxiv');
     // /pubs soft-miss → published falls back to EPMC's Preprint-of link
     expect(result.published?.pmid).toBe('32015507');
     expect(result.published?.source).toBe('europepmc');
-  }, 15000);
+  });
 
   test('articleGet on unknown preprint DOI throws not-found', async () => {
     global.fetch = jest.fn((url: unknown) => {
@@ -3033,8 +3064,8 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
-    await expect(articleGet('10.1101/2099.01.01.000001')).rejects.toThrow(/not found on bioRxiv\/medRxiv/);
-  }, 15000);
+    await expect(advanceUntilSettled(articleGet('10.1101/2099.01.01.000001'))).rejects.toThrow(/not found on bioRxiv\/medRxiv/);
+  });
 
   test('articleGet preprint citation section uses PPR endpoints', async () => {
     global.fetch = jest.fn((url: unknown) => {
@@ -3056,7 +3087,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
-    const result = await articleGet('10.1101/2021.10.25.465764', ['citation']);
+    const result = await advanceUntilSettled(articleGet('10.1101/2021.10.25.465764', ['citation']));
 
     const citation = result.sections?.citation as any;
     expect(citation).toBeDefined();
@@ -3066,7 +3097,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     expect(citation.forward_citations[0].title).toBe('Citing paper');
     expect(citation.backward_references[0].title).toBe('Referenced paper');
     expect(citation.items_available).toBe(true);
-  }, 15000);
+  });
 
   test('articleGet degrades to Europe PMC core when the official API is unreachable', async () => {
     global.fetch = jest.fn((url: unknown) => {
@@ -3077,14 +3108,14 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
-    const result = await articleGet('10.1101/2021.10.25.465764');
+    const result = await advanceUntilSettled(articleGet('10.1101/2021.10.25.465764'));
 
     expect(result.title).toBe('The preprint title');
     expect(result.abstract).toBe('The preprint abstract');
     expect(result.preprint?.data_source).toBe('europepmc');
     expect(result.cited_by).toBe(44);
     expect(result.ppr_id).toBe('PPR910295');
-  }, 20000);
+  });
 
   test('articleGet transport outage skips medrxiv probe and /pubs, degrades to EPMC', async () => {
     global.fetch = jest.fn((url: unknown) => {
@@ -3095,7 +3126,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
-    const result = await articleGet('10.1101/2021.10.25.465764');
+    const result = await advanceUntilSettled(articleGet('10.1101/2021.10.25.465764'));
 
     const urls = (global.fetch as any).mock.calls.map((c: unknown[]) => String(c[0]));
     // same host serves both collections → no medrxiv probe after transport failure
@@ -3105,7 +3136,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     // EPMC degraded core with published from the "Preprint of" link, no network call
     expect(result.preprint?.data_source).toBe('europepmc');
     expect(result.published).toEqual({ pmid: '32015507', source: 'europepmc' });
-  }, 20000);
+  });
 
   test('articleGet transport outage yields published null without an EPMC preprint-of link', async () => {
     const epmcWithoutLink = {
@@ -3124,21 +3155,18 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
-    const result = await articleGet('10.1101/2021.10.25.465764');
+    const result = await advanceUntilSettled(articleGet('10.1101/2021.10.25.465764'));
 
     expect(result.preprint?.data_source).toBe('europepmc');
     expect(result.published).toBeNull();
-  }, 20000);
+  });
 
   test('getPreprintArticle skips /pubs with a published note when step 1 exceeds the budget threshold', async () => {
-    // Patent-suite convention (see src/__tests__/README.md): a Date.now spy
-    // would leak the +25 s jump into token-bucket limiters (their refill
-    // freezes while the clock reads in the future), so use fake timers with
-    // a monotonic base and flip the clock via setSystemTime instead. The
-    // happy-path mocks resolve on microtasks alone — no timer advancement
-    // is needed for the call to settle.
-    fakeTimersInstalled++;
-    jest.useFakeTimers({ now: REAL_TIME_AT_LOAD + fakeTimersInstalled * 3_600_000 });
+    // A Date.now spy would leak the +25 s jump into token-bucket limiters
+    // (their refill freezes while the clock reads in the future), so the
+    // describe's fake timers carry a monotonic base and the clock is flipped
+    // via setSystemTime instead. The fake clock only ever advances forward,
+    // so the "25s already spent" note below stays valid.
     const base = Date.now();
     global.fetch = jest.fn((url: unknown) => {
       const u = String(url);
@@ -3158,23 +3186,17 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
-    try {
-      const result = await getPreprintArticle('10.1101/2025.03.05.641768');
+    const result = await advanceUntilSettled(getPreprintArticle('10.1101/2025.03.05.641768'));
 
-      const urls = requestedUrls();
-      // budget guard: /pubs never hit the wire despite the official API succeeding
-      expect(urls.some((u: any) => u.includes('/pubs/'))).toBe(false);
-      // published mapping degrades to the EPMC "Preprint of" link...
-      expect(result.published).toMatchObject({ pmid: '32015507', source: 'europepmc' });
-      // ...with the skip disclosed on the natural note field
-      expect((result.published as any).note).toContain('/pubs skipped');
-      expect((result.published as any).note).toContain('25s already spent');
-    } finally {
-      jest.useRealTimers();
-      // fresh limiters for later tests (they were constructed against the fake clock)
-      connectionManager.closeAll();
-    }
-  }, 15000);
+    const urls = requestedUrls();
+    // budget guard: /pubs never hit the wire despite the official API succeeding
+    expect(urls.some((u: any) => u.includes('/pubs/'))).toBe(false);
+    // published mapping degrades to the EPMC "Preprint of" link...
+    expect(result.published).toMatchObject({ pmid: '32015507', source: 'europepmc' });
+    // ...with the skip disclosed on the natural note field
+    expect((result.published as any).note).toContain('/pubs skipped');
+    expect((result.published as any).note).toContain('25s already spent');
+  });
 
   test('getPreprintArticle still calls /pubs (no skip note) when step 1 is fast', async () => {
     global.fetch = jest.fn((url: unknown) => {
@@ -3191,13 +3213,13 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
-    const result = await getPreprintArticle('10.1101/2025.03.05.641768');
+    const result = await advanceUntilSettled(getPreprintArticle('10.1101/2025.03.05.641768'));
 
     const urls = requestedUrls();
     expect(urls.some((u: any) => u.includes('/pubs/'))).toBe(true);
     expect(result.published).toMatchObject({ doi: '10.3389/fbinf.2025.1577324', source: 'biorxiv_pubs' });
     expect((result.published as any).note).toBeUndefined();
-  }, 15000);
+  });
 
   test('articleGet published falls back to the official /details published DOI when /pubs and EPMC yield nothing', async () => {
     const detailsWithPublishedDoi = {
@@ -3218,11 +3240,11 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
-    const result = await articleGet('10.1101/2025.03.05.641768');
+    const result = await advanceUntilSettled(articleGet('10.1101/2025.03.05.641768'));
 
     // fallback chain end: /details record's own `published` DOI field
     expect(result.published).toEqual({ doi: '10.1234/journal.2024.01.001', source: 'biorxiv_details' });
-  }, 15000);
+  });
 
   test('articleGet preprint citation section carries _error when the PPR endpoints reject', async () => {
     global.fetch = jest.fn((url: unknown) => {
@@ -3239,11 +3261,11 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
-    const result = await articleGet('10.1101/2021.10.25.465764', ['citation']);
+    const result = await advanceUntilSettled(articleGet('10.1101/2021.10.25.465764', ['citation']));
 
     // exact fetchPprCitationSection catch shape: `Preprint citation lookup failed: <msg>`
     expect(result.sections?.citation).toEqual({ _error: 'Preprint citation lookup failed: PPR citation endpoints exploded' });
-  }, 15000);
+  });
 
   test('articleGet omits funders when the official record carries the string "NA"', async () => {
     const detailsNaFunder = {
@@ -3262,11 +3284,11 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
-    const result = await articleGet('10.1101/2025.03.05.641768');
+    const result = await advanceUntilSettled(articleGet('10.1101/2025.03.05.641768'));
 
     expect(result.preprint?.data_source).toBe('api.biorxiv.org');
     expect(result.preprint?.funders).toBeUndefined();
-  }, 15000);
+  });
 
   test('articleGet preprint citation limit slices forward citations and references', async () => {
     const threeCitations = [1, 2, 3].map(i => ({
@@ -3286,7 +3308,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
-    const result = await articleGet('10.1101/2021.10.25.465764', ['citation'], { limit: 2 });
+    const result = await advanceUntilSettled(articleGet('10.1101/2021.10.25.465764', ['citation'], { limit: 2 }));
 
     const citation = result.sections?.citation as any;
     expect(citation.forward_citations).toHaveLength(2);
@@ -3296,12 +3318,12 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     // fetch pageSize = max(limit*3, 10) — the limit still governs the returned window
     const urls = (global.fetch as any).mock.calls.map((c: unknown[]) => String(c[0]));
     expect(urls.find((u: any) => u.includes('/PPR910295/citations'))).toContain('pageSize=10');
-  }, 15000);
+  });
 
   test('articleGet preprint citation_direction="forward" requests only /citations; skipped array key stays empty', async () => {
     global.fetch = pprCitationRouter() as any;
 
-    const result = await articleGet('10.1101/2021.10.25.465764', ['citation'], { citationDirection: 'forward' });
+    const result = await advanceUntilSettled(articleGet('10.1101/2021.10.25.465764', ['citation'], { citationDirection: 'forward' }));
 
     const urls = requestedUrls();
     expect(urls.some((u: any) => u.includes('/PPR910295/citations'))).toBe(true);
@@ -3313,12 +3335,12 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     expect(citation.backward_references).toEqual([]);
     // skipped direction ⇒ no EPMC hitCount for it; total falls back to the core record count
     expect(citation.citation_counts).toEqual([{ total: 44, source: 'europepmc' }]);
-  }, 15000);
+  });
 
   test('articleGet preprint citation_direction="backward" requests only /references', async () => {
     global.fetch = pprCitationRouter() as any;
 
-    const result = await articleGet('10.1101/2021.10.25.465764', ['citation'], { citationDirection: 'backward' });
+    const result = await advanceUntilSettled(articleGet('10.1101/2021.10.25.465764', ['citation'], { citationDirection: 'backward' }));
 
     const urls = requestedUrls();
     expect(urls.some((u: any) => u.includes('/PPR910295/citations'))).toBe(false);
@@ -3327,12 +3349,12 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     expect(citation.backward_references.map((c: any) => c.title)).toEqual(['Referenced paper 1', 'Referenced paper 2', 'Referenced paper 3']);
     expect(Array.isArray(citation.forward_citations)).toBe(true);
     expect(citation.forward_citations).toEqual([]);
-  }, 15000);
+  });
 
   test('articleGet preprint default direction requests both PPR endpoints (no regression)', async () => {
     global.fetch = pprCitationRouter() as any;
 
-    const result = await articleGet('10.1101/2021.10.25.465764', ['citation']);
+    const result = await advanceUntilSettled(articleGet('10.1101/2021.10.25.465764', ['citation']));
 
     const urls = requestedUrls();
     expect(urls.some((u: any) => u.includes('/PPR910295/citations'))).toBe(true);
@@ -3340,12 +3362,12 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     const citation = result.sections?.citation as any;
     expect(citation.forward_citations).toHaveLength(3);
     expect(citation.backward_references).toHaveLength(3);
-  }, 15000);
+  });
 
   test('articleGet preprint names unsupported sections and citation_mode via sections._note', async () => {
     global.fetch = pprCitationRouter() as any;
 
-    const result = await articleGet('10.1101/2021.10.25.465764', ['citation', 'oa', 'graph'], { citationMode: 'full' });
+    const result = await advanceUntilSettled(articleGet('10.1101/2021.10.25.465764', ['citation', 'oa', 'graph'], { citationMode: 'full' }));
 
     // unsupported sections are NOT attached on the preprint path...
     expect(result.sections?.open_access).toBeUndefined();
@@ -3357,21 +3379,21 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     expect(note).not.toContain('"annotations"');
     expect(note).toContain('citation_mode="full"');
     expect(note).toContain('Europe PMC PPR');
-  }, 15000);
+  });
 
   test('articleGet preprint supported requests carry no sections._note', async () => {
     global.fetch = pprCitationRouter() as any;
 
-    const result = await articleGet('10.1101/2021.10.25.465764', ['citation']);
+    const result = await advanceUntilSettled(articleGet('10.1101/2021.10.25.465764', ['citation']));
 
     expect(result.sections?.citation).toBeDefined();
     expect(result.sections?._note).toBeUndefined();
-  }, 15000);
+  });
 
   test('articleGet preprint citation source_results rows are compact summaries (no record arrays)', async () => {
     global.fetch = pprCitationRouter() as any;
 
-    const result = await articleGet('10.1101/2021.10.25.465764', ['citation'], { limit: 2 });
+    const result = await advanceUntilSettled(articleGet('10.1101/2021.10.25.465764', ['citation'], { limit: 2 }));
 
     const rows = (result.sections?.citation as any).source_results;
     expect(rows).toHaveLength(1);
@@ -3380,13 +3402,13 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     expect(rows[0].forward_citations).toBeUndefined();
     expect(rows[0].backward_references).toBeUndefined();
     expect(rows[0].citation_count).toBeUndefined();
-  }, 15000);
+  });
 
   test('applyLimit slices the preprint citation arrays and passes sections._note through untouched', async () => {
     global.fetch = pprCitationRouter() as any;
 
     // forward-only + a mode request ⇒ _note present; limit 2 pre-slices inside the preprint path
-    const result = await articleGet('10.1101/2021.10.25.465764', ['citation'], { citationDirection: 'forward', citationMode: 'fast', limit: 2 });
+    const result = await advanceUntilSettled(articleGet('10.1101/2021.10.25.465764', ['citation'], { citationDirection: 'forward', citationMode: 'fast', limit: 2 }));
     // the tool layer's own maps (mirrors server/tools/article.ts)
     const limited = applyLimit(
       result.sections!,
@@ -3404,7 +3426,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     expect(citation._error).toBeUndefined();
     // the runtime note is not a section key — applyLimit must not drop it
     expect(limited._note).toContain('citation_mode="fast"');
-  }, 15000);
+  });
 
   test('transformPreprint defaults the server label to bioRxiv when bookOrReportDetails is absent', () => {
     const result = transformPreprint({
@@ -3431,7 +3453,7 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
-    const result = await getPreprintArticle('10.1101/2024.01.01.12345?v=x');
+    const result = await advanceUntilSettled(getPreprintArticle('10.1101/2024.01.01.12345?v=x'));
 
     expect(result.preprint?.data_source).toBe('api.biorxiv.org');
     const urls = (global.fetch as any).mock.calls.map((c: unknown[]) => String(c[0]));
@@ -3441,5 +3463,5 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     expect(detailsUrl).not.toContain('?v=x');
     const pubsUrl = urls.find((u: any) => u.includes('/pubs/')) ?? '';
     expect(pubsUrl).toContain('2024.01.01.12345%3Fv%3Dx/na');
-  }, 15000);
+  });
 });

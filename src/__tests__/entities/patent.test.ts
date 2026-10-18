@@ -1064,15 +1064,20 @@ describe('patent search federation', () => {
       return Promise.reject(new HttpConnectionError('HTTP 503: Service Unavailable', 503));
     }) as any;
 
-    const { patentSearch } = await import('../../entities/patent/search/index.js');
-    const response = await advanceUntilSettled(patentSearch('crispr', {}));
-    expect(response.errors?.some(e => e.message.includes("'ppubs' failed"))).toBe(true);
-    expect(response.warnings).toBeUndefined();
-    const calledUrls = (global.fetch as any).mock.calls.map((c: any[]) => String(c[0]));
-    expect(calledUrls.some((u: any) => parseMockUrl(u).hostname === 'api.uspto.gov')).toBe(false);
-    nowSpy.mockRestore();
-    gp.resetGooglePatentsBreaker();
-    (await import('../../connections/manager.js')).connectionManager.closeAll();
+    // try/finally: an assertion throw must not leave Date.now pinned at
+    // 20_000 for the rest of the file (limiters stop refilling in the future).
+    try {
+      const { patentSearch } = await import('../../entities/patent/search/index.js');
+      const response = await advanceUntilSettled(patentSearch('crispr', {}));
+      expect(response.errors?.some(e => e.message.includes("'ppubs' failed"))).toBe(true);
+      expect(response.warnings).toBeUndefined();
+      const calledUrls = (global.fetch as any).mock.calls.map((c: unknown[]) => String(c[0]));
+      expect(calledUrls.some((u: any) => parseMockUrl(u).hostname === 'api.uspto.gov')).toBe(false);
+    } finally {
+      nowSpy.mockRestore();
+      gp.resetGooglePatentsBreaker();
+      (await import('../../connections/manager.js')).connectionManager.closeAll();
+    }
   });
 
   test('patentSearch: clean 0-hit search returns empty patents + guidance warning', async () => {
