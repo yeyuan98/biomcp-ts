@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { trialSearch, trialGet } from '../../entities/trial.js';
-import { applyLimit, withToolTimeout, type CancellationCapableExtra } from './utils.js';
+import { applyLimit, requiredString, withToolTimeout, type CancellationCapableExtra } from './utils.js';
 
 // Deadline rationale (#107 phase 2): the core ClinicalTrials.gov fetch is
 // bounded by its connection budget (15s per attempt x2 attempts + backoff),
@@ -52,7 +52,7 @@ export function registerTrialTools(server: McpServer): void {
     {
       description: 'Get detailed trial information by NCT ID',
       inputSchema: {
-        nct_id: z.string().describe('NCT ID (e.g., "NCT01234567")'),
+        nct_id: requiredString('NCT ID').describe('NCT ID (e.g., "NCT01234567")'),
         sections: z.array(z.enum(TRIAL_SECTIONS)).optional().describe('Sections to include'),
         limit: z.number().int().min(1).max(100).default(20),
       },

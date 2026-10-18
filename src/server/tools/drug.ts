@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { drugSearch, drugGet, DRUG_ENTITY_ALL_SECTIONS } from '../../entities/drug.js';
 import { drugToTrials } from '../../entities/cross-entity.js';
-import { sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra } from './utils.js';
+import { requiredString, sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra } from './utils.js';
 
 // Deadline rationale (#107 phase 2): mychem core lookup + parallel section
 // wave (regulatory labels, ChEMBL, FAERS adverse events) where each section
@@ -61,7 +61,7 @@ export function registerDrugTools(server: McpServer): void {
     {
       description: 'Get detailed drug information by name',
       inputSchema: {
-        name: z.string().describe('Drug name (e.g., "imatinib", "aspirin")'),
+        name: requiredString('Drug name').describe('Drug name (e.g., "imatinib", "aspirin")'),
         sections: z.array(z.enum(DRUG_SECTIONS)).optional().describe('Sections to include (adverse_events = FDA FAERS adverse reactions ranked by report count; limit applies to reaction rows; indications = OpenTargets indications ranked by max clinical phase descending, then trial-report count, then disease name; who_regulatory = WHO Prequalification listing only, ~650 global-health priority products — prequalified:false means not PQ-listed, not banned or unapproved anywhere; limit applies to product rows)'),
         limit: z.number().int().min(1).max(100).default(20),
       },
@@ -109,7 +109,7 @@ export function registerDrugTools(server: McpServer): void {
     {
       description: 'Find clinical trials for a drug',
       inputSchema: {
-        drug: z.string().describe('Drug name'),
+        drug: requiredString('Drug name').describe('Drug name'),
       },
       annotations: { readOnlyHint: true }
     },

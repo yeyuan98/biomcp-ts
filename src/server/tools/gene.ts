@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { geneSearch, geneGet } from '../../entities/gene.js';
 import { geneToDrugs, geneToTrials, geneToArticles, geneEnrichment } from '../../entities/cross-entity.js';
-import { applyLimit, sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra } from './utils.js';
+import { applyLimit, requiredString, sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra } from './utils.js';
 
 // Deadline rationale (#107 phase 2): geneGet already enforces its own 30s
 // overall abort internally (threaded into every section fetch), so the tool
@@ -73,7 +73,7 @@ export function registerGeneTools(server: McpServer): void {
     {
       description: 'Get detailed gene information by symbol. Response section keys mirror the requested section names: sections:["clinical_evidence"] returns sections.clinical_evidence, "protein_atlas" returns sections.protein_atlas, "dosage_sensitivity" returns sections.dosage_sensitivity, "disease_associations" returns sections.disease_associations — the legacy storage keys (civic, hpa, clingen, disgenet) never appear in responses.',
       inputSchema: {
-        symbol: z.string().describe('Official HGNC gene symbol (e.g., "BRAF", "TP53", "ERBB2"). Common aliases like "HER2" or "NEU" are NOT accepted unless smart=true is enabled.'),
+        symbol: requiredString('Gene symbol').describe('Official HGNC gene symbol (e.g., "BRAF", "TP53", "ERBB2"). Common aliases like "HER2" or "NEU" are NOT accepted unless smart=true is enabled.'),
         sections: z.array(z.enum(GENE_SECTIONS)).optional().describe('Sections to include'),
         limit: z.number().int().min(1).max(100).default(20),
         smart: z.boolean().default(false).describe('When true, automatically resolves gene aliases and common names to the official HGNC symbol before lookup (e.g., "HER2" → "ERBB2"). Zero overhead when input is already a valid HGNC symbol.'),
@@ -125,7 +125,7 @@ export function registerGeneTools(server: McpServer): void {
     {
       description: 'Get diseases associated with a gene. Requires DISGENET_API_KEY environment variable for DisGeNET data; falls back to OpenTargets gene-disease associations when unavailable.',
       inputSchema: {
-        symbol: z.string().describe('HGNC gene symbol'),
+        symbol: requiredString('Gene symbol').describe('HGNC gene symbol'),
         limit: z.number().int().min(1).max(50).default(10),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
@@ -164,7 +164,7 @@ export function registerGeneTools(server: McpServer): void {
     {
       description: 'Find drugs targeting a gene. Results are ranked by max clinical phase, then trial-report count, with salt forms collapsed',
       inputSchema: {
-        symbol: z.string().describe('HGNC gene symbol (e.g., "BRAF", "TP53")'),
+        symbol: requiredString('Gene symbol').describe('HGNC gene symbol (e.g., "BRAF", "TP53")'),
       },
       annotations: { readOnlyHint: true }
     },
@@ -183,7 +183,7 @@ export function registerGeneTools(server: McpServer): void {
     {
       description: 'Find clinical trials for a gene',
       inputSchema: {
-        symbol: z.string().describe('HGNC gene symbol'),
+        symbol: requiredString('Gene symbol').describe('HGNC gene symbol'),
       },
       annotations: { readOnlyHint: true }
     },
@@ -202,7 +202,7 @@ export function registerGeneTools(server: McpServer): void {
     {
       description: 'Find articles about a gene',
       inputSchema: {
-        symbol: z.string().describe('HGNC gene symbol'),
+        symbol: requiredString('Gene symbol').describe('HGNC gene symbol'),
       },
       annotations: { readOnlyHint: true }
     },

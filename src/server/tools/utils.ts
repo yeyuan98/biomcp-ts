@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 export function sliceArraysRecursive(obj: unknown, limit: number): unknown {
   if (Array.isArray(obj)) return obj.slice(0, limit);
   if (obj && typeof obj === 'object') {
@@ -156,3 +158,25 @@ export function applyLimit(
   }
   return result;
 }
+
+/**
+ * Required non-empty string parameter: trims, then rejects an empty result
+ * with a uniform message so empty/whitespace-only selector params (ids,
+ * symbols, accessions, …) fail zod schema validation — an MCP -32602-class
+ * InvalidParams error — before any handler logic or network call runs
+ * (issue #128). The 10 free-text search `query` params use the identical
+ * inline pattern (issue #79); this helper extends it to required selectors.
+ *
+ * Format/regex tightening is deliberately out of scope: only emptiness is
+ * rejected here.
+ */
+export const requiredString = (label: string) =>
+  z.string().trim().min(1, `${label} must be a non-empty string after trimming`);
+
+/**
+ * Optional filter-style string: ABSENCE still passes schema, but an
+ * explicitly supplied empty/whitespace-only value is rejected. An empty
+ * filter value would otherwise silently broaden the query — e.g.
+ * variant_search's empty `query` used to match everything upstream.
+ */
+export const optionalNonEmptyString = (label: string) => requiredString(label).optional();

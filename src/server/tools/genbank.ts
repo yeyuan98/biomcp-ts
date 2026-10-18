@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { genbankSearch, genbankGet, genbankToGeneIds } from '../../entities/genbank.js';
 import type { GenbankRecord } from '../../entities/genbank.js';
 import { writeGenbankFile, GENBANK_MAX_FILE_CHARS } from './genbank-store.js';
+import { requiredString } from './utils.js';
 
 /** Auto-inline ceiling: records at or under this length are returned inline
  *  as today; anything larger defaults to file mode (full data on disk). */
@@ -100,7 +101,7 @@ Queries may be plain terms, an accession, or NCBI field syntax ("TP53[Gene Name]
 
 Whole-record fetches are capped at 2,000,000 bp — larger records require a seq_start/seq_stop region (1-based, inclusive, up to 10 Mb span; set strand=2 for a reverse-strand slice where seq_start > seq_stop — the region field echoes the request as given, while NCBI's text shows complement(min..max)). Output: records up to 1,000 characters are returned inline (sequence_text with char_count/truncated). Anything larger defaults to file mode — the FULL text is written to a server-side cache file and the reply carries mode:"file", file_path, char_count, and total_char_count instead of sequence_text (never truncated); Read/Grep the file selectively. The cache is ephemeral (pruned after ~7 days / 500 files) and the path is server-local; re-call to regenerate. sequence_output:"inline" opts back into inline text capped at 200,000 characters — use it only if you cannot read server-side files.`,
       inputSchema: {
-        accession: z.string().describe('GenBank/RefSeq accession, versioned or bare — NC_000023.11, NG_017013.2, KJ668569.1, NC_000908.2'),
+        accession: requiredString('Accession').describe('GenBank/RefSeq accession, versioned or bare — NC_000023.11, NG_017013.2, KJ668569.1, NC_000908.2'),
         format: z.enum(['genbank', 'fasta']).default('genbank').describe('Record format: genbank flat file (default) or fasta'),
         seq_start: z.number().int().min(1).optional().describe('Region start (1-based, inclusive) — required with seq_stop for records over 2 Mb'),
         seq_stop: z.number().int().min(1).optional().describe('Region stop (1-based, inclusive)'),
@@ -151,7 +152,7 @@ Whole-record fetches are capped at 2,000,000 bp — larger records require a seq
 
 The returned gene_ids are entrezgene IDs usable directly with MyGene-backed gene tools (gene_get, gene_search). Useful bridge from a sequence record to gene-level annotation.`,
       inputSchema: {
-        accession: z.string().describe('GenBank/RefSeq accession, versioned or bare — e.g. NG_017013.2, NC_000023.11'),
+        accession: requiredString('Accession').describe('GenBank/RefSeq accession, versioned or bare — e.g. NG_017013.2, NC_000023.11'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },

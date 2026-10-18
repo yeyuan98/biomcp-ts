@@ -614,6 +614,11 @@ export async function ensemblRegion(
   const [, chr, startStr, endStr] = match;
   const start = Number(startStr);
   const end = Number(endStr);
+  if (start < 1) {
+    throw new Error(
+      `Invalid region '${region}' — coordinates are 1-based (start must be >= 1), e.g. 7:140450000-140480000`
+    );
+  }
   if (end < start) throw new Error(`Invalid region '${region}' — end must be >= start`);
   if (end - start + 1 > REGION_MAX_SPAN_BP) {
     throw new Error(`Region span ${(end - start + 1).toLocaleString()} bp exceeds the ${REGION_MAX_SPAN_BP / 1_000_000} Mb upstream limit — narrow it`);

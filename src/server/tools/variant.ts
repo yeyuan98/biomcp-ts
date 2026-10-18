@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { variantSearch, variantGet, fetchOncoKbAnnotation, getVariantSearchFilters } from '../../entities/variant.js';
 import { variantToTrials } from '../../entities/cross-entity.js';
-import { sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra } from './utils.js';
+import { optionalNonEmptyString, requiredString, sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra } from './utils.js';
 
 // Deadline rationale (#107 phase 2): myvariant core lookup + parallel
 // section wave (frequency/clinical/predictions, each with an 8s section
@@ -29,15 +29,15 @@ export function registerVariantTools(server: McpServer): void {
 - ClinVar significance: e.g. significance="pathogenic"
 Do NOT use compound free-text like "BRAF V600E" — use separate gene and hgvsp parameters instead.`,
       inputSchema: {
-        query: z.string().optional().describe('Variant query (rsid or HGVS notation). Avoid compound queries like "BRAF V600E" — use gene + hgvsp parameters instead.'),
-        gene: z.string().optional().describe('Filter by gene symbol (e.g., "BRAF"). Use together with hgvsp for protein change queries.'),
+        query: optionalNonEmptyString('Query').describe('Variant query (rsid or HGVS notation). Avoid compound queries like "BRAF V600E" — use gene + hgvsp parameters instead.'),
+        gene: optionalNonEmptyString('Gene').describe('Filter by gene symbol (e.g., "BRAF"). Use together with hgvsp for protein change queries.'),
         significance: z.enum(['benign', 'likely_benign', 'pathogenic', 'likely_pathogenic', 'uncertain']).optional().describe('ClinVar significance category, matched exactly — records displayed as "Pathogenic/Likely pathogenic" match both pathogenic and likely_pathogenic; "Conflicting interpretations of pathogenicity" matches none of these'),
         max_frequency: z.number().optional().describe('Maximum allele frequency (0-1)'),
         min_cadd: z.number().optional().describe('Minimum CADD score; echoed per row as cadd_phred so the filter is verifiable from each result'),
         consequence: z.string().optional().describe('Variant consequence (e.g., missense, synonymous)'),
-        rsid: z.string().optional().describe('dbSNP rsID'),
-        hgvsp: z.string().optional().describe('Protein change (e.g., V600E). Use with gene parameter for compound queries.'),
-        hgvsc: z.string().optional().describe('cDNA change — bare c. notation (e.g., c.1799T>A) or full HGVS (e.g., NM_004333.4:c.1799T>A)'),
+        rsid: optionalNonEmptyString('rsID').describe('dbSNP rsID'),
+        hgvsp: optionalNonEmptyString('Protein change').describe('Protein change (e.g., V600E). Use with gene parameter for compound queries.'),
+        hgvsc: optionalNonEmptyString('cDNA change').describe('cDNA change — bare c. notation (e.g., c.1799T>A) or full HGVS (e.g., NM_004333.4:c.1799T>A)'),
         limit: z.number().int().min(1).max(50).default(10).describe('Maximum results'),
         offset: z.number().int().min(0).default(0).describe('Result offset'),
       },
@@ -102,7 +102,7 @@ Do NOT use compound free-text like "BRAF V600E" — use separate gene and hgvsp 
     {
       description: 'Get detailed variant information with optional sections. Core data (id, gene, rsid, significance) is always returned at the top level. Use sections to request additional data. Response section keys mirror the requested section names: sections:["alphagenome_scores"] returns sections.alphagenome_scores — the legacy storage key (alphagenome) never appears in responses.',
       inputSchema: {
-        id: z.string().describe('Variant ID (rsid e.g. rs113488022, HGVS e.g. NM_004333.4:c.1799T>A, ClinVar ID e.g. 13961 / clinvar_13961 / VCV0000013961). Multi-allelic rsIDs (one ClinVar allele per ALT, e.g. rs28934575): the top-level record is ONE allele, chosen by gnomad-availability — all alleles are returned under \'alleles\' with a \'_warning\' naming the reflected allele; to select an exact allele use allele-qualified HGVS (e.g. NM_000546.5:c.733G>T), where the transcript version must match the indexed snpeff annotation (NM_000546.5 works; ClinVar\'s NM_000546.6 does not)'),
+        id: requiredString('Variant ID').describe('Variant ID (rsid e.g. rs113488022, HGVS e.g. NM_004333.4:c.1799T>A, ClinVar ID e.g. 13961 / clinvar_13961 / VCV0000013961). Multi-allelic rsIDs (one ClinVar allele per ALT, e.g. rs28934575): the top-level record is ONE allele, chosen by gnomad-availability — all alleles are returned under \'alleles\' with a \'_warning\' naming the reflected allele; to select an exact allele use allele-qualified HGVS (e.g. NM_000546.5:c.733G>T), where the transcript version must match the indexed snpeff annotation (NM_000546.5 works; ClinVar\'s NM_000546.6 does not)'),
         sections: z.array(z.enum(VARIANT_GET_SECTIONS)).optional().describe('Sections to include: core, frequency, predictions, clinical, alphagenome_scores (currently unavailable — returns an error stub pending AlphaGenome gRPC reimplementation)'),
         limit: z.number().int().min(1).max(100).default(20),
       },
@@ -154,8 +154,8 @@ Do NOT use compound free-text like "BRAF V600E" — use separate gene and hgvsp 
     {
       description: 'Get OncoKB annotations for a variant in a cancer gene. Requires ONCOKB_TOKEN environment variable.',
       inputSchema: {
-        gene: z.string().describe('Gene symbol (e.g., BRAF, EGFR)'),
-        protein_change: z.string().describe('Protein change (e.g., V600E, L858R)'),
+        gene: requiredString('Gene symbol').describe('Gene symbol (e.g., BRAF, EGFR)'),
+        protein_change: requiredString('Protein change').describe('Protein change (e.g., V600E, L858R)'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
@@ -177,7 +177,7 @@ Do NOT use compound free-text like "BRAF V600E" — use separate gene and hgvsp 
     {
       description: 'Find clinical trials for a variant',
       inputSchema: {
-        variant: z.string().describe('Variant ID (rsID, HGVS, or variant ID)'),
+        variant: requiredString('Variant ID').describe('Variant ID (rsID, HGVS, or variant ID)'),
       },
       annotations: { readOnlyHint: true }
     },

@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { diseaseSearch, diseaseGet } from '../../entities/disease.js';
 import { connectionManager } from '../../connections/manager.js';
-import { applyLimit, withToolTimeout, type CancellationCapableExtra } from './utils.js';
+import { applyLimit, requiredString, withToolTimeout, type CancellationCapableExtra } from './utils.js';
 
 // Deadline rationale (#107 phase 2): the mydisease core lookup (candidate
 // curie retries, 15s per attempt) plus the 8s-deadline section wave in
@@ -72,7 +72,7 @@ export function registerDiseaseTools(server: McpServer): void {
     {
       description: 'Get detailed disease information by ID',
       inputSchema: {
-        disease_id: z.string().describe('Disease ID (e.g., "DOID:0060268", "MONDO:0007254", "OMIM:114480", or UMLS CUI "C0018794" — heart block, named via MedGen enrichment)'),
+        disease_id: requiredString('Disease ID').describe('Disease ID (e.g., "DOID:0060268", "MONDO:0007254", "OMIM:114480", or UMLS CUI "C0018794" — heart block, named via MedGen enrichment)'),
         sections: z.array(z.enum(DISEASE_SECTIONS)).optional().describe('Sections to include'),
         limit: z.number().int().min(1).max(100).default(20),
       },
@@ -106,7 +106,7 @@ export function registerDiseaseTools(server: McpServer): void {
     {
       description: 'Get drugs for a disease via OpenTargets. Results are ranked by max clinical phase, then trial-report count, with salt forms collapsed',
       inputSchema: {
-        disease_id: z.string().describe('Disease ID'),
+        disease_id: requiredString('Disease ID').describe('Disease ID'),
         limit: z.number().int().min(1).max(50).default(20),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
@@ -127,7 +127,7 @@ export function registerDiseaseTools(server: McpServer): void {
     {
       description: 'Get clinical trials for a disease',
       inputSchema: {
-        disease_id: z.string().describe('Disease ID'),
+        disease_id: requiredString('Disease ID').describe('Disease ID'),
         limit: z.number().int().min(1).max(50).default(20),
       },
       annotations: { readOnlyHint: true, openWorldHint: true }
