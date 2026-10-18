@@ -55,8 +55,14 @@ describe('stripHtml', () => {
   it('strips mixed raw and entity-encoded nested markup', () => {
     // Raw outer tag + escaped inner tags: both regex passes are needed.
     expect(stripHtml('<div>&lt;div&gt;inner&lt;/div&gt;</div>', 'block')).toBe('inner');
-    // Stripping one tag exposes the text the other pass owns.
-    expect(stripHtml('<<b>x</b>y', 'block')).toBe('x y');
+    // Stripping one tag exposes the text the other pass owns; the leading
+    // lone `<` (not followed by a letter) is text, not markup.
+    expect(stripHtml('<<b>x</b>y', 'block')).toBe('< x y');
+  });
+
+  it('leaves non-letter markup as literal text', () => {
+    expect(stripHtml('a<!-- comment -->b')).toBe('a<!-- comment -->b');
+    expect(stripHtml('x<>y', 'block')).toBe('x<>y');
   });
 
   it('decodes entities once after stripping (double-encode safety)', () => {

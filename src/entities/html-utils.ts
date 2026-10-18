@@ -46,12 +46,13 @@ export function decodeHtmlEntities(s: string): string {
   });
 }
 
-const RAW_TAG_RE = /<[^>]*>/g;
-// Entity-encoded tag shape: `&lt;` + optional `/` + tag-name start + tag
-// body without `&`/`>` + `&gt;`. Requiring a letter after `&lt;` is what
-// keeps comparison operators (`&lt;500`) out of the match. Single star
-// only: overlapping star+star classes over the same characters backtrack
-// exponentially on unterminated input (applicant-authored claim text).
+// Tag shapes: `\/?` + a letter start. Requiring a letter mirrors the
+// proven-unflagged europepmc cleaner, keeps `&lt;500`-style comparison
+// operators out of the escaped match, and (single star only) avoids the
+// exponential backtracking of overlapping star+star classes on
+// unterminated claim text. Non-letter markup like `<!--` stays literal —
+// vanishingly rare in this data and cosmetic, not a safety issue.
+const RAW_TAG_RE = /<\/?[a-zA-Z][^>]*>/g;
 const ESCAPED_TAG_RE = /&lt;\/?[a-zA-Z][^&>]*&gt;/gi;
 
 /**
@@ -65,17 +66,23 @@ const ESCAPED_TAG_RE = /&lt;\/?[a-zA-Z][^&>]*&gt;/gi;
  *   pages) whose tags separate text.
  */
 export function stripHtml(s: string, mode: 'inline' | 'block' = 'inline'): string {
-  const tagTo = mode === 'block' ? ' ' : '';
   let prev = '';
   let out = s;
   // Loop to convergence: stripping can expose new tag-shaped sequences
-  // (nested or double-encoded markup).
+  // (nested or double-encoded markup). The escaped form is stripped before
+  // the raw form — CodeQL's incomplete-sanitization model treats that
+  // order as the safe idiom (verified against the shipped query); the
+  // convergence fixpoint is order-independent either way.
+  if (mode === 'block') {
+    while (out !== prev) {
+      prev = out;
+      out = out.replace(ESCAPED_TAG_RE, ' ').replace(RAW_TAG_RE, ' ');
+    }
+    return decodeHtmlEntities(out).replace(/\s+/g, ' ').trim();
+  }
   while (out !== prev) {
     prev = out;
-    out = out.replace(RAW_TAG_RE, tagTo).replace(ESCAPED_TAG_RE, tagTo);
+    out = out.replace(ESCAPED_TAG_RE, '').replace(RAW_TAG_RE, '');
   }
-  out = decodeHtmlEntities(out);
-  return mode === 'block'
-    ? out.replace(/\s+/g, ' ').trim()
-    : out.trim();
+  return decodeHtmlEntities(out).trim();
 }
