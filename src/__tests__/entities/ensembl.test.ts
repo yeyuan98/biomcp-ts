@@ -683,5 +683,31 @@ describe('ensembl entity', () => {
       await expect(ensemblRegion('7:1-20000000')).rejects.toThrow(/5 Mb upstream limit/);
       await expect(ensemblRegion('7:1-1000', { features: ['regulatory' as never] })).rejects.toThrow(/Unsupported feature/);
     });
+
+    it('rejects 0-based starts with the 1-based convention (#128)', async () => {
+      const { ensemblRegion } = await loadEnsembl();
+      mockFetchRoutes({});
+
+      // The issue's repro: the regex accepted start 0 and Ensembl answered
+      // 200 [] — a confident empty locus for an off-by-one caller.
+      await expect(ensemblRegion('7:0-10')).rejects.toThrow(
+        /coordinates are 1-based \(start must be >= 1\)/
+      );
+      await expect(ensemblRegion('7:0-0')).rejects.toThrow(
+        /coordinates are 1-based \(start must be >= 1\)/
+      );
+      // Rejection happens before any network call.
+      expect(callUrls()).toHaveLength(0);
+    });
+
+    it('still accepts a 1-based region starting at 1', async () => {
+      const { ensemblRegion } = await loadEnsembl();
+      mockFetchRoutes(overlapRoutes());
+
+      const result = await ensemblRegion('7:1-10');
+
+      expect(result.region).toBe('7:1-10');
+      expect(callUrls().length).toBeGreaterThan(0);
+    });
   });
 });

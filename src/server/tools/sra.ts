@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { sraSearch, sraGet } from '../../entities/sra/index.js';
+import { requiredString } from './utils.js';
 
 // Accepts NCBI (S…), European (E…), and DDBJ (D…) accessions alike — NCBI
 // SRA indexes all three archives (live-verified 2026-10-17: DRX/DRR/ERR/DRP/
@@ -38,7 +39,7 @@ The query may be free text, an accession (SRP study, SRX experiment, SRR run, SR
 
 Chain from geo_get (sra field) or sra_search (experiment_accession / first_run_accession).`,
       inputSchema: {
-        accession: z.string().describe('SRA accession: run (SRR/ERR/DRR), experiment (SRX/ERX/DRX), study (SRP/ERP/DRP), or sample (SRS/ERS/DRS), e.g. SRR14432476'),
+        accession: requiredString('SRA accession').describe('SRA accession: run (SRR/ERR/DRR), experiment (SRX/ERX/DRX), study (SRP/ERP/DRP), or sample (SRS/ERS/DRS), e.g. SRR14432476'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },

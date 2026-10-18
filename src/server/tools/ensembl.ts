@@ -6,6 +6,7 @@ import {
   ensemblConsequence,
   ensemblRegion,
 } from '../../entities/ensembl.js';
+import { requiredString } from './utils.js';
 
 export function registerEnsemblTools(server: McpServer): void {
   server.registerTool(
@@ -16,7 +17,7 @@ export function registerEnsemblTools(server: McpServer): void {
 Accepts an HGNC symbol (BRAF) or Ensembl gene ID (ENSG00000157764, versioned or bare — versions are resolved to the current record). Species accepts scientific names or aliases ('homo_sapiens'/'human', 'mus_musculus'/'mouse').
 For rich human gene annotation (summary, pathways, drugs, diseases) use gene_get instead — this tool is the identifier/structure authority.`,
       inputSchema: {
-        gene_or_id: z.string().describe('HGNC symbol (BRAF) or Ensembl gene ID (ENSG00000157764, versioned or bare)'),
+        gene_or_id: requiredString('Gene or ID').describe('HGNC symbol (BRAF) or Ensembl gene ID (ENSG00000157764, versioned or bare)'),
         species: z.string().default('human').describe("Species name or alias — 'human' (default), 'mouse', 'mus_musculus', 'rat', …"),
         expand: z.boolean().default(false).describe('Include all transcripts with translation/protein IDs'),
       },
@@ -40,7 +41,7 @@ For rich human gene annotation (summary, pathways, drugs, diseases) use gene_get
 Returns target stable IDs, gene symbols (when the assembly provides them, e.g. ARAF/RAF1 for BRAF paralogs), species, taxonomy level, and percent identity, sorted by identity. Accepts an HGNC symbol or Ensembl gene ID; scope to one species with target_species ('mouse') or target_taxon (10090).
 Use it for conservation questions ('is this gene conserved?', 'what is the mouse orthologue of BRAF?').`,
       inputSchema: {
-        gene: z.string().describe('Gene symbol (BRAF) or Ensembl gene ID (ENSG00000157764)'),
+        gene: requiredString('Gene').describe('Gene symbol (BRAF) or Ensembl gene ID (ENSG00000157764)'),
         species: z.string().default('human').describe("Source species — 'human' (default), 'mouse', …"),
         type: z.enum(['orthologues', 'paralogues']).default('orthologues').describe('Homology type to fetch'),
         target_species: z.string().optional().describe("Restrict results to one species, e.g. 'mouse'"),
@@ -69,7 +70,7 @@ Per-species rules: the variant must be valid on a transcript of THAT species —
 Returns the most severe consequence plus per-transcript effects (impact, codon/amino-acid change, SIFT/PolyPhen where available) and co-located known variants (ClinVar/COSMIC IDs, gnomAD/1000G frequencies when present).
 For KNOWN human variants, variant_get additionally provides deep pre-computed scores (CADD, REVEL, AlphaMissense, ClinVar stars) — prefer it there.`,
       inputSchema: {
-        variant: z.string().describe('HGVS notation (NM_004333:c.1799T>A) or dbSNP rsID (rs113488060)'),
+        variant: requiredString('Variant').describe('HGVS notation (NM_004333:c.1799T>A) or dbSNP rsID (rs113488060)'),
         species: z.string().default('human').describe("Species — 'human' (default), 'mouse', …"),
         limit: z.number().int().min(1).max(50).default(10).describe('Max transcript consequences returned (sorted by impact severity)'),
       },
@@ -94,7 +95,7 @@ Ideal for locus triage — "what genes and known variants sit in this GWAS hit i
 Genes/transcripts are always fetched for the FULL requested span, but variation density can reach ~100k variants in dense loci (which times out upstream), so when the span exceeds 50 kb variation is queried only for a 50 kb window centered on the region midpoint — the result echoes effective_variation_window (the coordinates actually queried for variation) and variation_truncated (names the dropped span) when this cap applies. To sweep variation across a large interval, issue adjacent region calls.
 Keep spans modest (<1 Mb recommended); output is capped at limit with a truncated marker. For sequence text use genbank_get; for entity-level annotation chain IDs into gene_get / variant_get.`,
       inputSchema: {
-        region: z.string().describe('Genomic region chr:start-end (1-based, GRCh38 for human) — e.g. 7:140450000-140480000'),
+        region: requiredString('Region').describe('Genomic region chr:start-end (1-based, GRCh38 for human) — e.g. 7:140450000-140480000'),
         features: z
           .array(z.enum(['gene', 'transcript', 'variation']))
           .default(['gene', 'variation'])
