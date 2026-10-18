@@ -88,13 +88,15 @@ const GENE_SYMBOLS = ['BRAF', 'TP53'];
  * below) so a reworded docstring cannot leave a stale entry behind.
  */
 const ILLUSTRATIVE_ALLOWLIST: Record<string, string[]> = {
-  // article_get id description: the canonical PMID / PMCID shape examples.
-  // Digit-sequential placeholders — the description's DOIs (and the
-  // tool-level description's preprint DOI) are the real, live-checked ones.
-  article_get: ['12345', 'PMC1234567'],
+  // article_get id description's PMCID shape example. "PMC1234567" is a
+  // digit-sequential placeholder (0 hits on Europe PMC). The equally
+  // digit-sequential PMID "12345" is NOT a placeholder — it is a real,
+  // resolvable record (1976, J Pharm Pharmacol) and is live-checked below.
+  article_get: ['PMC1234567'],
   // trial_get nct_id description: NCT + the keyboard-sequential 8-digit run.
-  // A shape illustration, not a curated study — the neighboring trial-tools
-  // suite live-checks NCT03676114 for real data.
+  // "NCT01234567" 404s on ClinicalTrials.gov — a shape illustration, not a
+  // curated study; the neighboring trial-tools suite live-checks
+  // NCT03676114 for real data.
   trial_get: ['NCT01234567'],
 };
 
