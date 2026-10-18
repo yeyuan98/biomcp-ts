@@ -100,7 +100,7 @@ Do NOT use compound free-text like "BRAF V600E" — use separate gene and hgvsp 
   server.registerTool(
     'variant_get',
     {
-      description: 'Get detailed variant information with optional sections. Core data (id, gene, rsid, significance) is always returned at the top level. Use sections to request additional data.',
+      description: 'Get detailed variant information with optional sections. Core data (id, gene, rsid, significance) is always returned at the top level. Use sections to request additional data. Response section keys mirror the requested section names: sections:["alphagenome_scores"] returns sections.alphagenome_scores — the legacy storage key (alphagenome) never appears in responses.',
       inputSchema: {
         id: z.string().describe('Variant ID (rsid e.g. rs113488022, HGVS e.g. NM_004333.4:c.1799T>A, ClinVar ID e.g. 13961 / clinvar_13961 / VCV0000013961). Multi-allelic rsIDs (one ClinVar allele per ALT, e.g. rs28934575): the top-level record is ONE allele, chosen by gnomad-availability — all alleles are returned under \'alleles\' with a \'_warning\' naming the reflected allele; to select an exact allele use allele-qualified HGVS (e.g. NM_000546.5:c.733G>T), where the transcript version must match the indexed snpeff annotation (NM_000546.5 works; ClinVar\'s NM_000546.6 does not)'),
         sections: z.array(z.enum(VARIANT_GET_SECTIONS)).optional().describe('Sections to include: core, frequency, predictions, clinical, alphagenome_scores (currently unavailable — returns an error stub pending AlphaGenome gRPC reimplementation)'),
@@ -125,6 +125,21 @@ Do NOT use compound free-text like "BRAF V600E" — use separate gene and hgvsp 
             if (data && typeof data === 'object') {
               result.sections[storedKey] = sliceArraysRecursive(data, limit);
             }
+          }
+          // #129: response keys mirror the requested (schema-advertised)
+          // section names. The entity stores alphagenome_scores under the
+          // legacy key 'alphagenome' so it can address it internally;
+          // translate back at the tool boundary so callers can key on what
+          // they asked for. In-repo entity consumers (variantToTrials,
+          // batch_get) read entity output directly, below this remap, and
+          // are unaffected. requestedSections already covers the 'all'
+          // expansion; identity sections (no alias entry) are untouched.
+          const sectionsOut = result.sections;
+          for (const name of requestedSections) {
+            const storedKey = VARIANT_STORAGE_KEYS[name];
+            if (!storedKey || !(storedKey in sectionsOut)) continue;
+            sectionsOut[name] = sectionsOut[storedKey];
+            delete sectionsOut[storedKey];
           }
         }
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };

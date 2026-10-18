@@ -361,6 +361,29 @@ describe('Tool registration', () => {
     expect(description).toMatch(/"graph".*sections\.citation_graph/);
   });
 
+  it('gene_get/variant_get descriptions document the section key mirror contract (#129)', () => {
+    registerGeneTools(mockServer);
+    registerVariantTools(mockServer);
+    const geneGetCall = mockRegisterTool.mock.calls.find((call: any[]) => call[0] === 'gene_get');
+    const variantGetCall = mockRegisterTool.mock.calls.find((call: any[]) => call[0] === 'variant_get');
+    expect(geneGetCall).toBeDefined();
+    expect(variantGetCall).toBeDefined();
+    const geneDescription = (geneGetCall![1] as any).description as string;
+    const variantDescription = (variantGetCall![1] as any).description as string;
+    // Response keys mirror the requested names — each aliased section must
+    // be documented as returning under its public (schema-advertised) name,
+    // and the legacy storage keys must be named as never appearing.
+    expect(geneDescription).toContain('Response section keys mirror the requested section names');
+    expect(geneDescription).toMatch(/"clinical_evidence".*sections\.clinical_evidence/);
+    expect(geneDescription).toMatch(/"protein_atlas".*sections\.protein_atlas/);
+    expect(geneDescription).toMatch(/"dosage_sensitivity".*sections\.dosage_sensitivity/);
+    expect(geneDescription).toMatch(/"disease_associations".*sections\.disease_associations/);
+    expect(geneDescription).toContain('civic, hpa, clingen, disgenet');
+    expect(variantDescription).toContain('Response section keys mirror the requested section names');
+    expect(variantDescription).toMatch(/"alphagenome_scores".*sections\.alphagenome_scores/);
+    expect(variantDescription).toContain('alphagenome');
+  });
+
   it('patent_get sections schema is usable (entity mock provides real constants)', () => {
     registerPatentTools(mockServer);
     const patentGetCall = mockRegisterTool.mock.calls.find((call: any[]) => call[0] === 'patent_get');

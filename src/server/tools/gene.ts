@@ -71,7 +71,7 @@ export function registerGeneTools(server: McpServer): void {
   server.registerTool(
     'gene_get',
     {
-      description: 'Get detailed gene information by symbol',
+      description: 'Get detailed gene information by symbol. Response section keys mirror the requested section names: sections:["clinical_evidence"] returns sections.clinical_evidence, "protein_atlas" returns sections.protein_atlas, "dosage_sensitivity" returns sections.dosage_sensitivity, "disease_associations" returns sections.disease_associations — the legacy storage keys (civic, hpa, clingen, disgenet) never appear in responses.',
       inputSchema: {
         symbol: z.string().describe('Official HGNC gene symbol (e.g., "BRAF", "TP53", "ERBB2"). Common aliases like "HER2" or "NEU" are NOT accepted unless smart=true is enabled.'),
         sections: z.array(z.enum(GENE_SECTIONS)).optional().describe('Sections to include'),
@@ -92,6 +92,23 @@ export function registerGeneTools(server: McpServer): void {
           : (sections ?? []);
         if (result.sections) {
           result.sections = applyLimit(result.sections, requestedSections, GENE_STORAGE_KEYS, GENE_ARRAY_KEYS, limit);
+          // #129: response keys mirror the requested (schema-advertised)
+          // section names. The entity stores aliased sections under legacy
+          // storage keys (civic/hpa/clingen/disgenet) so it can address
+          // them internally; translate back at the tool boundary so callers
+          // can key on what they asked for. In-repo entity consumers
+          // (gene_diseases, batch_get) read entity output directly, below
+          // this remap, and are unaffected. requestedSections already
+          // covers the 'all' expansion, so implicitly requested sections
+          // come back under their public names too. Identity sections
+          // (no alias entry) are untouched.
+          const sectionsOut = result.sections;
+          for (const name of requestedSections) {
+            const storedKey = GENE_STORAGE_KEYS[name];
+            if (!storedKey || !(storedKey in sectionsOut)) continue;
+            sectionsOut[name] = sectionsOut[storedKey];
+            delete sectionsOut[storedKey];
+          }
         }
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       } catch (error) {
