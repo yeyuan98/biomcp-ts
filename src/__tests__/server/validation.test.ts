@@ -108,17 +108,16 @@ describe('InputValidation.geoAccession', () => {
 });
 
 describe('InputValidation.sraAccession', () => {
-  it('accepts SRP/SRX/SRR/SRS accessions', () => {
-    for (const prefix of ['SRP', 'SRX', 'SRR', 'SRS']) {
+  it('accepts NCBI, European (ENA), and DDBJ accessions', () => {
+    for (const prefix of ['SRP', 'SRX', 'SRR', 'SRS', 'ERP', 'ERX', 'ERR', 'ERS', 'DRP', 'DRX', 'DRR', 'DRS']) {
       expect(InputValidation.sraAccession.safeParse(`${prefix}14432476`).success).toBe(true);
     }
   });
 
-  it('rejects European/DDBJ accessions and malformed input', () => {
-    expect(InputValidation.sraAccession.safeParse('ERP123456').success).toBe(false);
-    expect(InputValidation.sraAccession.safeParse('ERR123456').success).toBe(false);
-    expect(InputValidation.sraAccession.safeParse('DRP123456').success).toBe(false);
+  it('rejects malformed input', () => {
+    expect(InputValidation.sraAccession.safeParse('XRQ123456').success).toBe(false);
     expect(InputValidation.sraAccession.safeParse('SRR').success).toBe(false);
+    expect(InputValidation.sraAccession.safeParse('SRR14432476!').success).toBe(false);
   });
 });
 
@@ -206,7 +205,8 @@ describe('isValidEntityInput', () => {
 
   it('returns false for invalid geo/sra/genbank inputs', () => {
     expect(isValidEntityInput('geo', 'not-an-accession')).toBe(false);
-    expect(isValidEntityInput('sra', 'ERP123456')).toBe(false);
+    expect(isValidEntityInput('sra', 'ERP123456')).toBe(true);
+    expect(isValidEntityInput('sra', 'XRQ123456')).toBe(false);
     expect(isValidEntityInput('genbank', '###')).toBe(false);
   });
 });

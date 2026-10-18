@@ -37,7 +37,7 @@ For rich human gene annotation (summary, pathways, drugs, diseases) use gene_get
     {
       description: `Find orthologues or paralogues of a gene across species (Ensembl Compara) — the cross-species gene mapping source in biomcp.
 
-Returns target stable IDs, species, taxonomy level, and percent identity, sorted by identity. Accepts an HGNC symbol or Ensembl gene ID; scope to one species with target_species ('mouse') or target_taxon (10090).
+Returns target stable IDs, gene symbols (when the assembly provides them, e.g. ARAF/RAF1 for BRAF paralogs), species, taxonomy level, and percent identity, sorted by identity. Accepts an HGNC symbol or Ensembl gene ID; scope to one species with target_species ('mouse') or target_taxon (10090).
 Use it for conservation questions ('is this gene conserved?', 'what is the mouse orthologue of BRAF?').`,
       inputSchema: {
         gene: z.string().describe('Gene symbol (BRAF) or Ensembl gene ID (ENSG00000157764)'),

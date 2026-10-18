@@ -20,7 +20,7 @@ export function registerPdbTools(server: McpServer): void {
       description: `Access the Protein Data Bank (RCSB PDB) for macromolecular structure data.
 
   SEARCH: Provide "query" to find structures (e.g., "kinase inhibitor", "hemoglobin").
-  GET: Provide "pdb_id" to retrieve entry metadata with optional detail sections.
+  GET: Provide "pdb_id" to retrieve entry metadata with optional detail sections. Sections list per-entity records (polymer_entities, ligands, assembly); when some records fail while siblings succeed, each failure appears as an inline {_error} item AND the response carries a top-level "warnings" array naming the section and failed item.
   DOWNLOAD: Provide "pdb_id" + download=true to save the structure file and get the file path.`,
       inputSchema: {
         query: z.string().optional().describe(

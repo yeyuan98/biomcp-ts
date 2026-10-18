@@ -644,9 +644,27 @@ describe('seminal prior-art mining', () => {
     const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
     expect(searchCalls.count).toBe(1); // main search only — no pool call burned
     expect(response.patents).toHaveLength(1);
-    expect(response.seminal_prior_art).toBeUndefined();
-    expect(response.mined_count).toBeUndefined();
+    // #136: the seminal fields are always present when seminal was requested
+    // — the budget skip yields explicit empties, not absent keys.
+    expect(response.seminal_prior_art).toEqual([]);
+    expect(response.mined_count).toBe(0);
     expect(response.seminal_note).toContain('time budget exhausted');
+  });
+
+  test('seminal fields are present (empty) even when the search returns 0 patents', async () => {
+    const searchCalls = { count: 0 };
+    global.fetch = ppubsSeminalPhaseMock({
+      pool: () => { throw new Error('pool search must not run with no visible patents'); },
+      searchCalls,
+      mainPatents: [],
+    }) as any;
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
+    expect(response.patents).toEqual([]);
+    expect(searchCalls.count).toBe(1);
+    // Same input → same shape: fields exist on the 0-patents path too.
+    expect(response.seminal_prior_art).toEqual([]);
+    expect(response.mined_count).toBe(0);
   });
 
   test('docs phase degrades to partial on deadline instead of discarding fetched refs', async () => {

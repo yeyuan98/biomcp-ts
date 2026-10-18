@@ -51,6 +51,12 @@ export interface PdbResult {
   pdb_id: string;
   summary: PdbEntrySummary;
   sections?: Record<string, unknown>;
+  /** Present when some (not all) per-item fetches inside a section failed:
+   *  one short entry per failed item, e.g.
+   *  "polymer_entities: entity 2 failed: Failed to fetch polymer entity 2: HTTP 500".
+   *  The failed items also keep their inline `_error` object; siblings and
+   *  other sections are unaffected. */
+  warnings?: string[];
 }
 
 export interface PdbDownloadResult {
@@ -144,6 +150,27 @@ export async function pdbSearch(
   }));
 }
 
+/** Bubble per-item failures inside assembled section arrays to the top level
+ *  (#136): entity/ligand/assembly legs use per-item allSettled, so a failed
+ *  item becomes an inline `{_error}` while its siblings succeed — invisible
+ *  unless the caller walks every array. Returns one short warning per failed
+ *  item. The informational "No polymer entities found" placeholder is NOT a
+ *  fetch failure and stays out of warnings. */
+function collectSectionWarnings(sections: Record<string, unknown>): string[] {
+  const warnings: string[] = [];
+  for (const [section, data] of Object.entries(sections)) {
+    if (!Array.isArray(data)) continue;
+    data.forEach((item, index) => {
+      if (!item || typeof item !== 'object' || !('_error' in item)) return;
+      const raw = (item as Record<string, unknown>)['_error'];
+      const message = typeof raw === 'string' ? raw : 'fetch failed';
+      if (message.startsWith('No polymer entities found')) return; // emptiness, not failure
+      warnings.push(`${section}: entity ${index + 1} failed: ${message}`);
+    });
+  }
+  return warnings;
+}
+
 export async function pdbGet(
   pdbId: string,
   sections?: string[]
@@ -198,6 +225,10 @@ export async function pdbGet(
         };
       }
     }
+    // Partial per-item failures inside sections bubble to a top-level
+    // warnings list so callers get a signal without walking every array.
+    const warnings = collectSectionWarnings(result.sections);
+    if (warnings.length > 0) result.warnings = warnings;
   }
 
   return result;

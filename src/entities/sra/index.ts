@@ -145,7 +145,7 @@ function toStudyExperiment(record: SraRecord): SraStudyExperiment {
 
 function sraNotFound(accession: string): Error {
   return new Error(
-    `SRA accession ${accession} not found in NCBI SRA. European accessions (ERP/ERR) and DDBJ accessions (DRP/DRR) are NOT indexed in NCBI SRA — for those, use ENA at https://www.ebi.ac.uk/ena (search by accession). Also check the accession for typos.`
+    `SRA accession ${accession} not found in NCBI SRA. Check the accession for typos and truncation (esearch matches prefixes, so a too-short accession can "hit" unrelated records that are then rejected here); if this accession should exist, ENA (https://www.ebi.ac.uk/ena) may have it.`
   );
 }
 
@@ -173,15 +173,21 @@ export async function sraGet(accession: string): Promise<SraDetail> {
   const { total, ids } = await esearchSraUids(trimmed, SRA_SEARCH_MAX);
   if (ids.length === 0) throw sraNotFound(trimmed);
 
-  if (upper.startsWith('SRR')) return buildRunDetail(trimmed, ids[0]);
-  if (upper.startsWith('SRP')) return buildStudyDetail(trimmed, total, ids);
-  if (upper.startsWith('SRS')) return buildSampleDetail(trimmed, total, ids);
+  // NCBI SRA indexes all three archives, so dispatch on the accession TYPE
+  // regardless of the registry letter (S=NCBI, E=ENA, D=DDBJ).
+  if (/^[EDS]RR/.test(upper)) return buildRunDetail(trimmed, ids[0]);
+  if (/^[EDS]RP/.test(upper)) return buildStudyDetail(trimmed, total, ids);
+  if (/^[EDS]RS/.test(upper)) return buildSampleDetail(trimmed, total, ids);
   return buildExperimentDetail(trimmed, ids[0]);
 }
 
 async function buildExperimentDetail(accession: string, uid: string): Promise<SraDetail> {
   const packages = await efetchExperimentPackages([uid]);
-  const record = packages[0];
+  // esearch is prefix-fuzzy (a truncated accession "hits" longer ones), so
+  // verify the fetched package actually carries the requested accession.
+  const record = packages.find(
+    candidate => candidate.experiment_accession.toUpperCase() === accession.toUpperCase()
+  );
   if (!record) throw sraNotFound(accession);
   return { entry_type: 'experiment', accession, ...record };
 }
@@ -220,17 +226,24 @@ async function buildStudyDetail(
   uids: string[]
 ): Promise<SraDetail> {
   const packages = await fetchAllPackages(uids);
-  const first = packages[0];
+  // Same prefix-fuzzy guard as the sample path: keep only packages whose
+  // STUDY accession matches the request, and treat a total mismatch as
+  // not-found (the esearch hits were fuzzy, not this study).
+  const matching = packages.filter(
+    record => record.study_accession?.toUpperCase() === accession.toUpperCase()
+  );
+  if (matching.length === 0) throw sraNotFound(accession);
+  const first = matching[0];
   return {
     entry_type: 'study',
     accession,
-    study_title: first?.study_title,
-    study_type: first?.study_type,
-    bioproject: first?.bioproject,
-    center_name: first?.center_name,
-    submission_accession: first?.submission_accession,
+    study_title: first.study_title,
+    study_type: first.study_type,
+    bioproject: first.bioproject,
+    center_name: first.center_name,
+    submission_accession: first.submission_accession,
     total_experiments: total,
-    experiments: packages.slice(0, SRA_DETAIL_LIST_CAP).map(toStudyExperiment),
+    experiments: matching.slice(0, SRA_DETAIL_LIST_CAP).map(toStudyExperiment),
   };
 }
 

@@ -303,6 +303,13 @@ describe('ensembl entity', () => {
       mockFetchRoutes({
         '/lookup/symbol': () => okJson(LOOKUP_BRAF),
         '/homology/id': () => okJson(HOMOLOGY_RESPONSE),
+        '/lookup/id': () =>
+          okJson({
+            ENSG00000157764: { display_name: 'BRAF' },
+            ENSFCAG00000004233: { display_name: 'RAF1' },
+            ENSMUSG00000002413: { display_name: 'Braf' },
+            // ENSDARG… deliberately absent — partial lookups degrade per row.
+          }),
       });
 
       const result = await ensemblHomology('BRAF');
@@ -314,26 +321,71 @@ describe('ensembl entity', () => {
       expect(result.homologies.map(h => h.target.perc_id)).toEqual([94.2, 87.6866, null]);
       expect(result.homologies[0].target.species).toBe('felis_catus');
       expect(result.homologies[0].taxonomy_level).toBe('Mammals');
+      // Symbols are enriched via ONE batched POST /lookup/id after the homology leg.
+      expect(result.homologies[0].target.symbol).toBe('RAF1');
+      expect(result.homologies[0].source_symbol).toBe('BRAF');
+      expect(result.homologies[1].target.symbol).toBe('Braf');
+      expect(result.homologies[2].target.symbol).toBeUndefined();
       // Symbol route proved flaky upstream — only /lookup/symbol + /homology/id are used.
       expect(callUrls()[0]).toContain('/lookup/symbol/human/BRAF');
       expect(callUrls()[1]).toContain('/homology/id/human/ENSG00000157764?type=orthologues');
+      expect(callUrls()[2]).toContain('/lookup/id');
+    });
+
+    it('degrades silently to symbol-less rows when the symbol lookup fails', async () => {
+      const { ensemblHomology } = await loadEnsembl();
+      mockFetchRoutes({
+        '/lookup/symbol': () => okJson(LOOKUP_BRAF),
+        '/homology/id': () => okJson(HOMOLOGY_RESPONSE),
+        '/lookup/id': () => ({
+          ok: false,
+          status: 500,
+          statusText: 'Internal Server Error',
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ error: 'lookup exploded' }),
+        }),
+      });
+
+      const result = await ensemblHomology('BRAF');
+
+      // Rows still come back, shape unchanged, just without symbols.
+      expect(result.total).toBe(3);
+      expect(result.returned).toBe(3);
+      expect(result.homologies[0].target.symbol).toBeUndefined();
+      expect(result.homologies[0].source_symbol).toBeUndefined();
     });
 
     it('skips resolution for ENSG inputs and passes target filters as semicolon params', async () => {
       const { ensemblHomology } = await loadEnsembl();
       mockFetchRoutes({
         '/homology/id': () => okJson(HOMOLOGY_RESPONSE),
+        '/lookup/id': () =>
+          okJson({
+            ENSG00000157764: { display_name: 'BRAF' },
+            ENSFCAG00000004233: { display_name: 'RAF1' },
+          }),
       });
 
       const result = await ensemblHomology('ENSG00000157764', { target_species: 'mouse', limit: 1 });
 
-      expect(callUrls()).toHaveLength(1);
+      // Homology GET + one batched symbol lookup POST — no /lookup/symbol leg.
+      expect(callUrls()).toHaveLength(2);
       const url = callUrls()[0];
       expect(url).toContain('/homology/id/human/ENSG00000157764?');
       expect(url).toContain('type=orthologues;');
       expect(url).toContain('target_species=mouse');
+      expect(callUrls()[1]).toContain('/lookup/id');
+      // The symbol lookup batches only the ids on the returned page (limit 1
+      // → top row felis_catus 94.2 + the source gene), sorted page order.
+      const lookupInit = (global.fetch as any).mock.calls[1][1] as RequestInit;
+      expect(String(lookupInit.method)).toBe('POST');
+      expect(JSON.parse(String(lookupInit.body)).ids).toEqual([
+        'ENSG00000157764',
+        'ENSFCAG00000004233',
+      ]);
       expect(result.returned).toBe(1);
       expect(result.truncated).toBe(true);
+      expect(result.homologies[0].target.symbol).toBe('RAF1');
     });
 
     it('supports paralogues and target_taxon', async () => {

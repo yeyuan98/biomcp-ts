@@ -533,7 +533,7 @@ describe('sraGet', () => {
     expect(detail.experiments[0].runs).toEqual(['SRR14432476', 'SRR14432477']);
   });
 
-  test('ERP accession with empty idlist rejects with ENA hint', async () => {
+  test('genuinely missing accession rejects with not-found (ENA kept as a fallback pointer)', async () => {
     mockEutils({
       esearch: url => {
         expect(url.searchParams.get('term')).toBe('ERP013000');
@@ -543,6 +543,55 @@ describe('sraGet', () => {
 
     await expect(sraGet('ERP013000')).rejects.toThrow(/ERP013000 not found/);
     await expect(sraGet('ERP013000')).rejects.toThrow(/https:\/\/www.ebi.ac.uk\/ena/);
+  });
+
+  test('DDBJ/ENA accessions dispatch by type letter and resolve like NCBI ones', async () => {
+    const ddbjXml = `<?xml version="1.0"?>\n<EXPERIMENT_PACKAGE_SET>${packageXml({
+      experiment: 'DRX579758',
+      study: 'DRP021325',
+      sample: 'DRS0246071',
+      runs: ['DRR599211', 'ERR174237'],
+    })}</EXPERIMENT_PACKAGE_SET>`;
+    mockEutils({
+      esearch: () => esearchBody(['1']),
+      efetch: () => ddbjXml,
+    });
+
+    const experiment = await sraGet('DRX579758');
+    expect(experiment.entry_type).toBe('experiment');
+    if (experiment.entry_type !== 'experiment') return;
+    expect(experiment.accession).toBe('DRX579758');
+    expect(experiment.study_accession).toBe('DRP021325');
+    expect(experiment.sample_accession).toBe('DRS0246071');
+
+    const run = await sraGet('ERR174237');
+    expect(run.entry_type).toBe('run');
+    if (run.entry_type !== 'run') return;
+    expect(run.accession).toBe('ERR174237');
+    expect(run.experiment_accession).toBe('DRX579758');
+    expect(run.study_accession).toBe('DRP021325');
+  });
+
+  test('truncated experiment accession that only fuzzily matched rejects as not-found', async () => {
+    // esearch is prefix-fuzzy: ERX1389829 "hits" SRX1389829x records — the
+    // post-fetch accession check must reject instead of echoing a wrong row.
+    mockEutils({
+      esearch: () => esearchBody(['1', '2']),
+      efetch: () => SRP_MULTI_PACKAGE_XML,
+    });
+
+    await expect(sraGet('ERX1389829')).rejects.toThrow(/ERX1389829.*not found/);
+  });
+
+  test('truncated study accession that only fuzzily matched rejects as not-found', async () => {
+    // ERP123456 fuzzily matches 468 records of other studies (live-verified);
+    // none carries that exact STUDY accession → not-found, not a wrong study.
+    mockEutils({
+      esearch: () => esearchBody(['1', '2'], 468),
+      efetch: () => SRP_MULTI_PACKAGE_XML,
+    });
+
+    await expect(sraGet('ERP123456')).rejects.toThrow(/ERP123456 not found/);
   });
 
   test('efetch ERROR document (HTTP 200) rejects', async () => {
