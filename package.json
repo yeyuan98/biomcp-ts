@@ -90,5 +90,8 @@
   "dependencies": {
     "undici": "^8.10.0"
   },
+  "overrides": {
+    "argparse": "^2.0.1"
+  },
   "mcpName": "io.github.yeyuan98/biomcp-ts"
 }

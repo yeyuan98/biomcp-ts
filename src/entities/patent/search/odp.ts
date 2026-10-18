@@ -1,7 +1,7 @@
 import { connectionManager } from '../../../connections/manager.js';
 import { RestConnection } from '../../../connections/rest.js';
 import type { PatentSearchOptions, PatentSearchResult } from '../types.js';
-import { hasExplicitBooleanSyntax, parseQueryTerms, escapeLuceneTerm } from './query.js';
+import { hasExplicitBooleanSyntax, parseQueryTerms, escapeLuceneTerm, escapeLucenePhrase, assertValidDateRange } from './query.js';
 
 export function hasOdpKey(): boolean {
   return !!process.env.USPTO_API_KEY;
@@ -67,7 +67,7 @@ export function buildLuceneQueryClause(query: string): string {
   if (!trimmed) return '';
   if (hasExplicitBooleanSyntax(trimmed)) return `(${trimmed})`;
   const tokens = parseQueryTerms(trimmed).map(t =>
-    t.phrase ? `"${t.text.replace(/"/g, '\\"')}"` : escapeLuceneTerm(t.text),
+    t.phrase ? escapeLucenePhrase(t.text) : escapeLuceneTerm(t.text),
   );
   return tokens.length > 0 ? `(${tokens.join(' AND ')})` : '';
 }
@@ -76,9 +76,13 @@ function buildLucene(query: string, options: PatentSearchOptions): string {
   const clauses: string[] = [];
   const freeText = buildLuceneQueryClause(query);
   if (freeText) clauses.push(freeText);
-  if (options.assignee) clauses.push(`applicationMetaData.firstApplicantName:"${options.assignee.replace(/"/g, '\\"')}"`);
-  if (options.inventor) clauses.push(`applicationMetaData.firstInventorName:"${options.inventor.replace(/"/g, '\\"')}"`);
+  if (options.assignee) clauses.push(`applicationMetaData.firstApplicantName:${escapeLucenePhrase(options.assignee)}`);
+  if (options.inventor) clauses.push(`applicationMetaData.firstInventorName:${escapeLucenePhrase(options.inventor)}`);
   if (options.date_range) {
+    // Defense in depth: the patentSearch funnel validates first, but
+    // searchOdp is exported and callable directly, and this value is
+    // interpolated into Lucene below.
+    assertValidDateRange(options.date_range);
     const [from, to] = options.date_range.split('/');
     const start = from || '1790-01-01';
     const end = to || '2100-12-31';

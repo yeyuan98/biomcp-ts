@@ -1,5 +1,6 @@
 import { connectionManager } from '../../../connections/manager.js';
 import { HttpConnectionError } from '../../../connections/errors.js';
+import { stripHtml } from '../../html-utils.js';
 import type { PatentSearchOptions, PatentSearchResult } from '../types.js';
 import { kindToStatus } from './dedup.js';
 
@@ -53,19 +54,6 @@ export function breakerRemainingMinutes(): number {
   return Math.max(1, Math.ceil((breaker!.openMs - elapsed) / 60_000));
 }
 
-function stripHtml(s: string | undefined): string | undefined {
-  if (!s) return undefined;
-  return s
-    .replace(/<[^>]*>/g, '')
-    .replace(/&hellip;/g, '…')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .trim();
-}
-
 interface GpPatent {
   title?: string;
   snippet?: string;
@@ -91,8 +79,8 @@ export function transformGooglePatentsResult(p: GpPatent): PatentSearchResult {
   const status = kindToStatus(kindMatch?.[1]);
   return {
     publication_number: pubNum,
-    title: stripHtml(p.title),
-    snippet: stripHtml(p.snippet),
+    title: p.title ? stripHtml(p.title) : undefined,
+    snippet: p.snippet ? stripHtml(p.snippet) : undefined,
     publication_date: p.publication_date,
     filing_date: p.filing_date,
     priority_date: p.priority_date,

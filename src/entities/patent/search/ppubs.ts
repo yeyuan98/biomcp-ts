@@ -1,4 +1,5 @@
 import { ppubsClient } from '../ppubs-client.js';
+import { assertValidDateRange } from './query.js';
 import type { PatentSearchOptions, PatentSearchResult, PatentStatus } from '../types.js';
 
 interface PpubsRecord {
@@ -99,6 +100,9 @@ function buildPpubsQuery(query: string, options: PatentSearchOptions): string {
   if (options.inventor) parts.push(`(${options.inventor}).in.`);
   if (options.cpc) parts.push(`(${options.cpc}).cpc.`);
   if (options.date_range) {
+    // Defense in depth (searchPpubs is exported and callable directly):
+    // these parts are interpolated into the @pd expression below.
+    assertValidDateRange(options.date_range);
     const [from, to] = options.date_range.split('/').map(s => (s || '').replace(/-/g, ''));
     let dateExpr = '';
     if (from && to) dateExpr = `@pd>=${from}<=${to}`;

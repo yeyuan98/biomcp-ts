@@ -3,6 +3,7 @@ import { hasOpsCredentials, isOpsBackedOff, opsBackoffReason, recordOpsFailure, 
 import { hasOdpKey } from './odp.js';
 import { isGooglePatentsBlocked } from './google-patents.js';
 import { dedupPatents } from './dedup.js';
+import { assertValidDateRange } from './query.js';
 
 export const PATENT_SEARCH_SOURCES: readonly PatentSource[] = ['ops', 'uspto_odp', 'ppubs', 'google_patents'] as const;
 
@@ -145,6 +146,9 @@ export async function patentSearch(
   query: string,
   options: PatentSearchOptions = {}
 ): Promise<PatentSearchResponse> {
+  // Fail fast on malformed input BEFORE any backend builds a query — the
+  // same date_range flows into Lucene (odp) and @pd (ppubs) expressions.
+  if (options.date_range) assertValidDateRange(options.date_range);
   const startedAt = Date.now();
   const backends = selectSearchBackends(options);
 

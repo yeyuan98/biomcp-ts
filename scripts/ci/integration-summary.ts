@@ -46,9 +46,11 @@ function shorten(path: string): string {
   return p;
 }
 
-/** Escape `|` so suite/test names cannot break the Markdown table. */
+/** Escape a cell for the Markdown table: backslash first, then `|`, so a
+ * crafted `\|` cannot un-escape the pipe and break the row (CodeQL
+ * js/incomplete-sanitization). */
 function cell(text: string): string {
-  return text.replace(/\|/g, '\\|');
+  return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
 }
 
 interface Parsed {

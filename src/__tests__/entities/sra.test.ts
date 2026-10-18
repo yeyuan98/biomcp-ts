@@ -542,7 +542,9 @@ describe('sraGet', () => {
     });
 
     await expect(sraGet('ERP013000')).rejects.toThrow(/ERP013000 not found/);
-    await expect(sraGet('ERP013000')).rejects.toThrow(/https:\/\/www.ebi.ac.uk\/ena/);
+    // Escaped dots + the literal /ena path delimit the hostname (CodeQL
+    // js/incomplete-hostname-regexp); \b rejects path continuations like /enable.
+    await expect(sraGet('ERP013000')).rejects.toThrow(/https:\/\/www\.ebi\.ac\.uk\/ena\b/);
   });
 
   test('DDBJ/ENA accessions dispatch by type letter and resolve like NCBI ones', async () => {
