@@ -1,14 +1,11 @@
 import { connectionManager } from '../../../connections/manager.js';
 import { RestConnection } from '../../../connections/rest.js';
 import type { PatentSearchOptions, PatentSearchResult } from '../types.js';
-import { hasExplicitBooleanSyntax, parseQueryTerms, escapeLuceneTerm, escapeLucenePhrase } from './query.js';
+import { hasExplicitBooleanSyntax, parseQueryTerms, escapeLuceneTerm, escapeLucenePhrase, assertValidDateRange } from './query.js';
 
 export function hasOdpKey(): boolean {
   return !!process.env.USPTO_API_KEY;
 }
-
-/** Both sides of a date_range clause must be plain ISO dates once defaults fill empty sides. */
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 interface OdpApplicationMetaData {
   inventionTitle?: string;
@@ -82,18 +79,13 @@ function buildLucene(query: string, options: PatentSearchOptions): string {
   if (options.assignee) clauses.push(`applicationMetaData.firstApplicantName:${escapeLucenePhrase(options.assignee)}`);
   if (options.inventor) clauses.push(`applicationMetaData.firstInventorName:${escapeLucenePhrase(options.inventor)}`);
   if (options.date_range) {
-    const parts = options.date_range.split('/');
-    const [from, to] = parts;
+    // Defense in depth: the patentSearch funnel validates first, but
+    // searchOdp is exported and callable directly, and this value is
+    // interpolated into Lucene below.
+    assertValidDateRange(options.date_range);
+    const [from, to] = options.date_range.split('/');
     const start = from || '1790-01-01';
     const end = to || '2100-12-31';
-    // date_range is free-form user input interpolated into the Lucene query;
-    // only well-formed ISO dates may enter the range clause.
-    if (parts.length > 2 || !ISO_DATE.test(start) || !ISO_DATE.test(end)) {
-      throw new Error(
-        `Invalid date_range '${options.date_range}': expected YYYY-MM-DD/YYYY-MM-DD ` +
-        '(either side may be empty for an open range, e.g. "2020-01-01/").'
-      );
-    }
     clauses.push(`applicationMetaData.filingDate:[${start} TO ${end}]`);
   }
   if (clauses.length === 0) clauses.push('(biomedical)');

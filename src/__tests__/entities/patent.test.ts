@@ -2028,6 +2028,44 @@ describe('query builders (assert exact upstream request construction)', () => {
     connectionManager.closeAll();
   });
 
+  test('patentSearch rejects malformed date_range at the funnel before any backend runs', async () => {
+    const fetchCalls = { count: 0 };
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
+      fetchCalls.count++;
+      return Promise.resolve({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({}),
+      });
+    }) as any;
+    const { connectionManager } = await import('../../connections/manager.js');
+    connectionManager.closeAll();
+
+    const { patentSearch } = await import('../../entities/patent/search/index.js');
+    // The same string reaches Lucene (odp) and @pd (ppubs) expressions in
+    // the backends — the funnel must reject it before any query is built.
+    await expect(patentSearch('crispr', { date_range: '2023-01-01/) OR applicationMetaData:x:', source: 'ppubs' }))
+      .rejects.toThrow(/Invalid date_range/);
+    await expect(patentSearch('crispr', { date_range: 'a/b/c' }))
+      .rejects.toThrow(/YYYY-MM-DD/);
+    await expect(patentSearch('crispr', { date_range: '2020-01-01/13-45', source: 'uspto_odp' }))
+      .rejects.toThrow(/Invalid date_range/);
+    expect(fetchCalls.count).toBe(0);
+
+    // A well-formed open range passes the funnel and reaches the backend
+    process.env.USPTO_API_KEY = 'u';
+    connectionManager.closeAll();
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => Promise.resolve({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({ count: 0, patentFileWrapperDataBag: [] }),
+    })) as any;
+    const response = await patentSearch('crispr', { date_range: '/2024-12-31', source: 'uspto_odp', seminal: false });
+    expect(response.patents).toEqual([]);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    connectionManager.closeAll();
+  });
+
   test('normalizeExchangeDocuments handles both live response shapes (dict-of-array and list-of-wrapped)', async () => {
     const { normalizeExchangeDocuments } = await import('../../entities/patent/search/ops.js');
     const doc = (n: string) => ({ '@country': { '$': 'US' }, '@doc-number': { '$': n }, '@kind': { '$': 'B2' } });

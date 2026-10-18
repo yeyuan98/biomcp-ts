@@ -45,6 +45,26 @@ export function escapeLucenePhrase(value: string): string {
   return `"${value.replace(/["\\]/g, '\\$&')}"`;
 }
 
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Validate a `date_range` filter before any backend interpolates it into a
+ * query language (ODP Lucene, PPUBS `@pd` expressions). Shape:
+ * `YYYY-MM-DD/YYYY-MM-DD` with either side optional (`2020-01-01/`,
+ * `/2020-12-31`); more than two segments or non-ISO sides are rejected.
+ * Throws a descriptive Error; enforced at the patentSearch funnel and at
+ * the ODP interpolation site (searchOdp is callable directly).
+ */
+export function assertValidDateRange(dateRange: string): void {
+  const parts = dateRange.split('/');
+  if (parts.length > 2 || parts.some(p => p && !ISO_DATE_RE.test(p))) {
+    throw new Error(
+      `Invalid date_range '${dateRange}': expected YYYY-MM-DD/YYYY-MM-DD ` +
+      '(either side may be empty for an open range, e.g. "2020-01-01/").'
+    );
+  }
+}
+
 /**
  * True when the query already contains explicit Lucene/CQL-style syntax
  * (boolean operators, field:value pairs, range brackets, unary +/-/!), in
