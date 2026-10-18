@@ -87,13 +87,75 @@ describe('deduplicateAndRank', () => {
     expect(result[0].title).toBe('First');
   });
 
-  test('prioritizes DOI over arxiv_id for dedup key (same record from two sources)', () => {
+  // Intended behavior change (#134): under any-key transitive merging the
+  // published row and its arXiv preprint twin share an arxiv_id, so they are
+  // ONE work and collapse to one row. The old single-key chain keyed the
+  // published row on DOI alone and never compared it with the preprint.
+  test('merges published/preprint twins sharing an arxiv_id into one row (#134)', () => {
     const articles = [
       { doi: '10.1140/epjc/s2003-01326-x', arxiv_id: 'hep-ex/0307015', title: 'Published' },
       { arxiv_id: 'hep-ex/0307015', title: 'Preprint twin' },
     ] as any[];
     const result = deduplicateAndRank(articles, 10);
-    expect(result).toHaveLength(2);
+    expect(result).toHaveLength(1);
+    // First-seen base wins; the twin's fields fill-merge where missing.
+    expect(result[0].title).toBe('Published');
+    expect(result[0].doi).toBe('10.1140/epjc/s2003-01326-x');
+  });
+
+  // The #134 repro: two rows with DISTINCT PMIDs sharing a DOI were never
+  // compared under the pmid‖pmcid‖doi‖arxiv_id chain — both survived.
+  test('merges same-DOI twins with distinct PMIDs (#134 repro)', () => {
+    const articles = [
+      { pmid: '38478005', doi: '10.1056/NEJMc2400161', title: 'Correspondence (kept)' },
+      { pmid: '38478006', doi: '10.1056/NEJMc2400161', title: 'Correspondence (twin)' },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result).toHaveLength(1);
+    expect(result[0].pmid).toBe('38478005');
+    expect(result[0].title).toBe('Correspondence (kept)');
+  });
+
+  test('transitively merges chained identities (A≡B by DOI, B≡C by PMID)', () => {
+    const articles = [
+      { doi: '10.1/abc', title: 'A (DOI only)' },
+      { doi: '10.1/abc', pmid: '111', title: 'B (bridges DOI and PMID)' },
+      { pmid: '111', title: 'C (PMID only)' },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe('A (DOI only)');
+  });
+
+  test('a bridging row merges two already-formed groups, earliest-seen base wins', () => {
+    const articles = [
+      { doi: '10.1/abc', title: 'A' },
+      { pmid: '111', title: 'B' },
+      { doi: '10.1/abc', pmid: '111', journal: 'Nature' },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result).toHaveLength(1);
+    // A was seen first, so A survives as the base even though the bridge
+    // row arrived last; B and the bridge row only donate missing fields.
+    expect(result[0].title).toBe('A');
+    expect(result[0].journal).toBe('Nature');
+  });
+
+  test('merged group carries the union of fields per fill-merge semantics', () => {
+    const articles = [
+      { pmid: '38478005', doi: '10.1056/NEJMc2400161', title: 'Kept', source: 'pubmed' },
+      { pmid: '38478006', doi: '10.1056/NEJMc2400161', pmcid: 'PMC1234567', journal: 'N Engl J Med', cited_by: 3 },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    expect(result).toHaveLength(1);
+    // First-seen values are never overwritten...
+    expect(result[0].pmid).toBe('38478005');
+    expect(result[0].title).toBe('Kept');
+    expect(result[0].source).toBe('pubmed');
+    // ...while fields missing on the base fill in from the twin.
+    expect(result[0].pmcid).toBe('PMC1234567');
+    expect(result[0].journal).toBe('N Engl J Med');
+    expect(result[0].cited_by).toBe(3);
   });
 
   test('prioritizes PMID over PMCID over DOI for dedup key', () => {
@@ -136,6 +198,16 @@ describe('deduplicateAndRank', () => {
     const result = deduplicateAndRank(articles, 10);
     expect(result).toHaveLength(1);
     expect(result[0].title).toBe('First');
+  });
+
+  test('whitespace-only DOIs never merge unrelated rows under a bare doi: key', () => {
+    const articles = [
+      { doi: '   ', arxiv_id: '1706.03762', title: 'One' },
+      { doi: '  ', arxiv_id: '2301.00001', title: 'Two' },
+    ] as any[];
+    const result = deduplicateAndRank(articles, 10);
+    // The padded DOIs contribute no key — these are two distinct works.
+    expect(result).toHaveLength(2);
   });
 
   test('keyless articles are dropped, never merged under an empty-string key', () => {

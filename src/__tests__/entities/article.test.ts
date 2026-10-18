@@ -224,6 +224,9 @@ describe('article', () => {
     const searchCallUrl = (global.fetch as any).mock.calls[0][0] as string;
     expect(searchCallUrl).toContain('esearch.fcgi');
     expect(searchCallUrl).toContain('term=brca1');
+    // #134: esearch must request relevance ordering, not PubMed's
+    // recency-default pool.
+    expect(searchCallUrl).toContain('sort=relevance');
 
     const fetchCallUrl = (global.fetch as any).mock.calls[1][0] as string;
     expect(fetchCallUrl).toContain('efetch.fcgi');
@@ -1063,6 +1066,8 @@ describe('article', () => {
 
       const urls = (global.fetch as any).mock.calls.map((c: any) => c[0] as string);
       expect(urls[0]).toContain('esearch.fcgi');
+      // #134: the federated pubmed leg also requests relevance ordering.
+      expect(urls[0]).toContain('sort=relevance');
       expect(urls[1]).toContain('europepmc');
       expect(urls[2]).toContain('semanticscholar');
       expect(urls[3]).toContain('export.arxiv.org');
@@ -1390,6 +1395,176 @@ describe('article', () => {
       const emptied = await searchArticles('brca1', {});
       expect(emptied.results.some(r => r.pmid === '12345')).toBe(true);
       expect(emptied.warnings?.some(w => w.includes('relevance floor') && w.includes('1 litsense matches'))).toBe(true);
+    });
+
+    // Crowd-out disclosure (issue #134): ranking is citation-based but only
+    // some legs populate cited_by, so zero-cited sources tie at 0, the stable
+    // sort keeps federation order, and with limit applied post-dedup a
+    // MATCHING secondary source can contribute 0 rows with no signal.
+    const CROWD_ARXIV_FEED = `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">
+<entry><id>http://arxiv.org/abs/2510.12868v1</id><title>CRISPR base editing review</title>
+<summary>Abstract.</summary><published>2025-10-14T00:00:00Z</published>
+<author><name>A. Author</name></author>
+<arxiv:primary_category xmlns:arxiv="http://arxiv.org/schemas/atom" term="q-bio.GN"/></entry>
+</feed>`;
+    const crowdOutFederation = (extraMocks: Array<(u: string, hostname: string) => unknown> = []) =>
+      jest.fn<(...args: any[]) => any>().mockImplementation((url: unknown) => {
+        const { hostname } = parseMockUrl(url);
+        const u = String(url);
+        if (hostname === 'eutils.ncbi.nlm.nih.gov') {
+          if (u.includes('efetch.fcgi')) return Promise.resolve(okXml(SINGLE_ARTICLE_XML));
+          return Promise.resolve(okJson({
+            esearchresult: { idlist: ['12345'], count: '1', querytranslation: '"brca1"[All Fields]' },
+          }));
+        }
+        if (hostname === 'export.arxiv.org') {
+          return Promise.resolve({
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/atom+xml' }),
+            text: () => Promise.resolve(CROWD_ARXIV_FEED),
+          });
+        }
+        if (u.includes('europepmc')) return Promise.resolve(okJson({ resultList: { result: [] } }));
+        if (hostname === 'api.semanticscholar.org') return Promise.resolve(okJson({ data: [] }));
+        for (const mock of extraMocks) {
+          const handled = mock(u, hostname);
+          if (handled !== undefined) return Promise.resolve(handled);
+        }
+        return Promise.reject(new Error('network down'));
+      }) as any;
+
+    test('searchArticles federated: crowded-out secondary source is disclosed with an exact warning (#134)', async () => {
+      global.fetch = crowdOutFederation();
+
+      const response = await searchArticles('brca1', { limit: 1 });
+
+      // The single-row page goes to pubmed (zero-cited tie, federation
+      // order) — arXiv matched but contributed nothing, and says so.
+      expect(response.results).toHaveLength(1);
+      expect(response.results[0].pmid).toBe('12345');
+      expect(response.warnings?.some(w =>
+        w === "arXiv had matches but none made this page — query source 'arxiv' directly if broader coverage is needed."
+      )).toBe(true);
+    });
+
+    test('searchArticles federated: no crowd-out warning when the secondary contributes rows (#134)', async () => {
+      global.fetch = crowdOutFederation();
+
+      const response = await searchArticles('brca1');
+
+      // Default limit 10: both rows survive — nothing to disclose.
+      expect(response.results.some(r => r.pmid === '12345')).toBe(true);
+      expect(response.results.some(r => r.source === 'arxiv')).toBe(true);
+      expect(response.warnings?.some(w => w.includes('had matches but none made this page'))).toBeFalsy();
+    });
+
+    test('searchArticles federated: dedup-merged twins do not count as crowded out (#134)', async () => {
+      // arXiv's row is the arXiv twin OF the pubmed record (same DOI in
+      // submitter vs registry casing) — it merges into the pubmed row, so
+      // arXiv IS represented even though no kept row has source 'arxiv'.
+      // NB: the arxiv namespace is declared on the ROOT (as in real feeds)
+      // so <arxiv:doi> parses to a plain string, not an attribute object.
+      const twinFeed = CROWD_ARXIV_FEED
+        .replace(
+          '<feed xmlns="http://www.w3.org/2005/Atom">',
+          '<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">'
+        )
+        .replace(
+          '</entry>',
+          '<arxiv:doi>10.1234/TEST.2018</arxiv:doi></entry>'
+        );
+      global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: unknown) => {
+        const { hostname } = parseMockUrl(url);
+        const u = String(url);
+        if (hostname === 'eutils.ncbi.nlm.nih.gov') {
+          if (u.includes('efetch.fcgi')) return Promise.resolve(okXml(SINGLE_ARTICLE_XML));
+          return Promise.resolve(okJson({
+            esearchresult: { idlist: ['12345'], count: '1', querytranslation: '"brca1"[All Fields]' },
+          }));
+        }
+        if (hostname === 'export.arxiv.org') {
+          return Promise.resolve({
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/atom+xml' }),
+            text: () => Promise.resolve(twinFeed),
+          });
+        }
+        if (u.includes('europepmc')) return Promise.resolve(okJson({ resultList: { result: [] } }));
+        if (hostname === 'api.semanticscholar.org') return Promise.resolve(okJson({ data: [] }));
+        return Promise.reject(new Error('network down'));
+      }) as any;
+
+      const response = await searchArticles('brca1', { limit: 1 });
+
+      expect(response.results).toHaveLength(1);
+      expect(response.results[0].source).toBe('pubmed');
+      // The twin merged (DOI match) — arXiv is represented, not crowded out.
+      expect(response.results[0].arxiv_id).toBe('2510.12868');
+      expect(response.warnings?.some(w => w.includes('had matches but none made this page'))).toBeFalsy();
+    });
+
+    test('searchArticles federated: ONE warning names ALL crowded-out sources (#134)', async () => {
+      const litsenseRows = [
+        // Above the relevance floor with its own PMID — a real competing
+        // match that still loses the limit-1 page.
+        { pmid: 67890, text: 'Topical BRCA1 sentence.', score: 0.95, section: 'abstract', annotations: [] },
+      ];
+      global.fetch = crowdOutFederation([
+        (u) => u.includes('/sentences/') ? okJson(litsenseRows) : undefined,
+      ]);
+
+      const response = await searchArticles('brca1', { limit: 1 });
+
+      expect(response.results).toHaveLength(1);
+      expect(response.warnings?.some(w =>
+        w === "arXiv, LitSense had matches but none made this page — query sources 'arxiv', 'litsense' directly if broader coverage is needed."
+      )).toBe(true);
+    });
+
+    test('searchArticles federated: a leg whose rows were all date-dropped is NOT crowd-out (#134)', async () => {
+      // PubMed's own displayed-date post-filter (#120) drops its whole pool
+      // BEFORE federation sees a row — offered == 0, so pubmed must not be
+      // reported as crowded out (its matches never competed for the page).
+      global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: unknown) => {
+        const { hostname } = parseMockUrl(url);
+        const u = String(url);
+        if (hostname === 'eutils.ncbi.nlm.nih.gov') {
+          if (u.includes('efetch.fcgi')) {
+            return Promise.resolve(okXml(pubmedDatedArticleXml([{ year: '2018', month: 'Sep', day: '21' }])));
+          }
+          return Promise.resolve(okJson({
+            esearchresult: { idlist: pubmedDatedPmids(1), count: '1', querytranslation: '"brca1"[All Fields]' },
+          }));
+        }
+        if (u.includes('europepmc')) {
+          return Promise.resolve(okJson(epmcSearchHit({
+            pmid: '41721001',
+            title: 'In-window Europe PMC hit',
+            authorString: 'Smith J',
+            journalTitle: 'Nature',
+            firstPublicationDate: '2020-06-01',
+            citedByCount: 2,
+            isOpenAccess: 'N',
+          })));
+        }
+        if (hostname === 'api.semanticscholar.org') return Promise.resolve(okJson({ data: [] }));
+        if (hostname === 'export.arxiv.org') {
+          return Promise.resolve({
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/atom+xml' }),
+            text: () => Promise.resolve(`<?xml version='1.0' encoding='UTF-8'?>\n<feed xmlns="http://www.w3.org/2005/Atom"><opensearch:totalResults xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">0</opensearch:totalResults></feed>`),
+          });
+        }
+        throw new Error(`unexpected ${u}`);
+      }) as any;
+
+      const response = await searchArticles('brca1', { dateRange: '2020-01-01/2020-12-31', limit: 3 });
+
+      expect(response.results).toHaveLength(1);
+      expect(response.results[0].source).toBe('europepmc');
+      // Sanity: pubmed DID have pool matches — dropped by its own filter.
+      expect(response.warnings?.some(w => w.includes('0 in-window records'))).toBe(true);
+      expect(response.warnings?.some(w => w.includes('had matches but none made this page'))).toBeFalsy();
     });
   });
 
