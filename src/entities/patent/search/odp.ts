@@ -82,12 +82,13 @@ function buildLucene(query: string, options: PatentSearchOptions): string {
   if (options.assignee) clauses.push(`applicationMetaData.firstApplicantName:${escapeLucenePhrase(options.assignee)}`);
   if (options.inventor) clauses.push(`applicationMetaData.firstInventorName:${escapeLucenePhrase(options.inventor)}`);
   if (options.date_range) {
-    const [from, to] = options.date_range.split('/');
+    const parts = options.date_range.split('/');
+    const [from, to] = parts;
     const start = from || '1790-01-01';
     const end = to || '2100-12-31';
     // date_range is free-form user input interpolated into the Lucene query;
     // only well-formed ISO dates may enter the range clause.
-    if (!ISO_DATE.test(start) || !ISO_DATE.test(end)) {
+    if (parts.length > 2 || !ISO_DATE.test(start) || !ISO_DATE.test(end)) {
       throw new Error(
         `Invalid date_range '${options.date_range}': expected YYYY-MM-DD/YYYY-MM-DD ` +
         '(either side may be empty for an open range, e.g. "2020-01-01/").'

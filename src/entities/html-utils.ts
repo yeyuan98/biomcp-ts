@@ -49,8 +49,10 @@ export function decodeHtmlEntities(s: string): string {
 const RAW_TAG_RE = /<[^>]*>/g;
 // Entity-encoded tag shape: `&lt;` + optional `/` + tag-name start + tag
 // body without `&`/`>` + `&gt;`. Requiring a letter after `&lt;` is what
-// keeps comparison operators (`&lt;500`) out of the match.
-const ESCAPED_TAG_RE = /&lt;\/?[a-zA-Z][a-zA-Z0-9:-]*\b[^&>]*&gt;/gi;
+// keeps comparison operators (`&lt;500`) out of the match. Single star
+// only: overlapping star+star classes over the same characters backtrack
+// exponentially on unterminated input (applicant-authored claim text).
+const ESCAPED_TAG_RE = /&lt;\/?[a-zA-Z][^&>]*&gt;/gi;
 
 /**
  * Strip HTML markup (raw and entity-encoded tag-shaped sequences) and

@@ -61,6 +61,18 @@ describe('patent search transforms', () => {
     expect(result.status).toBe('application');
   });
 
+  test('transformGooglePatentsResult tolerates null/empty title and snippet', async () => {
+    const { transformGooglePatentsResult } = await import('../../entities/patent/search/google-patents.js');
+    // Upstream XHR JSON is unvalidated: null/'' must stay undefined, not crash.
+    const result = transformGooglePatentsResult({
+      publication_number: 'US1',
+      title: null,
+      snippet: '',
+    } as any);
+    expect(result.title).toBeUndefined();
+    expect(result.snippet).toBeUndefined();
+  });
+
   test('transformPpubsResult maps type, kind, and applicant fallback', async () => {
     const { transformPpubsResult } = await import('../../entities/patent/search/ppubs.js');
     const grant = transformPpubsResult({
@@ -2006,6 +2018,8 @@ describe('query builders (assert exact upstream request construction)', () => {
       .rejects.toThrow(/Invalid date_range/);
     await expect(searchOdp('crispr', { date_range: 'not-a-date/' }))
       .rejects.toThrow(/YYYY-MM-DD/);
+    await expect(searchOdp('crispr', { date_range: '2020-01-01/2020-12-31/extra' }))
+      .rejects.toThrow(/Invalid date_range/);
     // Open ranges with well-formed sides still pass through
     await expect(searchOdp('crispr', { date_range: '/2024-12-31' })).resolves.toEqual({
       patents: [], total: 0,

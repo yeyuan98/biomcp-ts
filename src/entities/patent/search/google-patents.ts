@@ -79,8 +79,8 @@ export function transformGooglePatentsResult(p: GpPatent): PatentSearchResult {
   const status = kindToStatus(kindMatch?.[1]);
   return {
     publication_number: pubNum,
-    title: p.title !== undefined ? stripHtml(p.title) : undefined,
-    snippet: p.snippet !== undefined ? stripHtml(p.snippet) : undefined,
+    title: p.title ? stripHtml(p.title) : undefined,
+    snippet: p.snippet ? stripHtml(p.snippet) : undefined,
     publication_date: p.publication_date,
     filing_date: p.filing_date,
     priority_date: p.priority_date,
