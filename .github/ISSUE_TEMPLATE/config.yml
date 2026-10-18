@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & usage help
+    url: https://github.com/yeyuan98/biomcp-ts/discussions
+    about: Ask how to use biomcp here before filing an issue
