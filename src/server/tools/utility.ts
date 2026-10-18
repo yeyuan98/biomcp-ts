@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { discover, batchGet } from '../../entities/cross-entity.js';
+import { requiredString } from './utils.js';
 
 export function registerUtilityTools(server: McpServer): void {
   server.registerTool(
@@ -29,7 +30,7 @@ export function registerUtilityTools(server: McpServer): void {
       inputSchema: {
         inputs: z.array(z.object({
           entity: z.enum(['gene', 'variant', 'drug', 'disease', 'trial', 'article', 'patent']),
-          id: z.string(),
+          id: requiredString('Entity ID'),
           sections: z.array(z.string()).optional(),
         })).describe('List of entity requests'),
       },

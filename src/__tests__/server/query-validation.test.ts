@@ -233,3 +233,129 @@ describe('variant_search optional filter validation (issue #128)', () => {
     expect(fetchSentinel).toHaveBeenCalled();
   });
 });
+
+/**
+ * ID-FORMAT validation (issue #163): malformed identifiers are rejected at
+ * the zod schema level — an MCP -32602-class InvalidParams error — with an
+ * error message that NAMES the expected shape, before any handler logic or
+ * network call runs. Each regex deliberately mirrors its entity-layer
+ * counterpart, so the "oddball-valid" rows (real-world shapes a naive
+ * regex might reject: lowercase accessions, version-suffixed PMCIDs,
+ * WGS-style GenBank ids, spaced/slashy patent numbers) must keep passing
+ * the schema and reach the handler.
+ */
+const ID_FORMAT_CASES = [
+  {
+    tool: 'trial_get',
+    param: 'nct_id',
+    malformed: ['NCT1234', '01234567', 'NCT012345678', 'nct-id-1'],
+    shape: /NCT ID must be NCT followed by 8 digits, e\.g\. NCT01234567/,
+    oddballValid: ['NCT00409094', 'nct01234567'],
+  },
+  {
+    tool: 'article_get',
+    param: 'id',
+    malformed: ['PMC', '123abc', '10.x', 'doi:'],
+    shape: /Article ID must be a PMID \(numeric, e\.g\. 12345\), a PMCID \(e\.g\. PMC1234567, optionally versioned like PMC4712660\.1\), or a DOI/,
+    oddballValid: ['PMC4712660.1', 'doi:10.1038/s41586-021-03819-2', '31672941'],
+  },
+  {
+    tool: 'preprint_fulltext',
+    param: 'id',
+    // A journal DOI and a CSHL Press 10.1101 journal article are the exact
+    // misuses the strict date form exists to reject (see isPreprintDoi).
+    malformed: ['10.1038/s41586-021-03819-2', '10.1101/gr.123456', 'PMC1234567'],
+    shape: /Preprint DOI must be a bioRxiv\/medRxiv preprint DOI: 10\.1101\/YYYY\.MM\.DD\.NNNNNN \(e\.g\. 10\.1101\/2021\.10\.25\.465764\) or the new prefix 10\.64898\/\.\.\./,
+    oddballValid: ['10.64898/2026.08.11.744243', '10.1101/2021.10.25.465764'],
+  },
+  {
+    tool: 'sra_get',
+    param: 'accession',
+    malformed: ['SRR', 'SRA123', 'ERR-123'],
+    shape: /SRA accession must be like SRR14432476/,
+    oddballValid: ['DRR599211', 'srr14432476', 'ERX1234567'],
+  },
+  {
+    tool: 'genbank_get',
+    param: 'accession',
+    malformed: ['NC_123abc', 'KJ668569.v1', '###'],
+    shape: /Accession must look like NC_000023\.11, NG_017013\.2, KJ668569\.1, or U12345/,
+    oddballValid: ['KJ668569.1', 'NC_000908.2', 'ABCD01000001.1', 'U12345'],
+  },
+  {
+    tool: 'genbank_genes',
+    param: 'accession',
+    malformed: ['NC_123abc', '12345'],
+    shape: /Accession must look like NC_000023\.11, NG_017013\.2, KJ668569\.1, or U12345/,
+    oddballValid: ['KJ668569.1', 'NC_000908.2', 'ABCD01000001.1'],
+  },
+  {
+    tool: 'patent_get',
+    param: 'patent_id',
+    malformed: ['US123', '11027025', 'patent-number'],
+    shape: /Patent ID must be a publication number like US11027025B2, EP3904939B1, or US 11027025 B2 \(spaces and case tolerated\)/,
+    oddballValid: ['US 11027025 B2', 'us11027025b2', 'WO 2015/006747 A2', 'EP3904939B1', 'US20260240819A1'],
+  },
+  {
+    tool: 'geo_get',
+    param: 'accession',
+    malformed: ['XYZ123', 'GSE'],
+    shape: /GEO accession like GSE183947, GSM5574685, GPL11154/,
+    oddballValid: ['gse183947', 'GSM5574685'],
+  },
+] as const;
+
+describe('ID-format validation (issue #163)', () => {
+  let harness: McpTestHarness;
+  mockGlobalFetch();
+  let fetchSentinel: jest.Mock;
+
+  beforeAll(async () => {
+    harness = await createMcpTestHarness();
+  });
+
+  afterAll(async () => {
+    await harness.close();
+  });
+
+  beforeEach(() => {
+    connectionManager.closeAll();
+    fetchSentinel = jest.fn(() => Promise.reject(new Error('schema test sentinel: upstream disabled')));
+    global.fetch = fetchSentinel as unknown as typeof global.fetch;
+  });
+
+  it.each(ID_FORMAT_CASES)('$tool rejects a malformed $param at the schema level with the expected shape', async ({ tool, param, malformed, shape }) => {
+    for (const bad of malformed) {
+      fetchSentinel.mockClear();
+      await expect(harness.callTool(tool, { [param]: bad })).rejects.toThrow(shape);
+      expect(fetchSentinel).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each(ID_FORMAT_CASES)('$tool accepts oddball-but-valid $param values (handler starts)', async ({ tool, param, oddballValid }) => {
+    for (const good of oddballValid) {
+      fetchSentinel.mockClear();
+      await harness.callTool(tool, { [param]: good }).catch(() => undefined);
+      expect(fetchSentinel).toHaveBeenCalled();
+    }
+  });
+
+  it('batch_get rejects an empty id inside any inputs[] item at the schema level', async () => {
+    await expect(harness.callTool('batch_get', {
+      inputs: [{ entity: 'article', id: '31672941' }, { entity: 'trial', id: '' }],
+    })).rejects.toThrow(/Entity ID must be a non-empty string after trimming/);
+    expect(fetchSentinel).not.toHaveBeenCalled();
+
+    await expect(harness.callTool('batch_get', {
+      inputs: [{ entity: 'gene', id: '   ' }],
+    })).rejects.toThrow(/Entity ID must be a non-empty string after trimming/);
+    expect(fetchSentinel).not.toHaveBeenCalled();
+  });
+
+  it('batch_get passes schema validation for well-formed ids', async () => {
+    await harness.callTool('batch_get', {
+      inputs: [{ entity: 'article', id: 'PMC4712660.1' }],
+    }).catch(() => undefined);
+    expect(fetchSentinel).toHaveBeenCalled();
+  });
+});

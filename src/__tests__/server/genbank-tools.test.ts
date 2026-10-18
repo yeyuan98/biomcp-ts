@@ -167,12 +167,16 @@ describe('genbank tools', () => {
     expect(parsed.searchParams.get('seq_stop')).toBe('60');
   });
 
-  it('genbank_get surfaces entity validation errors for malformed accessions', async () => {
+  it('genbank_get rejects malformed accessions at the schema level (issue #163)', async () => {
     mockFetchRoutes(defaultRoutes());
 
+    // Formerly an entity-layer "Invalid GenBank accession" error; the shape
+    // check moved to the zod schema, so malformed input now fails as an
+    // MCP -32602 with the expected-shape message and zero fetches.
     await expect(harness.callTool('genbank_get', { accession: 'not an accession!!' })).rejects.toThrow(
-      /Invalid GenBank accession/
+      /Accession must look like NC_000023\.11, NG_017013\.2, KJ668569\.1, or U12345/
     );
+    expect(fetchUrls()).toHaveLength(0);
   });
 
   it('genbank_genes returns NCBI Gene IDs with the MyGene bridge note', async () => {

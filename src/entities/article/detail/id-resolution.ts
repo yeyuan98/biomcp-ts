@@ -27,7 +27,10 @@ export interface IDConvResponse {
 export function parseArticleId(id: string): { type: 'pmid' | 'pmcid' | 'doi'; value: string } {
   const trimmed = id.trim();
   if (/^\d+$/.test(trimmed)) return { type: 'pmid', value: trimmed };
-  if (/^PMC\d+$/i.test(trimmed)) return { type: 'pmcid', value: trimmed };
+  // Versioned PMCIDs (Europe PMC serves them as PMC4712660.1) parse as
+  // pmcid with the FULL value preserved; the version is stripped only at
+  // the idconv boundary below, the single leg that needs a bare PMCID.
+  if (/^PMC\d+(\.\d+)?$/i.test(trimmed)) return { type: 'pmcid', value: trimmed };
   const doiMatch = trimmed.match(/^(?:doi:)?(10\.\d{4,}\/\S+)$/i);
   if (doiMatch) return { type: 'doi', value: doiMatch[1] };
   throw new Error(`Unrecognized identifier format: "${id}". Expected PMID (numeric), PMCID (PMC...), or DOI (10.x/...).`);
@@ -52,8 +55,12 @@ export async function resolveToPmid(id: string, type: 'doi' | 'pmcid'): Promise<
   try {
     const conn = connectionManager.getConnection('ncbi_idconv');
 
+    // idconv expects a bare PMCID; a version suffix (PMC4712660.1 — the
+    // Europe PMC versioned form, accepted by parseArticleId since issue
+    // #163) is dropped here, the only leg that needs the bare form.
+    const idParam = type === 'pmcid' ? id.replace(/\.\d+$/i, '') : id;
     const response = await conn.request(
-      `?ids=${encodeURIComponent(id)}&format=json`
+      `?ids=${encodeURIComponent(idParam)}&format=json`
     ) as IDConvResponse;
 
     const record = response.records?.[0];
