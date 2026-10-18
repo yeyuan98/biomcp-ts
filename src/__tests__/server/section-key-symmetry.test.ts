@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerGeneTools } from '../../server/tools/gene.js';
 import { registerVariantTools } from '../../server/tools/variant.js';
 import { mockGlobalFetch } from '../helpers/mock-fetch.js';
+import { parseMockUrl } from '../helpers/mock-url.js';
 import { connectionManager } from '../../connections/manager.js';
 
 /**
@@ -38,16 +39,19 @@ const MYGENE_LOOKUP_HIT = {
 };
 
 /**
- * fetch dispatcher keyed on URL substrings. The default branch answers a
+ * fetch dispatcher keyed on EXACT hostname via parseMockUrl — never on URL
+ * substrings (CodeQL js/incomplete-url-substring-sanitization). Route order
+ * matters: first match wins, so specific routes (e.g. the mygene GO query)
+ * must precede the generic mygene lookup. The default branch answers a
  * plain JSON `{}` with ok/json/text/arrayBuffer so any section fetcher
  * (REST, GraphQL, raw proteinatlas fetch) settles without throwing — the
  * tests below assert response KEYS, not upstream data.
  */
 function fetchDispatch(
-  routes: Array<{ match: (url: string) => boolean; body: unknown }>,
+  routes: Array<{ match: (url: URL) => boolean; body: unknown }>,
 ): typeof global.fetch {
   return jest.fn<(...args: any[]) => any>().mockImplementation((input: any, init?: any) => {
-    const url = String(input ?? init?.url ?? '');
+    const url = parseMockUrl(input ?? init?.url);
     const body = {
       ok: true,
       json: () => Promise.resolve({}),
@@ -92,9 +96,9 @@ describe('gene_get/variant_get section response keys mirror requested names (#12
   describe('gene_get aliased sections', () => {
     it('clinical_evidence returns sections.clinical_evidence, not civic', async () => {
       global.fetch = fetchDispatch([
-        { match: (u) => u.includes('mygene.info'), body: { hits: [MYGENE_LOOKUP_HIT] } },
+        { match: (u) => u.hostname === 'mygene.info', body: { hits: [MYGENE_LOOKUP_HIT] } },
         {
-          match: (u) => u.includes('civicdb.org'),
+          match: (u) => u.hostname === 'civicdb.org',
           body: {
             data: {
               gene: {
@@ -122,8 +126,8 @@ describe('gene_get/variant_get section response keys mirror requested names (#12
     it('protein_atlas returns sections.protein_atlas, not hpa', async () => {
       const hpaRow = [{ Gene: 'TP53', 'Subcellular location': ['Nucleus'] }];
       global.fetch = fetchDispatch([
-        { match: (u) => u.includes('mygene.info'), body: { hits: [MYGENE_LOOKUP_HIT] } },
-        { match: (u) => u.includes('proteinatlas.org'), body: hpaRow },
+        { match: (u) => u.hostname === 'mygene.info', body: { hits: [MYGENE_LOOKUP_HIT] } },
+        { match: (u) => u.hostname === 'www.proteinatlas.org', body: hpaRow },
       ]);
       const tools = captureTools(registerGeneTools);
       const result = await tools.get('gene_get')!({
@@ -144,7 +148,7 @@ describe('gene_get/variant_get section response keys mirror requested names (#12
       // ClinGen has no public API: the entity returns an offline _error
       // stub — it must still land under the requested name.
       global.fetch = fetchDispatch([
-        { match: (u) => u.includes('mygene.info'), body: { hits: [MYGENE_LOOKUP_HIT] } },
+        { match: (u) => u.hostname === 'mygene.info', body: { hits: [MYGENE_LOOKUP_HIT] } },
       ]);
       const tools = captureTools(registerGeneTools);
       const result = await tools.get('gene_get')!({
@@ -163,7 +167,7 @@ describe('gene_get/variant_get section response keys mirror requested names (#12
 
     it('disease_associations returns sections.disease_associations, not disgenet', async () => {
       global.fetch = fetchDispatch([
-        { match: (u) => u.includes('mygene.info'), body: { hits: [MYGENE_LOOKUP_HIT] } },
+        { match: (u) => u.hostname === 'mygene.info', body: { hits: [MYGENE_LOOKUP_HIT] } },
       ]);
       const tools = captureTools(registerGeneTools);
       const result = await tools.get('gene_get')!({
@@ -184,7 +188,7 @@ describe('gene_get/variant_get section response keys mirror requested names (#12
       // Default `{}` responses let every section fetcher settle (data or
       // _error stub) — the assertion is about which KEYS come back.
       global.fetch = fetchDispatch([
-        { match: (u) => u.includes('mygene.info'), body: { hits: [MYGENE_LOOKUP_HIT] } },
+        { match: (u) => u.hostname === 'mygene.info', body: { hits: [MYGENE_LOOKUP_HIT] } },
       ]);
       const tools = captureTools(registerGeneTools);
       const result = await tools.get('gene_get')!({
@@ -213,10 +217,10 @@ describe('gene_get/variant_get section response keys mirror requested names (#12
         {
           // MyGene hosts BOTH the symbol lookup and the GO query; the GO
           // query is the one asking fields=go.
-          match: (u) => u.includes('mygene.info') && u.includes('fields=go'),
+          match: (u) => u.hostname === 'mygene.info' && u.searchParams.get('fields') === 'go',
           body: { hits: [{ go: { BP: [{ id: 'GO:0006915', term: 'apoptotic process' }] } }] },
         },
-        { match: (u) => u.includes('mygene.info'), body: { hits: [MYGENE_LOOKUP_HIT] } },
+        { match: (u) => u.hostname === 'mygene.info', body: { hits: [MYGENE_LOOKUP_HIT] } },
       ]);
       const tools = captureTools(registerGeneTools);
       const result = await tools.get('gene_get')!({
@@ -238,7 +242,7 @@ describe('gene_get/variant_get section response keys mirror requested names (#12
 
     it('alphagenome_scores returns sections.alphagenome_scores, not alphagenome', async () => {
       global.fetch = fetchDispatch([
-        { match: (u) => u.includes('myvariant.info'), body: MYVARIANT_DOC },
+        { match: (u) => u.hostname === 'myvariant.info', body: MYVARIANT_DOC },
       ]);
       const tools = captureTools(registerVariantTools);
       const result = await tools.get('variant_get')!({
@@ -256,7 +260,7 @@ describe('gene_get/variant_get section response keys mirror requested names (#12
 
     it('sections:["all"] returns advertised public names and no storage keys', async () => {
       global.fetch = fetchDispatch([
-        { match: (u) => u.includes('myvariant.info'), body: MYVARIANT_DOC },
+        { match: (u) => u.hostname === 'myvariant.info', body: MYVARIANT_DOC },
       ]);
       const tools = captureTools(registerVariantTools);
       const result = await tools.get('variant_get')!({
