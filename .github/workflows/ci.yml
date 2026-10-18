@@ -55,32 +55,7 @@ jobs:
         run: npm run build
 
       - name: Dependency audit (full — see header note)
-        run: |
-          # Full audit (dev deps included) minus one documented exception:
-          # GHSA-hp3w-g68c-fv3c (sprintf-js DoS) — sprintf-js is abandoned
-          # upstream (every version vulnerable, no patch exists) and is
-          # reachable only inside jest's @istanbuljs/load-nyc-config ->
-          # js-yaml@3 -> argparse@1 error-formatting path: test tooling
-          # that is never bundled into dist and never sees untrusted input.
-          # Remove this allowlist entry once a patched release exists.
-          npm audit --audit-level=low --json | node -e '
-            const a = JSON.parse(require("fs").readFileSync(0, "utf8"));
-            const allow = new Set(["GHSA-hp3w-g68c-fv3c"]);
-            const bad = [];
-            for (const v of Object.values(a.vulnerabilities ?? {})) {
-              for (const via of v.via ?? []) {
-                if (typeof via === "object" && !allow.has(via.url.split("/").pop())) {
-                  bad.push(`${via.title} (${via.name} ${via.range}) ${via.url}`);
-                }
-              }
-            }
-            const totals = a.metadata?.vulnerabilities?.total ?? 0;
-            console.log(`audit: ${totals} total (allowlisted: GHSA-hp3w-g68c-fv3c)`);
-            if (bad.length) {
-              console.error(`\n${bad.length} non-allowlisted vulnerabilit${bad.length === 1 ? "y" : "ies"}:\n` + bad.join("\n"));
-              process.exit(1);
-            }
-          '
+        run: npm audit --audit-level=low
 
       - name: MCP stdio handshake smoke (NDJSON framing)
         run: |

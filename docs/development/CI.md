@@ -31,8 +31,7 @@ Gates in order, each failing the build on error:
 3. `npm test` — the 1300+ mocked unit tests (integration tests are excluded
    via the npm script; they run in the separate `integration` job)
 4. `npm run build` — `tsc` + the two esbuild bundles
-5. `npm audit --audit-level=low` — **full** audit, not `--omit=dev`, minus
-   one documented allowlist entry (see below)
+5. `npm audit --audit-level=low` — **full** audit, not `--omit=dev`
 6. stdio MCP handshake smoke — sends one NDJSON `initialize` request to
    `dist/bundle.js` and requires a `serverInfo` response
 
@@ -56,14 +55,13 @@ between concurrent runs). The test scripts pass
 shipped vulnerability exists, so it is a false-negative gate by construction
 here.
 
-**The one allowlist entry:** `GHSA-hp3w-g68c-fv3c` (sprintf-js DoS). Every
-version of `sprintf-js` is vulnerable and the package is abandoned upstream —
-no patched release exists to upgrade to, and npm's only suggested "fix" is a
-destructive jest downgrade. It is reachable only inside jest's test tooling
-(`@istanbuljs/load-nyc-config -> js-yaml@3 -> argparse@1`), which is never
-bundled into `dist/` and never handles untrusted input. The workflow filters
-`npm audit --json` in-node against this single advisory ID; remove the entry
-once a patched sprintf-js release exists.
+**sprintf-js history (no allowlist entry remains):** `GHSA-hp3w-g68c-fv3c`
+(sprintf-js DoS) was previously allowlisted — every version of sprintf-js is
+vulnerable and the package is abandoned upstream. It was removed from the tree
+entirely via the `argparse` npm override in `package.json` (it was reachable
+only inside jest's `@istanbuljs/load-nyc-config -> js-yaml@3 -> argparse@1`
+chain, whose library paths never load argparse), so the audit now runs
+unfiltered and fails on any advisory.
 
 **Why the smoke test uses NDJSON:** MCP over stdio is newline-delimited JSON.
 An LSP-style `Content-Length: ...` framed request yields no response and the
@@ -184,7 +182,7 @@ npm ci                        # 1. install
 make typecheck                # 2. typecheck (src + scripts)
 npm test                      # 3. unit tests
 npm run build                 # 4. bundles
-npm audit --audit-level=low --json | node -e '...'   # 5. full audit; the workflow's copy allowlists GHSA-hp3w-g68c-fv3c (see above)
+npm audit --audit-level=low    # 5. full audit (unfiltered; see sprintf-js history above)
 req='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}'
 out=$({ echo "$req"; sleep 2; } | timeout 15 node dist/bundle.js)
 echo "$out" | grep -q '"serverInfo"' && echo SMOKE_OK   # 6. stdio smoke
