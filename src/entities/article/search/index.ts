@@ -1,6 +1,6 @@
 import type { ArticleSearchOptions, ArticleSearchError, ArticleSearchResponse, Article, ParsedDateRange } from '../types.js';
 import { withTimeout } from '../../../connections/fetch-utils.js';
-import { deduplicateAndRank, isAboveLitsenseFloor, LITSENSE_RELEVANCE_FLOOR } from './dedup.js';
+import { deduplicateAndRank, dedupKeys, isAboveLitsenseFloor, LITSENSE_RELEVANCE_FLOOR } from './dedup.js';
 import { searchPubMed, type PubMedQueryOutcome } from './pubmed.js';
 import { searchEuropePMC } from './europepmc.js';
 import { searchSemanticScholar } from './semantic-scholar.js';
@@ -11,6 +11,16 @@ import { searchArxiv } from './arxiv.js';
 import { fetchPmidArticles } from '../citation/pubmed.js';
 
 const FEDERATED_SEARCH_TIMEOUT_MS = 20000;
+
+/** Human-facing names for the federated fan-out legs (crowd-out warning). */
+const SOURCE_DISPLAY_NAMES: Record<string, string> = {
+  pubmed: 'PubMed',
+  europepmc: 'Europe PMC',
+  semantic_scholar: 'Semantic Scholar',
+  arxiv: 'arXiv',
+  pubtator: 'PubTator',
+  litsense: 'LitSense',
+};
 
 export function parseDateRange(dateRange: string): ParsedDateRange {
   const [from, to] = dateRange.split('/');
@@ -176,12 +186,17 @@ async function federatedSearch(
 
   const settled = await Promise.allSettled(legs.map(l => l.promise));
   const allArticles: Article[] = [];
+  // Per-leg rows that entered federation (post-own-filter, error rows split
+  // out) — the "offered" side of the crowd-out accounting below.
+  const offeredBySource = new Map<string, Article[]>();
 
   for (let i = 0; i < settled.length; i++) {
     const { label } = legs[i];
     const result = settled[i];
     if (result.status === 'fulfilled') {
-      allArticles.push(...splitErrorRows(result.value, label, errors));
+      const real = splitErrorRows(result.value, label, errors);
+      allArticles.push(...real);
+      offeredBySource.set(label, real);
     } else {
       // withTimeout rejections are transient by nature; backend-promise
       // rejections should have been caught by the backend's own error row.
@@ -220,7 +235,38 @@ async function federatedSearch(
     );
   }
 
-  return deduplicateAndRank(allArticles, limit);
+  const ranked = deduplicateAndRank(allArticles, limit);
+
+  // Crowd-out disclosure (issue #134): ranking is citation-based, but only
+  // europepmc/preprint/semantic_scholar populate cited_by — the zero-cited
+  // legs tie at 0 and stable-sort keeps federation order, so with limit
+  // applied post-dedup a matching secondary source can contribute ZERO rows
+  // with no signal. A source is crowded out only when it offered rows that
+  // entered the ranking competition (key-bearing and floor-surviving —
+  // legs already date-post-filtered before returning, and floor-dropped
+  // litsense noise has its own warning) yet NONE of its rows — and none of
+  // their dedup-merged twins — appear on the final page. Twinned rows count
+  // as represented because they share an identity key with the kept row.
+  const finalKeySets = ranked.map(row => new Set(dedupKeys(row)));
+  const crowdedOut: string[] = [];
+  for (const [label, offered] of offeredBySource) {
+    const competing = offered.filter(row => dedupKeys(row).length > 0 && isAboveLitsenseFloor(row));
+    if (competing.length === 0) continue;
+    const represented = competing.some(row =>
+      dedupKeys(row).some(key => finalKeySets.some(keySet => keySet.has(key)))
+    );
+    if (!represented) crowdedOut.push(label);
+  }
+  if (crowdedOut.length > 0) {
+    const names = crowdedOut.map(s => SOURCE_DISPLAY_NAMES[s] ?? s).join(', ');
+    const ids = crowdedOut.map(s => `'${s}'`).join(', ');
+    warnings.push(
+      `${names} had matches but none made this page — ` +
+      `query ${crowdedOut.length === 1 ? `source ${ids}` : `sources ${ids}`} directly if broader coverage is needed.`
+    );
+  }
+
+  return ranked;
 }
 
 async function searchSingleSource(

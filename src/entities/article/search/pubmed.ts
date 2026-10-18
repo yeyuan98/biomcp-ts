@@ -185,7 +185,12 @@ export async function searchPubMed(
     // filter below can drop out-of-window rows and still fill the page.
     const hasDateRange = Boolean(dateRange?.from || dateRange?.to);
     const retmax = hasDateRange ? Math.min(limit * 2, 100) : limit;
-    let searchUrl = `/esearch.fcgi?db=pubmed&term=${encodeURIComponent(searchTerm)}&retmax=${retmax}&retstart=${offset}&retmode=json`;
+    // sort=relevance (issue #134): esearch's DEFAULT ordering is most-recent,
+    // so the candidate pool — and with it single-source output AND the
+    // federated merge's tie-broken bottom — seated loosely-matching recent
+    // papers above topical classics (live: a cotton-epigenetics paper topped
+    // federated "CRISPR-Cas9"). Relevance ordering keeps the pool topical.
+    let searchUrl = `/esearch.fcgi?db=pubmed&term=${encodeURIComponent(searchTerm)}&retmax=${retmax}&retstart=${offset}&retmode=json&sort=relevance`;
     if (hasDateRange && dateRange) {
       // NBK25499: mindate/maxdate must be used together — default the
       // missing bound so esearch always receives a complete range.

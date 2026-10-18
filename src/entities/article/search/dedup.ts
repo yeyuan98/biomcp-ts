@@ -22,46 +22,81 @@ function isMissing(value: unknown): boolean {
   return value === undefined || value === null || value === '';
 }
 
-// Key chain: pmid ‖ pmcid ‖ doi ‖ arxiv_id — most arXiv preprints carry
-// none of the first three, so arxiv_id keeps them deduplicable.
+// Identity keys: EVERY id a row carries participates in matching (issue
+// #134) — the old single-key chain (pmid ‖ pmcid ‖ doi ‖ arxiv_id) never
+// compared two rows that each had a PMID, so same-DOI twins under distinct
+// PMIDs both survived (live: 10.1056/NEJMc2400161 under PMIDs 38478005 and
+// 38478006). Rows now merge when ANY key collides, and collisions chain
+// transitively (A≡B by DOI, B≡C by PMID ⇒ one group) via the key→base map.
 // DOIs are case-insensitive per the DOI handbook, and arXiv submitter-cased
 // DOIs (e.g. 10.1109/ICASSP...) must merge with registry-cased twins — so
-// only the DOI is lowercased here. The stored `doi` field itself is never
+// only the DOI is normalized here. The stored `doi` field itself is never
 // normalized: first-seen display casing survives, matching fill-merge.
-function dedupKey(article: Article): string {
-  return (
-    article.pmid ||
-    article.pmcid ||
-    (article.doi ? article.doi.trim().toLowerCase() : '') ||
-    article.arxiv_id ||
-    ''
-  );
+// Key prefixes keep id types from colliding across namespaces.
+export function dedupKeys(article: Article): string[] {
+  const keys: string[] = [];
+  if (article.pmid) keys.push(`pmid:${article.pmid}`);
+  if (article.pmcid) keys.push(`pmcid:${article.pmcid}`);
+  // Whitespace-only DOIs contribute no key (mirrors the old chain's
+  // fallthrough) — a bare `doi:` would falsely merge unrelated rows.
+  const doi = article.doi?.trim();
+  if (doi) keys.push(`doi:${doi.toLowerCase()}`);
+  if (article.arxiv_id) keys.push(`arxiv:${article.arxiv_id}`);
+  return keys;
+}
+
+function fillMergeInto(base: Article, donor: Article): void {
+  for (const [field, value] of Object.entries(donor)) {
+    if (NO_FILL_KEYS.has(field)) continue;
+    if (isMissing(base[field as keyof Article]) && !isMissing(value)) {
+      (base as Record<string, unknown>)[field] = value;
+    }
+  }
 }
 
 export function deduplicateAndRank(articles: Article[], limit: number): Article[] {
-  const seen = new Map<string, Article>();
+  // key → surviving base row of its group; bases keeps first-seen order.
+  const keyToBase = new Map<string, Article>();
+  const bases: Article[] = [];
 
   for (const article of articles) {
     if (article._error) continue;
     if (!isAboveLitsenseFloor(article)) continue;
-    const key = dedupKey(article);
-    if (!key) continue;
-    const base = seen.get(key);
-    if (!base) {
-      seen.set(key, article);
-      continue;
+    const keys = dedupKeys(article);
+    if (keys.length === 0) continue;
+
+    // Distinct surviving bases this row collides with (any-key match).
+    // Usually one; more than one means this row BRIDGES previously
+    // separate groups (A keyed on DOI, B on PMID, this row carries both),
+    // so the later-seen bases merge into the earliest-seen one.
+    const collided: Article[] = [];
+    for (const key of keys) {
+      const base = keyToBase.get(key);
+      if (base !== undefined && !collided.includes(base)) collided.push(base);
     }
-    for (const [field, value] of Object.entries(article)) {
-      if (NO_FILL_KEYS.has(field)) continue;
-      if (isMissing(base[field as keyof Article]) && !isMissing(value)) {
-        (base as Record<string, unknown>)[field] = value;
+
+    let base: Article;
+    if (collided.length === 0) {
+      base = article;
+      bases.push(article);
+    } else {
+      base = collided.reduce((earliest, candidate) =>
+        bases.indexOf(candidate) < bases.indexOf(earliest) ? candidate : earliest
+      );
+      for (const other of collided) {
+        if (other === base) continue;
+        fillMergeInto(base, other);
+        for (const [key, owner] of keyToBase) {
+          if (owner === other) keyToBase.set(key, base);
+        }
+        bases.splice(bases.indexOf(other), 1);
       }
+      fillMergeInto(base, article);
     }
+    for (const key of keys) keyToBase.set(key, base);
   }
 
-  const unique = Array.from(seen.values());
-
-  return unique
+  return bases
     .sort((a, b) => (b.cited_by || 0) - (a.cited_by || 0))
     .slice(0, limit);
 }
