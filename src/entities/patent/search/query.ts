@@ -37,6 +37,15 @@ export function escapeLuceneTerm(term: string): string {
 }
 
 /**
+ * Quote + escape a Lucene phrase or field value. Backslash and double-quote
+ * are escaped in the same single pass, so a user-supplied trailing `\`
+ * cannot escape the closing quote and break out of the phrase.
+ */
+export function escapeLucenePhrase(value: string): string {
+  return `"${value.replace(/["\\]/g, '\\$&')}"`;
+}
+
+/**
  * True when the query already contains explicit Lucene/CQL-style syntax
  * (boolean operators, field:value pairs, range brackets, unary +/-/!), in
  * which case backends must pass it through verbatim instead of re-tokenizing.

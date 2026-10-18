@@ -1975,6 +1975,45 @@ describe('query builders (assert exact upstream request construction)', () => {
     connectionManager.closeAll();
   });
 
+  test('escapeLucenePhrase escapes backslash and quote in one pass (CodeQL 34-36)', async () => {
+    const { escapeLucenePhrase } = await import('../../entities/patent/search/query.js');
+    // Quote-only inputs keep the historical escaping
+    expect(escapeLucenePhrase('Say "hi" Inc')).toBe('"Say \\"hi\\" Inc"');
+    // A trailing or interior backslash must not be able to escape the
+    // closing quote — both characters escape in a single pass.
+    expect(escapeLucenePhrase('ends with \\')).toBe('"ends with \\\\"');
+    expect(escapeLucenePhrase('a"b\\c')).toBe('"a\\"b\\\\c"');
+    expect(escapeLucenePhrase('plain')).toBe('"plain"');
+  });
+
+  test('buildLuceneQueryClause backslash-escapes user phrases, not just quotes', async () => {
+    const { buildLuceneQueryClause } = await import('../../entities/patent/search/odp.js');
+    expect(buildLuceneQueryClause('"back\\slash phrase"')).toBe('("back\\\\slash phrase")');
+  });
+
+  test('searchOdp rejects malformed date_range instead of interpolating it into Lucene', async () => {
+    process.env.USPTO_API_KEY = 'u';
+    const { connectionManager } = await import('../../connections/manager.js');
+    connectionManager.closeAll();
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => Promise.resolve({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({ count: 0, patentFileWrapperDataBag: [] }),
+    })) as any;
+
+    const { searchOdp } = await import('../../entities/patent/search/odp.js');
+    await expect(searchOdp('crispr', { date_range: '2023-01-01/) OR applicationMetaData:x:' }))
+      .rejects.toThrow(/Invalid date_range/);
+    await expect(searchOdp('crispr', { date_range: 'not-a-date/' }))
+      .rejects.toThrow(/YYYY-MM-DD/);
+    // Open ranges with well-formed sides still pass through
+    await expect(searchOdp('crispr', { date_range: '/2024-12-31' })).resolves.toEqual({
+      patents: [], total: 0,
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    connectionManager.closeAll();
+  });
+
   test('normalizeExchangeDocuments handles both live response shapes (dict-of-array and list-of-wrapped)', async () => {
     const { normalizeExchangeDocuments } = await import('../../entities/patent/search/ops.js');
     const doc = (n: string) => ({ '@country': { '$': 'US' }, '@doc-number': { '$': n }, '@kind': { '$': 'B2' } });
