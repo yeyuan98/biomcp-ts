@@ -75,11 +75,13 @@ describe('geo tools (integration)', () => {
   }, 120000);
 
   it('geo_get returns curated-DataSet guidance for GDS accessions', async () => {
-    // GDS passes schema validation; the entity guard fires before any fetch
-    // and points users at the underlying GSE/GSM records.
-    await expect(
-      harness.callTool('geo_get', { accession: 'GDS1234' })
-    ).rejects.toThrow(/curated GEO DataSet records.*series accession \(GSE\.\.\.\) or sample accession \(GSM\.\.\.\)/s);
+    // GDS passes schema validation; the entity returns structured guidance
+    // (data, not an error — issue #130) before any fetch, pointing users at
+    // the underlying GSE/GSM records.
+    const result = await harness.callTool('geo_get', { accession: 'GDS1234' });
+    expect(result.accession).toBe('GDS1234');
+    expect(result.guidance).toContain('curated GEO DataSet records');
+    expect(result.see_also).toEqual({ series: 'GSE…', sample: 'GSM…' });
   }, 30000);
 
   it('geo_get rejects malformed accessions', async () => {

@@ -1,7 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { geneSearch, geneGet } from '../../entities/gene.js';
-import { geneToDrugs, geneToTrials, geneToArticles, geneEnrichment } from '../../entities/cross-entity.js';
+import { geneToDrugs, geneToTrials, geneEnrichment } from '../../entities/cross-entity.js';
+import { searchArticles } from '../../entities/article/index.js';
 import { applyLimit, requiredString, sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra } from './utils.js';
 
 // Deadline rationale (#107 phase 2): geneGet already enforces its own 30s
@@ -200,7 +201,7 @@ export function registerGeneTools(server: McpServer): void {
   server.registerTool(
     'gene_articles',
     {
-      description: 'Find articles about a gene',
+      description: 'Find articles about a gene. Response is an envelope: { results, warnings?, errors? } — per-backend failures ride in `errors` (never as items inside `results`), degradation notes in `warnings` (issue #130)',
       inputSchema: {
         symbol: requiredString('Gene symbol').describe('HGNC gene symbol'),
       },
@@ -208,8 +209,13 @@ export function registerGeneTools(server: McpServer): void {
     },
     async ({ symbol }) => {
       try {
-        const results = await geneToArticles(symbol);
-        return { content: [{ type: 'text', text: JSON.stringify(results) }] };
+        // Direct searchArticles call (same args the former geneToArticles
+        // wrapper used): the full { results, warnings?, errors? } envelope
+        // reaches the caller — the legacy array wrapper discarded the
+        // per-backend errors channel, making a hung backend (e.g. Semantic
+        // Scholar timeouts) indistinguishable from "few articles" (#130).
+        const response = await searchArticles(symbol, { limit: 10 });
+        return { content: [{ type: 'text', text: JSON.stringify(response) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
       }

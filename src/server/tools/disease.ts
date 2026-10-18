@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { diseaseSearch, diseaseGet } from '../../entities/disease.js';
 import { connectionManager } from '../../connections/manager.js';
-import { applyLimit, requiredString, withToolTimeout, type CancellationCapableExtra } from './utils.js';
+import { applyLimit, listEnvelope, requiredString, withToolTimeout, type CancellationCapableExtra } from './utils.js';
 
 // Deadline rationale (#107 phase 2): the mydisease core lookup (candidate
 // curie retries, 15s per attempt) plus the 8s-deadline section wave in
@@ -46,7 +46,7 @@ export function registerDiseaseTools(server: McpServer): void {
   server.registerTool(
     'disease_search',
     {
-      description: 'Search for diseases by name, phenotype, or keyword',
+      description: 'Search for diseases by name, phenotype, or keyword. Response is an envelope: { results, warnings?, errors? } (issue #130)',
       inputSchema: {
         query: z.string().trim().min(1, 'Query must be a non-empty string after trimming').describe('Disease name, phenotype, or keyword to search for'),
         limit: z.number().int().min(1).max(50).default(10).describe('Maximum results'),
@@ -57,7 +57,8 @@ export function registerDiseaseTools(server: McpServer): void {
     async ({ query, limit, offset }) => {
       try {
         const results = await diseaseSearch(query, { limit, offset });
-        return { content: [{ type: 'text', text: JSON.stringify(results) }] };
+        // List-tool envelope (#130): { results, warnings?, errors? }.
+        return { content: [{ type: 'text', text: JSON.stringify(listEnvelope(results)) }] };
       } catch (error) {
         return { 
           content: [{ type: 'text', text: String(error) }],
@@ -104,7 +105,7 @@ export function registerDiseaseTools(server: McpServer): void {
   server.registerTool(
     'disease_drugs',
     {
-      description: 'Get drugs for a disease via OpenTargets. Results are ranked by max clinical phase, then trial-report count, with salt forms collapsed',
+      description: 'Get drugs for a disease via OpenTargets. Results are ranked by max clinical phase, then trial-report count, with salt forms collapsed. Response is an envelope: { results } — partial OpenTargets failures ride as inline _error items within results (issue #130)',
       inputSchema: {
         disease_id: requiredString('Disease ID').describe('Disease ID'),
         limit: z.number().int().min(1).max(50).default(20),
@@ -115,7 +116,10 @@ export function registerDiseaseTools(server: McpServer): void {
       try {
         const { diseaseToDrugs } = await import('../../entities/cross-entity.js');
         const drugs = await diseaseToDrugs(disease_id);
-        return { content: [{ type: 'text', text: JSON.stringify(drugs.slice(0, limit)) }] };
+        // List-tool envelope (#130). Partial OpenTargets failures still ride
+        // as inline `[{_error}]` items inside results for now (kept as-is
+        // this PR — see CHANGELOG).
+        return { content: [{ type: 'text', text: JSON.stringify(listEnvelope(drugs.slice(0, limit))) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
       }
@@ -125,7 +129,7 @@ export function registerDiseaseTools(server: McpServer): void {
   server.registerTool(
     'disease_trials',
     {
-      description: 'Get clinical trials for a disease',
+      description: 'Get clinical trials for a disease. Response is an envelope: { results, warnings?, errors? } (issue #130)',
       inputSchema: {
         disease_id: requiredString('Disease ID').describe('Disease ID'),
         limit: z.number().int().min(1).max(50).default(20),
@@ -171,7 +175,8 @@ export function registerDiseaseTools(server: McpServer): void {
           title: s.protocolSection?.identificationModule?.briefTitle,
           status: s.protocolSection?.statusModule?.overallStatus,
         }));
-        return { content: [{ type: 'text', text: JSON.stringify(trials) }] };
+        // List-tool envelope (#130): { results, warnings?, errors? }.
+        return { content: [{ type: 'text', text: JSON.stringify(listEnvelope(trials)) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
       }

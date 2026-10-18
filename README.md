@@ -40,7 +40,7 @@ Full tool schemas (params, enums, defaults) live in [src/server/README.md](src/s
 | `gene_diseases` | Get diseases associated with a gene (DisGeNET / OpenTargets) |
 | `gene_drugs` | Find drugs targeting a gene (OpenTargets) |
 | `gene_trials` | Find clinical trials for a gene |
-| `gene_articles` | Find articles about a gene |
+| `gene_articles` | Find articles about a gene (federated across PubMed, EuropePMC, Semantic Scholar, arXiv, PubTator, LitSense; envelope `{ results, warnings?, errors? }` — per-backend failures ride in `errors`) |
 | `gene_enrich` | Pathway enrichment analysis for a gene list (Reactome) |
 
 ### Variant (4)
@@ -56,7 +56,7 @@ Full tool schemas (params, enums, defaults) live in [src/server/README.md](src/s
 
 | Tool | Description |
 |------|-------------|
-| `drug_search` | Search drugs by name, mechanism, or keyword |
+| `drug_search` | Search drugs by name, mechanism, or keyword (envelope `{ results, hint? }` — when nothing matches, `hint` points mechanism/target queries at gene_drugs) |
 | `drug_get` | Get detailed drug info with optional sections (us_regulatory, who_regulatory, safety, targets, indications, adverse_events — FDA FAERS reactions ranked by report count; WHO PQ listing lookup, ~650 global-health priority products) |
 | `drug_trials` | Find clinical trials for a drug |
 
@@ -64,10 +64,10 @@ Full tool schemas (params, enums, defaults) live in [src/server/README.md](src/s
 
 | Tool | Description |
 |------|-------------|
-| `disease_search` | Search diseases by name, phenotype, or keyword |
+| `disease_search` | Search diseases by name, phenotype, or keyword (envelope `{ results, warnings?, errors? }`) |
 | `disease_get` | Get detailed disease info by ID (DOID, MONDO, OMIM, etc.) with optional sections (gene_associations, phenotypes, pathways) |
-| `disease_drugs` | Get drugs for a disease (OpenTargets) |
-| `disease_trials` | Get clinical trials for a disease (ClinicalTrials.gov) |
+| `disease_drugs` | Get drugs for a disease (OpenTargets; envelope `{ results }` — partial failures ride as inline `_error` items within results) |
+| `disease_trials` | Get clinical trials for a disease (ClinicalTrials.gov; envelope `{ results, warnings?, errors? }`) |
 
 ### Article (3)
 
@@ -109,7 +109,7 @@ Full tool schemas (params, enums, defaults) live in [src/server/README.md](src/s
 | Tool | Description |
 |------|-------------|
 | `geo_search` | Search NCBI GEO for functional genomics studies (expression microarrays, RNA-seq, single-cell series) by entry type (GSE/GSM/GPL/GDS) and organism; results carry cross-links (bioproject, pubmed_ids; sra_project when NCBI links the SRA study — otherwise geo_get's sra field) for chaining |
-| `geo_get` | Get the full SOFT record for a GEO series/sample/platform: summary, organisms, sample preview (≤20), supplementary file URLs, and cross-references; optionally download the first supplementary file |
+| `geo_get` | Get the full SOFT record for a GEO series/sample/platform: summary, organisms, sample preview (≤20), supplementary file URLs, and cross-references; optionally download the first supplementary file. GDS curated DataSets return structured guidance (`{ accession, guidance, see_also: { series, sample } }`) pointing at the underlying GSE/GSM instead of a record |
 
 ### SRA (2)
 

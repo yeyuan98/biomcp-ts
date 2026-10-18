@@ -541,7 +541,6 @@ Orchestrates queries that span multiple entity types. All pivot functions delega
 geneToDrugs(geneSymbol: string): Promise<Array<{ drug_name: string; source: string; action_type?: string }>>
 geneToTrials(geneSymbol: string): Promise<Array<{ nct_id: string; title?: string; status?: string }>>
 geneToPathways(geneSymbol: string): Promise<Array<{ pathway_id: string; name: string; source: string }>>
-geneToArticles(geneSymbol: string): Promise<Article[]>
 variantToTrials(variantId: string): Promise<Array<{ nct_id: string; title?: string; status?: string }>>
 drugToGenes(drugName: string): Promise<Array<{ gene_symbol: string; name: string; source: string; action_type?: string }>>
 drugToTrials(drugName: string): Promise<Array<{ nct_id: string; title?: string; status?: string }>>
@@ -558,7 +557,6 @@ diseaseToTrials(diseaseQuery: string): Promise<Array<{ nct_id: string; title?: s
 | `geneToDrugs` | OpenTargets (GraphQL) | None |
 | `geneToTrials` | ClinicalTrials.gov (via `trialSearch`) | None |
 | `geneToPathways` | Reactome | None |
-| `geneToArticles` | Federated article search (via `articleSearch`) | None |
 | `variantToTrials` | ClinicalTrials.gov (via `trialSearch`) | None |
 | `drugToGenes` | OpenTargets (GraphQL) | None |
 | `drugToTrials` | ClinicalTrials.gov (via `trialSearch`, `searchType: 'intervention'`) | None |

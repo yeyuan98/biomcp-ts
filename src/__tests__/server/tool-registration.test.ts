@@ -68,6 +68,7 @@ jest.mock('../../entities/trial.js', () => mockLoudModule('entities/trial', {
 }));
 
 jest.mock('../../entities/article/index.js', () => mockLoudModule('entities/article', {
+  searchArticles: jest.fn(),
   articleSearch: jest.fn(),
   articleGet: jest.fn(),
   fetchPreprintFullText: jest.fn(),
@@ -121,7 +122,6 @@ jest.mock('../../entities/cross-entity.js', () => mockLoudModule('entities/cross
   geneToDrugs: jest.fn(),
   geneToTrials: jest.fn(),
   geneToPathways: jest.fn(),
-  geneToArticles: jest.fn(),
   variantToTrials: jest.fn(),
   drugToGenes: jest.fn(),
   drugToTrials: jest.fn(),

@@ -180,3 +180,39 @@ export const requiredString = (label: string) =>
  * variant_search's empty `query` used to match everything upstream.
  */
 export const optionalNonEmptyString = (label: string) => requiredString(label).optional();
+
+/** One upstream/backend failure inside a list envelope (article_search parity). */
+export interface ListEnvelopeError {
+  source: string;
+  message: string;
+  retryable?: boolean;
+}
+
+/**
+ * Standard list-tool reply shape (issue #130): `results` plus optional
+ * `warnings`/`errors` channels. Emission logic mirrors searchArticles
+ * (src/entities/article/search/index.ts): the optional channels are
+ * attached ONLY when non-empty, so a clean happy path serializes as exactly
+ * `{"results":[...]}`.
+ */
+export interface ListEnvelope<T> {
+  results: T[];
+  warnings?: string[];
+  errors?: ListEnvelopeError[];
+}
+
+/**
+ * Wrap a list-tool result in the standard `{ results, warnings?, errors? }`
+ * envelope (issue #130). Attach `warnings`/`errors` only when non-empty —
+ * byte-identical emission logic to searchArticles' envelope construction.
+ */
+export function listEnvelope<T>(
+  results: T[],
+  warnings?: string[],
+  errors?: ListEnvelopeError[],
+): ListEnvelope<T> {
+  const envelope: ListEnvelope<T> = { results };
+  if (warnings !== undefined && warnings.length > 0) envelope.warnings = warnings;
+  if (errors !== undefined && errors.length > 0) envelope.errors = errors;
+  return envelope;
+}

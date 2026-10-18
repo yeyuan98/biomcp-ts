@@ -206,10 +206,13 @@ describe('gene_trials', () => {
 
 describe('gene_articles', () => {
   it('returns articles for BRCA1', async () => {
-    const result = await retryOnRateLimit(() => harness.callTool('gene_articles', { symbol: 'BRCA1' }));
-    expect(Array.isArray(result)).toBe(true);
-    expect(result.length).toBeGreaterThan(0);
-    const rows = result as Array<Record<string, any>>;
+    // gene_articles replies are envelopes (issue #130): { results,
+    // warnings?, errors? } — per-backend failures ride in errors, never as
+    // rows inside results.
+    const envelope = await retryOnRateLimit(() => harness.callTool('gene_articles', { symbol: 'BRCA1' }));
+    expect(Array.isArray(envelope.results)).toBe(true);
+    expect(envelope.results.length).toBeGreaterThan(0);
+    const rows = envelope.results as Array<Record<string, any>>;
     // Federated ranking may lead with a non-PMID source (litsense, pubtator,
     // semantic_scholar, preprints), so row 1 is not required to carry a pmid.
     // The pmid contract applies where it is actually guaranteed: (a) at least

@@ -26,7 +26,7 @@ Every tool handler follows the same contract:
 3. Return `{ content: [{ type: 'text', text: JSON.stringify(result) }] }`
 4. On error: return `{ content: [{ type: 'text', text: String(error) }], isError: true }`
 
-Error surfaces: malformed input fails the SDK's zod validation before the handler runs and comes back as `isError: true` content prefixed `MCP error -32602: Input validation error` (SDK 1.29 converts the protocol error into a tool error result), while domain errors — unsupported accessions (e.g. GDS guidance in `geo_get`), not-found, size gates — surface as `isError: true` content carrying the handler's error text the LLM can read and act on.
+Error surfaces: malformed input fails the SDK's zod validation before the handler runs and comes back as `isError: true` content prefixed `MCP error -32602: Input validation error` (SDK 1.29 converts the protocol error into a tool error result), while domain errors — not-found, size gates — surface as `isError: true` content carrying the handler's error text the LLM can read and act on. Guidance-style outcomes are data, not errors: `geo_get` with a GDS accession returns a structured `{ accession, guidance, see_also }` result (issue #130). List tools reply with the standard envelope `{ results, warnings?, errors? }` (`article_search`, `gene_articles`, `disease_search`, `disease_drugs`, `disease_trials`; `drug_search` keeps `{ results, hint? }`) — the optional channels are attached only when non-empty, matching `article_search`'s emission.
 
 Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'diseases'])` and extract specific sections from the result.
 
@@ -41,7 +41,7 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 | `gene_diseases` | `symbol: string`, `limit?: number (1-50, default 10)` | Get diseases associated with a gene. Requires `DISGENET_API_KEY`; falls back to OpenTargets | readOnly, openWorld |
 | `gene_drugs` | `symbol: string` | Find drugs targeting a gene | readOnly |
 | `gene_trials` | `symbol: string` | Find clinical trials for a gene | readOnly |
-| `gene_articles` | `symbol: string` | Find articles about a gene | readOnly |
+| `gene_articles` | `symbol: string` | Find articles about a gene (federated; envelope `{ results, warnings?, errors? }` — per-backend failures ride in `errors`, never as items inside `results`) | readOnly |
 | `gene_enrich` | `genes: string[]` | Pathway enrichment analysis for a gene list | readOnly |
 
 ### Variant Tools (`tools/variant.ts`) — 4 tools
@@ -57,7 +57,7 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
-| `drug_search` | `query: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for drugs by name, mechanism, or keyword | readOnly, openWorld |
+| `drug_search` | `query: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for drugs by name, mechanism, or keyword (envelope `{ results, hint? }` — `hint` appears exactly when nothing matched) | readOnly, openWorld |
 | `drug_get` | `name: string`, `sections?: ("core" \| "us_regulatory" \| "who_regulatory" \| "safety" \| "targets" \| "indications" \| "adverse_events" \| "all")[]` (`adverse_events` = FDA FAERS adverse reactions ranked by report count; `indications` = OpenTargets indications ranked by max clinical phase descending, then trial-report count, then disease name; `limit` applies to reaction rows; `who_regulatory` = WHO Prequalification listing only, ~650 global-health priority products — `prequalified:false` means not PQ-listed, not banned or unapproved anywhere; `limit` applies to product rows), `limit?: number (1-100, default 20)` | Get detailed drug information by name | readOnly, openWorld |
 | `drug_trials` | `drug: string` | Find clinical trials for a drug | readOnly |
 
@@ -65,10 +65,10 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
-| `disease_search` | `query: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for diseases by name, phenotype, or keyword | readOnly, openWorld |
+| `disease_search` | `query: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for diseases by name, phenotype, or keyword (envelope `{ results, warnings?, errors? }`) | readOnly, openWorld |
 | `disease_get` | `disease_id: string`, `sections?: ("core" \| "gene_associations" \| "phenotypes" \| "pathways" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed disease information by ID | readOnly, openWorld |
-| `disease_drugs` | `disease_id: string`, `limit?: number (1-50, default 20)` | Get drugs for a disease via OpenTargets | readOnly, openWorld |
-| `disease_trials` | `disease_id: string`, `limit?: number (1-50, default 20)` | Get clinical trials for a disease | readOnly, openWorld |
+| `disease_drugs` | `disease_id: string`, `limit?: number (1-50, default 20)` | Get drugs for a disease via OpenTargets (envelope `{ results }` — partial failures ride as inline `_error` items within results) | readOnly, openWorld |
+| `disease_trials` | `disease_id: string`, `limit?: number (1-50, default 20)` | Get clinical trials for a disease (envelope `{ results, warnings?, errors? }`) | readOnly, openWorld |
 
 ### Article Tools (`tools/article.ts`) — 3 tools
 
@@ -118,7 +118,7 @@ Param-based dispatch: `query` → search mode, `pdb_id` → get mode, `pdb_id` +
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
 | `geo_search` | `query: string` (free text or `GSE183947[Accession]` field syntax), `entry_type?: "gse" \| "gsm" \| "gpl" \| "gds"` (default gse), `organism?: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search NCBI GEO via E-utilities db=gds (esearch + esummary). Every result carries `accession` → `geo_get`, `bioproject`, `pubmed_ids` → `article_get`; `sra_project` → `sra_get` appears only when NCBI has linked the SRA study to the series (many newer series lack the link — use `geo_get`'s `sra` field as the reliable route). `NCBI_API_KEY` optional (higher rate limits) | readOnly, openWorld |
-| `geo_get` | `accession: string` (regex `^(GSE\|GSM\|GPL\|GDS)\d+$`, e.g. GSE183947, GSM5574685, GPL11154; GSE/GSM/GPL return SOFT records, while GDS curated DataSets are not served by SOFT and return guidance pointing at the underlying GSE/GSM), `download?: boolean` (default false), `max_bytes?: number (min 1000000, default 52428800 = 50 MB)` | Get the full SOFT record from the GEO SOFT viewer (`acc.cgi?targ=self&form=text&view=full`): series detail includes summary, organisms, platform_ids, sample preview (≤20), supplementary file URLs, and cross-references (sra, pubmed_ids, bioproject, super/sub-series); enriched with esummary gds metadata (best-effort). `download=true` saves the first supplementary file (.gz/.csv/.txt) to a temp path and returns path/size/URL | openWorld |
+| `geo_get` | `accession: string` (regex `^(GSE\|GSM\|GPL\|GDS)\d+$`, e.g. GSE183947, GSM5574685, GPL11154; GSE/GSM/GPL return SOFT records, while GDS curated DataSets are not served by SOFT and return structured guidance `{ accession, guidance, see_also: { series: "GSE…", sample: "GSM…" } }` as a successful result pointing at the underlying GSE/GSM), `download?: boolean` (default false), `max_bytes?: number (min 1000000, default 52428800 = 50 MB)` | Get the full SOFT record from the GEO SOFT viewer (`acc.cgi?targ=self&form=text&view=full`): series detail includes summary, organisms, platform_ids, sample preview (≤20), supplementary file URLs, and cross-references (sra, pubmed_ids, bioproject, super/sub-series); enriched with esummary gds metadata (best-effort). `download=true` saves the first supplementary file (.gz/.csv/.txt) to a temp path and returns path/size/URL | openWorld |
 
 ### SRA Tools (`tools/sra.ts`) — 2 tools
 
