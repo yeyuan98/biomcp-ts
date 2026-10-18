@@ -4,6 +4,7 @@ import { RestConnection } from '../connections/rest.js';
 import { fetchWithTimeout } from '../connections/fetch-utils.js';
 import { withRetry, isRetryableError } from '../connections/retry.js';
 import { transformMyGeneHit } from '../transform/gene.js';
+import { stripHtml } from './html-utils.js';
 import { fetchDisgenetGdaSummary } from './disgenet.js';
 import { otDiseasesForGene } from './opentargets.js';
 import { gtexMedianExpression } from './gtex.js';
@@ -372,7 +373,7 @@ async function fetchPathways(geneSymbol: string, signal?: AbortSignal): Promise<
           const name = typeof entry.name === 'string' ? entry.name : String(entry.name);
           pathways.push({
             id: entry.stId as string,
-            name: name.replace(/<[^>]+>/g, ''),
+            name: stripHtml(name),
             source: 'reactome',
           });
         }

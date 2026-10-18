@@ -1,4 +1,5 @@
 import { ppubsClient } from '../ppubs-client.js';
+import { stripHtml } from '../../html-utils.js';
 import type { PatentClaimsSection, PatentResult } from '../types.js';
 
 const CLAIMS_CAP_BYTES = 100_000;
@@ -26,20 +27,6 @@ interface PpubsDocumentRecord {
   foreignRefPubDate?: string[] | null;
   inventors?: Array<{ inventorName?: { name?: string } }>;
   patentFamilyMembers?: string[] | null;
-}
-
-function stripHtml(html: string): string {
-  return html
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&hellip;/g, '…')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 /**
@@ -94,7 +81,7 @@ export async function fetchPpubsCore(publicationNumber: string): Promise<PatentR
   return {
     publication_number: `US${number}${kind}`,
     title: doc.inventionTitle,
-    abstract: doc.abstractHtml ? stripHtml(doc.abstractHtml).slice(0, 5000) : undefined,
+    abstract: doc.abstractHtml ? stripHtml(doc.abstractHtml, 'block').slice(0, 5000) : undefined,
     publication_date: doc.datePublished ? doc.datePublished.slice(0, 10) : undefined,
     filing_date: doc.applicationFilingDate?.[0]?.slice(0, 10),
     assignee: org.length > 0 ? org : undefined,
@@ -158,7 +145,7 @@ function splitClaimsHtml(claimsHtml: string): { claims: string[]; method: 'num' 
       if (!num || seen.has(num)) return;
       const start = m.index + m[0].length;
       const end = i + 1 < matches.length ? matches[i + 1].index : claimsHtml.length;
-      const stripped = stripHtml(claimsHtml.slice(start, end)).replace(/^\d+[.)]\s*/, '');
+      const stripped = stripHtml(claimsHtml.slice(start, end), 'block').replace(/^\d+[.)]\s*/, '');
       if (stripped) {
         seen.add(num);
         claims.push(`${Number(num)}. ${stripped}`.trim());
@@ -167,10 +154,10 @@ function splitClaimsHtml(claimsHtml: string): { claims: string[]; method: 'num' 
     if (claims.length > 0) return { claims, method };
   }
 
-  const textSplit = splitPlainTextClaims(stripHtml(claimsHtml));
+  const textSplit = splitPlainTextClaims(stripHtml(claimsHtml, 'block'));
   if (textSplit) return { claims: textSplit, method: 'text' };
 
-  const blob = stripHtml(claimsHtml);
+  const blob = stripHtml(claimsHtml, 'block');
   return { claims: blob ? [blob] : [], method: 'blob' };
 }
 

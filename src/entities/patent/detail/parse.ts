@@ -1,42 +1,4 @@
-const HTML_ENTITIES: Record<string, string> = {
-  '&lt;': '<',
-  '&gt;': '>',
-  '&quot;': '"',
-  '&#39;': "'",
-  '&apos;': "'",
-  '&hellip;': '…',
-  '&nbsp;': ' ',
-  '&mdash;': '—',
-  '&ndash;': '–',
-};
-
-export function decodeHtmlEntities(s: string): string {
-  let out = s;
-  for (const [entity, char] of Object.entries(HTML_ENTITIES)) {
-    out = out.split(entity).join(char);
-  }
-  out = out.replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
-    try {
-      return String.fromCodePoint(parseInt(hex, 16));
-    } catch {
-      return '';
-    }
-  });
-  out = out.replace(/&#(\d+);/g, (_, dec) => {
-    try {
-      return String.fromCodePoint(Number(dec));
-    } catch {
-      return '';
-    }
-  });
-  return out.replace(/&amp;/g, '&');
-}
-
-export function stripTags(s: string): string {
-  return decodeHtmlEntities(s.replace(/<[^>]*>/g, ' '))
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+import { decodeHtmlEntities, stripHtml } from '../../html-utils.js';
 
 export interface ParsedGooglePatent {
   title?: string;
@@ -129,7 +91,7 @@ export function parseGooglePatentHtml(html: string): ParsedGooglePatent {
   const abstractMatch = html.match(/<div[^>]*class="[^"]*abstract[^"]*"[^>]*>([\s\S]*?)<\/div>/i)
     || html.match(/<abstract[^>]*>([\s\S]*?)<\/abstract>/i);
   if (abstractMatch) {
-    const abstractText = stripTags(abstractMatch[1]).slice(0, 5000);
+    const abstractText = stripHtml(abstractMatch[1], 'block').slice(0, 5000);
     if (abstractText) result.abstract = abstractText;
   }
 
@@ -144,7 +106,7 @@ export function parseGooglePatentHtml(html: string): ParsedGooglePatent {
     blocks.forEach((block, i) => {
       const num = numMatches[i];
       if (!num || seen.has(num)) return;
-      const text = stripTags(block);
+      const text = stripHtml(block, 'block');
       if (text) {
         seen.add(num);
         result.claims.push({ num, text });
@@ -169,7 +131,7 @@ export function parseGooglePatentHtml(html: string): ParsedGooglePatent {
 
   const nplRows = matchAll(/itemprop="detailedNonPatentLiterature"[^>]*>([\s\S]*?)<\/tr>/i, html);
   for (const row of nplRows) {
-    const text = stripTags(row[1]);
+    const text = stripHtml(row[1], 'block');
     if (text) result.non_patent_literature.push(text.slice(0, 500));
   }
 

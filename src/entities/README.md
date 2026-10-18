@@ -623,3 +623,28 @@ BatchGetResult { entity: string; id: string; success: boolean; data?: unknown; e
 ```
 
 All outbound fetch is proxy-aware — see `src/connections/README.md` (Proxy-aware fetch).
+
+---
+
+## Shared Helpers
+
+### HTML text cleanup (`html-utils.ts`)
+
+`decodeHtmlEntities(s)` and `stripHtml(s, mode?)` are the canonical HTML-to-text
+cleaners used by entity fetchers (Google Patents titles/snippets, PPUBS claims
+and abstracts, the patent detail page parser, Reactome pathway names in
+`gene.ts`/`cross-entity.ts`).
+
+- Only **tag-shaped** sequences are removed — raw (`<b>`) and entity-encoded
+  (`&lt;b&gt;`), in a convergence loop for nested markup. Entity-encoded
+  comparison operators in patent claims (`weight &lt;500 Da … &gt;95%`) are plain
+  text and survive as literal `<`/`>`.
+- Entities decode in a **single pass** after stripping, so the decoder never
+  re-decodes its own output (`&amp;lt;` stays literal `&lt;`).
+- `mode='inline'` (default) removes tags with `''` so inline highlights stay
+  joined (`Interleukin-<b>2</b>` → `Interleukin-2`); `mode='block'` removes
+  tags with `' '` and collapses whitespace runs, for block markup.
+
+`cleanArticleTitle` in `article/europepmc-shared.ts` deliberately stays
+separate: article titles need sub/sup → parenthesized-text conversion, not
+plain stripping.

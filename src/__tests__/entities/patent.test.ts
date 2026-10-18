@@ -1726,7 +1726,7 @@ describe('parseGooglePatentHtml', () => {
   });
 
   test('decodeHtmlEntities handles common entities', async () => {
-    const { decodeHtmlEntities } = await import('../../entities/patent/detail/parse.js');
+    const { decodeHtmlEntities } = await import('../../entities/html-utils.js');
     expect(decodeHtmlEntities('a&amp;b&lt;c&gt;d&quot;e&#39;f&hellip;g')).toBe("a&b<c>d\"e'f…g");
     expect(decodeHtmlEntities('&#65;&#66;')).toBe('AB');
   });

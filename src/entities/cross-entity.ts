@@ -1,6 +1,7 @@
 import { connectionManager } from '../connections/manager.js';
 import { RestConnection } from '../connections/rest.js';
 import { fetchWithTimeout } from '../connections/fetch-utils.js';
+import { stripHtml } from './html-utils.js';
 import { geneSearch, GeneSearchResult } from './gene.js';
 import { variantSearch, VariantSearchResult } from './variant.js';
 import { drugSearch, DrugSearchResult, drugIdentityKey, fetchAdverseEvents, AdverseEventsResult } from './drug.js';
@@ -171,7 +172,7 @@ export async function geneToPathways(geneSymbol: string): Promise<Array<{ pathwa
           const name = typeof entry.name === 'string' ? entry.name : String(entry.name);
           pathways.push({
             pathway_id: entry.stId as string,
-            name: name.replace(/<[^>]+>/g, ''),
+            name: stripHtml(name),
             source: 'reactome',
           });
         }
