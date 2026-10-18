@@ -1,8 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { drugSearch, drugGet, DRUG_ENTITY_ALL_SECTIONS } from '../../entities/drug.js';
+import { drugSearch, drugGet, DRUG_ENTITY_ALL_SECTIONS, type DrugSearchResult } from '../../entities/drug.js';
 import { drugToTrials } from '../../entities/cross-entity.js';
-import { requiredString, sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra } from './utils.js';
+import { requiredString, listEnvelope, sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra, type ListEnvelope } from './utils.js';
 
 // Deadline rationale (#107 phase 2): mychem core lookup + parallel section
 // wave (regulatory labels, ChEMBL, FAERS adverse events) where each section
@@ -41,8 +41,11 @@ export function registerDrugTools(server: McpServer): void {
         const results = await drugSearch(query, { limit, offset });
         // Response envelope: results plus, when nothing matched, an explicit
         // hint that drug_search is a chemical-identity search and mechanism /
-        // target queries belong on gene_drugs (issue #83).
-        const envelope: { results: typeof results; hint?: string } = { results };
+        // target queries belong on gene_drugs (issue #83). Since #130 the
+        // envelope is the standard list shape ({ results, warnings?, errors? })
+        // with hint kept exactly as-is — warnings/errors slots reserved for
+        // future use (the entity returns a bare array today).
+        const envelope: ListEnvelope<DrugSearchResult> & { hint?: string } = listEnvelope(results);
         if (results.length === 0) {
           envelope.hint = `No ChEMBL/MyChem identity matches for '${query}'. drug_search matches drug names/keywords; for target/mechanism queries (e.g. 'EGFR inhibitor') use gene_drugs with the target's gene symbol.`;
         }

@@ -355,13 +355,20 @@ describe('geoGet validation', () => {
     connectionManager.closeAll();
   });
 
-  test('GDS accessions are rejected with a helpful error', async () => {
+  test('GDS accessions return structured guidance as data (issue #130), no fetch', async () => {
     const { geoGet } = await loadGeo();
     mockFetchRoutes(defaultRoutes());
 
-    await expect(geoGet('GDS5132')).rejects.toThrow(
-      /curated GEO DataSet records.*GSE/s
-    );
+    const result = await geoGet('GDS5132');
+
+    expect(result).toEqual({
+      accession: 'GDS5132',
+      guidance: expect.stringContaining('curated GEO DataSet records'),
+      see_also: { series: 'GSE…', sample: 'GSM…' },
+    });
+    expect((result as { guidance: string }).guidance).toContain('SOFT endpoint');
+    expect((result as { guidance: string }).guidance).toContain('GSE');
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   test('malformed accessions are rejected', async () => {
@@ -387,7 +394,7 @@ describe('geoGet series detail', () => {
 
     const detail = await geoGet('GSE183947');
 
-    if (detail.entry_type !== 'series') throw new Error('expected series detail');
+    if (!('entry_type' in detail) || detail.entry_type !== 'series') throw new Error('expected series detail');
     expect(detail.title).toBe('Identification of five cytotoxicity-related genes');
     expect(detail.status).toBe('Public on Sep 15 2021');
     expect(detail.type).toBe('Expression profiling by high throughput sequencing');
@@ -422,7 +429,7 @@ describe('geoGet series detail', () => {
 
     const detail = await geoGet('GSE183947');
 
-    if (detail.entry_type !== 'series') throw new Error('expected series detail');
+    if (!('entry_type' in detail) || detail.entry_type !== 'series') throw new Error('expected series detail');
     expect(detail.samples).toEqual([
       { accession: 'GSM5574685', title: undefined },
       { accession: 'GSM5574686', title: undefined },
@@ -437,7 +444,7 @@ describe('geoGet series detail', () => {
 
     const detail = await geoGet('GSE183947');
 
-    if (detail.entry_type !== 'series') throw new Error('expected series detail');
+    if (!('entry_type' in detail) || detail.entry_type !== 'series') throw new Error('expected series detail');
     // Same PMID arrives twice (SOFT numeric + esummary '35046993') — must emit once, as a number.
     expect(detail.pubmed_ids).toEqual([35046993]);
     expect(detail.pubmed_ids.every(id => typeof id === 'number')).toBe(true);
@@ -467,7 +474,7 @@ describe('geoGet sample detail', () => {
 
     const detail = await geoGet('GSM5574685');
 
-    if (detail.entry_type !== 'sample') throw new Error('expected sample detail');
+    if (!('entry_type' in detail) || detail.entry_type !== 'sample') throw new Error('expected sample detail');
     expect(detail.title).toBe('tumor rep1');
     expect(detail.status).toBe('Public on Sep 15 2021');
     expect(detail.source_name).toBe('tumor tissue');
@@ -498,7 +505,7 @@ describe('geoGet supplementary download', () => {
 
     const detail = await geoGet('GSE183947', { download: true });
 
-    if (detail.entry_type !== 'series') throw new Error('expected series detail');
+    if (!('entry_type' in detail) || detail.entry_type !== 'series') throw new Error('expected series detail');
     const download = detail.download!;
     expect(download.filename).toBe('GSE183947_fpkm.csv.gz');
     expect(download.url).toBe(
@@ -574,7 +581,7 @@ describe('geoGet supplementary download', () => {
 
     const detail = await geoGet('GSE183947', { download: true });
 
-    if (detail.entry_type !== 'series') throw new Error('expected series detail');
+    if (!('entry_type' in detail) || detail.entry_type !== 'series') throw new Error('expected series detail');
     expect(detail.download!.filename).toBe('GSE183947_fpkm_fi_le.csv.gz');
     expect(existsSync(detail.download!.path)).toBe(true);
   });
@@ -594,7 +601,7 @@ describe('geoGet platform detail', () => {
 
     const detail = await geoGet('GPL11154');
 
-    if (detail.entry_type !== 'platform') throw new Error('expected platform detail');
+    if (!('entry_type' in detail) || detail.entry_type !== 'platform') throw new Error('expected platform detail');
     expect(detail.title).toContain('Illumina HiSeq 2500');
     expect(detail.organisms).toEqual(['Homo sapiens']);
     expect(detail.technology).toBe('high-throughput sequencing');

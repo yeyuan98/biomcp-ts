@@ -241,20 +241,52 @@ export async function geoSearch(query: string, options: GeoSearchOptions = {}): 
   return results;
 }
 
-function validateGeoAccession(accession: string): string {
+/**
+ * Structured guidance returned (not thrown) by geoGet for GDS accessions
+ * (issue #130): GDS records are curated GEO DataSets the SOFT endpoint does
+ * not serve, so the reply points the caller at the underlying series/sample
+ * accessions instead. Data, not an error — callers can inspect fields.
+ */
+export interface GeoGdsGuidance {
+  accession: string;
+  guidance: string;
+  see_also: { series: string; sample: string };
+}
+
+/**
+ * Trim/uppercase an accession and reject anything that is not a well-formed
+ * GSE/GSM/GPL/GDS accession. GDS passes here — the GDS-specific handling
+ * (guidance in geoGet, error elsewhere) is the callers' decision.
+ */
+function normalizeGeoAccession(accession: string): string {
   const normalized = accession.trim().toUpperCase();
-  const match = GEO_ACCESSION_REGEX.exec(normalized);
-  if (!match) {
+  if (!GEO_ACCESSION_REGEX.test(normalized)) {
     throw new Error(
       `Invalid GEO accession "${accession}". Expected GSE<n>, GSM<n>, or GPL<n> (e.g. GSE183947, GSM5574685, GPL11154).`
     );
   }
-  if (match[1] === 'GDS') {
+  return normalized;
+}
+
+function validateGeoAccession(accession: string): string {
+  const normalized = normalizeGeoAccession(accession);
+  if (normalized.startsWith('GDS')) {
     throw new Error(
       `GDS accessions (e.g. ${normalized}) refer to curated GEO DataSet records, which are not available via the SOFT endpoint. Use the underlying series accession (GSE...) or sample accession (GSM...) instead.`
     );
   }
   return normalized;
+}
+
+/** Guidance payload for a normalized GDS accession (see GeoGdsGuidance). */
+function gdsGuidance(normalized: string): GeoGdsGuidance {
+  return {
+    accession: normalized,
+    guidance:
+      `GDS accessions (e.g. ${normalized}) refer to curated GEO DataSet records, which the SOFT endpoint does not serve. ` +
+      'Use the underlying series accession (GSE...) or sample accession (GSM...) instead.',
+    see_also: { series: 'GSE…', sample: 'GSM…' },
+  };
 }
 
 async function fetchSoftText(accession: string): Promise<string> {
@@ -444,8 +476,15 @@ async function attachDownload(
   return detail;
 }
 
-export async function geoGet(accession: string, options: GeoGetOptions = {}): Promise<GeoDetail> {
-  const normalized = validateGeoAccession(accession);
+export async function geoGet(accession: string, options: GeoGetOptions = {}): Promise<GeoDetail | GeoGdsGuidance> {
+  const normalized = normalizeGeoAccession(accession);
+  // GDS curated DataSets: structured guidance instead of a thrown error
+  // (issue #130) — the geo_get docstring always promised guidance "pointing
+  // at the underlying GSE/GSM"; as data it is inspectable without a catch,
+  // and no fetch runs for this path.
+  if (normalized.startsWith('GDS')) {
+    return gdsGuidance(normalized);
+  }
   const record = await fetchSoftRecord(normalized);
 
   let detail: GeoDetail;

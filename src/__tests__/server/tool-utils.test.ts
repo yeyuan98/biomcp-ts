@@ -321,3 +321,37 @@ describe('withToolTimeout', () => {
     ).rejects.toThrow('backend error');
   });
 });
+
+// ---------------------------------------------------------------------------
+// listEnvelope (issue #130)
+// ---------------------------------------------------------------------------
+
+describe('listEnvelope', () => {
+  test('bare results: serializes as exactly { results } — no warnings/errors keys', async () => {
+    const { listEnvelope } = await import('../../server/tools/utils.js');
+    const envelope = listEnvelope([1, 2, 3]);
+    expect(envelope).toEqual({ results: [1, 2, 3] });
+    expect(JSON.stringify(listEnvelope([]))).toBe('{"results":[]}');
+    expect('warnings' in envelope).toBe(false);
+    expect('errors' in envelope).toBe(false);
+  });
+
+  test('empty warnings/errors arrays are omitted (searchArticles emission parity)', async () => {
+    const { listEnvelope } = await import('../../server/tools/utils.js');
+    expect(listEnvelope([1], [], [])).toEqual({ results: [1] });
+  });
+
+  test('non-empty warnings/errors attach in place', async () => {
+    const { listEnvelope } = await import('../../server/tools/utils.js');
+    const envelope = listEnvelope(
+      [],
+      ['pubmed dropped a term'],
+      [{ source: 'semantic_scholar', message: 'timed out', retryable: true }],
+    );
+    expect(envelope).toEqual({
+      results: [],
+      warnings: ['pubmed dropped a term'],
+      errors: [{ source: 'semantic_scholar', message: 'timed out', retryable: true }],
+    });
+  });
+});

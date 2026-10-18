@@ -6,7 +6,7 @@ import { variantSearch, VariantSearchResult } from './variant.js';
 import { drugSearch, DrugSearchResult, drugIdentityKey, fetchAdverseEvents, AdverseEventsResult } from './drug.js';
 import { diseaseSearch, DiseaseSearchResult } from './disease.js';
 import { trialSearch } from './trial.js';
-import { articleSearch, Article } from './article/index.js';
+import { articleSearch } from './article/index.js';
 import { fetchDisgenetGdaSummary } from './disgenet.js';
 import { errorMessageWithCause, networkCauseCode } from './errors.js';
 
@@ -186,9 +186,10 @@ export async function geneToPathways(geneSymbol: string): Promise<Array<{ pathwa
   }
 }
 
-export async function geneToArticles(geneSymbol: string): Promise<Article[]> {
-  return await articleSearch(geneSymbol, { limit: 10 });
-}
+// geneToArticles was deleted (issue #130): its only runtime caller, the
+// gene_articles tool handler, now calls searchArticles directly so the
+// { results, warnings?, errors? } envelope (not the bare array the legacy
+// wrapper returned) reaches the tool layer.
 
 /**
  * Convert HGVS three-letter amino acid notation to single-letter shorthand.

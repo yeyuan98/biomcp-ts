@@ -85,7 +85,7 @@ entityGet(id, sections?)      → { ...core, sections: Record<string, unknown> }
 
 Cross-entity pivot functions and multi-entity operations:
 
-- **Pivots**: `geneToDrugs`, `geneToTrials`, `geneToPathways`, `geneToArticles`, `variantToTrials`, `drugToGenes`, `drugToTrials`, `drugToAdverseEvents`, `diseaseToDrugs`, `diseaseToGenes`, `diseaseToTrials` — each queries the appropriate upstream source
+- **Pivots**: `geneToDrugs`, `geneToTrials`, `geneToPathways`, `variantToTrials`, `drugToGenes`, `drugToTrials`, `drugToAdverseEvents`, `diseaseToDrugs`, `diseaseToGenes`, `diseaseToTrials` — each queries the appropriate upstream source (`geneToArticles` was removed in #130: the gene_articles tool calls `searchArticles` directly so the `{ results, warnings?, errors? }` envelope reaches the tool layer)
 - **Enrichment**: `geneEnrichment(geneSymbols[])` — Reactome pathway enrichment
 - **Discovery**: `discover(query)` — multi-entity search across all domains
 - **Batch**: `batchGet(inputs: BatchGetInput[])` — parallel entity resolution

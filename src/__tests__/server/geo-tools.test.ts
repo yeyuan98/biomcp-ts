@@ -198,12 +198,19 @@ describe('geo tools', () => {
     expect(fetchUrls()).toHaveLength(0);
   });
 
-  it('geo_get surfaces curated-DataSet guidance for GDS accessions (isError, no fetch)', async () => {
+  it('geo_get returns curated-DataSet guidance as structured data for GDS accessions (no fetch, issue #130)', async () => {
     mockFetchRoutes(defaultRoutes());
 
-    await expect(harness.callTool('geo_get', { accession: 'GDS1234' })).rejects.toThrow(
-      /GDS accessions \(e\.g\. GDS1234\) refer to curated GEO DataSet records.*Use the underlying series accession \(GSE\.\.\.\) or sample accession \(GSM\.\.\.\) instead/s
-    );
+    const result = await harness.callTool('geo_get', { accession: 'GDS1234' });
+
+    // Structured guidance, not a thrown error: the docstring promises GDS
+    // records "return guidance pointing at the underlying GSE/GSM".
+    expect(result).toEqual({
+      accession: 'GDS1234',
+      guidance: expect.stringContaining('curated GEO DataSet records'),
+      see_also: { series: 'GSE…', sample: 'GSM…' },
+    });
+    expect(result.guidance).toContain('SOFT endpoint');
     expect(fetchUrls()).toHaveLength(0);
   });
 });
