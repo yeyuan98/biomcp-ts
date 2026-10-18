@@ -504,7 +504,10 @@ export async function getPreprintArticle(
   const step2: Promise<void>[] = [];
 
   if (official) {
-    const elapsed = Date.now() - startedAt;
+    // Clock-jump guard (WSL2/NTP): a backward wall-clock jump between
+    // startedAt and here must not fake "20 s already spent" and skip /pubs —
+    // clamp negative elapsed to 0 (precedent: rate-limiter refill guard).
+    const elapsed = Math.max(0, Date.now() - startedAt);
     if (elapsed > PREPRINT_PUBS_SKIP_THRESHOLD_MS) {
       // Budget guard (issue #51): step 1 was slow-but-succeeding (an outage
       // fast-skips above), so a /pubs call — worst case ~32.2 s on the same

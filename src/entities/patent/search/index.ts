@@ -184,8 +184,12 @@ export async function patentSearch(
 
     // Failure-only fallback (never on 0 hits — those are legitimate
     // results): default ppubs → uspto_odp, once, budget-guarded. Explicit
-    // `source` requests are respected as-is.
-    if (source === 'ppubs' && !options.source && hasOdpKey() && Date.now() - startedAt <= FALLBACK_BUDGET_MS) {
+    // `source` requests are respected as-is. The elapsed clamp is a
+    // clock-jump guard (WSL2/NTP): a backward jump must not fake an
+    // unspent 12 s budget and fire an extra fallback leg (precedent:
+    // rate-limiter refill guard).
+    const fallbackElapsed = Math.max(0, Date.now() - startedAt);
+    if (source === 'ppubs' && !options.source && hasOdpKey() && fallbackElapsed <= FALLBACK_BUDGET_MS) {
       try {
         const fallback = await runBackend('uspto_odp', query, options);
         record('uspto_odp', fallback);
