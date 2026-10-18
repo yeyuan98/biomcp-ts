@@ -66,7 +66,7 @@ Full tool schemas (params, enums, defaults) live in [src/server/README.md](src/s
 |------|-------------|
 | `disease_search` | Search diseases by name, phenotype, or keyword (envelope `{ results, warnings?, errors? }`) |
 | `disease_get` | Get detailed disease info by ID (DOID, MONDO, OMIM, etc.) with optional sections (gene_associations, phenotypes, pathways) |
-| `disease_drugs` | Get drugs for a disease (OpenTargets; envelope `{ results }` — partial failures ride as inline `_error` items within results) |
+| `disease_drugs` | Get drugs for a disease (OpenTargets; envelope `{ results, warnings?, errors? }` — OpenTargets failures and unresolved diseases ride in `errors[]`, never as inline rows) |
 | `disease_trials` | Get clinical trials for a disease (ClinicalTrials.gov; envelope `{ results, warnings?, errors? }`) |
 
 ### Article (3)

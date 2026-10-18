@@ -333,7 +333,40 @@ export async function drugToAdverseEvents(drugName: string, limit = 20): Promise
   return fetchAdverseEvents(drugName, limit);
 }
 
-export async function diseaseToDrugs(diseaseQuery: string): Promise<Array<{ drug_name: string; source: string; phase?: string; report_count?: number }>> {
+/** One ranked drug row of a diseaseToDrugs reply (OpenTargets). */
+export interface DiseaseDrugRow {
+  drug_name: string;
+  source: string;
+  phase?: string;
+  report_count?: number;
+}
+
+/**
+ * Out-of-band failure in the diseaseToDrugs reply envelope (issue #159):
+ * mirrors the tool layer's ListEnvelopeError shape (entities never import
+ * from server/tools). Messages keep the wording of the legacy inline
+ * `_error` rows verbatim. `retryable` is set only on the catch-all upstream
+ * failure (the current message's "or try again later" treats transport
+ * errors as transient); the not-found path is deterministic and omits it.
+ */
+export interface DiseaseDrugsError {
+  source: string;
+  message: string;
+  retryable?: boolean;
+}
+
+/**
+ * diseaseToDrugs reply envelope (issue #159): real drug rows in `results`;
+ * failures ride in `errors` instead of masquerading as inline `_error`
+ * items inside `results`. `errors` is attached by callers only when
+ * non-empty (see `listEnvelope`).
+ */
+export interface DiseaseDrugsResult {
+  results: DiseaseDrugRow[];
+  errors?: DiseaseDrugsError[];
+}
+
+export async function diseaseToDrugs(diseaseQuery: string): Promise<DiseaseDrugsResult> {
   try {
     const conn = connectionManager.getConnection('opentargets');
     
@@ -379,7 +412,13 @@ export async function diseaseToDrugs(diseaseQuery: string): Promise<Array<{ drug
     }
     
     if (!diseaseId) {
-      return [{ _error: `No OpenTargets entry found for disease '${diseaseQuery}'. Try disease_search first to verify the disease name or ID.` } as any];
+      return {
+        results: [],
+        errors: [{
+          source: 'disease',
+          message: `No OpenTargets entry found for disease '${diseaseQuery}'. Try disease_search first to verify the disease name or ID.`,
+        }],
+      };
     }
     
     const drugQuery = `query($efoId: String!) {
@@ -395,15 +434,24 @@ export async function diseaseToDrugs(diseaseQuery: string): Promise<Array<{ drug
     const drugData = JSON.parse(JSON.stringify(drugRaw));
     const rows: OtDrugCandidateRow[] = drugData?.data?.disease?.drugAndClinicalCandidates?.rows || [];
 
-    return rankOtDrugRows(rows).slice(0, 20).map((r) => ({
-      drug_name: r.drug?.name || '',
-      source: 'opentargets',
-      phase: r.maxClinicalStage || undefined,
-      report_count: (r.clinicalReports || []).length,
-    }));
+    return {
+      results: rankOtDrugRows(rows).slice(0, 20).map((r) => ({
+        drug_name: r.drug?.name || '',
+        source: 'opentargets',
+        phase: r.maxClinicalStage || undefined,
+        report_count: (r.clinicalReports || []).length,
+      })),
+    };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    return [{ _error: `Drug lookup for disease failed (source: opentargets): ${msg}. Try disease_search first to verify the disease name, or try again later.` } as any];
+    return {
+      results: [],
+      errors: [{
+        source: 'opentargets',
+        message: `Drug lookup for disease failed (source: opentargets): ${msg}. Try disease_search first to verify the disease name, or try again later.`,
+        retryable: true,
+      }],
+    };
   }
 }
 
