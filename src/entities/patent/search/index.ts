@@ -241,6 +241,11 @@ export async function patentSearch(
     response.total_hits_basis = total_hits_basis;
   }
   if (options.seminal ?? true) {
+    // Deterministic shape (#136): when seminal was requested the fields are
+    // ALWAYS present — `[]` / 0 on every skip path (0 patents, exhausted
+    // time budget, mining throw), populated values when mining ran.
+    response.seminal_prior_art = [];
+    response.mined_count = 0;
     if (patents.length > 0) {
       let seminal_note: string | undefined;
       const elapsed = Date.now() - startedAt;

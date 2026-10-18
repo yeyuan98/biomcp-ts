@@ -69,9 +69,21 @@ describe('sra tools (integration)', () => {
     expect(results[0].run_count).toBeGreaterThanOrEqual(1);
   }, 60000);
 
-  it('sra_get rejects ENA accessions with an ENA hint', async () => {
-    await expect(
-      harness.callTool('sra_get', { accession: 'ERP123456' })
-    ).rejects.toThrow(/ENA/i);
-  }, 30000);
+  it('sra_get resolves DDBJ (DRX) and European (ERR) accessions indexed by NCBI', async () => {
+    // Live-verified 2026-10-17: NCBI SRA indexes ENA/DDBJ submissions — the
+    // former ENA-pointer rejection was wrong (issue #136).
+    const experiment = await retryOnRateLimit(() =>
+      harness.callTool('sra_get', { accession: 'DRX579758' })
+    );
+    expect(experiment.entry_type).toBe('experiment');
+    expect(experiment.accession).toBe('DRX579758');
+    expect(experiment.study_accession).toBe('DRP021325');
+
+    const run = await retryOnRateLimit(() =>
+      harness.callTool('sra_get', { accession: 'ERR174237' })
+    );
+    expect(run.entry_type).toBe('run');
+    expect(run.accession).toBe('ERR174237');
+    expect(run.experiment_accession).toBeTruthy();
+  }, 60000);
 });

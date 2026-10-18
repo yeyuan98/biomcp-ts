@@ -76,6 +76,10 @@ export interface EnsemblGeneInfo {
 
 export interface EnsemblHomologyTarget {
   id: string;
+  /** Gene symbol (lookup display_name) — enrichment via a batched
+   *  POST /lookup/id after the /homology leg; absent when the lookup has
+   *  no name for the stable ID or the lookup leg fails (silent degrade). */
+  symbol?: string | null;
   species: string;
   taxon_id: number | null;
   protein_id: string | null;
@@ -88,6 +92,8 @@ export interface EnsemblHomologyEntry {
   taxonomy_level: string | null;
   source_id: string;
   source_species: string;
+  /** Symbol of the SOURCE gene when the batched lookup resolved it. */
+  source_symbol?: string | null;
   target: EnsemblHomologyTarget;
 }
 
@@ -398,16 +404,68 @@ export async function ensemblHomology(
 
   homologies.sort((a, b) => (b.target.perc_id ?? -1) - (a.target.perc_id ?? -1));
   const limit = Math.min(Math.max(options.limit ?? DEFAULT_HOMOLOGY_LIMIT, 1), MAX_HOMOLOGY_LIMIT);
+  const limited = homologies.slice(0, limit);
+  await attachHomologySymbols(limited, geneId);
 
   return {
     input: trimmed,
     species,
     type,
     total: homologies.length,
-    returned: Math.min(homologies.length, limit),
+    returned: limited.length,
     truncated: homologies.length > limit,
-    homologies: homologies.slice(0, limit),
+    homologies: limited,
   };
+}
+
+/** Cap on ids per batched /lookup/id POST — the homology limit is ≤100
+ *  targets (+1 source), so this only guards against future drift. */
+const HOMOLOGY_SYMBOL_LOOKUP_CAP = 100;
+
+/** Enrich homology rows with gene symbols: the /homology/id payload carries
+ *  stable IDs ONLY (live-verified — no gene-name field), so target symbols
+ *  (ARAF/RAF1 for BRAF paralogs) need one batched POST /lookup/id over the
+ *  returned ids. Pure enrichment: ANY failure degrades silently to
+ *  symbol-less rows — the response shape never changes, no error is added. */
+async function attachHomologySymbols(
+  entries: EnsemblHomologyEntry[],
+  sourceGeneId: string
+): Promise<void> {
+  const ids = new Set<string>([sourceGeneId]);
+  for (const entry of entries) {
+    if (entry.target.id) ids.add(entry.target.id);
+    if (entry.source_id) ids.add(entry.source_id);
+  }
+  if (ids.size === 0 || entries.length === 0) return;
+
+  try {
+    const response = (await (ensemblConn() as RestConnection).post('/lookup/id', {
+      ids: [...ids].slice(0, HOMOLOGY_SYMBOL_LOOKUP_CAP),
+    })) as Record<string, unknown> | null;
+    if (!response || typeof response !== 'object' || Array.isArray(response)) return;
+
+    const symbols = new Map<string, string>();
+    for (const [id, record] of Object.entries(response)) {
+      const name =
+        record && typeof record === 'object'
+          ? optStr((record as Record<string, unknown>)['display_name'])
+          : null;
+      if (name) symbols.set(id, name);
+    }
+    if (symbols.size === 0) return;
+
+    const symbolFor = (id: string): string | null =>
+      symbols.get(id) ?? symbols.get(id.split('.')[0]) ?? null;
+
+    for (const entry of entries) {
+      const targetSymbol = symbolFor(entry.target.id);
+      if (targetSymbol) entry.target.symbol = targetSymbol;
+      const sourceSymbol = symbolFor(entry.source_id);
+      if (sourceSymbol) entry.source_symbol = sourceSymbol;
+    }
+  } catch {
+    // Silent degrade — symbols are enrichment only, never a failure mode.
+  }
 }
 
 function impactOf(tc: Record<string, unknown>): number {

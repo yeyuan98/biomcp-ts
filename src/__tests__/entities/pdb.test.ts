@@ -265,6 +265,65 @@ describe('pdbGet', () => {
 
     expect(result.sections).toBeDefined();
     expect(result.sections!.polymer_entities).toBeDefined();
+    // All items succeeded → no top-level warnings channel.
+    expect(result.warnings).toBeUndefined();
+
+    spy.mockRestore();
+  });
+
+  it('bubbles a failed entity to top-level warnings while siblings succeed (#136)', async () => {
+    const entryData = {
+      struct: { title: 'HEMOGLOBIN' },
+      rcsb_entry_container_identifiers: {
+        polymer_entity_ids: ['1', '2'],
+        non_polymer_entity_ids: [],
+        assembly_ids: [],
+      },
+    };
+    mockRequest.mockImplementation((path: string) => {
+      if (path.includes('/core/entry/')) return Promise.resolve(entryData);
+      if (path.includes('/polymer_entity/4hhb/1')) return Promise.resolve({ rcsb_polymer_entity: { pdbx_description: 'HEMOGLOBIN ALPHA' } });
+      return Promise.reject(new Error('HTTP 500: Internal Server Error'));
+    });
+
+    const spy = jest.spyOn(connectionManager, 'getConnection').mockImplementation((_sourceId: string) => {
+      return createMockConnection({ request: mockRequest }) as any;
+    });
+
+    const result = await pdbGet('4HHB', ['polymer_entities']);
+
+    const entities = result.sections!.polymer_entities as any[];
+    expect(entities).toHaveLength(2);
+    expect(entities[0].rcsb_polymer_entity.pdbx_description).toBe('HEMOGLOBIN ALPHA');
+    expect(entities[1]._error).toContain('Failed to fetch polymer entity 2');
+    // Top-level signal: the partial failure is visible without walking the array.
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings![0]).toBe(
+      'polymer_entities: entity 2 failed: Failed to fetch polymer entity 2: HTTP 500: Internal Server Error'
+    );
+
+    spy.mockRestore();
+  });
+
+  it('does not warn on the informational no-polymer-entities placeholder', async () => {
+    const entryData = {
+      struct: { title: 'HEMOGLOBIN' },
+      rcsb_entry_container_identifiers: {
+        polymer_entity_ids: [],
+        non_polymer_entity_ids: [],
+        assembly_ids: [],
+      },
+    };
+    mockRequest.mockResolvedValue(entryData);
+
+    const spy = jest.spyOn(connectionManager, 'getConnection').mockImplementation((_sourceId: string) => {
+      return createMockConnection({ request: mockRequest }) as any;
+    });
+
+    const result = await pdbGet('4HHB', ['polymer_entities']);
+
+    expect((result.sections!.polymer_entities as any[])[0]._error).toContain('No polymer entities');
+    expect(result.warnings).toBeUndefined();
 
     spy.mockRestore();
   });

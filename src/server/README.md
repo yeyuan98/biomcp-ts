@@ -26,7 +26,7 @@ Every tool handler follows the same contract:
 3. Return `{ content: [{ type: 'text', text: JSON.stringify(result) }] }`
 4. On error: return `{ content: [{ type: 'text', text: String(error) }], isError: true }`
 
-Error surfaces: malformed input fails the SDK's zod validation before the handler runs and comes back as `isError: true` content prefixed `MCP error -32602: Input validation error` (SDK 1.29 converts the protocol error into a tool error result), while domain errors — unsupported accessions (e.g. GDS guidance in `geo_get`, the ENA pointer in `sra_get`), not-found, size gates — surface as `isError: true` content carrying the handler's error text the LLM can read and act on.
+Error surfaces: malformed input fails the SDK's zod validation before the handler runs and comes back as `isError: true` content prefixed `MCP error -32602: Input validation error` (SDK 1.29 converts the protocol error into a tool error result), while domain errors — unsupported accessions (e.g. GDS guidance in `geo_get`), not-found, size gates — surface as `isError: true` content carrying the handler's error text the LLM can read and act on.
 
 Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'diseases'])` and extract specific sections from the result.
 
@@ -125,7 +125,7 @@ Param-based dispatch: `query` → search mode, `pdb_id` → get mode, `pdb_id` +
 | Tool | Input Schema | Description | Annotations |
 |------|-------------|-------------|-------------|
 | `sra_search` | `query: string` (free text, accession SRP/SRX/SRR/SRS, or `"RNA-SEQ AND Homo sapiens[Organism]"`), `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search NCBI SRA via E-utilities (esearch db=sra → efetch experiment-package XML, batches of 10). Items list experiment/study/sample accessions, organism, library strategy, run count, and `first_run_accession` for chaining into `sra_get`. `NCBI_API_KEY` optional | readOnly, openWorld |
-| `sra_get` | `accession: string` (SRP/SRX/SRR/SRS/SZ, e.g. SRR14432476; ENA `ER*`/DDBJ `DR*` accessions rejected with an ENA pointer — NCBI SRA does not index them) | Get full SRA entry details: SRR run (instrument, total_spots, total_bases, size_bytes), SRX experiment (library strategy/source/selection/layout, platform), SRP study (experiment list, ≤50), or SRS sample. Shares the NCBI E-utilities 3 req/s budget | readOnly, openWorld |
+| `sra_get` | `accession: string` (run SRR/ERR/DRR, experiment SRX/ERX/DRX, study SRP/ERP/DRP, sample SRS/ERS/DRS, e.g. SRR14432476 — NCBI SRA indexes NCBI, ENA, and DDBJ accessions alike; the fetched package must carry the exact accession, else not-found) | Get full SRA entry details: run (instrument, total_spots, total_bases, size_bytes), experiment (library strategy/source/selection/layout, platform), study (experiment list, ≤50), or sample. Shares the NCBI E-utilities 3 req/s budget | readOnly, openWorld |
 
 ### GenBank Tools (`tools/genbank.ts`) — 3 tools
 

@@ -77,6 +77,45 @@ const MULTI_PACKAGE_XML = `<?xml version="1.0" encoding="UTF-8"  ?>
 </EXPERIMENT_PACKAGE>
 </EXPERIMENT_PACKAGE_SET>`;
 
+const DDBJ_PACKAGE_XML = `<?xml version="1.0" encoding="UTF-8"  ?>
+<EXPERIMENT_PACKAGE_SET>
+<EXPERIMENT_PACKAGE>
+<EXPERIMENT accession="DRX579758" alias="ddbj alias">
+  <IDENTIFIERS><PRIMARY_ID>DRX579758</PRIMARY_ID></IDENTIFIERS>
+  <TITLE>DDBJ metagenome experiment</TITLE>
+  <STUDY_REF accession="DRP021325"><IDENTIFIERS><PRIMARY_ID>DRP021325</PRIMARY_ID></IDENTIFIERS></STUDY_REF>
+  <DESIGN>
+    <SAMPLE_DESCRIPTOR accession="DRS0246071"><IDENTIFIERS><PRIMARY_ID>DRS0246071</PRIMARY_ID></IDENTIFIERS></SAMPLE_DESCRIPTOR>
+    <LIBRARY_DESCRIPTOR>
+      <LIBRARY_NAME/>
+      <LIBRARY_STRATEGY>WGS</LIBRARY_STRATEGY>
+      <LIBRARY_SOURCE>METAGENOMIC</LIBRARY_SOURCE>
+      <LIBRARY_SELECTION>RANDOM</LIBRARY_SELECTION>
+      <LIBRARY_LAYOUT><PAIRED/></LIBRARY_LAYOUT>
+    </LIBRARY_DESCRIPTOR>
+  </DESIGN>
+  <PLATFORM><ILLUMINA><INSTRUMENT_MODEL>Illumina HiSeq 2500</INSTRUMENT_MODEL></ILLUMINA></PLATFORM>
+</EXPERIMENT>
+<SUBMISSION accession="DRA008476" alias="sub" center_name="DDBJ Center"/>
+<STUDY accession="DRP021325" alias="PRJDB…" center_name="DDBJ Center">
+  <IDENTIFIERS><PRIMARY_ID>DRP021325</PRIMARY_ID></IDENTIFIERS>
+  <DESCRIPTOR>
+    <STUDY_TITLE>DDBJ gut metagenome study</STUDY_TITLE>
+    <STUDY_TYPE existing_study_type="Metagenomics"/>
+    <CENTER_NAME>DDBJ Center</CENTER_NAME>
+  </DESCRIPTOR>
+</STUDY>
+<SAMPLE accession="DRS0246071" alias="sample-ddbj">
+  <IDENTIFIERS><PRIMARY_ID>DRS0246071</PRIMARY_ID></IDENTIFIERS>
+  <SAMPLE_NAME><TAXON_ID>9606</TAXON_ID><SCIENTIFIC_NAME>Homo sapiens</SCIENTIFIC_NAME></SAMPLE_NAME>
+</SAMPLE>
+<RUN_SET>
+  <RUN accession="DRR599211" alias="run-ddbj" total_spots="1000" total_bases="200000" size="100000" published="2020-01-15 00:00:00"/>
+  <RUN accession="ERR174237" alias="run-ena" total_spots="2000" total_bases="400000" size="200000" published="2013-06-06 00:00:00"/>
+</RUN_SET>
+</EXPERIMENT_PACKAGE>
+</EXPERIMENT_PACKAGE_SET>`;
+
 function okJson(body: unknown) {
   return {
     ok: true,
@@ -97,14 +136,14 @@ function okXml(xml: string) {
   };
 }
 
-function mockEutils(esearchIds: string[]): void {
+function mockEutils(esearchIds: string[], efetchXml: string = MULTI_PACKAGE_XML): void {
   global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((rawUrl: string) => {
     const url = new URL(rawUrl);
     if (url.pathname.endsWith('/esearch.fcgi')) {
       return Promise.resolve(okJson({ esearchresult: { count: String(esearchIds.length), idlist: esearchIds } }));
     }
     if (url.pathname.endsWith('/efetch.fcgi')) {
-      return Promise.resolve(okXml(MULTI_PACKAGE_XML));
+      return Promise.resolve(okXml(efetchXml));
     }
     return Promise.reject(new Error(`Unexpected fetch in test: ${rawUrl}`));
   }) as unknown as typeof global.fetch;
@@ -164,21 +203,37 @@ describe('sra tools', () => {
     });
   });
 
-  it('sra_get points European accessions at ENA without hitting NCBI', async () => {
-    mockEutils(['8877661']);
+  it('sra_get resolves DDBJ (DRX) and European (ERR) accessions via NCBI', async () => {
+    mockEutils(['8877661'], DDBJ_PACKAGE_XML);
 
-    await expect(harness.callTool('sra_get', { accession: 'ERP123456' })).rejects.toThrow(
-      /European\/DDBJ accession ERP123456.*ENA/s
-    );
-    expect(fetchUrls()).toHaveLength(0);
+    const experiment = (await harness.callTool('sra_get', { accession: 'DRX579758' })) as any;
+    expect(experiment.entry_type).toBe('experiment');
+    expect(experiment.accession).toBe('DRX579758');
+    expect(experiment.study_accession).toBe('DRP021325');
+
+    const run = (await harness.callTool('sra_get', { accession: 'ERR174237' })) as any;
+    expect(run.entry_type).toBe('run');
+    expect(run.accession).toBe('ERR174237');
+    expect(run.experiment_accession).toBe('DRX579758');
   });
 
   it('sra_get rejects malformed accessions with the expected-format error', async () => {
     mockEutils(['8877661']);
 
     await expect(harness.callTool('sra_get', { accession: 'ABC123' })).rejects.toThrow(
-      /Expected NCBI SRA accession SRP\/SRX\/SRR\/SRS like SRR14432476/
+      /Expected SRA accession like SRR14432476/
     );
+    expect(fetchUrls()).toHaveLength(0);
+  });
+
+  it('sra_get rejects garbage and prefix-less accessions before hitting NCBI', async () => {
+    mockEutils(['8877661']);
+
+    for (const bad of ['banana', 'XRQ12345', 'SRR', 'SRR14432476!']) {
+      await expect(harness.callTool('sra_get', { accession: bad })).rejects.toThrow(
+        /Expected SRA accession/
+      );
+    }
     expect(fetchUrls()).toHaveLength(0);
   });
 });

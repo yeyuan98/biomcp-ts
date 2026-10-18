@@ -116,7 +116,7 @@ Full tool schemas (params, enums, defaults) live in [src/server/README.md](src/s
 | Tool | Description |
 |------|-------------|
 | `sra_search` | Search NCBI's Sequence Read Archive for sequencing experiments and runs by free text, accession, or field syntax; returns experiment/study/sample accessions with library strategy and run counts |
-| `sra_get` | Get full details for an SRA accession: SRR run (instrument, spots, bases, size), SRX experiment (library design), SRP study (experiment list), or SRS sample; ENA/DDBJ accessions rejected with an ENA pointer |
+| `sra_get` | Get full details for an SRA accession: run (SRR/ERR/DRR — instrument, spots, bases, size), experiment (SRX/ERX/DRX — library design), study (SRP/ERP/DRP — experiment list), or sample (SRS/ERS/DRS); NCBI SRA indexes NCBI, ENA, and DDBJ accessions alike |
 
 ### GenBank (3)
 
