@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { geneSearch, geneGet } from '../../entities/gene.js';
 import { geneToDrugs, geneToTrials, geneEnrichment } from '../../entities/cross-entity.js';
 import { searchArticles } from '../../entities/article/index.js';
-import { applyLimit, requiredString, sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra } from './utils.js';
+import { applyLimit, remapSectionKeysToRequested, requiredString, sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra } from './utils.js';
 
 // Deadline rationale (#107 phase 2): geneGet already enforces its own 30s
 // overall abort internally (threaded into every section fetch), so the tool
@@ -17,13 +17,13 @@ const GENE_SECTIONS = [
   'dosage_sensitivity', 'constraint', 'disease_associations', 'funding', 'all'
 ] as const;
 
-const GENE_ALL_SECTIONS = [
+export const GENE_ALL_SECTIONS = [
   'pathways', 'protein', 'ontology', 'go', 'interactions',
   'clinical_evidence', 'expression', 'protein_atlas',
   'druggability', 'dosage_sensitivity', 'constraint',
   'disease_associations', 'diseases', 'funding',
 ];
-const GENE_STORAGE_KEYS: Record<string, string> = {
+export const GENE_STORAGE_KEYS: Record<string, string> = {
   clinical_evidence: 'civic',
   protein_atlas: 'hpa',
   disease_associations: 'disgenet',
@@ -98,18 +98,12 @@ export function registerGeneTools(server: McpServer): void {
           // storage keys (civic/hpa/clingen/disgenet) so it can address
           // them internally; translate back at the tool boundary so callers
           // can key on what they asked for. In-repo entity consumers
-          // (gene_diseases, batch_get) read entity output directly, below
-          // this remap, and are unaffected. requestedSections already
-          // covers the 'all' expansion, so implicitly requested sections
-          // come back under their public names too. Identity sections
-          // (no alias entry) are untouched.
-          const sectionsOut = result.sections;
-          for (const name of requestedSections) {
-            const storedKey = GENE_STORAGE_KEYS[name];
-            if (!storedKey || !(storedKey in sectionsOut)) continue;
-            sectionsOut[name] = sectionsOut[storedKey];
-            delete sectionsOut[storedKey];
-          }
+          // (gene_diseases) read entity output directly, below this remap,
+          // and are unaffected. requestedSections already covers the 'all'
+          // expansion, so implicitly requested sections come back under
+          // their public names too. Identity sections (no alias entry) are
+          // untouched.
+          remapSectionKeysToRequested(result.sections, requestedSections, GENE_STORAGE_KEYS);
         }
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       } catch (error) {
