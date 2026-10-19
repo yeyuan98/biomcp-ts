@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { variantSearch, variantGet, fetchOncoKbAnnotation, getVariantSearchFilters } from '../../entities/variant.js';
 import { variantToTrials } from '../../entities/cross-entity.js';
-import { optionalNonEmptyString, requiredString, sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra } from './utils.js';
+import { optionalNonEmptyString, remapSectionKeysToRequested, requiredString, sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra } from './utils.js';
 
 // Deadline rationale (#107 phase 2): myvariant core lookup + parallel
 // section wave (frequency/clinical/predictions, each with an 8s section
@@ -13,8 +13,8 @@ const VARIANT_GET_TIMEOUT_MS = 40000;
 const VARIANT_GET_SECTIONS = ['core', 'frequency', 'predictions', 'clinical', 'alphagenome_scores', 'all'] as const;
 const VARIANT_SEARCH_FILTERS = getVariantSearchFilters();
 
-const VARIANT_ALL_SECTIONS = ['frequency', 'predictions', 'clinical', 'alphagenome_scores'];
-const VARIANT_STORAGE_KEYS: Record<string, string> = {
+export const VARIANT_ALL_SECTIONS = ['frequency', 'predictions', 'clinical', 'alphagenome_scores'];
+export const VARIANT_STORAGE_KEYS: Record<string, string> = {
   alphagenome_scores: 'alphagenome',
 };
 
@@ -130,17 +130,11 @@ Do NOT use compound free-text like "BRAF V600E" — use separate gene and hgvsp 
           // section names. The entity stores alphagenome_scores under the
           // legacy key 'alphagenome' so it can address it internally;
           // translate back at the tool boundary so callers can key on what
-          // they asked for. In-repo entity consumers (variantToTrials,
-          // batch_get) read entity output directly, below this remap, and
-          // are unaffected. requestedSections already covers the 'all'
-          // expansion; identity sections (no alias entry) are untouched.
-          const sectionsOut = result.sections;
-          for (const name of requestedSections) {
-            const storedKey = VARIANT_STORAGE_KEYS[name];
-            if (!storedKey || !(storedKey in sectionsOut)) continue;
-            sectionsOut[name] = sectionsOut[storedKey];
-            delete sectionsOut[storedKey];
-          }
+          // they asked for. In-repo entity consumers (variantToTrials) read
+          // entity output directly, below this remap, and are unaffected.
+          // requestedSections already covers the 'all' expansion; identity
+          // sections (no alias entry) are untouched.
+          remapSectionKeysToRequested(result.sections, requestedSections, VARIANT_STORAGE_KEYS);
         }
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       } catch (error) {

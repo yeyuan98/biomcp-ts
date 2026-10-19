@@ -545,7 +545,7 @@ variantToTrials(variantId: string): Promise<Array<{ nct_id: string; title?: stri
 drugToGenes(drugName: string): Promise<Array<{ gene_symbol: string; name: string; source: string; action_type?: string }>>
 drugToTrials(drugName: string): Promise<Array<{ nct_id: string; title?: string; status?: string }>>
 drugToAdverseEvents(drugName: string, limit?: number): Promise<{ total_reports: number; reactions: Array<{ reaction: string; count: number; source: 'openfda' }> } | Array<{ _error: string }>>
-diseaseToDrugs(diseaseQuery: string): Promise<Array<{ drug_name: string; source: string; phase?: string }>>
+diseaseToDrugs(diseaseQuery: string): Promise<{ results: Array<{ drug_name: string; source: string; phase?: string; report_count?: number }>; errors?: Array<{ source: string; message: string; retryable?: boolean }> }>
 diseaseToGenes(diseaseId: string): Promise<Array<{ gene_symbol: string; name: string; source: string; score?: number }>>
 diseaseToTrials(diseaseQuery: string): Promise<Array<{ nct_id: string; title?: string; status?: string }>>
 ```
@@ -568,6 +568,8 @@ diseaseToTrials(diseaseQuery: string): Promise<Array<{ nct_id: string; title?: s
 #### `diseaseToDrugs` ID Resolution
 
 When the input matches `^(DOID|MONDO|OMIM|OMOPS|ORPHA):`, the function first resolves it via MyDisease to get a human-readable label. If the MONDO-based OpenTargets search fails, it tries an EFO ID probe (`MONDO:` → `MONDO_`).
+
+Failure paths return `{ results: [], errors: [{ source, message, retryable? }] }` — an unresolved query is tagged `source: 'disease'`, an upstream OpenTargets outage `source: 'opentargets'` with `retryable: true` — never inline `_error` rows inside `results` (issue #159).
 
 ### Search All
 
