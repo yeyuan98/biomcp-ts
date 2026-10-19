@@ -78,26 +78,32 @@ exactly as they do locally in a bare environment.
 
 Since #164 the job is **two-tier on GitHub Actions**:
 
-1. **Gating step** — every integration suite *except* two known
+1. **Gating step** — every integration suite *except* four known
    GitHub-runner offenders, still with NO `continue-on-error`: any failure
    here fails the job exactly as before.
-2. **Best-effort known-offenders step** — ONLY the two pinned offender
+2. **Best-effort known-offenders step** — ONLY the four pinned offender
    files, run with `continue-on-error: true` (and `if: always()`), teed to
    `known-offenders.log`:
 
    - `src/__tests__/integration/tools/ensembl-tools.test.ts` — Ensembl REST
      (rest.ensembl.org) intermittently throttles shared GitHub runner IPs;
    - `src/__tests__/integration/tools/article-tools.test.ts` — arXiv cases
-     (`searchArxiv` TimeoutError from runner IPs).
+     (`searchArxiv` TimeoutError from runner IPs);
+   - `src/__tests__/integration/tools/gene-tools.test.ts` — `gene_articles`
+     article-source legs return pmid-less rows from runner IPs (#182);
+   - `src/__tests__/integration/tools/drug-tools.test.ts` — openfda
+     (api.fda.gov) transient 500s, retryable (#182).
 
    Their intermittent flakes stay visible — own step-summary section
    labeled non-gating, own `known-offenders-log` artifact uploaded on every
    run — but can never fail the job.
 
-The offender list is **pinned in `ci.yml`**: exactly those two paths, no
+The offender list is **pinned in `ci.yml`**: exactly those four paths, no
 others. ANY addition requires (1) a GitHub issue with triage evidence per
 the rubric below and (2) an explicit maintainer decision — a new flaky
-suite still gates and gets triaged like any other failure. Timeout
+suite still gates and gets triaged like any other failure; per the
+2026-10-19 policy (#182), a *confirmed* unstable upstream goes on the list
+rather than burning reruns. Timeout
 increases are off the table (maintainer decision, 2026-10-18): they are
 already generous; the failures are runner-side network conditions.
 
