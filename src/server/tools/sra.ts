@@ -1,12 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { sraSearch, sraGet } from '../../entities/sra/index.js';
-import { requiredString } from './utils.js';
-
-// Accepts NCBI (S…), European (E…), and DDBJ (D…) accessions alike — NCBI
-// SRA indexes all three archives (live-verified 2026-10-17: DRX/DRR/ERR/DRP/
-// ERP accessions all resolve via esearch+efetch db=sra).
-const SRA_ACCESSION_REGEX = /^[EDS]R[PXRS]\d+$/;
+import { sraAccessionParam } from './utils.js';
 
 export function registerSraTools(server: McpServer): void {
   server.registerTool(
@@ -39,18 +34,16 @@ The query may be free text, an accession (SRP study, SRX experiment, SRR run, SR
 
 Chain from geo_get (sra field) or sra_search (experiment_accession / first_run_accession).`,
       inputSchema: {
-        accession: requiredString('SRA accession').describe('SRA accession: run (SRR/ERR/DRR), experiment (SRX/ERX/DRX), study (SRP/ERP/DRP), or sample (SRS/ERS/DRS), e.g. SRR14432476'),
+        accession: sraAccessionParam().describe('SRA accession: run (SRR/ERR/DRR), experiment (SRX/ERX/DRX), study (SRP/ERP/DRP), or sample (SRS/ERS/DRS), e.g. SRR14432476'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     async ({ accession }) => {
       try {
+        // Shape is enforced at the schema level (SRA_ACCESSION_RE, /i —
+        // accepts NCBI/European/DDBJ prefixes alike); the handler only
+        // normalizes case for the entity call.
         const normalized = accession.trim().toUpperCase();
-        if (!SRA_ACCESSION_REGEX.test(normalized)) {
-          throw new Error(
-            `Expected SRA accession like SRR14432476 (SRR/ERR/DRR run, SRX/ERX/DRX experiment, SRP/ERP/DRP study, SRS/ERS/DRS sample) — got "${accession}"`
-          );
-        }
         const detail = await sraGet(normalized);
         return { content: [{ type: 'text', text: JSON.stringify(detail) }] };
       } catch (error) {

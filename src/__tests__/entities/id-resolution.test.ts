@@ -19,6 +19,15 @@ describe('parseArticleId', () => {
     expect(result).toEqual({ type: 'pmcid', value: 'pmc1234567' });
   });
 
+  test('parses versioned PMCID, preserving the version (issue #163)', () => {
+    // Europe PMC serves version-suffixed PMCIDs; the version must survive
+    // parsing (it is stripped only at the idconv boundary — see below).
+    expect(parseArticleId('PMC4712660.1')).toEqual({ type: 'pmcid', value: 'PMC4712660.1' });
+    expect(parseArticleId('pmc4712660.12')).toEqual({ type: 'pmcid', value: 'pmc4712660.12' });
+    // Bare PMCIDs keep their exact prior behavior.
+    expect(parseArticleId('PMC4712660')).toEqual({ type: 'pmcid', value: 'PMC4712660' });
+  });
+
   test('parses DOI without prefix', () => {
     const result = parseArticleId('10.1234/test.doi.5678');
     expect(result).toEqual({ type: 'doi', value: '10.1234/test.doi.5678' });
@@ -93,6 +102,23 @@ describe('resolveToPmid', () => {
 
     const result = await resolveToPmid('PMC1234567', 'pmcid');
     expect(result).toEqual({ pmid: '12345678', pmcid: 'PMC1234567' });
+  });
+
+  test('strips a versioned PMCID to its bare form at the idconv boundary (issue #163)', async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        records: [{ pmid: 12345678, pmcid: 'PMC4712660' }],
+      }),
+    }) as any;
+
+    const result = await resolveToPmid('PMC4712660.1', 'pmcid');
+    expect(result).toEqual({ pmid: '12345678', pmcid: 'PMC4712660' });
+
+    // The idconv request must carry the bare PMCID, never the version.
+    const callUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(callUrl).toContain('ids=PMC4712660');
+    expect(callUrl).not.toContain('PMC4712660.1');
   });
 
   test('returns all available IDs', async () => {

@@ -184,8 +184,11 @@ export async function patentSearch(
 
     // Failure-only fallback (never on 0 hits — those are legitimate
     // results): default ppubs → uspto_odp, once, budget-guarded. Explicit
-    // `source` requests are respected as-is.
-    if (source === 'ppubs' && !options.source && hasOdpKey() && Date.now() - startedAt <= FALLBACK_BUDGET_MS) {
+    // `source` requests are respected as-is. Clock-jump guard (WSL2/NTP):
+    // a backward jump drives elapsed negative (reads as "0 s spent") —
+    // clamp to no-time-elapsed (rate-limiter refill precedent).
+    const fallbackElapsed = Math.max(0, Date.now() - startedAt);
+    if (source === 'ppubs' && !options.source && hasOdpKey() && fallbackElapsed <= FALLBACK_BUDGET_MS) {
       try {
         const fallback = await runBackend('uspto_odp', query, options);
         record('uspto_odp', fallback);
@@ -252,7 +255,10 @@ export async function patentSearch(
     response.mined_count = 0;
     if (patents.length > 0) {
       let seminal_note: string | undefined;
-      const elapsed = Date.now() - startedAt;
+      // Clock-jump guard (WSL2/NTP): a backward jump makes elapsed negative
+      // and would inflate `remaining` past the 55 s ceiling — clamp so it
+      // reads as no time elapsed (precedent: rate-limiter refill guard).
+      const elapsed = Math.max(0, Date.now() - startedAt);
       const remaining = PATENT_SEARCH_TOOL_BUDGET_MS - elapsed - MINING_SAFETY_MARGIN_MS;
       if (remaining < MINING_MIN_BUDGET_MS) {
         seminal_note = `seminal prior-art discovery skipped (time budget exhausted after a slow search; ${Math.round(elapsed / 1000)}s already spent)`;

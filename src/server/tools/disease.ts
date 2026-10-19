@@ -105,7 +105,7 @@ export function registerDiseaseTools(server: McpServer): void {
   server.registerTool(
     'disease_drugs',
     {
-      description: 'Get drugs for a disease via OpenTargets. Results are ranked by max clinical phase, then trial-report count, with salt forms collapsed. Response is an envelope: { results } — partial OpenTargets failures ride as inline _error items within results (issue #130)',
+      description: 'Get drugs for a disease via OpenTargets. Results are ranked by max clinical phase, then trial-report count, with salt forms collapsed. Response is an envelope: { results, warnings?, errors? } — OpenTargets failures and unresolved diseases ride in errors[] as { source, message, retryable? } instead of inline items (issue #130)',
       inputSchema: {
         disease_id: requiredString('Disease ID').describe('Disease ID'),
         limit: z.number().int().min(1).max(50).default(20),
@@ -115,11 +115,9 @@ export function registerDiseaseTools(server: McpServer): void {
     async ({ disease_id, limit }) => {
       try {
         const { diseaseToDrugs } = await import('../../entities/cross-entity.js');
-        const drugs = await diseaseToDrugs(disease_id);
-        // List-tool envelope (#130). Partial OpenTargets failures still ride
-        // as inline `[{_error}]` items inside results for now (kept as-is
-        // this PR — see CHANGELOG).
-        return { content: [{ type: 'text', text: JSON.stringify(listEnvelope(drugs.slice(0, limit))) }] };
+        const { results, errors } = await diseaseToDrugs(disease_id);
+        // List-tool envelope (#130): partial failures ride in errors[] (#159).
+        return { content: [{ type: 'text', text: JSON.stringify(listEnvelope(results.slice(0, limit), undefined, errors)) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
       }

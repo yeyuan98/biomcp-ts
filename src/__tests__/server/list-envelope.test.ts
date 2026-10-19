@@ -55,7 +55,7 @@ const S2_OUTAGE = 'unit test sentinel: semantic scholar backend disabled';
  * Route every list-tool backend. `semanticScholarDown` rejects the Semantic
  * Scholar route so the federated fan-out records a per-backend error.
  */
-function mockListToolBackends(opts: { semanticScholarDown?: boolean } = {}): void {
+function mockListToolBackends(opts: { semanticScholarDown?: boolean; otDiseaseUnresolved?: boolean } = {}): void {
   global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((input: any, init?: { body?: string }) => {
     const url = parseMockUrl(input);
     switch (url.hostname) {
@@ -112,6 +112,9 @@ function mockListToolBackends(opts: { semanticScholarDown?: boolean } = {}): voi
               },
             },
           }));
+        }
+        if (opts.otDiseaseUnresolved) {
+          return Promise.resolve(okJson({ data: { search: { hits: [] } } }));
         }
         return Promise.resolve(okJson({
           data: { search: { hits: [{ id: 'EFO_0000313', name: 'melanoma', entity: 'disease' }] } },
@@ -170,7 +173,7 @@ describe('list-tool envelopes (issue #130)', () => {
     expect('errors' in envelope).toBe(false);
   });
 
-  it('disease_drugs wraps ranked rows in { results } (limit applied to results, inline _error rows kept as items)', async () => {
+  it('disease_drugs wraps ranked rows in { results } (limit applied to results)', async () => {
     mockListToolBackends();
 
     const envelope = await harness.callTool('disease_drugs', { disease_id: 'melanoma', limit: 1 });
@@ -183,6 +186,20 @@ describe('list-tool envelopes (issue #130)', () => {
     ]);
     expect('warnings' in envelope).toBe(false);
     expect('errors' in envelope).toBe(false);
+  });
+
+  it('disease_drugs: an unresolved disease rides in errors[] with empty results (issue #159)', async () => {
+    mockListToolBackends({ otDiseaseUnresolved: true });
+
+    const envelope = await harness.callTool('disease_drugs', { disease_id: 'melanoma' });
+
+    expect(envelope.results).toEqual([]);
+    expect(Array.isArray(envelope.errors)).toBe(true);
+    expect(envelope.errors).toHaveLength(1);
+    expect(envelope.errors[0].source).toBe('disease');
+    expect(envelope.errors[0].message).toContain('No OpenTargets entry found');
+    // No _error marker rows inside results — errors never masquerade as items.
+    expect(envelope.results.some((r: any) => r._error !== undefined)).toBe(false);
   });
 
   it('disease_trials wraps trial rows in { results }', async () => {
