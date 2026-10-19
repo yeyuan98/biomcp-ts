@@ -2,6 +2,7 @@ import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerGeneTools } from '../../server/tools/gene.js';
 import { registerVariantTools } from '../../server/tools/variant.js';
+import { registerUtilityTools } from '../../server/tools/utility.js';
 import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 import { parseMockUrl } from '../helpers/mock-url.js';
 import { connectionManager } from '../../connections/manager.js';
@@ -14,6 +15,10 @@ import { connectionManager } from '../../connections/manager.js';
  * what they asked for. Real tool callbacks + global.fetch mocks only (no
  * jest.mock of source modules) — the same harness as
  * tool-cancellation.test.ts.
+ *
+ * #158: batch_get must apply the same remap per gene/variant item — the
+ * entity dispatcher hands back storage keys, and a batch item used to leak
+ * them while the dedicated tool returned requested names.
  */
 type ToolCallback = (args: Record<string, unknown>, extra?: { signal?: AbortSignal }) => Promise<{
   content: Array<{ type: string; text: string }>;
@@ -274,6 +279,84 @@ describe('gene_get/variant_get section response keys mirror requested names (#12
         expect(keys).toContain(publicName);
       }
       expect(keys).not.toContain('alphagenome');
+    });
+  });
+
+  describe('batch_get gene/variant items mirror requested section names (#158)', () => {
+    it('gene item sections:["clinical_evidence"] returns sections.clinical_evidence, not civic', async () => {
+      global.fetch = fetchDispatch([
+        { match: (u) => u.hostname === 'mygene.info', body: { hits: [MYGENE_LOOKUP_HIT] } },
+        {
+          match: (u) => u.hostname === 'civicdb.org',
+          body: {
+            data: {
+              gene: {
+                id: 45,
+                name: 'TP53',
+                variants: { nodes: [{ id: 12, name: 'V600E' }] },
+              },
+            },
+          },
+        },
+      ]);
+      const tools = captureTools(registerUtilityTools);
+      const result = await tools.get('batch_get')!({
+        inputs: [{ entity: 'gene', id: 'TP53', sections: ['clinical_evidence'] }],
+      });
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0].success).toBe(true);
+      const sections = parsed[0].data.sections;
+      expect(Object.keys(sections)).toEqual(['clinical_evidence']);
+      expect(sections.clinical_evidence.variants).toEqual([{ name: 'V600E' }]);
+      expect(sections.civic).toBeUndefined();
+    });
+
+    it('variant item sections:["alphagenome_scores"] returns sections.alphagenome_scores, not alphagenome', async () => {
+      global.fetch = fetchDispatch([
+        { match: (u) => u.hostname === 'myvariant.info', body: { _id: 'vcf123', dbsnp: { rsid: 'rs123' } } },
+      ]);
+      const tools = captureTools(registerUtilityTools);
+      const result = await tools.get('batch_get')!({
+        inputs: [{ entity: 'variant', id: 'rs123', sections: ['alphagenome_scores'] }],
+      });
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0].success).toBe(true);
+      const sections = parsed[0].data.sections;
+      expect(Object.keys(sections)).toEqual(['alphagenome_scores']);
+      expect(sections.alphagenome_scores).toMatchObject({
+        _error: expect.stringContaining('temporarily unavailable'),
+      });
+      expect(sections.alphagenome).toBeUndefined();
+    });
+
+    it('gene item sections:["all"] returns every advertised public name and no storage keys', async () => {
+      // Default `{}` responses let every section fetcher settle (data or
+      // _error stub) — the assertion is about which KEYS come back. The
+      // 'all' literal must be expanded through the shared all-sections
+      // constant before remapping, exactly like gene_get.
+      global.fetch = fetchDispatch([
+        { match: (u) => u.hostname === 'mygene.info', body: { hits: [MYGENE_LOOKUP_HIT] } },
+      ]);
+      const tools = captureTools(registerUtilityTools);
+      const result = await tools.get('batch_get')!({
+        inputs: [{ entity: 'gene', id: 'TP53', sections: ['all'] }],
+      });
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed[0].success).toBe(true);
+      const keys = Object.keys(parsed[0].data.sections);
+      for (const publicName of [
+        'pathways', 'protein', 'ontology', 'go', 'interactions',
+        'clinical_evidence', 'expression', 'protein_atlas',
+        'druggability', 'dosage_sensitivity', 'constraint',
+        'disease_associations', 'diseases', 'funding',
+      ]) {
+        expect(keys).toContain(publicName);
+      }
+      for (const storageKey of ['civic', 'hpa', 'clingen', 'disgenet']) {
+        expect(keys).not.toContain(storageKey);
+      }
     });
   });
 });

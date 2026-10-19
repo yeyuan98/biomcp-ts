@@ -29,7 +29,12 @@ function mockXml(xml: string) {
 
 // Await a promise that internally sleeps on module timers (token-bucket rate
 // limiters, registry retry backoffs) under jest fake timers, stepping the
-// clock until the promise settles. Same pattern as patent.test.ts.
+// clock until the promise settles. Same pattern as patent.test.ts, plus a
+// bound: 480 steps × 250 ms = 2 virtual minutes, well past any legitimate
+// unit-test flow — a stuck promise fails FAST with a named error instead of
+// eating the jest timeout.
+const SETTLE_MAX_ITERATIONS = 480;
+
 async function advanceUntilSettled<T>(p: Promise<T>): Promise<T> {
   let settled = false;
   let value: T | undefined;
@@ -38,7 +43,14 @@ async function advanceUntilSettled<T>(p: Promise<T>): Promise<T> {
     v => { value = v; settled = true; },
     e => { failure = { error: e }; settled = true; },
   );
+  let iterations = 0;
   while (!settled) {
+    if (++iterations > SETTLE_MAX_ITERATIONS) {
+      throw new Error(
+        `promise never settled after ${SETTLE_MAX_ITERATIONS} iterations of jest.advanceTimersByTimeAsync(250) ` +
+        '(~2 virtual minutes); the flow under test is stuck on a timer that never fires or never reaches its settlement path',
+      );
+    }
     await jest.advanceTimersByTimeAsync(250);
   }
   if (failure) throw failure.error;

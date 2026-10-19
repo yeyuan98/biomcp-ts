@@ -26,7 +26,11 @@ describe('memwatch', () => {
   });
 
   it('passes when RSS is below the limit', () => {
-    process.env[ENV_VAR] = String(Math.ceil(process.memoryUsage().rss / 1024 / 1024) + 1);
+    // +256MB headroom: assertWithinMemoryLimit re-reads RSS internally, and
+    // normal GC/heap variance between the two reads can exceed a +1MB gap on
+    // busy CI runners (observed 743 vs 741 MB flipping this test in PR #155's
+    // first run). +256MB still catches real runaway growth.
+    process.env[ENV_VAR] = String(Math.ceil(process.memoryUsage().rss / 1024 / 1024) + 256);
     expect(() => assertWithinMemoryLimit(ENV_VAR, DEFAULT_MB)).not.toThrow();
   });
 
@@ -39,7 +43,8 @@ describe('memwatch', () => {
 
   it('uses the configured default when the env var is unset', () => {
     delete process.env[ENV_VAR];
-    const tinyDefault = Math.ceil(process.memoryUsage().rss / 1024 / 1024) + 1;
+    // Same +256MB headroom as above: RSS is re-read inside the assertion.
+    const tinyDefault = Math.ceil(process.memoryUsage().rss / 1024 / 1024) + 256;
     expect(() => assertWithinMemoryLimit(ENV_VAR, tinyDefault)).not.toThrow();
     expect(() => assertWithinMemoryLimit(ENV_VAR, 1)).toThrow(
       new RegExp(`exceeds ${ENV_VAR} \\(1 MB\\)`)

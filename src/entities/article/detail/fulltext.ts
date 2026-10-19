@@ -137,6 +137,10 @@ function buildUnavailable(
  * records), then E-utilities efetch db=pmc (also serves free-to-read PMC
  * records for which the Europe PMC endpoint 500s — live-verified). Both
  * are among the services NCBI/EBI permit for automated retrieval.
+ *
+ * A transient failure of the OA-status lookup is treated as no status
+ * info, so a paywalled in-PMC article whose status lookup failed is
+ * reported as fetch_failed, not paywalled — a retry may reclassify it.
  */
 export async function fetchFullText(pmcid: string | undefined, options: FullTextOptions = {}): Promise<FullTextResult> {
   const maxChars = Math.max(1000, Math.min(options.maxChars ?? FULLTEXT_DEFAULT_MAX_CHARS, FULLTEXT_MAX_CHARS_LIMIT));

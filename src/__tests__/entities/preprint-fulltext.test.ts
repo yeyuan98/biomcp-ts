@@ -10,6 +10,37 @@ import {
   resetPreprintDownloadGate,
 } from '../../entities/article/detail/preprint-fulltext.js';
 
+// Fake-timer helpers (patent.test.ts convention, see src/__tests__/README.md):
+// the shared biorxiv connection limiter (intervalMs=1000), the ≥3 s download
+// limiter and the 1 s retry backoff all sleep on module timers, so the whole
+// suite runs on a fake clock; limiters only refill when the clock moves
+// forward, so each install must start later than real time AND later than the
+// fake time any earlier install reached.
+const REAL_TIME_AT_LOAD = Date.now();
+let fakeTimersInstalled = 0;
+
+function installFakeTimers(): void {
+  fakeTimersInstalled++;
+  jest.useFakeTimers({ now: REAL_TIME_AT_LOAD + fakeTimersInstalled * 3_600_000 });
+}
+
+// Await a promise that internally sleeps on module timers under fake timers,
+// stepping the clock until the promise settles.
+async function advanceUntilSettled<T>(p: Promise<T>): Promise<T> {
+  let settled = false;
+  let value: T | undefined;
+  let failure: { error: unknown } | undefined;
+  p.then(
+    v => { value = v; settled = true; },
+    e => { failure = { error: e }; settled = true; },
+  );
+  while (!settled) {
+    await jest.advanceTimersByTimeAsync(250);
+  }
+  if (failure) throw failure.error;
+  return value as T;
+}
+
 // Small biorxiv-style JATS document: sections (incl. <sup> inline and a
 // list block) + a back ref-list (hasReferences). Served by the download
 // route to exercise the shared host-agnostic parser end-to-end.
@@ -32,6 +63,9 @@ describe('preprint-fulltext', () => {
   let cacheRoot: string;
 
   beforeEach(() => {
+    // Install the fake clock FIRST so the limiters re-armed below are
+    // constructed against the fake now.
+    installFakeTimers();
     savedCacheDir = process.env.BIOMCP_CACHE_DIR;
     cacheRoot = mkdtempSync(join(tmpdir(), 'biomcp-ppft-'));
     process.env.BIOMCP_CACHE_DIR = cacheRoot;
@@ -43,6 +77,7 @@ describe('preprint-fulltext', () => {
     if (savedCacheDir === undefined) delete process.env.BIOMCP_CACHE_DIR;
     else process.env.BIOMCP_CACHE_DIR = savedCacheDir;
     rmSync(cacheRoot, { recursive: true, force: true });
+    jest.useRealTimers();
   });
 
   const jsonResponse = (body: unknown) => ({
@@ -108,7 +143,7 @@ describe('preprint-fulltext', () => {
   test('downloads the latest version, normalizes the license, caches, returns a file handle', async () => {
     global.fetch = standardRouter() as any;
 
-    const result = await fetchPreprintFullText(DOI);
+    const result = await advanceUntilSettled(fetchPreprintFullText(DOI));
 
     expect(result.status).toBe('available');
     expect(result.mode).toBe('file');
@@ -135,28 +170,28 @@ describe('preprint-fulltext', () => {
   test('second call is served from cache — no new download; pinned versions need no network at all', async () => {
     global.fetch = standardRouter() as any;
 
-    await fetchPreprintFullText(DOI); // download
+    await advanceUntilSettled(fetchPreprintFullText(DOI)); // download
     expect(fetchCallsTo('www.biorxiv.org')).toBe(1);
     expect(fetchCallsTo('api.biorxiv.org')).toBe(1);
 
-    const second = await fetchPreprintFullText(DOI); // default version → details + cache hit
+    const second = await advanceUntilSettled(fetchPreprintFullText(DOI)); // default version → details + cache hit
     expect(fetchCallsTo('www.biorxiv.org')).toBe(1); // NO second download
     expect(second.cached).toBe(true);
     expect(second.status).toBe('available');
 
     const totalCalls = (global.fetch as any).mock.calls.length;
-    const pinned = await fetchPreprintFullText(DOI, { version: 2 }); // cache-first: zero network
+    const pinned = await advanceUntilSettled(fetchPreprintFullText(DOI, { version: 2 })); // cache-first: zero network
     expect((global.fetch as any).mock.calls.length).toBe(totalCalls);
     expect(pinned.cached).toBe(true);
     expect(pinned.version).toBe(2);
-  }, 30000);
+  });
 
   test('inline mode applies the fulltext_max_chars budget honestly', async () => {
     const longBody = 'x'.repeat(5000);
     const bigDoc = JATS_DOC.replace('<p>We study H<sup>+</sup> transport in cells.</p>', `<p>${longBody}</p>`);
     global.fetch = standardRouter({ jats: () => Promise.resolve(xmlResponse(bigDoc)) }) as any;
 
-    const result = await fetchPreprintFullText(DOI, { output: 'inline', maxChars: 1000 });
+    const result = await advanceUntilSettled(fetchPreprintFullText(DOI, { output: 'inline', maxChars: 1000 }));
 
     expect(result.status).toBe('available');
     expect(result.mode).toBe('inline');
@@ -172,7 +207,7 @@ describe('preprint-fulltext', () => {
   test('429/1015 verdict: rate_limited envelope, >=60s cooldown, next call is instant + network-free', async () => {
     global.fetch = standardRouter({ jats: () => Promise.resolve(xmlResponse('error code: 1015', 429)) }) as any;
 
-    const first = await fetchPreprintFullText(DOI);
+    const first = await advanceUntilSettled(fetchPreprintFullText(DOI));
     expect(first).toMatchObject({ status: 'unavailable', reason: 'rate_limited' });
     expect(first.retry_after_sec!).toBeGreaterThanOrEqual(60);
     expect(first.links).toMatchObject({ jatsxml_url: JATS_URL(2), doi_url: `https://doi.org/${DOI}` });
@@ -189,21 +224,21 @@ describe('preprint-fulltext', () => {
 
   test('Retry-After (seconds form) is honored above the 60s floor', async () => {
     global.fetch = standardRouter({ jats: () => Promise.resolve(xmlResponse('error code: 1015', 429, { 'retry-after': '120' })) }) as any;
-    const result = await fetchPreprintFullText(DOI);
+    const result = await advanceUntilSettled(fetchPreprintFullText(DOI));
     expect(result.reason).toBe('rate_limited');
     expect(result.retry_after_sec!).toBeGreaterThanOrEqual(120);
   });
 
   test('403 is treated like 429 (Cloudflare block)', async () => {
     global.fetch = standardRouter({ jats: () => Promise.resolve(xmlResponse('Forbidden', 403)) }) as any;
-    const result = await fetchPreprintFullText(DOI);
+    const result = await advanceUntilSettled(fetchPreprintFullText(DOI));
     expect(result).toMatchObject({ status: 'unavailable', reason: 'rate_limited' });
     expect(result.retry_after_sec!).toBeGreaterThanOrEqual(60);
   });
 
   test('a Cloudflare challenge page served with HTTP 200 is detected as rate limiting', async () => {
     global.fetch = standardRouter({ jats: () => Promise.resolve(xmlResponse('<html><body>Just a moment...</body></html>')) }) as any;
-    const result = await fetchPreprintFullText(DOI);
+    const result = await advanceUntilSettled(fetchPreprintFullText(DOI));
     expect(result).toMatchObject({ status: 'unavailable', reason: 'rate_limited' });
   });
 
@@ -212,7 +247,7 @@ describe('preprint-fulltext', () => {
     const padding = '<sec id="pad"><title>Filler</title><p>' + 'lorem ipsum '.repeat(180) + '</p></sec>';
     const doc = JATS_DOC.replace('<sec id="s2">', `${padding}<sec id="s2"><p>As we waited, the page said: Just a moment...</p>`);
     global.fetch = standardRouter({ jats: () => Promise.resolve(xmlResponse(doc)) }) as any;
-    const result = await fetchPreprintFullText(DOI);
+    const result = await advanceUntilSettled(fetchPreprintFullText(DOI));
     expect(result.status).toBe('available');
     expect(result.reason).toBeUndefined();
   });
@@ -225,14 +260,14 @@ describe('preprint-fulltext', () => {
         : Promise.resolve(xmlResponse('error code: 1015', 429)),
     }) as any;
 
-    const v1 = await fetchPreprintFullText(DOI, { version: 1 });
+    const v1 = await advanceUntilSettled(fetchPreprintFullText(DOI, { version: 1 }));
     expect(v1.status).toBe('available');
     expect(v1.version).toBe(1);
 
-    const blocked = await fetchPreprintFullText(DOI, { version: 2 });
+    const blocked = await advanceUntilSettled(fetchPreprintFullText(DOI, { version: 2 }));
     expect(blocked.reason).toBe('rate_limited');
 
-    const served = await fetchPreprintFullText(DOI); // default version, cooldown active
+    const served = await advanceUntilSettled(fetchPreprintFullText(DOI)); // default version, cooldown active
     expect(served.status).toBe('available');
     expect(served.version).toBe(1); // newest cached
     expect(served.cached).toBe(true);
@@ -244,7 +279,7 @@ describe('preprint-fulltext', () => {
       biorxivDetails: { messages: [{ status: 'no posts found' }], collection: [] },
       medrxivDetails: detailsPayload('medRxiv', ['1']),
     }) as any;
-    const result = await fetchPreprintFullText(DOI);
+    const result = await advanceUntilSettled(fetchPreprintFullText(DOI));
     expect(result.status).toBe('available');
     expect(result.server).toBe('medRxiv');
     expect(result.version).toBe(1);
@@ -252,34 +287,34 @@ describe('preprint-fulltext', () => {
 
   test('not_found when both collections soft-miss', async () => {
     global.fetch = standardRouter({ biorxivDetails: { messages: [{ status: 'no posts found' }], collection: [] } }) as any;
-    const result = await fetchPreprintFullText('10.1101/2099.01.01.000001');
+    const result = await advanceUntilSettled(fetchPreprintFullText('10.1101/2099.01.01.000001'));
     expect(result).toMatchObject({ status: 'unavailable', reason: 'not_found' });
     expect(result.note).toContain('preprint_only');
   });
 
   test('not_found for an unknown explicit version, listing the available ones', async () => {
     global.fetch = standardRouter() as any;
-    const result = await fetchPreprintFullText(DOI, { version: 99 });
+    const result = await advanceUntilSettled(fetchPreprintFullText(DOI, { version: 99 }));
     expect(result).toMatchObject({ status: 'unavailable', reason: 'not_found' });
     expect(result.note).toContain('[1, 2]');
   });
 
   test('no_jats_xml when the record carries no jatsxml URL', async () => {
     global.fetch = standardRouter({ biorxivDetails: detailsPayload('bioRxiv', ['1'], { jatsxml: undefined }) }) as any;
-    const result = await fetchPreprintFullText(DOI, { version: 1 });
+    const result = await advanceUntilSettled(fetchPreprintFullText(DOI, { version: 1 }));
     expect(result).toMatchObject({ status: 'unavailable', reason: 'no_jats_xml' });
     expect(result.links?.jatsxml_url).toBeUndefined();
   });
 
   test('fetch_failed when api.biorxiv.org is unreachable', async () => {
     global.fetch = jest.fn(() => Promise.reject(new Error('network down'))) as any;
-    const result = await fetchPreprintFullText(DOI);
+    const result = await advanceUntilSettled(fetchPreprintFullText(DOI));
     expect(result).toMatchObject({ status: 'unavailable', reason: 'fetch_failed' });
-  }, 30000);
+  });
 
   test('fetch_failed after ONE bounded retry on download network errors, with cause + URL + remedy in the note', async () => {
     global.fetch = standardRouter({ jats: () => Promise.reject(new Error('connection reset')) }) as any;
-    const result = await fetchPreprintFullText(DOI);
+    const result = await advanceUntilSettled(fetchPreprintFullText(DOI));
     expect(result).toMatchObject({ status: 'unavailable', reason: 'fetch_failed' });
     expect(fetchCallsTo('www.biorxiv.org')).toBe(2); // one retry, no more
     // #132: the failure detail must name the underlying cause AND the URL,
@@ -287,36 +322,36 @@ describe('preprint-fulltext', () => {
     expect(result.note).toContain('connection reset');
     expect(result.note).toContain(`from ${JATS_URL(2)}`);
     expect(result.note).toContain('Retry once; if it persists, use article_get (abstract) or the DOI landing page.');
-  }, 30000);
+  });
 
   test('fetch_failed detail is never empty: empty-message rejection falls back to the error name', async () => {
     // An Error with an empty message previously produced a blank embed
     // ("JATS download failed: "). The fallback chain (message → cause →
     // name → String) must yield SOMETHING, plus the URL.
     global.fetch = standardRouter({ jats: () => Promise.reject(new Error('')) }) as any;
-    const result = await fetchPreprintFullText(DOI);
+    const result = await advanceUntilSettled(fetchPreprintFullText(DOI));
     expect(result).toMatchObject({ status: 'unavailable', reason: 'fetch_failed' });
     expect(result.note).toContain('JATS download failed');
     expect(result.note).toContain(`from ${JATS_URL(2)}`);
     expect(result.note).not.toMatch(/failed \(\)/); // no empty cause embed
     expect(result.note).not.toContain('undefined');
     expect(result.note).toMatch(/\(Error\)/); // name fallback surfaced
-  }, 30000);
+  });
 
   test('fetch_failed detail surfaces the cause code for raw fetch rejections', async () => {
     // Raw undici rejections are bare `TypeError: fetch failed` with the real
     // signal on cause.code — errorMessageWithCause appends it.
     const networkReject = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
     global.fetch = standardRouter({ jats: () => Promise.reject(networkReject) }) as any;
-    const result = await fetchPreprintFullText(DOI);
+    const result = await advanceUntilSettled(fetchPreprintFullText(DOI));
     expect(result).toMatchObject({ status: 'unavailable', reason: 'fetch_failed' });
     expect(result.note).toContain('fetch failed (ECONNRESET)');
     expect(result.note).toContain(`from ${JATS_URL(2)}`);
-  }, 30000);
+  });
 
   test('license "na" falls back verbatim with no URL and a reuse warning', async () => {
     global.fetch = standardRouter({ biorxivDetails: detailsPayload('bioRxiv', ['1'], { license: 'na' }) }) as any;
-    const result = await fetchPreprintFullText(DOI, { version: 1 });
+    const result = await advanceUntilSettled(fetchPreprintFullText(DOI, { version: 1 }));
     expect(result.status).toBe('available');
     expect(result.license).toBe('na');
     expect(result.license_url).toBeUndefined();
@@ -325,7 +360,7 @@ describe('preprint-fulltext', () => {
 
   test('underscore license forms normalize for the CC URL lookup (cc_by_nc_nd)', async () => {
     global.fetch = standardRouter({ biorxivDetails: detailsPayload('bioRxiv', ['1'], { license: 'cc_by_nc_nd' }) }) as any;
-    const result = await fetchPreprintFullText(DOI, { version: 1 });
+    const result = await advanceUntilSettled(fetchPreprintFullText(DOI, { version: 1 }));
     expect(result.license).toBe('cc by-nc-nd');
     expect(result.license_url).toBe('https://creativecommons.org/licenses/by-nc-nd/4.0/');
   });
