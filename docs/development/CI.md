@@ -71,10 +71,41 @@ test would silently degrade to checking nothing. Keep stdin open briefly
 ## Integration tier & merge checklist
 
 The same workflow runs a second job, id/name `integration`, in parallel with
-`ci` (no `needs` between them). It runs `npm run test:integration` — the
-keyless live-API suites via `jest.integration.config.ts` with `--runInBand`;
-env-gated suites (db, biowasm/ranalysis mirror, depmap) self-skip in CI via
-`describe.skip`, exactly as they do locally in a bare environment.
+`ci` (no `needs` between them). It runs the keyless live-API suites via
+`jest.integration.config.ts` with `--runInBand`; env-gated suites (db,
+biowasm/ranalysis mirror, depmap) self-skip in CI via `describe.skip`,
+exactly as they do locally in a bare environment.
+
+Since #164 the job is **two-tier on GitHub Actions**:
+
+1. **Gating step** — every integration suite *except* two known
+   GitHub-runner offenders, still with NO `continue-on-error`: any failure
+   here fails the job exactly as before.
+2. **Best-effort known-offenders step** — ONLY the two pinned offender
+   files, run with `continue-on-error: true` (and `if: always()`), teed to
+   `known-offenders.log`:
+
+   - `src/__tests__/integration/tools/ensembl-tools.test.ts` — Ensembl REST
+     (rest.ensembl.org) intermittently throttles shared GitHub runner IPs;
+   - `src/__tests__/integration/tools/article-tools.test.ts` — arXiv cases
+     (`searchArxiv` TimeoutError from runner IPs).
+
+   Their intermittent flakes stay visible — own step-summary section
+   labeled non-gating, own `known-offenders-log` artifact uploaded on every
+   run — but can never fail the job.
+
+The offender list is **pinned in `ci.yml`**: exactly those two paths, no
+others. ANY addition requires (1) a GitHub issue with triage evidence per
+the rubric below and (2) an explicit maintainer decision — a new flaky
+suite still gates and gets triaged like any other failure. Timeout
+increases are off the table (maintainer decision, 2026-10-18): they are
+already generous; the failures are runner-side network conditions.
+
+**Local runs are unchanged and authoritative:** `npm run
+test:integration` / `make test-integration` still runs every suite —
+offenders included — and fails on any failure. The split exists only
+inside the GitHub Actions job, because GitHub-hosted runner IP ranges are
+the environmental variable; your machine is not.
 
 What the two checks mean on a PR:
 
@@ -95,9 +126,12 @@ What the two checks mean on a PR:
 2. Read the **Step Summary** — the `Integration failure summary` step renders
    a verdict header (`❌ N failed — triage before merging` or
    `✅ N passed / all green`), a `Suite | Failed test` table, and the verbatim
-   jest totals. The raw jest output is attached as the `integration-log`
-   artifact whenever the job fails, for full context beyond the table.
-3. Bucket **every** failure in the table into exactly one of:
+   jest totals for the gating step, followed by a `Known-offender tier
+   (non-gating)` section for the ensembl/arXiv step (informational only).
+   The raw jest output is attached as the `integration-log` artifact
+   whenever the job fails (the `known-offenders-log` artifact uploads on
+   every run), for full context beyond the table.
+3. Bucket **every** failure in the **gating** table into exactly one of:
 
    | Bucket | Meaning | Action |
    |---|---|---|
