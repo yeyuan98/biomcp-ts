@@ -249,47 +249,9 @@ Wraps an async function. Resolves to `{ data }` on success, `{ error }` on failu
 | `extractSection<T>` | `(data: unknown, ...paths: string[]) => T \| undefined` | Returns the first non-null value at a path, or `undefined` if `_error` exists |
 | `sectionResult<T>` | `(result: { sections?: Record<string, unknown> }, sectionName: string, subPath?: string) => T \| { _error: string } \| undefined` | Extracts a section from `result.sections[sectionName]`, optionally drilling into `subPath`. Returns `{ _error }` object if the section failed |
 
-## Validation System (`validation.ts`)
+## Input Validation
 
-### `ValidationResult` Interface
-
-```ts
-interface ValidationResult {
-  success: boolean;
-  errors?: Array<{ path: string; message: string }>;
-  data?: unknown;
-}
-```
-
-### `validateInput<T extends z.ZodType>(schema: T, data: unknown): ValidationResult`
-
-Runs `schema.safeParse(data)`. Returns `{ success: true, data }` or `{ success: false, errors }` with dot-joined paths.
-
-### `InputValidation` Schemas
-
-| Key | Schema | Constraints |
-|-----|--------|-------------|
-| `geneSymbol` | `z.string()` | min 1, max 50, regex `/^[A-Za-z0-9\-_]+$/` |
-| `variantId` | `z.string()` | min 1, max 100 |
-| `drugName` | `z.string()` | min 1, max 200 |
-| `diseaseQuery` | `z.string()` | min 1, max 200 |
-| `articleId` | `z.string()` | regex `/^(?:\d+|PMC\d+|10\.\d{4,}\/\S+)$/i` (PMID, PMCID, or DOI) |
-| `nctId` | `z.string()` | regex `/^NCT\d{8}$/` |
-| `patentId` | `z.string()` | regex `/^[A-Za-z]{2}\s?(?:RE|PP|H)?\s?\d{5,}\s?(?:[A-Za-z]\d{0,2})?$/` (publication number) |
-| `limit` | `z.number()` | int, min 1, max 100 |
-| `offset` | `z.number()` | int, min 0 |
-
-### `isValidEntityInput(entity: string, id: string): boolean`
-
-Validates an entity identifier against the appropriate `InputValidation` schema. Supports: `gene`, `variant`, `drug`, `disease`, `trial` (accepts NCT ID or PMID), `article` (accepts PMID, PMCID, or DOI), `patent` (accepts publication numbers like US11027025B2).
-
-### `getEntitySuggestions(entity: string): string`
-
-Returns a human-readable suggestion describing which search tool to use for valid IDs.
-
-### `formatValidationErrors(errors: Array<{ path: string; message: string }>): string`
-
-Formats validation errors into a multi-line string for user-facing output.
+There is no standalone validation module. Input validation is enforced by the Zod input schemas declared on each tool (see the Tool Registry above); malformed input fails the SDK's Zod validation before the handler runs and surfaces as an `isError: true` result (see Error Codes). The former `validation.ts` helper module was dead code — nothing imported it at runtime — and was removed (issue #162).
 
 ## File Structure
 
@@ -297,7 +259,6 @@ Formats validation errors into a multi-line string for user-facing output.
 src/server/
   index.ts            Server bootstrap, McpServer + StdioServerTransport
   errors.ts           BioMCPError types, formatError, withErrorHandling, section helpers
-  validation.ts       Zod schemas, validateInput, isValidEntityInput, getEntitySuggestions
   tools/
     gene.ts           7 gene tools (search, get, diseases, drugs, trials, articles, enrich)
     variant.ts        4 variant tools (search, get, oncokb, trials)
