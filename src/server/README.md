@@ -67,7 +67,7 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 |------|-------------|-------------|-------------|
 | `disease_search` | `query: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for diseases by name, phenotype, or keyword (envelope `{ results, warnings?, errors? }`) | readOnly, openWorld |
 | `disease_get` | `disease_id: string`, `sections?: ("core" \| "gene_associations" \| "phenotypes" \| "pathways" \| "all")[]`, `limit?: number (1-100, default 20)` | Get detailed disease information by ID | readOnly, openWorld |
-| `disease_drugs` | `disease_id: string`, `limit?: number (1-50, default 20)` | Get drugs for a disease via OpenTargets (envelope `{ results }` — partial failures ride as inline `_error` items within results) | readOnly, openWorld |
+| `disease_drugs` | `disease_id: string`, `limit?: number (1-50, default 20)` | Get drugs for a disease via OpenTargets (envelope `{ results, warnings?, errors? }` — OpenTargets failures and unresolved diseases ride in `errors[]`) | readOnly, openWorld |
 | `disease_trials` | `disease_id: string`, `limit?: number (1-50, default 20)` | Get clinical trials for a disease (envelope `{ results, warnings?, errors? }`) | readOnly, openWorld |
 
 ### Article Tools (`tools/article.ts`) — 3 tools

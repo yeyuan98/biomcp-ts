@@ -1305,12 +1305,14 @@ describe('diseaseToDrugs', () => {
       });
     }) as any;
 
-    const results = await diseaseToDrugs('MONDO:0007254');
+    const res = await diseaseToDrugs('MONDO:0007254');
 
-    expect(results).toHaveLength(1);
-    expect(results[0].drug_name).toBe('Tamoxifen');
-    expect(results[0].source).toBe('opentargets');
-    expect(results[0].phase).toBe('Phase 3');
+    expect(res.results).toHaveLength(1);
+    expect(res.results[0].drug_name).toBe('Tamoxifen');
+    expect(res.results[0].source).toBe('opentargets');
+    expect(res.results[0].phase).toBe('Phase 3');
+    // Clean happy path: no errors channel at all.
+    expect(res.errors).toBeUndefined();
   });
 
   test('queries OpenTargets directly for plain text query', async () => {
@@ -1348,7 +1350,7 @@ describe('diseaseToDrugs', () => {
       });
     }) as any;
 
-    const results = await diseaseToDrugs('melanoma');
+    const { results } = await diseaseToDrugs('melanoma');
 
     expect(results).toHaveLength(1);
     expect(results[0].drug_name).toBe('Dabrafenib');
@@ -1389,7 +1391,7 @@ describe('diseaseToDrugs', () => {
       });
     }) as any;
 
-    const results = await diseaseToDrugs('melanoma');
+    const { results } = await diseaseToDrugs('melanoma');
 
     expect(results.map(r => r.drug_name)).toEqual(['VEMURAFENIB', 'QS-21', 'ALUMINUM HYDROXIDE']);
     expect(results[0].phase).toBe('PHASE_4');
@@ -1432,7 +1434,7 @@ describe('diseaseToDrugs', () => {
       });
     }) as any;
 
-    const results = await diseaseToDrugs('melanoma');
+    const { results } = await diseaseToDrugs('melanoma');
 
     expect(results.map(r => r.drug_name)).toEqual(['DRUG APPROVED', 'DRUG DISPLAY', 'DRUG PHASE2']);
     expect(results[1].phase).toBe('Phase 3');
@@ -1471,7 +1473,7 @@ describe('diseaseToDrugs', () => {
       });
     }) as any;
 
-    const results = await diseaseToDrugs('melanoma');
+    const { results } = await diseaseToDrugs('melanoma');
 
     // DABRAFENIB MESYLATE and DABRAFENIB share an identity key; the
     // approved base form survives, the salt form is dropped.
@@ -1480,7 +1482,7 @@ describe('diseaseToDrugs', () => {
     expect(results[0].report_count).toBe(2);
   });
 
-  test('returns error when disease not found', async () => {
+  test('returns errors entry when disease not found', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
@@ -1488,10 +1490,27 @@ describe('diseaseToDrugs', () => {
       }),
     }) as any;
 
-    const results = await diseaseToDrugs('UNKNOWN_DISEASE');
+    const res = await diseaseToDrugs('UNKNOWN_DISEASE');
 
-    expect(results).toHaveLength(1);
-    expect((results[0] as any)._error).toContain('No OpenTargets entry found');
+    expect(res.results).toEqual([]);
+    expect(res.errors).toHaveLength(1);
+    expect(res.errors![0].source).toBe('disease');
+    expect(res.errors![0].message).toContain('No OpenTargets entry found');
+    // Deterministic not-found: no retryable flag.
+    expect(res.errors![0].retryable).toBeUndefined();
+  });
+
+  test('returns errors entry on hard upstream failure', async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(new Error('Service unavailable')) as any;
+
+    const res = await diseaseToDrugs('melanoma');
+
+    expect(res.results).toEqual([]);
+    expect(res.errors).toHaveLength(1);
+    expect(res.errors![0].source).toBe('opentargets');
+    expect(res.errors![0].message).toContain('Drug lookup for disease failed');
+    expect(res.errors![0].message).toContain('Service unavailable');
+    expect(res.errors![0].retryable).toBe(true);
   });
 
   test('falls back to MONDO EFO ID format when initial search fails', async () => {
@@ -1526,7 +1545,7 @@ describe('diseaseToDrugs', () => {
       });
     }) as any;
 
-    const results = await diseaseToDrugs('MONDO:0007254');
+    const { results } = await diseaseToDrugs('MONDO:0007254');
 
     expect(results).toHaveLength(1);
     expect(results[0].drug_name).toBe('Test Drug');
