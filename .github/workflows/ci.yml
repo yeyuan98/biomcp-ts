@@ -101,18 +101,24 @@ jobs:
       # here on purpose: jest's exit code must fail this job so the checks
       # list shows a red ✗ named `integration`.
       #
-      # === KNOWN OFFENDERS — pinned exclusion list (issue #164) ===
-      # Exactly these two paths, NO others:
+      # === KNOWN OFFENDERS — pinned exclusion list (issues #164, #182) ===
+      # Exactly these four paths, NO others:
       #   - src/__tests__/integration/tools/ensembl-tools.test.ts
       #     (Ensembl REST throttles shared GitHub runner IPs)
       #   - src/__tests__/integration/tools/article-tools.test.ts
       #     (arXiv cases: searchArxiv TimeoutError from runner IPs)
-      # Both are timeout-class environmental flakes: per-run-varying subsets,
-      # green locally and on rerun. ANY addition to this list requires (1) a
-      # GitHub issue with triage evidence per the rubric in
-      # docs/development/CI.md and (2) an explicit maintainer decision — a
-      # new flaky suite still gates and gets triaged like any other failure.
-      # Keep this list from growing into a blind spot.
+      #   - src/__tests__/integration/tools/gene-tools.test.ts
+      #     (gene_articles BRCA1: article-source legs return pmid-less rows
+      #     from runner IPs; 4 occurrences 2026-10-18/19, triage in #182)
+      #   - src/__tests__/integration/tools/drug-tools.test.ts
+      #     (openfda api.fda.gov transient 500s, retryable; triage in #182)
+      # All are environmental flakes: per-run-varying subsets, green locally
+      # and on rerun. 2026-10-19 maintainer decision (#182): confirmed
+      # unstable upstreams go on this list instead of burning reruns.
+      # ANY addition to this list requires (1) a GitHub issue with triage
+      # evidence per the rubric in docs/development/CI.md and (2) an explicit
+      # maintainer decision — a new flaky suite still gates and gets triaged
+      # like any other failure. Keep this list from growing into a blind spot.
       - name: Integration tests (gating — known offenders excluded)
         shell: bash # explicit bash => -eo pipefail; the set below is belt-and-braces
         run: |
@@ -121,10 +127,12 @@ jobs:
             --testPathIgnorePatterns \
               src/__tests__/integration/tools/ensembl-tools.test.ts \
               src/__tests__/integration/tools/article-tools.test.ts \
+              src/__tests__/integration/tools/gene-tools.test.ts \
+              src/__tests__/integration/tools/drug-tools.test.ts \
             2>&1 | tee integration.log
 
-      # Best-effort run of ONLY the two known offenders (pinned list above).
-      # continue-on-error ON PURPOSE: runner-IP flakes in exactly these two
+      # Best-effort run of ONLY the four known offenders (pinned list above).
+      # continue-on-error ON PURPOSE: runner-IP flakes in exactly these four
       # files must not fail the advisory job. `if: always()` so they still
       # run — and stay visible in the log/summary/artifact — even when the
       # gating step failed; their status is orthogonal to it.
@@ -138,6 +146,8 @@ jobs:
             --runTestsByPath \
               src/__tests__/integration/tools/ensembl-tools.test.ts \
               src/__tests__/integration/tools/article-tools.test.ts \
+              src/__tests__/integration/tools/gene-tools.test.ts \
+              src/__tests__/integration/tools/drug-tools.test.ts \
             2>&1 | tee known-offenders.log
 
       # Runs on failure AND success: the all-green verdict is worth recording
