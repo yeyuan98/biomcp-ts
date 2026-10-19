@@ -2391,6 +2391,43 @@ describe('article', () => {
       expect(withDoi.links?.doi_url).toBe('https://doi.org/10.1234/x');
     });
 
+    test('articleGet() reports fetch_failed when the OA status lookup itself fails for an in-PMC record', async () => {
+      // In-PMC record (PMCID in the PubMed XML) whose Europe PMC oa-status
+      // search leg rejects: the transient failure is treated as no status
+      // info, so paywalled can be neither ruled in nor out, and with both
+      // full-text legs failing the final reason is fetch_failed — never
+      // paywalled (a retry may reclassify it; issue #165).
+      global.fetch = jest.fn((url: unknown) => {
+        const { hostname, pathname, searchParams } = parseMockUrl(url);
+        if (hostname === 'eutils.ncbi.nlm.nih.gov' && pathname.endsWith('/efetch.fcgi') && searchParams.get('db') === 'pubmed') {
+          return Promise.resolve({ ok: true, headers: new Headers({ 'content-type': 'text/xml' }), text: () => Promise.resolve(SINGLE_ARTICLE_XML) });
+        }
+        if (hostname === 'www.ebi.ac.uk' && pathname.endsWith('/search')) {
+          return Promise.reject(new Error('transient network failure'));
+        }
+        if (hostname === 'www.ebi.ac.uk' && pathname.endsWith('/fullTextXML')) {
+          return Promise.resolve(failingResponse(500));
+        }
+        // eutils efetch db=pmc leg (and any other eutils call) fails too
+        return Promise.resolve(failingResponse(500));
+      }) as any;
+
+      const result = await articleGet('12345', ['fulltext']);
+
+      const ft = result.sections?.fulltext as any;
+      expect(ft.status).toBe('unavailable');
+      expect(ft.reason).toBe('fetch_failed');
+      // the failed lookup collapsed to no status info — echoed as unknown,
+      // not paywalled
+      expect(ft.oa_status).toBe('unknown');
+      expect(ft.note).toContain('retry');
+      expect(ft._error).toBeUndefined();
+      // both full-text legs were attempted before giving up
+      const calledUrls = (global.fetch as any).mock.calls.map((c: any) => String(c[0]));
+      expect(calledUrls.some((u: string) => u.includes('fullTextXML'))).toBe(true);
+      expect(calledUrls.some((u: string) => u.includes('db=pmc'))).toBe(true);
+    }, 30000);
+
     test('fetchFullText reports no_pmcid without upstream calls', async () => {
       global.fetch = jest.fn() as any;
 
