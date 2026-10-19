@@ -29,13 +29,17 @@ npm run test:coverage    # Unit tests with coverage
 > client's per-request cap, so larger jest timeouts only ever benefit the
 > `retryOnRateLimit` wrapper, never a single slow call.
 
-> **Always run tests via the npm scripts or `make` targets.** This is a native-ESM
+> **Always run tests via the npm scripts or `make` targets** (`npm test`,
+> `npm run test:integration`, …). This is a native-ESM
 > project (`"type": "module"` + ts-jest ESM), so jest must be launched with
-> `node --experimental-vm-modules`. The npm scripts do this for you. A bare
-> `npx jest …` invocation will *appear* to work but silently degrades: ESM mocks
+> `node --experimental-vm-modules`. The npm scripts do this for you — the flag
+> is hard-wired only there, never in a global/jest config, so a bare
+> `jest`/`npx jest …` invocation fails with
+> `Must use import to load ES Module` (or, where it limps along, silently
+> degrades: ESM mocks
 > registered via `jest.unstable_mockModule` stop applying (tests then assert against
 > real modules — e.g. the proxy suite hits live undici) and any module using
-> `import.meta.url` fails with "Cannot use 'import.meta' outside a module".
+> `import.meta.url` fails with "Cannot use 'import.meta' outside a module").
 >
 > If you must invoke jest directly, use:
 >

@@ -1,16 +1,18 @@
 import { jest } from '@jest/globals';
-import { articleSearch, searchArxiv, parseArxivAtomXml } from '../../entities/article/index.js';
 import { parseMockUrl } from '../helpers/mock-url.js';
-import { connectionManager } from '../../connections/manager.js';
 import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 // The 'arxiv' registry source enforces the arXiv Terms-of-Use rate (1
 // request / 3 s) via a capacity-1 token bucket and retries 429s after a
-// ~3.5 s backoff. The limiter's acquire() is mocked to a no-op (precedent:
-// src/__tests__/connections/rest.test.ts:6) so tests stay fast; the 429
-// fault-injection test intentionally sleeps through ONE real retry backoff
-// (~3.5 s) so the registry retry policy itself is exercised.
-jest.mock('../../connections/rate-limiter.js', () => ({
+// ~3.5 s backoff. This suite runs under --experimental-vm-modules (native
+// ESM), where babel-style jest.mock is silently IGNORED for static-import
+// graphs — the limiter must be registered with jest.unstable_mockModule
+// BEFORE the first dynamic import whose graph reaches it (repo pattern:
+// src/__tests__/server/biowasm-tools.test.ts). Both exports of
+// connections/rate-limiter.js are mocked because rest.ts/graphql.ts
+// construct their limiters through RateLimiterFactory; acquire() is a
+// no-op (immediate grant, no pacing) so tests stay fast.
+await jest.unstable_mockModule('../../connections/rate-limiter.js', () => ({
   TokenBucketRateLimiter: jest.fn<(...args: any[]) => any>().mockImplementation(() => ({
     acquire: jest.fn<(...args: any[]) => any>().mockResolvedValue(undefined),
   })),
@@ -19,6 +21,45 @@ jest.mock('../../connections/rate-limiter.js', () => ({
     getEffectiveRate: jest.fn<(...args: any[]) => any>().mockReturnValue(3000),
   },
 }));
+
+// Post-mock dynamic imports: every module whose static graph reaches
+// rate-limiter must load AFTER the registration above, so
+// entities/article/index.js (→ search/index.js → connections/manager.js →
+// rest.js → rate-limiter.js) and connections/manager.js itself become
+// dynamic top-level imports. The helper imports (mock-url, mock-fetch)
+// stay static — verified free of any transitive rate-limiter dependency.
+const { articleSearch, searchArxiv, parseArxivAtomXml } = await import('../../entities/article/index.js');
+const { connectionManager } = await import('../../connections/manager.js');
+
+// Await a promise that internally sleeps on module timers (registry retry
+// backoff setTimeouts) under jest fake timers, stepping the clock until
+// the promise settles (patent.test.ts convention).
+async function advanceUntilSettled<T>(p: Promise<T>): Promise<T> {
+  let settled = false;
+  let value: T | undefined;
+  let failure: { error: unknown } | undefined;
+  p.then(
+    v => { value = v; settled = true; },
+    e => { failure = { error: e }; settled = true; },
+  );
+  while (!settled) {
+    await jest.advanceTimersByTimeAsync(250);
+  }
+  if (failure) throw failure.error;
+  return value as T;
+}
+
+// Retry-backed tests install fake timers per test (try/finally restore) so
+// the ~3.5 s registry backoff never costs wall-clock time. Each install
+// starts later than any fake time a previous test reached — the documented
+// repo convention (src/__tests__/README.md) — even though the mocked
+// limiter here carries no refill state to protect.
+const REAL_TIME_AT_LOAD = Date.now();
+let fakeTimersInstalled = 0;
+function installFakeTimers(): void {
+  fakeTimersInstalled++;
+  jest.useFakeTimers({ now: REAL_TIME_AT_LOAD + fakeTimersInstalled * 3_600_000 });
+}
 
 // Trimmed from /tmp/opencode/arxiv-api-research/r18_multi_id.xml (real API
 // response, captured 2026-09-19). Entry 1: single author (with leading
@@ -297,7 +338,7 @@ describe('searchArxiv', () => {
     expect(openToEnd).toContain('+AND+submittedDate:%22202001010000+TO+209912312359%22');
     const openFromStart = (global.fetch as any).mock.calls[1][0] as string;
     expect(openFromStart).toContain('+AND+submittedDate:%22199107010000+TO+202012312359%22');
-  }, 60000); // real arXiv request pacing between the two calls — clock-skew headroom
+  });
 
   test('both-bounds dateRange sends submittedDate:"A TO B" with no sentinel bounds', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(atomResponse(EMPTY_FEED_XML)) as any;
@@ -331,7 +372,7 @@ describe('searchArxiv', () => {
     url = (global.fetch as any).mock.calls[2][0] as string;
     expect(url).toContain('&start=29950&max_results=50&');
     expect(url).not.toContain('999999');
-  }, 60000); // real arXiv request pacing between the three calls — clock-skew headroom
+  });
 
   test('empty feed resolves to [] (not an error result)', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue(atomResponse(EMPTY_FEED_XML)) as any;
@@ -369,22 +410,27 @@ describe('searchArxiv', () => {
   });
 
   test('HTTP 429: retried exactly once (2 fetches), then surfaces _error', async () => {
-    // NB: this test intentionally sleeps through the real ~3.5 s retry
-    // backoff (registry retry: { attempts: 2, backoffMs: 3500 }) — only the
-    // rate limiter is mocked (see file header). Generous per-test timeout:
-    // real-timer sleeps on clock-skewed dev boxes (WSL2) occasionally trip
-    // the 30 s default with spurious timeouts; assertions are unchanged.
+    // The real registry retry policy is exercised (attempts: 2, backoffMs:
+    // 3500); its setTimeout backoff runs on fake timers (installed later
+    // than any prior fake time, restored in finally — patent.test.ts
+    // convention) instead of sleeping ~3.5 s of wall clock. Assertions
+    // are unchanged.
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({ ok: false, status: 429, statusText: 'Too Many Requests' }) as any;
 
-    const result = await searchArxiv('electron', 10, 0);
+    installFakeTimers();
+    try {
+      const result = await advanceUntilSettled(searchArxiv('electron', 10, 0));
 
-    expect(global.fetch).toHaveBeenCalledTimes(2);
-    expect(result).toHaveLength(1);
-    expect(result[0]._error).toContain('searchArxiv failed');
-    expect(result[0]._error).toContain('HTTP 429');
-    expect(result[0]._error).toContain('shared `biomcp serve` daemon');
-    expect(result[0]._error).not.toContain('API key');
-  }, 60000);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(result).toHaveLength(1);
+      expect(result[0]._error).toContain('searchArxiv failed');
+      expect(result[0]._error).toContain('HTTP 429');
+      expect(result[0]._error).toContain('shared `biomcp serve` daemon');
+      expect(result[0]._error).not.toContain('API key');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 
   test('query reduced to nothing by sanitization returns [] without a network call', async () => {
     global.fetch = jest.fn() as any;
@@ -398,20 +444,23 @@ describe('searchArxiv', () => {
   test('fetch transport rejection surfaces as a single generic _error row', async () => {
     // 'fetch failed' matches the connection-layer network signature, so the
     // registry retry policy fires first (attempts: 2 → exactly 2 fetches);
-    // NB: this test sleeps through one real ~3.5 s retry backoff like the
-    // 429 test above (only the rate limiter is mocked — see file header);
-    // 60 s cap for the same clock-skew reason as that test.
+    // the ~3.5 s backoff runs on fake timers like the 429 test above.
     global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(new TypeError('fetch failed')) as any;
 
-    const result = await searchArxiv('electron', 10, 0);
+    installFakeTimers();
+    try {
+      const result = await advanceUntilSettled(searchArxiv('electron', 10, 0));
 
-    expect(global.fetch).toHaveBeenCalledTimes(2);
-    expect(result).toHaveLength(1);
-    // backendErrorRow generic wording, byte-identical to the shared envelope
-    expect(result[0]._error).toBe(
-      'searchArxiv failed: fetch failed. This may be a temporary data source issue. Try again or use a different source.'
-    );
-  }, 60000);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(result).toHaveLength(1);
+      // backendErrorRow generic wording, byte-identical to the shared envelope
+      expect(result[0]._error).toBe(
+        'searchArxiv failed: fetch failed. This may be a temporary data source issue. Try again or use a different source.'
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 
   test('truncated mid-entry XML fails parsing and surfaces as an _error row', async () => {
     // Passes the feed sniff (<?xml + <feed>), then the parser hits the
@@ -428,7 +477,9 @@ describe('searchArxiv', () => {
   test('federated run drops the arXiv leg\'s _error row when the other legs succeed', async () => {
     // arXiv leg rejects at the transport level (retried once, then a
     // single-element _error row); Europe PMC returns keyed rows so the
-    // final federated pool is non-empty and provably _error-free.
+    // final federated pool is non-empty and provably _error-free. The
+    // arXiv leg's ~3.5 s retry backoff runs on fake timers (see the 429
+    // test) instead of wall-clock sleep.
     const europepmcRows = {
       resultList: {
         result: [
@@ -448,11 +499,16 @@ describe('searchArxiv', () => {
       return Promise.resolve(jsonResponse({ esearchresult: { idlist: [] } })); // eutils esearch
     }) as any;
 
-    const result = await articleSearch('crispr');
+    installFakeTimers();
+    try {
+      const result = await advanceUntilSettled(articleSearch('crispr'));
 
-    // the arXiv outage degraded to an _error row which dedup dropped
-    expect(result.some(r => Boolean(r._error))).toBe(false);
-    expect(result).toHaveLength(2);
-    expect(result.map(r => r.pmid)).toEqual(['41721000', '41721001']);
-  }, 60000); // arXiv leg sleeps through one real ~3.5 s retry backoff — clock-skew headroom
+      // the arXiv outage degraded to an _error row which dedup dropped
+      expect(result.some(r => Boolean(r._error))).toBe(false);
+      expect(result).toHaveLength(2);
+      expect(result.map(r => r.pmid)).toEqual(['41721000', '41721001']);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });
