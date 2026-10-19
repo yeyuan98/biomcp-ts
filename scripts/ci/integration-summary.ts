@@ -1,12 +1,22 @@
 /* Build the GitHub Step Summary for the CI integration tier.
  *
- * Usage: node --import tsx scripts/ci/integration-summary.ts <integration.log>
+ * Usage: node --import tsx scripts/ci/integration-summary.ts <log> \
+ *          [--title <header prefix>] [--artifact <name>] [--non-gating]
  *
- * Called from the `integration` job in .github/workflows/ci.yml after
- * `npm run test:integration 2>&1 | tee integration.log`. Parses the jest
- * output (plain, or timestamp-prefixed raw GitHub job-log form) and appends
- * a triage summary to $GITHUB_STEP_SUMMARY: verdict header, failed-suite /
- * failed-test table, verbatim totals, and the triage rubric reminder.
+ * Called twice from the `integration` job in .github/workflows/ci.yml (the
+ * two-tier contract of issue #164), after each jest run is teed to a log:
+ *  1. gating run   — integration.log (defaults: title "Integration tier",
+ *     artifact integration-log, gating semantics with the triage rubric);
+ *  2. known-offender run — known-offenders.log with --title
+ *     "Known-offender tier (non-gating)" --artifact known-offenders-log
+ *     --non-gating (verdict headers say so; the rubric trailer is replaced
+ *     by the known-offender note so a flake is never mistaken for a
+ *     must-triage regression).
+ *
+ * Parses the jest output (plain, or timestamp-prefixed raw GitHub job-log
+ * form) and appends a summary to $GITHUB_STEP_SUMMARY: verdict header,
+ * failed-suite / failed-test table, verbatim totals, and the tier-specific
+ * trailer.
  *
  * Robustness contract: a missing, empty, or unparseable log must still
  * produce a summary that says so — this script never throws and never
@@ -112,28 +122,39 @@ function parse(raw: string): Parsed {
   return { failSuites, failures, suiteTotals, testTotals, failedCount, passedCount };
 }
 
-function buildSummary(logPath: string): string {
+/** Which CI tier a summary describes (two-tier contract, issue #164). */
+interface TierOpts {
+  /** Header prefix, e.g. `Integration tier` or `Known-offender tier (non-gating)`. */
+  title: string;
+  /** Artifact name quoted in the trailer (`integration-log`, `known-offenders-log`). */
+  artifact: string;
+  /** Non-gating tiers swap the triage rubric for a known-offender note. */
+  nonGating: boolean;
+}
+
+function buildSummary(logPath: string, tier: TierOpts): string {
   const out: string[] = [];
 
   if (!existsSync(logPath)) {
-    out.push('## Integration tier: ⚠️ no log to summarize', '',
-      `Integration log \`${logPath}\` was not found — the test step may not have run.`,
+    out.push(`## ${tier.title}: ⚠️ no log to summarize`, '',
+      `Log \`${logPath}\` was not found — the test step may not have run.`,
       'Check the job log directly; the triage checklist still applies:',
       '[docs/development/CI.md](docs/development/CI.md#integration-tier--merge-checklist).');
     return out.join('\n');
   }
 
   const parsed = parse(readFileSync(logPath, 'utf8'));
+  const failSuffix = tier.nonGating ? ' — non-gating, no triage required' : ' — triage before merging';
 
   // Verdict header: prefer the `Tests:` totals line; fall back to FAIL lines.
   const header =
     parsed.failedCount > 0
-      ? `## Integration tier: ❌ ${parsed.failedCount} failed — triage before merging`
+      ? `## ${tier.title}: ❌ ${parsed.failedCount} failed${failSuffix}`
       : parsed.failedCount === 0
-        ? `## Integration tier: ✅ ${parsed.passedCount >= 0 ? `${parsed.passedCount} passed / ` : ''}all green`
+        ? `## ${tier.title}: ✅ ${parsed.passedCount >= 0 ? `${parsed.passedCount} passed / ` : ''}all green`
         : parsed.failSuites.length > 0
-          ? `## Integration tier: ❌ ${parsed.failSuites.length} suite${parsed.failSuites.length === 1 ? '' : 's'} failed — triage before merging`
-          : '## Integration tier: ✅ no failures detected';
+          ? `## ${tier.title}: ❌ ${parsed.failSuites.length} suite${parsed.failSuites.length === 1 ? '' : 's'} failed${failSuffix}`
+          : `## ${tier.title}: ✅ no failures detected`;
   out.push(header, '');
 
   if (parsed.failSuites.length > 0 || parsed.failures.length > 0) {
@@ -150,34 +171,66 @@ function buildSummary(logPath: string): string {
         parsed.testTotals && `Tests:       ${parsed.testTotals}`, '```', '');
     }
   } else if (parsed.failedCount === 0) {
-    out.push('All integration suites that ran passed. Env-gated suites (db, biowasm/', 'ranalysis mirror, depmap) self-skip in CI as expected.', '');
+    if (tier.nonGating) {
+      out.push('Both known-offender suites (ensembl-tools, article-tools) passed this',
+        'run — the runner IPs got through to Ensembl/arXiv this time.', '');
+    } else {
+      out.push('All integration suites that ran passed. Env-gated suites (db, biowasm/', 'ranalysis mirror, depmap) self-skip in CI as expected.', '');
+    }
   } else {
     out.push('No `FAIL` lines or failure bullets were parseable from the log —', 'inspect the raw output before merging.', '');
   }
 
-  out.push('---', '',
-    '**Before merging, bucket every failure (triage rubric — details in',
-    '[docs/development/CI.md](docs/development/CI.md#integration-tier--merge-checklist)):**',
-    '',
-    '- **(a) Upstream** — rate-limit / timeout / geo-block from a live API: note it in the PR.',
-    '- **(b) Test-design** — brittle assertion against volatile live data: file an issue.',
-    '- **(c) Code defect** — the contract under test is actually broken: fix before merging.',
-    '',
-    'The raw log is uploaded as the `integration-log` artifact when this job fails.',
-    'Reproduce locally: `make test-integration`. Note: local WSL2 clock skew can',
-    'cause spurious token-bucket / TLS failures that never occur on CI runners, so',
-    'CI is authoritative when triaging flakes.');
+  out.push('---', '');
+  if (tier.nonGating) {
+    out.push('**Known GitHub-runner offenders (issue #164):** these two suites',
+      '(`ensembl-tools` — Ensembl REST; `article-tools` arXiv cases) fail',
+      'intermittently from GitHub-hosted runner IPs — upstream throttling of',
+      'shared runner ranges, not code, and per-run-varying subsets that pass',
+      'on rerun. This tier runs best-effort with `continue-on-error`: a red',
+      'result here does **not** fail the `integration` job and needs no',
+      'per-failure triage.',
+      '',
+      `The raw log is uploaded as the \`${tier.artifact}\` artifact on every run.`,
+      'Local runs remain authoritative for these suites: `make test-integration`',
+      'runs them and fails on any failure (local WSL2 clock skew can cause',
+      'spurious token-bucket / TLS failures — resync before trusting a local red).');
+  } else {
+    out.push('**Before merging, bucket every failure (triage rubric — details in',
+      '[docs/development/CI.md](docs/development/CI.md#integration-tier--merge-checklist)):**',
+      '',
+      '- **(a) Upstream** — rate-limit / timeout / geo-block from a live API: note it in the PR.',
+      '- **(b) Test-design** — brittle assertion against volatile live data: file an issue.',
+      '- **(c) Code defect** — the contract under test is actually broken: fix before merging.',
+      '',
+      `The raw log is uploaded as the \`${tier.artifact}\` artifact when this job fails.`,
+      'Reproduce locally: `make test-integration`. Note: local WSL2 clock skew can',
+      'cause spurious token-bucket / TLS failures that never occur on CI runners, so',
+      'CI is authoritative when triaging flakes.');
+  }
   return out.join('\n');
 }
 
 function main(): void {
-  const logPath = process.argv[2];
+  const args = process.argv.slice(2);
+  const positional: string[] = [];
+  let title = 'Integration tier';
+  let artifact = 'integration-log';
+  let nonGating = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--title' && i + 1 < args.length) title = String(args[++i]);
+    else if (arg === '--artifact' && i + 1 < args.length) artifact = String(args[++i]);
+    else if (arg === '--non-gating') nonGating = true;
+    else positional.push(arg);
+  }
+  const logPath = positional[0];
   if (!logPath) {
-    console.error('usage: integration-summary.ts <integration.log>');
+    console.error('usage: integration-summary.ts <log> [--title <prefix>] [--artifact <name>] [--non-gating]');
     process.exit(0); // never fail the job from the summarizer itself
   }
   const summaryPath = process.env.GITHUB_STEP_SUMMARY ?? '';
-  const body = buildSummary(logPath);
+  const body = buildSummary(logPath, { title, artifact, nonGating });
   if (summaryPath) {
     // Append (the file may not exist yet or may already hold earlier content).
     const existing = existsSync(summaryPath) ? readFileSync(summaryPath, 'utf8') : '';

@@ -160,6 +160,36 @@ export function applyLimit(
 }
 
 /**
+ * Rename aliased section entries from their STORAGE keys back to the
+ * REQUESTED (schema-advertised) names, in place, and return the same
+ * sections object (issue #129; batch_get parity is issue #158).
+ *
+ * The entity layer maps request names to legacy storage keys on input only
+ * (gene: clinical_evidence→civic, protein_atlas→hpa, dosage_sensitivity→
+ * clingen, disease_associations→disgenet; variant: alphagenome_scores→
+ * alphagenome) so it can address them internally — callers must not have to
+ * know those internal names. For each requested name with an alias entry
+ * whose storage key is present, the entry moves to the requested name;
+ * identity sections (no alias entry) and non-aliased keys are untouched.
+ * `requestedNames` should already cover the 'all' expansion (pass the
+ * all-sections constant), so implicitly requested sections come back under
+ * their public names too.
+ */
+export function remapSectionKeysToRequested(
+  sections: Record<string, unknown>,
+  requestedNames: string[],
+  storageKeys: Record<string, string>,
+): Record<string, unknown> {
+  for (const name of requestedNames) {
+    const storedKey = storageKeys[name];
+    if (!storedKey || !(storedKey in sections)) continue;
+    sections[name] = sections[storedKey];
+    delete sections[storedKey];
+  }
+  return sections;
+}
+
+/**
  * Required non-empty string parameter: trims, then rejects an empty result
  * with a uniform message so empty/whitespace-only selector params (ids,
  * symbols, accessions, …) fail zod schema validation — an MCP -32602-class

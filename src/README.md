@@ -48,7 +48,6 @@ Entry point. Converts MCP tool calls into entity-layer invocations. All tools ar
 - `server/index.ts` — creates `McpServer` on `StdioServerTransport`, imports and calls all 14 `register*Tools(server)` functions.
 - `server/tools/` — 14 registration modules, one `register*Tools(server)` per domain; handlers try/catch and delegate to the entity layer; Zod input schemas.
 - `server/errors.ts` — `BioMCPError` typing, `formatError` classification, `withErrorHandling`, `{ _error }` section helpers.
-- `server/validation.ts` — Zod schemas for entity identifiers plus `validateInput` / `isValidEntityInput` / `getEntitySuggestions`.
 
 ## Layer 2 — `entities/` Business Logic Layer
 

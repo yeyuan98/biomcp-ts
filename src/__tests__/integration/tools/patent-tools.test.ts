@@ -176,8 +176,11 @@ describe('patent_get', () => {
   }, 60000);
 
   it('rejects invalid patent ids', async () => {
+    // Schema-level shape check (#163): rejection now happens before any
+    // upstream call, with the expected-shape message instead of the old
+    // entity-layer "Invalid patent number" text.
     await expect(harness.callTool('patent_get', { patent_id: 'not-a-patent' }))
-      .rejects.toThrow(/Invalid patent number/i);
+      .rejects.toThrow(/Patent ID must be a publication number/i);
   }, 15000);
 });
 

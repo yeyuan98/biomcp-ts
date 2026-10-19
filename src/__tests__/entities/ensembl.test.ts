@@ -544,23 +544,35 @@ describe('ensembl entity', () => {
       });
       mockFetchRoutes(overlapRoutes(undefined, variationGate));
 
-      const pending = ensemblRegion('7:140450000-140480000');
-      // While the variation response is still gated, the gene leg must
-      // already have gone out (and vice versa) — a sequential implementation
-      // could not have both URLs fetched at this point.
-      await Promise.race([pending.then(() => 'settled'), new Promise(r => setTimeout(r, 500))]).then(v => {
-        expect(v).not.toBe('settled');
-      });
-      expect(callUrls()).toContainEqual(
-        expect.stringContaining('/overlap/region/human/7:140450000-140480000?feature=gene')
-      );
-      expect(callUrls()).toContainEqual(
-        expect.stringContaining('/overlap/region/human/7:140450000-140480000?feature=variation')
-      );
+      // Deterministic parallelism probe (was a real 500 ms Promise.race
+      // sleep): the second leg's fetch is gated only by the ensembl
+      // limiter's intervalMs=100 module timer, so a single fake-clock step
+      // flushes it without any wall-clock wait. Patent-suite convention —
+      // install later than real time so lazily constructed limiters refill.
+      jest.useFakeTimers({ now: Date.now() + 3_600_000 });
+      try {
+        let settled = false;
+        const pending = ensemblRegion('7:140450000-140480000');
+        void pending.then(() => { settled = true; }, () => { settled = true; });
+        // While the variation response is still gated, the gene leg must
+        // already have gone out (and vice versa) — a sequential implementation
+        // could not have both URLs fetched at this point.
+        await jest.advanceTimersByTimeAsync(250);
+        expect(settled).toBe(false);
+        expect(callUrls()).toContainEqual(
+          expect.stringContaining('/overlap/region/human/7:140450000-140480000?feature=gene')
+        );
+        expect(callUrls()).toContainEqual(
+          expect.stringContaining('/overlap/region/human/7:140450000-140480000?feature=variation')
+        );
 
-      releaseVariation();
-      const result = await pending;
-      expect(result.total).toBe(2);
+        releaseVariation();
+        await jest.advanceTimersByTimeAsync(250);
+        const result = await pending;
+        expect(result.total).toBe(2);
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('combines gene+transcript into one full-span leg', async () => {
