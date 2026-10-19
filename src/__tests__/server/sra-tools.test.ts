@@ -220,8 +220,10 @@ describe('sra tools', () => {
   it('sra_get rejects malformed accessions with the expected-format error', async () => {
     mockEutils(['8877661']);
 
+    // Rejected at the SCHEMA level (issue #163) — the shape message names
+    // the expected form and no fetch happens.
     await expect(harness.callTool('sra_get', { accession: 'ABC123' })).rejects.toThrow(
-      /Expected SRA accession like SRR14432476/
+      /SRA accession must be like SRR14432476/
     );
     expect(fetchUrls()).toHaveLength(0);
   });
@@ -231,7 +233,7 @@ describe('sra tools', () => {
 
     for (const bad of ['banana', 'XRQ12345', 'SRR', 'SRR14432476!']) {
       await expect(harness.callTool('sra_get', { accession: bad })).rejects.toThrow(
-        /Expected SRA accession/
+        /SRA accession must be like SRR14432476/
       );
     }
     expect(fetchUrls()).toHaveLength(0);

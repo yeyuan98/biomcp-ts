@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { discover, batchGet } from '../../entities/cross-entity.js';
 import { GENE_ALL_SECTIONS, GENE_STORAGE_KEYS } from './gene.js';
 import { VARIANT_ALL_SECTIONS, VARIANT_STORAGE_KEYS } from './variant.js';
-import { remapSectionKeysToRequested } from './utils.js';
+import { remapSectionKeysToRequested, requiredString } from './utils.js';
 
 /**
  * Per-entity section remap inputs for batch_get (issue #158): the 'all'
@@ -43,7 +43,7 @@ export function registerUtilityTools(server: McpServer): void {
       inputSchema: {
         inputs: z.array(z.object({
           entity: z.enum(['gene', 'variant', 'drug', 'disease', 'trial', 'article', 'patent']),
-          id: z.string(),
+          id: requiredString('Entity ID'),
           sections: z.array(z.string()).optional(),
         })).describe('List of entity requests'),
       },

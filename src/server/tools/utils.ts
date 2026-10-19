@@ -204,6 +204,117 @@ export const requiredString = (label: string) =>
   z.string().trim().min(1, `${label} must be a non-empty string after trimming`);
 
 /**
+ * ── ID-format regex constants (issue #163) ──────────────────────────────
+ *
+ * Single source of truth for the accepted SHAPE of each identifier family.
+ * Each mirrors its entity-layer counterpart EXACTLY (never stricter — a
+ * schema stricter than the entity would reject identifiers the entity
+ * layer can serve), so a value passing the schema always reaches the
+ * handler. Exported deliberately: the docstring-example harness (issue
+ * #160) will import these constants to assert that every example ID
+ * advertised in a tool `.describe()` string is accepted by its schema.
+ *
+ * Case handling: where the consuming handler/entity normalizes case
+ * (sra_get uppercases; genbank/patent/article entities are case-blind)
+ * the regex is case-INsensitive; where the entity is case-sensitive
+ * (isPreprintDoi) the schema stays case-sensitive too.
+ */
+
+/** ClinicalTrials.gov registry ID: `NCT` + 8 digits, e.g. NCT01234567. */
+export const NCT_ID_RE = /^NCT\d{8}$/i;
+
+/**
+ * Article identifier accepted by article_get / parseArticleId: a PMID
+ * (numeric), a PMCID (optionally versioned — Europe PMC serves
+ * version-suffixed PMCIDs like PMC4712660.1), or a DOI with an optional
+ * `doi:` prefix. Mirrors parseArticleId's three patterns (entity uses
+ * `10\.\d{4,}` for the prefix — no 9-digit cap — so the schema does too).
+ */
+export const ARTICLE_ID_RE =
+  /^(?:\d+|PMC\d+(?:\.\d+)?|(?:doi:)?10\.\d{4,}\/\S+)$/i;
+
+/**
+ * bioRxiv/medRxiv preprint DOI, mirroring the entity's isPreprintDoi
+ * EXACTLY (case-sensitive, two alternatives): the strict CSHL date form
+ * 10.1101/YYYY.MM.DD.NNNNNN (a bare 10.1101 prefix would misclassify
+ * CSHL Press journal articles) or the preprint-only 10.64898 prefix.
+ */
+export const PREPRINT_DOI_RE =
+  /^10\.1101\/\d{4}\.\d{2}\.\d{2}\.\d+$|^10\.64898\/\S+$/;
+
+/**
+ * GenBank/RefSeq nucleotide accession, mirroring the entity-layer
+ * ACCESSION_RE in src/entities/genbank.ts: 1-6 letters, optional
+ * underscore (RefSeq NC_/NG_ vs INSDC KJ668569), digits, optional
+ * version suffix. Covers WGS-style ABCD01000001.1.
+ */
+export const GENBANK_ACCESSION_RE = /^[A-Z]{1,6}_?\d+(?:\.\d+)?$/i;
+
+/**
+ * Patent publication number. The entity layer (normalizePublicationNumber
+ * in src/entities/patent/search/dedup.ts) strips ALL spaces/slashes and
+ * uppercases, then tests PUBLICATION_NUMBER_RE
+ * `/^[A-Z]{2}(RE|PP|H)?\d{5,}[A-Z]?\d{0,2}$/`. This schema-level pattern
+ * accepts the SAME set by allowing spaces/slashes between tokens — so
+ * "US11027025B2", "us11027025b2", "US 11027025 B2", and "WO 2015/006747
+ * A2" all pass. Normalization stays in the handler/entity (schema must
+ * not mutate).
+ */
+export const PATENT_ID_RE =
+  /^[A-Z]{2}(?:RE|PP|H)?(?:[ /]*\d){4,}[ /]*(?:[A-Z][ /]*\d{0,2})?$/i;
+
+/**
+ * SRA accession across the three INSDC archives: [EDS]R (NCBI S, ENA E,
+ * DDBJ D) + record subfamily [PXRS] (run/experiment/study/sample) +
+ * digits, e.g. SRR14432476, ERR2603273, DRR599211. Case-insensitive —
+ * sra_get's handler uppercases before use.
+ */
+export const SRA_ACCESSION_RE = /^[EDS]R[PXRS]\d+$/i;
+
+/**
+ * ── Per-family schema builders (issue #163) ─────────────────────────────
+ *
+ * Each = requiredString + the family regex, with an error message that
+ * NAMES THE EXPECTED SHAPE (with examples) so a malformed id fails fast
+ * at the zod schema level as an MCP -32602 InvalidParams error — before
+ * any handler logic or network call — instead of surfacing as a confusing
+ * upstream not-found later. Examples are the REAL ids advertised in the
+ * tools' `.describe()` strings.
+ */
+export const nctIdParam = (label = 'NCT ID') =>
+  requiredString(label).regex(NCT_ID_RE, `${label} must be NCT followed by 8 digits, e.g. NCT01234567`);
+
+export const articleIdParam = (label = 'Article ID') =>
+  requiredString(label).regex(
+    ARTICLE_ID_RE,
+    `${label} must be a PMID (numeric, e.g. 12345), a PMCID (e.g. PMC1234567, optionally versioned like PMC4712660.1), or a DOI (e.g. 10.1038/s41586-021-03819-2 or doi:10.1038/s41586-021-03819-2)`,
+  );
+
+export const preprintDoiParam = (label = 'Preprint DOI') =>
+  requiredString(label).regex(
+    PREPRINT_DOI_RE,
+    `${label} must be a bioRxiv/medRxiv preprint DOI: 10.1101/YYYY.MM.DD.NNNNNN (e.g. 10.1101/2021.10.25.465764) or the new prefix 10.64898/... (e.g. 10.64898/2026.08.11.744243); journal-article identifiers are rejected — use article_get for those`,
+  );
+
+export const genbankAccessionParam = (label = 'Accession') =>
+  requiredString(label).regex(
+    GENBANK_ACCESSION_RE,
+    `${label} must look like NC_000023.11, NG_017013.2, KJ668569.1, or U12345 — 1-6 letters, optional underscore, digits, optional .version suffix`,
+  );
+
+export const patentIdParam = (label = 'Patent ID') =>
+  requiredString(label).regex(
+    PATENT_ID_RE,
+    `${label} must be a publication number like US11027025B2, EP3904939B1, or US 11027025 B2 (spaces and case tolerated)`,
+  );
+
+export const sraAccessionParam = (label = 'SRA accession') =>
+  requiredString(label).regex(
+    SRA_ACCESSION_RE,
+    `${label} must be like SRR14432476 — run (SRR/ERR/DRR), experiment (SRX/ERX/DRX), study (SRP/ERP/DRP), or sample (SRS/ERS/DRS) followed by digits (case-insensitive)`,
+  );
+
+/**
  * Optional filter-style string: ABSENCE still passes schema, but an
  * explicitly supplied empty/whitespace-only value is rejected. An empty
  * filter value would otherwise silently broaden the query — e.g.

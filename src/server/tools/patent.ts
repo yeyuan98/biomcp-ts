@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { patentSearch, patentGet, PATENT_GET_SECTIONS, PATENT_SEARCH_TOOL_BUDGET_MS } from '../../entities/patent/index.js';
-import { applyLimit, requiredString, withToolTimeout } from './utils.js';
+import { applyLimit, patentIdParam, withToolTimeout } from './utils.js';
 
 // Derived from the entity-exported budget so the seminal mining phase can
 // size itself against the real tool timeout (see search/index.ts).
@@ -75,7 +75,7 @@ export function registerPatentTools(server: McpServer): void {
         'Sections: abstract, claims (US fulltext via USPTO Public Search; EP/WO via EPO OPS), ' +
         'citations (backward + forward), family, classifications.',
       inputSchema: {
-        patent_id: requiredString('Patent ID').describe('Publication number, e.g. "US11027025B2"'),
+        patent_id: patentIdParam().describe('Publication number, e.g. "US11027025B2"'),
         sections: z.array(z.enum(PATENT_GET_SECTIONS)).optional().describe('Sections to include (default: core only)'),
         limit: z.number().int().min(1).max(100).default(20).describe('Max entries per section array'),
       },
