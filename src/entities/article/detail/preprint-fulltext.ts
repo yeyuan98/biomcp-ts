@@ -1,4 +1,5 @@
 import { TokenBucketRateLimiter } from '../../../connections/rate-limiter.js';
+import { monotonicNowMs } from '../../../connections/time.js';
 import { VERSION } from '../../../version.js';
 import { errorMessageWithCause } from '../../errors.js';
 import { isPreprintDoi } from './id-resolution.js';
@@ -185,9 +186,9 @@ function parseRetryAfterMs(headers: Headers): number | undefined {
 /** Enter (or extend) the cooldown; returns the effective remaining ms. */
 function enterCooldown(retryAfterMs?: number): number {
   const duration = Math.max(MIN_COOLDOWN_MS, retryAfterMs ?? 0);
-  const until = Date.now() + duration;
+  const until = monotonicNowMs() + duration;
   if (until > cooldownUntil) cooldownUntil = until;
-  return Math.max(duration, cooldownUntil - Date.now());
+  return Math.max(duration, cooldownUntil - monotonicNowMs());
 }
 
 /** Only the two known CSHL preprint hosts may be downloaded from — a
@@ -213,8 +214,8 @@ async function downloadJats(url: string): Promise<DownloadOutcome> {
     await downloadLimiter.acquire();
     // A concurrent call may have tripped the cooldown while we waited for
     // the limiter — never start an attempt inside a cooldown.
-    if (Date.now() < cooldownUntil) {
-      return { kind: 'rate_limited', cooldownMs: cooldownUntil - Date.now() };
+    if (monotonicNowMs() < cooldownUntil) {
+      return { kind: 'rate_limited', cooldownMs: cooldownUntil - monotonicNowMs() };
     }
     let resp: Response;
     try {
@@ -433,7 +434,7 @@ export async function fetchPreprintFullText(
   // 2. Cooldown gate: while paused, return immediately (or serve whatever
   // is already cached — for default-version calls the newest cached
   // version, disclosed in the note). Never sleep past a budget.
-  const cooldownRemainingMs = cooldownUntil - Date.now();
+  const cooldownRemainingMs = cooldownUntil - monotonicNowMs();
   if (cooldownRemainingMs > 0) {
     const cachedVersion = options.version ?? latestCachedVersion(trimmed);
     if (cachedVersion !== undefined) {

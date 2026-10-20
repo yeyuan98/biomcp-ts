@@ -24,6 +24,7 @@ import {
   type ProgressThrottle,
 } from '../wasmcore/progress.js';
 import { runMain, type RunMainModule } from './run-main.js';
+import { monotonicNowMs } from '../connections/time.js';
 
 // ---------------------------------------------------------------------------
 // Protocol types (imported type-only by the engine).
@@ -251,7 +252,7 @@ let stderrTail = '';
 function beginRunProgress(runId: unknown): void {
   progressRun =
     typeof runId === 'string' || typeof runId === 'number'
-      ? { runId, startedMs: Date.now(), throttle: createProgressThrottle(PROGRESS_MIN_INTERVAL_MS) }
+      ? { runId, startedMs: monotonicNowMs(), throttle: createProgressThrottle(PROGRESS_MIN_INTERVAL_MS) }
       : null;
   runIoBytes = 0;
   stderrTail = '';
@@ -271,7 +272,7 @@ function noteStderrLine(text: string): void {
 function emitRunProgress(): void {
   const run = progressRun;
   if (!run) return;
-  const now = Date.now();
+  const now = monotonicNowMs();
   run.throttle.maybeEmit(now, () => {
     const elapsed = Math.round((now - run.startedMs) / 1000);
     let message = `${elapsed}s, ${(runIoBytes / (1024 * 1024)).toFixed(1)} MB read`;

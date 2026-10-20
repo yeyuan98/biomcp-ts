@@ -723,6 +723,34 @@ describe('drug', () => {
     expect(whoFetchCount()).toBe(1);
   });
 
+  test('WHO PQ memo: a backward wall-clock jump cannot pin it stale-forever — normal progression still expires it', async () => {
+    // WSL2 #166: the memo's TTL runs on the monotonic clock, so a wall-clock
+    // jump backward (which would make `Date.now - fetchedAt` negative and a
+    // wall-clock memo live forever) must not matter, and the memo must still
+    // expire once monotonic time passes the 24 h TTL. Fake timers virtualize
+    // performance.now; setSystemTime moves only the virtual Date
+    // (verified) — exactly the wall-jumps/monotonic-ticks split under test.
+    global.fetch = mockWhoPqHosts();
+
+    await fetchWHORegulatory('artemether');
+    expect(whoFetchCount()).toBe(1);
+
+    jest.useFakeTimers();
+    try {
+      // Wall clock jumps back 5 minutes; monotonic clock unaffected.
+      jest.setSystemTime(Date.now() - 5 * 60_000);
+      await fetchWHORegulatory('lumefantrine');
+      expect(whoFetchCount()).toBe(1); // still memoized — no refetch storm
+
+      // 24 h TTL passes on the monotonic clock: the memo MUST expire.
+      jest.advanceTimersByTime(24 * 60 * 60 * 1000 + 60_000);
+      await fetchWHORegulatory('dolutegravir');
+      expect(whoFetchCount()).toBe(2); // genuinely expired → refetch
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   test('drugGet() who_regulatory section wires the real lookup through the section pipeline', async () => {
     global.fetch = mockWhoPqHosts();
 

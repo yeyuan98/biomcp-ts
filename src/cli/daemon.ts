@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { readTraceDatabaseMetrics } from '../remote/tracer.js';
+import { monotonicNowMs } from '../connections/time.js';
 
 export interface DaemonState {
   pid: number;
@@ -137,11 +138,11 @@ export async function startDaemon(cliPath: string, options?: DaemonOptions): Pro
   }
 
   // Poll /health for up to 5 seconds
-  const start = Date.now();
+  const start = monotonicNowMs();
   let healthy = false;
   const healthUrl = `http://${host}:${port}/health`;
 
-  while (Date.now() - start < 5000) {
+  while (monotonicNowMs() - start < 5000) {
     await new Promise((r) => setTimeout(r, 250));
     if (!isProcessRunning(pid)) break;
     try {
@@ -213,8 +214,8 @@ export async function stopDaemon(): Promise<void> {
     return;
   }
 
-  const start = Date.now();
-  while (Date.now() - start < 15_000) {
+  const start = monotonicNowMs();
+  while (monotonicNowMs() - start < 15_000) {
     if (!isProcessRunning(state.pid)) break;
     await new Promise((r) => setTimeout(r, 200));
   }

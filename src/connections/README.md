@@ -8,6 +8,10 @@ API abstraction layer for biomcp-ts. Provides protocol-aware HTTP clients, a sou
 - **Lazy initialization** — `ConnectionManager.getConnection(sourceId)` creates the connection on first access and caches it in a `Map`.
 - **Module singleton** — `connectionManager` is the pre-instantiated `ConnectionManager` exported from `manager.ts`.
 
+## Clock rule (duration math)
+
+In-process DURATION / BUDGET / TTL / elapsed comparisons use the monotonic clock via `monotonicNowMs()` (`time.ts`) — never `Date.now()`. Wall-clock stays ONLY for absolute/persisted/user-visible timestamps (filenames, trace epochs, FS mtimes, HTTP `Retry-After` date parsing). Reason: WSL2 guest-clock jumps (NTP resync, host sleep/wake) make wall-clock deadlines corrupt elapsed state both ways — forward jumps expire fresh caches / falsely exhaust retry budgets; backward jumps make `expiresAt` comparisons stale-forever. `performance.now()` never moves backward, so converted math is immune. Trade-off: monotonic time excludes host-suspend time, so TTLs stretch across suspend — acceptable for this repo's short-lived in-process caches. Deliberate exception: `rate-limiter.ts` stays on `Date.now()` (import-time-constructed limiter singletons break fake-timer tests, and its capacity-1 bucket bounds wall-clock-jump damage to one extra request forward / a delayed refill backward).
+
 ### Proxy-aware fetch (`proxy.ts`)
 
 Node's built-in fetch (undici) ignores `HTTP(S)_PROXY` env — verified live in proxied environments where direct TCP to some hosts (patents.google.com, web.archive.org) times out while the proxy carries them. `proxy.ts` installs an undici `EnvHttpProxyAgent` as the **global dispatcher**, making every `fetch` call honor `HTTP_PROXY`/`HTTPS_PROXY` (and lowercase forms) plus `NO_PROXY`/`no_proxy`. It self-initializes exactly once at module scope and is imported for its side effect by `manager.ts`, so the server, tests, and CLI paths all get proxy-aware fetch before first use (the env is read at agent construction time).
@@ -158,6 +162,14 @@ class RateLimiterFactory {
   static getEffectiveRate(baseRate: number, config: RateLimitConfig, hasKey: boolean): number;
 }
 ```
+
+### `time.ts`
+
+```ts
+function monotonicNowMs(): number;
+```
+
+Monotonic milliseconds (`performance.now()`) for duration/budget/TTL math — see [Clock rule](#clock-rule-duration-math).
 
 ### `fetch-utils.ts`
 

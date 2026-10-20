@@ -1,6 +1,7 @@
 import { jest } from '@jest/globals';
 import { HttpConnectionError } from '../../connections/errors.js';
 import { parseMockUrl, mockFetchRouter } from '../helpers/mock-url.js';
+import { withClockJumps } from '../helpers/clock-jumps.js';
 
 const REQUIRED_TEMPLATE_KEY = 'showDocPerFamilyPref';
 
@@ -634,33 +635,48 @@ describe('seminal prior-art mining', () => {
 
   test('mining budget adapts to elapsed search time (35s elapsed → 20s budget)', async () => {
     // A frozen Date.now spy would deadlock the token-bucket refill (it needs
-    // an advancing clock), so the slow search is simulated with a system-time
-    // jump inside the main-search mock — fake-time advancement continues.
+    // an advancing clock), so the slow search is simulated as a monotonic
+    // elapsed offset inside the main-search mock — the budget math reads
+    // performance.now (#166), and fake-time advancement continues.
+    const virtualPerfNow = performance.now.bind(performance);
+    let perfOffsetMs = 0;
+    const perfSpy = jest.spyOn(performance, 'now').mockImplementation(() => virtualPerfNow() + perfOffsetMs);
     global.fetch = ppubsSeminalPhaseMock({
       pool: () => new Promise(() => {}),
-      onMainSearch: () => { jest.setSystemTime(new Date(Date.now() + 35_000)); },
+      onMainSearch: () => { perfOffsetMs += 35_000; },
     }) as any;
-    const { patentSearch } = await import('../../entities/patent/search/index.js');
-    const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
-    expect(response.seminal_note).toContain('deadline exceeded after 20s');
+    try {
+      const { patentSearch } = await import('../../entities/patent/search/index.js');
+      const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
+      expect(response.seminal_note).toContain('deadline exceeded after 20s');
+    } finally {
+      perfSpy.mockRestore();
+    }
   });
 
   test('mining is skipped outright when the remaining budget is under the floor', async () => {
     const searchCalls = { count: 0 };
+    const virtualPerfNow = performance.now.bind(performance);
+    let perfOffsetMs = 0;
+    const perfSpy = jest.spyOn(performance, 'now').mockImplementation(() => virtualPerfNow() + perfOffsetMs);
     global.fetch = ppubsSeminalPhaseMock({
       pool: () => { throw new Error('pool search must not run when the budget is exhausted'); },
       searchCalls,
-      onMainSearch: () => { jest.setSystemTime(new Date(Date.now() + 50_000)); }, // 5s remaining < 8s floor
+      onMainSearch: () => { perfOffsetMs += 50_000; }, // 5s remaining < 8s floor
     }) as any;
-    const { patentSearch } = await import('../../entities/patent/search/index.js');
-    const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
-    expect(searchCalls.count).toBe(1); // main search only — no pool call burned
-    expect(response.patents).toHaveLength(1);
-    // #136: the seminal fields are always present when seminal was requested
-    // — the budget skip yields explicit empties, not absent keys.
-    expect(response.seminal_prior_art).toEqual([]);
-    expect(response.mined_count).toBe(0);
-    expect(response.seminal_note).toContain('time budget exhausted');
+    try {
+      const { patentSearch } = await import('../../entities/patent/search/index.js');
+      const response = await advanceUntilSettled(patentSearch('"mRNA display"', {}));
+      expect(searchCalls.count).toBe(1); // main search only — no pool call burned
+      expect(response.patents).toHaveLength(1);
+      // #136: the seminal fields are always present when seminal was requested
+      // — the budget skip yields explicit empties, not absent keys.
+      expect(response.seminal_prior_art).toEqual([]);
+      expect(response.mined_count).toBe(0);
+      expect(response.seminal_note).toContain('time budget exhausted');
+    } finally {
+      perfSpy.mockRestore();
+    }
   });
 
   test('seminal fields are present (empty) even when the search returns 0 patents', async () => {
@@ -1059,8 +1075,14 @@ describe('patent search federation', () => {
     gp.resetGooglePatentsBreaker();
     let now = 1_000;
     const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    // #166: the fallback budget reads the monotonic clock — mirror the
+    // simulated elapsed on performance.now so the guard sees 19 s spent.
+    const virtualPerfNow = performance.now.bind(performance);
+    let perfOffsetMs = 0;
+    const perfSpy = jest.spyOn(performance, 'now').mockImplementation(() => virtualPerfNow() + perfOffsetMs);
     global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
       now = 20_000; // simulate time passing while backends run
+      perfOffsetMs = 20_000;
       return Promise.reject(new HttpConnectionError('HTTP 503: Service Unavailable', 503));
     }) as any;
 
@@ -1075,6 +1097,7 @@ describe('patent search federation', () => {
       expect(calledUrls.some((u: any) => parseMockUrl(u).hostname === 'api.uspto.gov')).toBe(false);
     } finally {
       nowSpy.mockRestore();
+      perfSpy.mockRestore();
       gp.resetGooglePatentsBreaker();
       (await import('../../connections/manager.js')).connectionManager.closeAll();
     }
@@ -2770,5 +2793,50 @@ describe('fetchGooglePatentDetail block-page detection', () => {
     const { fetchGooglePatentDetail } = await import('../../entities/patent/detail/google-patents.js');
     await expect(fetchGooglePatentDetail('US11027025B2')).rejects.toThrow(/unavailable for US11027025B2/);
     connectionManager.closeAll();
+  });
+});
+
+describe('patent backoff clock-jump immunity (WSL2 #166)', () => {
+  // The OPS auto-mode exclusion window runs on the monotonic clock
+  // (monotonicNowMs), so WSL2 wall-clock jumps must neither shorten nor
+  // extend it. Real timers throughout — never mix the jump harness with
+  // fake timers.
+  afterEach(async () => {
+    jest.useRealTimers();
+    (await import('../../entities/patent/ops-client.js')).resetOpsBackoff();
+  });
+
+  test('ops 15-min exclusion cannot be jumped out of by forward wall-clock jumps', async () => {
+    const ops = await import('../../entities/patent/ops-client.js');
+    ops.recordOpsFailure('EPO OPS search failed: HTTP 500 upstream error');
+    ops.recordOpsFailure('EPO OPS search failed: HTTP 500 upstream error');
+    expect(ops.isOpsBackedOff()).toBe(true); // 2 strikes: excluded 15 min
+
+    // Forward jumps summing far past the 15-minute window (33 min): a
+    // wall-clock-based backoff would read as expired with ~0 real time
+    // passed and auto mode would re-select the failing source.
+    const forwardJumps = [180_000, 170_000, 160_000, 150_000, 180_000, 170_000, 160_000, 150_000, 180_000, 170_000, 160_000, 150_000];
+    await withClockJumps(async () => {
+      for (let i = 0; i < 24; i++) void Date.now(); // step through every jump
+      expect(ops.isOpsBackedOff()).toBe(true);
+    }, forwardJumps);
+  });
+
+  test('ops exclusion holds across interleaved backward/forward wall-clock jumps', async () => {
+    const ops = await import('../../entities/patent/ops-client.js');
+    ops.recordOpsFailure('x');
+    ops.recordOpsFailure('y');
+    expect(ops.isOpsBackedOff()).toBe(true);
+
+    await withClockJumps(async () => {
+      for (let i = 0; i < 16; i++) {
+        void Date.now();
+        expect(ops.isOpsBackedOff()).toBe(true);
+      }
+    });
+
+    // Outside the harness the backoff still resets cleanly on demand.
+    ops.resetOpsBackoff();
+    expect(ops.isOpsBackedOff()).toBe(false);
   });
 });

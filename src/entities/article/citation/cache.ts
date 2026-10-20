@@ -1,3 +1,5 @@
+import { monotonicNowMs } from '../../../connections/time.js';
+
 import type { FederatedCitationResult } from './types.js';
 
 interface CacheEntry<T> {
@@ -21,7 +23,7 @@ class FederatedCache {
     const entry = this.cache.get(key) as CacheEntry<T> | undefined;
     if (!entry) return null;
 
-    if (Date.now() > entry.expiresAt) {
+    if (monotonicNowMs() > entry.expiresAt) {
       this.cache.delete(key);
       return null;
     }
@@ -32,7 +34,7 @@ class FederatedCache {
   set<T>(key: string, data: T, ttlMs?: number): void {
     const entry: CacheEntry<T> = {
       data,
-      expiresAt: Date.now() + (ttlMs ?? this.defaultTtlMs),
+      expiresAt: monotonicNowMs() + (ttlMs ?? this.defaultTtlMs),
     };
     this.cache.set(key, entry as CacheEntry<unknown>);
   }
@@ -46,7 +48,7 @@ class FederatedCache {
   }
 
   cleanup(): void {
-    const now = Date.now();
+    const now = monotonicNowMs();
     for (const [key, entry] of this.cache.entries()) {
       if (now > entry.expiresAt) {
         this.cache.delete(key);

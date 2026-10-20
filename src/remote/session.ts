@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createBioMcpServer } from '../server/factory.js';
+import { monotonicNowMs } from '../connections/time.js';
 import type { RemoteSession } from './types.js';
 
 export interface CreateSessionOptions {
@@ -51,13 +52,15 @@ export class SessionManager {
     await server.connect(transport);
 
     const now = Date.now();
+    // lastActiveAt feeds idle-timeout/eviction ELAPSED math only — monotonic
+    // so a WSL2 clock jump cannot idle-out live sessions or pin stale ones.
     const session: RemoteSession = {
       sessionId,
       server,
       transport,
       clientLabel: options?.clientLabel ?? 'default',
       createdAt: now,
-      lastActiveAt: now,
+      lastActiveAt: monotonicNowMs(),
     };
 
     this.sessions.set(sessionId, session);
@@ -67,7 +70,7 @@ export class SessionManager {
   getSession(sessionId: string): RemoteSession | undefined {
     const session = this.sessions.get(sessionId);
     if (session) {
-      session.lastActiveAt = Date.now();
+      session.lastActiveAt = monotonicNowMs();
     }
     return session;
   }
@@ -114,7 +117,7 @@ export class SessionManager {
     const timeout = idleTimeoutMs ?? this.defaultIdleTimeoutMs;
 
     this.sweeperTimer = setInterval(() => {
-      const now = Date.now();
+      const now = monotonicNowMs();
       for (const [id, session] of this.sessions.entries()) {
         if (now - session.lastActiveAt > timeout) {
           void this.closeSession(id);
