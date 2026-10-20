@@ -1,5 +1,6 @@
 import { connectionManager } from '../connections/manager.js';
 import { isRetryableError } from '../connections/retry.js';
+import { monotonicNowMs } from '../connections/time.js';
 import { errorMessageWithCause } from './errors.js';
 
 const PINNED_DATASET_ID = 'gtex_v10';
@@ -193,8 +194,8 @@ async function fetchDatasets(): Promise<GTExDatasetInfo[]> {
 /** Latest gtex_vN release derived from metadata; NB: kids_first_harmonization
  *  and other non-GTEx datasets must stay excluded from the comparison. */
 async function getActiveDataset(): Promise<ActiveDataset> {
-  if (!activeDatasetMemo || Date.now() - activeDatasetMemoAt > ACTIVE_DATASET_TTL_MS) {
-    activeDatasetMemoAt = Date.now();
+  if (!activeDatasetMemo || monotonicNowMs() - activeDatasetMemoAt > ACTIVE_DATASET_TTL_MS) {
+    activeDatasetMemoAt = monotonicNowMs();
     activeDatasetMemo = (async () => {
       try {
         const datasets = await getGtexDatasets();

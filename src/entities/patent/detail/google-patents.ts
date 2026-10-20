@@ -1,5 +1,6 @@
 import { connectionManager } from '../../../connections/manager.js';
 import { fetchWithTimeout } from '../../../connections/fetch-utils.js';
+import { monotonicNowMs } from '../../../connections/time.js';
 import { parseGooglePatentHtml, type ParsedGooglePatent } from './parse.js';
 import { findWaybackSnapshot, fetchWaybackOriginal } from './wayback.js';
 
@@ -8,7 +9,7 @@ const BLOCK_SIGNATURES = ['Sorry...', 'automated queries'];
 let liveBlockedUntil = 0;
 
 export function isGooglePatentsDetailBlocked(): boolean {
-  return Date.now() < liveBlockedUntil;
+  return monotonicNowMs() < liveBlockedUntil;
 }
 
 function looksLikeBlockPage(html: string): boolean {
@@ -35,7 +36,7 @@ export async function fetchGooglePatentDetail(publicationNumber: string): Promis
       const html = await fetchLiveDetail(targetUrl);
       if (html) {
         if (looksLikeBlockPage(html)) {
-          liveBlockedUntil = Date.now() + 30 * 60 * 1000;
+          liveBlockedUntil = monotonicNowMs() + 30 * 60 * 1000;
         } else {
           const parsed = parseGooglePatentHtml(html);
           if (parsed.title || parsed.publication_number || parsed.abstract) {

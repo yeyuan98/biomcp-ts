@@ -1,5 +1,6 @@
 import { TokenBucketRateLimiter } from '../../connections/rate-limiter.js';
 import { fetchWithTimeout } from '../../connections/fetch-utils.js';
+import { monotonicNowMs } from '../../connections/time.js';
 
 const PPUBS_BASE = 'https://ppubs.uspto.gov';
 const REFERER = `${PPUBS_BASE}/pubwebapp/`;
@@ -73,7 +74,7 @@ export class PpubsClient {
   private readonly rateLimiter = new TokenBucketRateLimiter({ intervalMs: 1000 });
 
   async getSession(): Promise<PpubsSession> {
-    if (this.session && Date.now() < this.session.expiresAt) {
+    if (this.session && monotonicNowMs() < this.session.expiresAt) {
       return this.session;
     }
     if (!this.sessionPromise) {
@@ -117,7 +118,7 @@ export class PpubsClient {
     if (!caseId || !token) {
       throw new Error('USPTO Public Search session response missing caseId or access token.');
     }
-    this.session = { token, caseId, expiresAt: Date.now() + SESSION_TTL_MS };
+    this.session = { token, caseId, expiresAt: monotonicNowMs() + SESSION_TTL_MS };
     return this.session;
   }
 

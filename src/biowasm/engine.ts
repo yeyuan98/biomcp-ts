@@ -7,6 +7,7 @@ import { assertWithinMemoryLimit } from '../wasmcore/memwatch.js';
 import { runWithWatchdog } from '../wasmcore/watchdog.js';
 import { PROGRESS_MSG_TYPE } from '../wasmcore/progress.js';
 import { cacheDir, sha256File } from '../wasmcore/assets.js';
+import { monotonicNowMs } from '../connections/time.js';
 import { BIOWASM_TOOLS_ORDER, biowasmCacheDirPath, provisionBiowasmAssets } from './registry.js';
 import type {
   BiowasmCaptureSummary,
@@ -351,7 +352,7 @@ class BiowasmSlot {
       try {
         run.onProgress({
           bytes: msg.value,
-          elapsedMs: Date.now() - run.startedMs,
+          elapsedMs: monotonicNowMs() - run.startedMs,
           message: typeof msg.message === 'string' ? msg.message : undefined,
         });
       } catch {
@@ -437,7 +438,7 @@ class BiowasmSlot {
           host.kill();
         };
         signal?.addEventListener('abort', onAbort, { once: true });
-        const started = Date.now();
+        const started = monotonicNowMs();
         let response: BiowasmWorkerRunResponse;
         let cancelMessage = '';
         try {
@@ -547,7 +548,7 @@ class BiowasmSlot {
           outputs,
           ioStats: response.ioStats,
           heapBytes: response.heapBytes,
-          ms: Date.now() - started,
+          ms: monotonicNowMs() - started,
         };
       });
     } finally {

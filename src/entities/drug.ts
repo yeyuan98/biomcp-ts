@@ -1,6 +1,7 @@
 import { connectionManager } from '../connections/manager.js';
 import { fetchWithTimeout } from '../connections/fetch-utils.js';
 import { HttpConnectionError } from '../connections/errors.js';
+import { monotonicNowMs } from '../connections/time.js';
 // Circular with cross-entity.ts (which imports drug helpers back): both
 // sides only reference function declarations at call time, never during
 // module evaluation, so the cycle is safe in ESM and CJS alike.
@@ -721,7 +722,7 @@ function whoPqColumns(headerRow: string[] | undefined): {
 }
 
 async function loadWhoPqRows(signal?: AbortSignal): Promise<string[][]> {
-  if (whoPqCache && Date.now() - whoPqCache.fetchedAt < WHO_PQ_CACHE_TTL_MS) {
+  if (whoPqCache && monotonicNowMs() - whoPqCache.fetchedAt < WHO_PQ_CACHE_TTL_MS) {
     return whoPqCache.rows;
   }
   if (whoPqInFlight) return whoPqInFlight;
@@ -733,7 +734,7 @@ async function loadWhoPqRows(signal?: AbortSignal): Promise<string[][]> {
     // columns. Anything else (a proxied error page, a redirect body) is a
     // fetch failure, never a zero-match "false".
     if (!whoPqColumns(rows[0])) throw new Error('response is not the WHO PQ CSV export');
-    whoPqCache = { fetchedAt: Date.now(), rows };
+    whoPqCache = { fetchedAt: monotonicNowMs(), rows };
     return rows;
   })();
   try {

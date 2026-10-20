@@ -1,5 +1,6 @@
 import { connectionManager } from '../../../connections/manager.js';
 import { HttpConnectionError } from '../../../connections/errors.js';
+import { monotonicNowMs } from '../../../connections/time.js';
 import { stripHtml } from '../../html-utils.js';
 import type { PatentSearchOptions, PatentSearchResult } from '../types.js';
 import { kindToStatus } from './dedup.js';
@@ -23,7 +24,7 @@ interface BreakerState {
 let breaker: BreakerState | null = null;
 
 export function isGooglePatentsBlocked(): boolean {
-  return breaker !== null && Date.now() - breaker.openedAt < breaker.openMs;
+  return breaker !== null && monotonicNowMs() - breaker.openedAt < breaker.openMs;
 }
 
 export function resetGooglePatentsBreaker(): void {
@@ -31,7 +32,7 @@ export function resetGooglePatentsBreaker(): void {
 }
 
 function tripBreaker(openMs: number): void {
-  breaker = { openedAt: Date.now(), openMs };
+  breaker = { openedAt: monotonicNowMs(), openMs };
 }
 
 /**
@@ -50,7 +51,7 @@ export function isNetworkError(err: unknown): boolean {
 
 export function breakerRemainingMinutes(): number {
   if (!isGooglePatentsBlocked()) return 0;
-  const elapsed = Date.now() - breaker!.openedAt;
+  const elapsed = monotonicNowMs() - breaker!.openedAt;
   return Math.max(1, Math.ceil((breaker!.openMs - elapsed) / 60_000));
 }
 

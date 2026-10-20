@@ -1,6 +1,7 @@
 import { TokenBucketRateLimiter } from '../../connections/rate-limiter.js';
 import { fetchWithTimeout } from '../../connections/fetch-utils.js';
 import { HttpConnectionError } from '../../connections/errors.js';
+import { monotonicNowMs } from '../../connections/time.js';
 
 const OPS_BASE = 'https://ops.epo.org/3.2';
 const TOKEN_TTL_MS = 18 * 60 * 1000;
@@ -26,7 +27,7 @@ const opsBackoff: { failures: number; excludedUntil: number; lastReason?: string
 };
 
 export function isOpsBackedOff(): boolean {
-  return Date.now() < opsBackoff.excludedUntil;
+  return monotonicNowMs() < opsBackoff.excludedUntil;
 }
 
 export function opsBackoffReason(): string | undefined {
@@ -49,7 +50,7 @@ export function recordOpsFailure(message: string): void {
     opsBackoff.failures++;
   }
   if (opsBackoff.failures >= OPS_CONSECUTIVE_FAILURES) {
-    opsBackoff.excludedUntil = Date.now() + OPS_BACKOFF_MS;
+    opsBackoff.excludedUntil = monotonicNowMs() + OPS_BACKOFF_MS;
   }
 }
 

@@ -1,6 +1,7 @@
 import { ppubsClient } from '../ppubs-client.js';
 import { hasOpsCredentials, opsClient } from '../ops-client.js';
 import { kindToStatus } from './dedup.js';
+import { monotonicNowMs } from '../../../connections/time.js';
 import type { PatentSearchResult, PatentSeminalEntry } from '../types.js';
 
 const MINING_POOL_PAGECOUNT = 100;
@@ -337,8 +338,8 @@ export async function mineSeminalPriorArt(
   visibleResults: PatentSearchResult[],
   budgetMs: number = SEMINAL_MAX_BUDGET_MS,
 ): Promise<SeminalOutcome> {
-  const deadline = Date.now() + budgetMs;
-  const timeLeft = () => deadline - Date.now();
+  const deadline = monotonicNowMs() + budgetMs;
+  const timeLeft = () => deadline - monotonicNowMs();
 
   const visibleKeys = new Set(
     visibleResults

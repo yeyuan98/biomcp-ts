@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { runShards } from '../wasmcore/shards.js';
+import { monotonicNowMs } from '../connections/time.js';
 import type {
   BiowasmArtifact,
   BiowasmInputFile,
@@ -818,7 +819,7 @@ export async function runBcfSummary(source: ResolvedSource, output: CanonicalOut
         ),
       ];
       if (poolSize > 1 && contigs.length >= 2) {
-        const batchStartedMs = Date.now();
+        const batchStartedMs = monotonicNowMs();
         const baseBytes = results.reduce((acc, r) => acc + bytesReadOf(r), 0);
         const onProgress = exec.onProgress;
         try {
@@ -850,7 +851,7 @@ export async function runBcfSummary(source: ResolvedSource, output: CanonicalOut
                     onProgress: (value) => {
                       onProgress({
                         bytes: baseBytes + value,
-                        elapsedMs: Date.now() - batchStartedMs,
+                        elapsedMs: monotonicNowMs() - batchStartedMs,
                         message: `parallel per-contig count (${contigs.length} shards over ${poolSize} workers)`,
                       });
                     },

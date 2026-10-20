@@ -1,6 +1,7 @@
 import { jest } from '@jest/globals';
 import { withRetry, isRetryableError } from '../../connections/retry.js';
 import { HttpConnectionError } from '../../connections/errors.js';
+import { withClockJumps } from '../helpers/clock-jumps.js';
 
 jest.useFakeTimers();
 
@@ -449,5 +450,62 @@ describe('retry', () => {
       expect(isRetryableError(123)).toBe(false);
       expect(isRetryableError({ message: 'HTTP 429' })).toBe(false);
     });
+  });
+});
+
+describe('withRetry clock-jump immunity (WSL2 #166)', () => {
+  // withRetry's budget runs on the monotonic clock (monotonicNowMs), so
+  // WSL2 wall-clock jumps must not corrupt it. These tests need REAL
+  // timers (the rest of this file fakes them); this describe runs last and
+  // restores the file's fake-timer state afterwards.
+  const silentLogger = { warn: () => undefined };
+
+  beforeEach(() => {
+    jest.useRealTimers();
+  });
+
+  afterAll(() => {
+    jest.useFakeTimers();
+  });
+
+  it('a retry sequence spanning wall-clock jumps does not falsely exhaust the budget', async () => {
+    await withClockJumps(async () => {
+      let attempts = 0;
+      const result = await withRetry(
+        async () => {
+          attempts += 1;
+          if (attempts < 3) throw new Error('fetch failed: ECONNRESET');
+          return 'ok';
+        },
+        {
+          maxRetries: 3,
+          baseDelayMs: 1,
+          jitter: false,
+          maxTotalMs: 60_000,
+          logger: silentLogger,
+        }
+      );
+      expect(result).toBe('ok');
+      expect(attempts).toBe(3);
+    });
+  });
+
+  it('the budget is still genuinely enforced once real elapsed time passes maxTotalMs', async () => {
+    // ~50 ms of real backoff against a 50 ms budget: the retry loop must
+    // give up with the budget-exhausted note (jumps must not DISABLE the cap).
+    await expect(
+      withRetry(
+        async () => {
+          throw new Error('fetch failed: timeout');
+        },
+        {
+          maxRetries: 5,
+          baseDelayMs: 25,
+          jitter: false,
+          maxTotalMs: 50,
+          logger: silentLogger,
+        }
+      )
+    ).rejects.toThrow('retry budget exhausted');
   });
 });

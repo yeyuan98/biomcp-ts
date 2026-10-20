@@ -1,5 +1,6 @@
 import { connectionManager } from '../../../connections/manager.js';
 import { withTimeout, DEFAULT_PROVIDER_TIMEOUT_MS } from '../../../connections/fetch-utils.js';
+import { monotonicNowMs } from '../../../connections/time.js';
 import {
   EuropePMCPreprintRecord,
   EuropePMCSearchResponse,
@@ -435,7 +436,7 @@ export async function getPreprintArticle(
   // Budget anchor for the /pubs skip gate (issue #51): measures step-1
   // latency so a slow-but-succeeding official API cannot push step 2 past
   // the 60 s article_get tool cap.
-  const startedAt = Date.now();
+  const startedAt = monotonicNowMs();
 
   const [officialResult, epmc] = await Promise.all([
     fetchOfficialDetails(doi),
@@ -504,10 +505,8 @@ export async function getPreprintArticle(
   const step2: Promise<void>[] = [];
 
   if (official) {
-    // Clock-jump guard (WSL2/NTP): a backward jump drives elapsed negative
-    // (reads as "0 s spent") — clamp to no-time-elapsed (rate-limiter
-    // refill precedent).
-    const elapsed = Math.max(0, Date.now() - startedAt);
+    // Monotonic elapsed never goes negative, so no clock-jump clamp is needed.
+    const elapsed = monotonicNowMs() - startedAt;
     if (elapsed > PREPRINT_PUBS_SKIP_THRESHOLD_MS) {
       // Budget guard (issue #51): step 1 was slow-but-succeeding (an outage
       // fast-skips above), so a /pubs call — worst case ~32.2 s on the same

@@ -1,3 +1,4 @@
+import { withClockJumps } from '../../helpers/clock-jumps.js';
 import { federatedCache, buildCacheKey } from '../../../entities/article/citation/cache.js';
 
 describe('FederatedCache', () => {
@@ -145,6 +146,48 @@ describe('FederatedCache', () => {
     test('uses full when full option is true', () => {
       const key = buildCacheKey({ pmid: '12345' }, { full: true });
       expect(key).toBe('12345|both|full');
+    });
+  });
+});
+
+describe('FederatedCache clock-jump immunity (WSL2 #166)', () => {
+  // Wall clock (Date.now) jumps ±minutes on WSL2 (NTP resync); the cache's
+  // TTL math runs on the monotonic clock (monotonicNowMs), so jumps must be
+  // invisible to it. Probing Date.now() inside withClockJumps paces the
+  // deterministic jump sequence — a Date.now()-based TTL sees those probes
+  // jump forward/backward and would expire (or pin) entries.
+  afterEach(() => {
+    federatedCache.shutdown();
+  });
+
+  test('fresh entry (10 s TTL) is NOT expired across forward+backward wall-clock jumps', async () => {
+    await withClockJumps(async () => {
+      federatedCache.set('jump-fresh', { data: 'fresh' }, 10_000);
+      for (let i = 0; i < 16; i++) {
+        void Date.now(); // step the jumped wall clock
+        expect(federatedCache.get('jump-fresh')).toEqual({ data: 'fresh' });
+      }
+    });
+  });
+
+  test('genuinely expired entry (monotonic base past TTL) IS expired despite jumps', async () => {
+    await withClockJumps(async () => {
+      federatedCache.set('jump-stale', { data: 'stale' }, 10); // 10 ms TTL
+      await new Promise(resolve => setTimeout(resolve, 25)); // real monotonic time passes
+      expect(federatedCache.get('jump-stale')).toBeNull();
+    });
+  });
+
+  test('cleanup prunes expired entries and keeps fresh ones under jumps', async () => {
+    await withClockJumps(async () => {
+      federatedCache.set('jump-keep', { data: 'keep' }, 60_000);
+      federatedCache.set('jump-prune', { data: 'prune' }, 10); // 10 ms TTL
+      await new Promise(resolve => setTimeout(resolve, 25));
+      for (let i = 0; i < 12; i++) void Date.now(); // jump around
+      federatedCache.cleanup();
+      expect(federatedCache.get('jump-keep')).toEqual({ data: 'keep' });
+      expect(federatedCache.get('jump-prune')).toBeNull();
+      expect(federatedCache.size).toBe(1);
     });
   });
 });

@@ -1,4 +1,6 @@
 import { HttpConnectionError } from './errors.js';
+import { monotonicNowMs } from './time.js';
+
 
 /**
  * Retry infrastructure for handling transient failures in external API calls.
@@ -211,11 +213,11 @@ export async function withRetry<T>(
     sourceId,
   } = options;
 
-  const start = Date.now();
+  const start = monotonicNowMs();
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const attemptStart = Date.now();
+    const attemptStart = monotonicNowMs();
     try {
       return await fn();
     } catch (error) {
@@ -240,8 +242,8 @@ export async function withRetry<T>(
         // would exceed it. Fast-failing errors (near-zero duration) are
         // unaffected, so legitimate quick retry loops still run to
         // maxRetries.
-        const elapsed = Date.now() - start;
-        const lastAttemptMs = Date.now() - attemptStart;
+        const elapsed = monotonicNowMs() - start;
+        const lastAttemptMs = monotonicNowMs() - attemptStart;
         if (
           maxTotalMs !== undefined &&
           (elapsed >= maxTotalMs || elapsed + delay + lastAttemptMs > maxTotalMs)

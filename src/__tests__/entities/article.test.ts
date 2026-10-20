@@ -3260,11 +3260,18 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
     // via setSystemTime instead. The fake clock only ever advances forward,
     // so the "25s already spent" note below stays valid.
     const base = Date.now();
+    // #166: the budget math reads the monotonic clock — mirror the simulated
+    // elapsed on performance.now (setSystemTime moves only the virtual Date,
+    // not the faked performance clock).
+    const virtualPerfNow = performance.now.bind(performance);
+    let perfOffsetMs = 0;
+    const perfSpy = jest.spyOn(performance, 'now').mockImplementation(() => virtualPerfNow() + perfOffsetMs);
     global.fetch = jest.fn((url: unknown) => {
       const u = String(url);
       const { hostname, pathname } = parseMockUrl(u);
       if (hostname === 'api.biorxiv.org' && pathname.startsWith('/details/biorxiv/')) {
         jest.setSystemTime(base + 25_000); // step 1 consumed 25 s — past the 20 s skip threshold
+        perfOffsetMs = 25_000;
         return Promise.resolve(jsonResponse(biorxivDetailsPayload('bioRxiv', ['1'])));
       }
       if (hostname === 'api.biorxiv.org' && pathname.startsWith('/pubs/')) {
@@ -3278,7 +3285,12 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
-    const result = await advanceUntilSettled(getPreprintArticle('10.1101/2025.03.05.641768'));
+    let result: Awaited<ReturnType<typeof getPreprintArticle>>;
+    try {
+      result = await advanceUntilSettled(getPreprintArticle('10.1101/2025.03.05.641768'));
+    } finally {
+      perfSpy.mockRestore(); // restore even if the fetch chain throws
+    }
 
     const urls = requestedUrls();
     // budget guard: /pubs never hit the wire despite the official API succeeding
