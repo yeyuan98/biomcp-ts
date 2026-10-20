@@ -18,6 +18,10 @@ function installFakeTimers(): void {
 
 // Await a promise that internally sleeps on module timers (token-bucket rate
 // limiters) under fake timers, stepping the clock until the promise settles.
+// Bounded per the citation.test.ts hygiene convention: a stuck promise fails
+// fast with a named error instead of eating the jest timeout.
+const SETTLE_MAX_ITERATIONS = 480;
+
 async function advanceUntilSettled<T>(p: Promise<T>): Promise<T> {
   let settled = false;
   let value: T | undefined;
@@ -26,7 +30,13 @@ async function advanceUntilSettled<T>(p: Promise<T>): Promise<T> {
     v => { value = v; settled = true; },
     e => { failure = { error: e }; settled = true; },
   );
+  let iterations = 0;
   while (!settled) {
+    if (++iterations > SETTLE_MAX_ITERATIONS) {
+      throw new Error(
+        `promise never settled after ${SETTLE_MAX_ITERATIONS} iterations of jest.advanceTimersByTimeAsync(250)`,
+      );
+    }
     await jest.advanceTimersByTimeAsync(250);
   }
   if (failure) throw failure.error;

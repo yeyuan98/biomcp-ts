@@ -87,7 +87,10 @@ describe('runWithWatchdog activity + ceiling (progress-driven deadlines)', () =>
 
   it('maxRunMs is an absolute ceiling that activity() cannot extend', async () => {
     const opts = makeOpts({ timeoutMs: 50, watchdogMs: 20, maxRunMs: 140 });
-    const started = Date.now();
+    // Monotonic clock (issue #166): a Date.now diff false-failed here amid
+    // live WSL2 guest-clock jumps (observed elapsed -159209 ms); performance.now
+    // cannot jump — same treatment as the engine watchdog test in this PR.
+    const started = performance.now();
     let stopInterval: (() => void) | null = null as (() => void) | null;
     try {
       await expect(
@@ -104,7 +107,7 @@ describe('runWithWatchdog activity + ceiling (progress-driven deadlines)', () =>
     } finally {
       stopInterval?.();
     }
-    const elapsed = Date.now() - started;
+    const elapsed = performance.now() - started;
     expect(opts.cancel).toHaveBeenCalledTimes(1);
     expect(opts.discard).toHaveBeenCalledTimes(1);
     expect(elapsed).toBeGreaterThanOrEqual(130); // well past the 50 ms deadline, at the 140 ms ceiling
