@@ -333,8 +333,18 @@ describe('ID-format validation (issue #163)', () => {
   });
 
   it.each(ID_FORMAT_CASES)('$tool accepts oddball-but-valid $param values (handler starts)', async ({ tool, param, oddballValid }) => {
+    // Bucket reset between values (issue #166): each value re-runs the
+    // handler start-to-sentinel, re-acquiring tokens from the same
+    // singleton connections. Some legs pace at multi-second intervals
+    // (e.g. google_patents 2000 ms, uspto_odp 1000 ms, arxiv 3000 ms), so
+    // without the reset the loop burned real wall-clock waiting for
+    // refills — under local CPU load this pushed the per-test 30 s cap
+    // (the #163 patent oddball flake). closeAll() destroys the
+    // connections; getConnection() recreates them with a full capacity-1
+    // bucket, so every value starts unthrottled.
     for (const good of oddballValid) {
       fetchSentinel.mockClear();
+      connectionManager.closeAll();
       await harness.callTool(tool, { [param]: good }).catch(() => undefined);
       expect(fetchSentinel).toHaveBeenCalled();
     }
