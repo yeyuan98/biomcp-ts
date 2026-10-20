@@ -4,6 +4,35 @@ import { connectionManager } from '../../connections/manager.js';
 import { parseMockUrl } from '../helpers/mock-url.js';
 import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
+// Fake-timer helpers (article.test.ts / patent.test.ts convention, see
+// src/__tests__/README.md): token-bucket rate limiters only refill when the
+// clock moves forward, so any fake-timer install must start later than real
+// time AND later than the fake time any earlier install reached.
+const REAL_TIME_AT_LOAD = Date.now();
+let fakeTimersInstalled = 0;
+
+function installFakeTimers(): void {
+  fakeTimersInstalled++;
+  jest.useFakeTimers({ now: REAL_TIME_AT_LOAD + fakeTimersInstalled * 3_600_000 });
+}
+
+// Await a promise that internally sleeps on module timers (token-bucket rate
+// limiters) under fake timers, stepping the clock until the promise settles.
+async function advanceUntilSettled<T>(p: Promise<T>): Promise<T> {
+  let settled = false;
+  let value: T | undefined;
+  let failure: { error: unknown } | undefined;
+  p.then(
+    v => { value = v; settled = true; },
+    e => { failure = { error: e }; settled = true; },
+  );
+  while (!settled) {
+    await jest.advanceTimersByTimeAsync(250);
+  }
+  if (failure) throw failure.error;
+  return value as T;
+}
+
 describe('disease', () => {
   mockGlobalFetch();
 
@@ -555,6 +584,14 @@ describe('diseaseGet gene_associations OpenTargets fallback (issue #84)', () => 
     // A mydisease id OT's efoId argument does not accept directly: the
     // direct disease lookup returns null, so the resolved disease name
     // drives an OT search whose hit id feeds the associatedTargets query.
+    //
+    // Fake timers (issue #166): this is the only test in the file whose OT
+    // leg makes THREE sequential opentargets requests (direct probe → name
+    // search → associatedTargets), so the 500 ms token-bucket pacing sleeps
+    // twice between calls. Real-time pacing raced the section's 8 s
+    // fetchWithTimeout deadline and lost under local CPU oversubscription
+    // (the section silently degraded to an `_error` row); driving the chain
+    // on a fake clock makes the pacing virtual and the test hermetic.
     const otRows = [
       { target: { id: 'ENSG00000141510', approvedSymbol: 'TP53' }, score: 0.4 },
     ];
@@ -595,17 +632,23 @@ describe('diseaseGet gene_associations OpenTargets fallback (issue #84)', () => 
       return Promise.reject(new Error(`unexpected url ${url.href}`));
     }) as any;
 
-    const result = await diseaseGet('DOID:9999', ['gene_associations']);
+    installFakeTimers();
+    try {
+      const result = await advanceUntilSettled(diseaseGet('DOID:9999', ['gene_associations']));
 
-    const associations = result.sections!.gene_associations as any[];
-    expect(associations).toHaveLength(1);
-    expect(associations[0].gene_symbol).toBe('TP53');
-    expect(associations[0].source).toBe('opentargets');
-    // Call 1: direct efoId probe (DOID_9999, colon→underscore); call 2: name
-    // search; call 3: associatedTargets on the search-resolved id.
-    expect(otBodies).toHaveLength(3);
-    expect(otBodies[0].variables).toEqual({ efoId: 'DOID_9999' });
-    expect(otBodies[1].variables).toEqual({ name: 'rare melanocytic neoplasm' });
-    expect(otBodies[2].variables).toEqual({ efoId: 'EFO_0000616' });
+      const associations = result.sections!.gene_associations as any[];
+      expect(associations).toHaveLength(1);
+      expect(associations[0].gene_symbol).toBe('TP53');
+      expect(associations[0].source).toBe('opentargets');
+      // Call 1: direct efoId probe (DOID_9999, colon→underscore); call 2: name
+      // search; call 3: associatedTargets on the search-resolved id.
+      expect(otBodies).toHaveLength(3);
+      expect(otBodies[0].variables).toEqual({ efoId: 'DOID_9999' });
+      expect(otBodies[1].variables).toEqual({ name: 'rare melanocytic neoplasm' });
+      expect(otBodies[2].variables).toEqual({ efoId: 'EFO_0000616' });
+    } finally {
+      jest.useRealTimers();
+      connectionManager.closeAll();
+    }
   });
 });

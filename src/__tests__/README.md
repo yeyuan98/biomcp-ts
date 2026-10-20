@@ -47,6 +47,16 @@ npm run test:coverage    # Unit tests with coverage
 > node --experimental-vm-modules node_modules/.bin/jest [args…]
 > ```
 
+> **Local worker cap & WSL2 clock caveat (issue #166):** on non-CI machines
+> `jest.config.ts` caps workers at `maxWorkers: '50%'` of the cores. Jest's
+> default (cores−1) oversubscribed local boxes and was the amplifier behind
+> the residual pacing-race flakes (token-bucket sleeps and watchdog windows
+> stretching under CPU contention); CI keeps jest's defaults. Separately, on
+> WSL2 a guest-clock jump (host sleep + NTP resync) can make jest print a
+> NEGATIVE total run time — that number is cosmetic; production elapsed math
+> is clamped against clock regression (PR #172), and a mid-run jump now only
+> ever costs wall-clock, not correctness.
+
 
 ## Directory Structure
 

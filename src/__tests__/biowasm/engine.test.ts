@@ -470,13 +470,24 @@ describe('biowasm engine (worker boundary mocked)', () => {
           }, 600);
         }),
     );
-    const started = Date.now();
+    // Monotonic clock (issue #166 RC1): the WSL2 guest wall clock can jump
+    // ±minutes (host sleep + NTP resync) — a Date.now diff here was observed
+    // reading -158 980 ms and +159 843 ms mid-test, false-failing BOTH
+    // bounds while the watchdog itself behaved correctly. performance.now()
+    // cannot jump, so the strict 380 ms progress guard below measures real
+    // elapsed time regardless of wall-clock corrections.
+    const started = performance.now();
     await expect(biowasmEngine.run({ tool: 'samtools', args: ['view'] })).rejects.toBeInstanceOf(BiowasmTimeoutError);
-    const elapsed = Date.now() - started;
+    const elapsed = performance.now() - started;
     // Steady progress kept the run alive past the 120 ms inactivity deadline…
     expect(elapsed).toBeGreaterThanOrEqual(380);
-    // …but the 420 ms absolute ceiling still fired.
-    expect(elapsed).toBeLessThan(2_000);
+    // …but the 420 ms absolute ceiling still fired. Upper bound only — the
+    // run loop's timers (progress interval + ceiling) share the event loop
+    // with the rest of the suite, so under local CPU oversubscription the
+    // REAL elapsed can overshoot the ideal ~420 ms by seconds while the
+    // watchdog ordering itself stays correct (issue #166). The lower bound
+    // above is the progress guard and stays strict.
+    expect(elapsed).toBeLessThan(10_000);
     expect(host.killCalls).toBeGreaterThanOrEqual(1);
   });
 

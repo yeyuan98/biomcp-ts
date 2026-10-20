@@ -1339,6 +1339,11 @@ describe('article', () => {
     });
 
     test('searchArticles federated: failed backends become envelope errors, never result items (#87)', async () => {
+      // Fake timers (issue #166): the federated legs pace through token-bucket
+      // limiters (pubmed eutils 300 ms between esearch/efetch; semantic
+      // scholar 2000 ms unkeyed fallback) which raced the per-leg 20 s
+      // federated budget in real time and lost under local oversubscription.
+      // The fake clock makes the pacing virtual.
       global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: unknown) => {
         const { hostname } = parseMockUrl(url);
         const u = String(url);
@@ -1357,16 +1362,54 @@ describe('article', () => {
         return Promise.reject(new Error('network down'));
       }) as any;
 
-      const response = await searchArticles('brca1', {});
+      installFakeTimers();
+      try {
+        const response = await advanceUntilSettled(searchArticles('brca1', {}));
 
-      expect(response.results).toHaveLength(1);
-      expect(response.results[0].pmid).toBe('12345');
-      expect(response.results.every(r => r._error === undefined)).toBe(true);
-      const failedSources = response.errors?.map(e => e.source);
-      expect(failedSources).toEqual(expect.arrayContaining(['pubtator', 'litsense']));
-      for (const err of response.errors ?? []) {
-        expect(err.message).toContain('failed');
-        expect(typeof err.message).toBe('string');
+        expect(response.results).toHaveLength(1);
+        expect(response.results[0].pmid).toBe('12345');
+        expect(response.results.every(r => r._error === undefined)).toBe(true);
+        const failedSources = response.errors?.map(e => e.source);
+        expect(failedSources).toEqual(expect.arrayContaining(['pubtator', 'litsense']));
+        for (const err of response.errors ?? []) {
+          expect(err.message).toContain('failed');
+          expect(typeof err.message).toBe('string');
+        }
+
+        // Budget-boundary semantics (kept explicit per issue #166): the
+        // errors above came from backends failing INSIDE the per-leg 20 s
+        // federated budget. A leg that never settles must surface as a
+        // budget envelope error instead — deliberately advance the fake
+        // clock past the 20 s budget and assert the hung leg lands in
+        // `errors` (retryable, never a result item), so the fake-timer
+        // conversion cannot silently stop exercising the budget.
+        (global.fetch as any).mockImplementation((url: unknown) => {
+          const { hostname } = parseMockUrl(url);
+          const u = String(url);
+          if (hostname === 'eutils.ncbi.nlm.nih.gov') {
+            if (u.includes('esearch.fcgi')) {
+              return Promise.resolve(okJson({
+                esearchresult: { idlist: ['12345'], count: '1', querytranslation: '"brca1"[All Fields]' },
+              }));
+            }
+            return Promise.resolve(okXml(SINGLE_ARTICLE_XML));
+          }
+          if (hostname === 'api.semanticscholar.org') {
+            return Promise.resolve(okJson({ data: [] }));
+          }
+          if (hostname === 'www.ncbi.nlm.nih.gov' && u.includes('/pubtator3-api')) {
+            return new Promise(() => {}); // hangs past the federated budget
+          }
+          return Promise.reject(new Error('network down'));
+        });
+        const timedOut = await advanceUntilSettled(searchArticles('brca1', {}));
+        expect(timedOut.results.every(r => r._error === undefined)).toBe(true);
+        const timedOutErrors = timedOut.errors ?? [];
+        expect(timedOutErrors.some(e => e.source === 'pubtator' && e.message.includes('timed out after 20000ms'))).toBe(true);
+        expect(timedOutErrors.every(e => typeof e.message === 'string')).toBe(true);
+      } finally {
+        jest.useRealTimers();
+        connectionManager.closeAll();
       }
     });
 
@@ -1376,6 +1419,12 @@ describe('article', () => {
     // disappears as a litsense-sourced row; that is not a floor drop and
     // must NOT be reported as one.
     test('searchArticles federated: dedup-merged litsense rows are not misreported as floor drops (#78)', async () => {
+      // Fake timers (issue #166): both federated calls below pace through
+      // token-bucket limiters (eutils 300 ms, semantic scholar 2000 ms
+      // unkeyed fallback, litsense 1000 ms) racing the per-leg 20 s
+      // federated budget; the fake clock makes the pacing virtual. Budget
+      // semantics stay pinned by the #87 test above (deliberate 20 s
+      // crossing) and the hanging-provider regression test.
       const litsenseRows = [
         // above floor, same PMID as the pubmed hit → merges, page keeps the pubmed record
         { pmid: 12345, text: 'Topical BRCA1 sentence.', score: 0.95, section: 'abstract', annotations: [] },
@@ -1397,27 +1446,33 @@ describe('article', () => {
         return Promise.reject(new Error('network down'));
       }) as any;
 
-      const merged = await searchArticles('brca1', {});
-      expect(merged.results.some(r => r.pmid === '12345')).toBe(true);
-      expect(merged.warnings?.some(w => w.includes('relevance floor'))).toBeFalsy();
+      installFakeTimers();
+      try {
+        const merged = await advanceUntilSettled(searchArticles('brca1', {}));
+        expect(merged.results.some(r => r.pmid === '12345')).toBe(true);
+        expect(merged.warnings?.some(w => w.includes('relevance floor'))).toBeFalsy();
 
-      // Same federation but the litsense leg returns ONLY sub-floor noise
-      // → the floor emptied the contribution and the warning must say so.
-      const noiseOnly = [
-        { pmid: 99999, text: 'Unrelated sentence.', score: 0.42, section: 'abstract', annotations: [] },
-      ];
-      (global.fetch as any).mockImplementation((url: unknown) => {
-        const { hostname } = parseMockUrl(url);
-        const u = String(url);
-        if (hostname === 'eutils.ncbi.nlm.nih.gov') return pubmedLeg(u);
-        if (u.includes('/sentences/')) return Promise.resolve(okJson(noiseOnly));
-        if (hostname === 'api.semanticscholar.org') return Promise.resolve(okJson({ data: [] }));
-        return Promise.reject(new Error('network down'));
-      });
+        // Same federation but the litsense leg returns ONLY sub-floor noise
+        // → the floor emptied the contribution and the warning must say so.
+        const noiseOnly = [
+          { pmid: 99999, text: 'Unrelated sentence.', score: 0.42, section: 'abstract', annotations: [] },
+        ];
+        (global.fetch as any).mockImplementation((url: unknown) => {
+          const { hostname } = parseMockUrl(url);
+          const u = String(url);
+          if (hostname === 'eutils.ncbi.nlm.nih.gov') return pubmedLeg(u);
+          if (u.includes('/sentences/')) return Promise.resolve(okJson(noiseOnly));
+          if (hostname === 'api.semanticscholar.org') return Promise.resolve(okJson({ data: [] }));
+          return Promise.reject(new Error('network down'));
+        });
 
-      const emptied = await searchArticles('brca1', {});
-      expect(emptied.results.some(r => r.pmid === '12345')).toBe(true);
-      expect(emptied.warnings?.some(w => w.includes('relevance floor') && w.includes('1 litsense matches'))).toBe(true);
+        const emptied = await advanceUntilSettled(searchArticles('brca1', {}));
+        expect(emptied.results.some(r => r.pmid === '12345')).toBe(true);
+        expect(emptied.warnings?.some(w => w.includes('relevance floor') && w.includes('1 litsense matches'))).toBe(true);
+      } finally {
+        jest.useRealTimers();
+        connectionManager.closeAll();
+      }
     });
 
     // Crowd-out disclosure (issue #134): ranking is citation-based but only

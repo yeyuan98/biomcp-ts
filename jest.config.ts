@@ -19,6 +19,10 @@ export default {
   // default, restated because setting this option replaces the default.
   testPathIgnorePatterns: ['/node_modules/', '<rootDir>/src/__tests__/integration'],
   testTimeout: 30000,
+  // Local-only worker cap (issue #166): jest's default (cores-1) workers
+  // oversubscribed this 16-core WSL2 box and amplified pacing-based flakes;
+  // CI keeps jest's defaults (CI=true is set by GitHub Actions runners).
+  ...(process.env.CI ? {} : { maxWorkers: '50%' }),
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/**/*.d.ts',
