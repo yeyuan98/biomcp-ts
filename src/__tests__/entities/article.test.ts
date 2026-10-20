@@ -3285,8 +3285,12 @@ describe('preprint source (bioRxiv/medRxiv via preprint_only)', () => {
       return Promise.reject(new Error(`unexpected url ${u}`));
     }) as any;
 
-    const result = await advanceUntilSettled(getPreprintArticle('10.1101/2025.03.05.641768'));
-    perfSpy.mockRestore();
+    let result: Awaited<ReturnType<typeof getPreprintArticle>>;
+    try {
+      result = await advanceUntilSettled(getPreprintArticle('10.1101/2025.03.05.641768'));
+    } finally {
+      perfSpy.mockRestore(); // restore even if the fetch chain throws
+    }
 
     const urls = requestedUrls();
     // budget guard: /pubs never hit the wire despite the official API succeeding
