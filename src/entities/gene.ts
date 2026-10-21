@@ -413,6 +413,48 @@ async function fetchProtein(geneSymbol: string, signal?: AbortSignal): Promise<{
   return {};
 }
 
+/**
+ * Round-robin interleave of equally-positioned element lists: BP[0], MF[0],
+ * CC[0], BP[1], … (#199). mygene serves the three GO roots as independent
+ * facets and its within-category order is ascending GO id (arbitrary), so a
+ * plain concat structurally starves MF/CC whenever BP is long (live: TP53's
+ * BP terms displace every MF/CC row from the cap). Interleaving keeps every
+ * aspect represented at every prefix length; a category with fewer terms
+ * simply runs out.
+ */
+function interleaveGoAspects<T>(bp: T[], mf: T[], cc: T[]): T[] {
+  const out: T[] = [];
+  const max = Math.max(bp.length, mf.length, cc.length);
+  for (let i = 0; i < max; i++) {
+    if (i < bp.length) out.push(bp[i]);
+    if (i < mf.length) out.push(mf[i]);
+    if (i < cc.length) out.push(cc[i]);
+  }
+  return out;
+}
+
+/** One deduped GO annotation, tagged with its (first-seen) mygene category. */
+type GoAspectTerm = { id: string; term: string; aspect: 'BP' | 'MF' | 'CC' };
+
+/** Dedup mygene's GO annotations per category (issue #135: ids repeat within
+ *  and across categories; a term under two categories keeps its first-seen
+ *  aspect, BP before MF before CC), returning the three deduped lists. */
+function dedupGoByCategory(
+  goData: Record<string, Array<{ id: string; term: string; gocategory?: string }>>
+): Record<'BP' | 'MF' | 'CC', GoAspectTerm[]> {
+  const seen = new Set<string>();
+  const lists: Record<'BP' | 'MF' | 'CC', GoAspectTerm[]> = { BP: [], MF: [], CC: [] };
+  for (const category of ['BP', 'MF', 'CC'] as const) {
+    const items = goData[category] || [];
+    for (const item of items) {
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      lists[category].push({ id: item.id, term: item.term, aspect: category });
+    }
+  }
+  return lists;
+}
+
 async function fetchOntology(geneSymbol: string, signal?: AbortSignal): Promise<{ go_enrichment?: Array<{ id: string; term: string; p_value?: number }> }> {
   try {
     const conn = connectionManager.getConnection('mygene');
@@ -422,23 +464,19 @@ async function fetchOntology(geneSymbol: string, signal?: AbortSignal): Promise<
       undefined,
       signal ? { signal } : undefined
     ) as MyGeneGOResponse;
-    
+
     const goData = response.hits?.[0]?.go;
     if (!goData) return { go_enrichment: [] };
-    
-    const seen = new Set<string>();
-    const terms: Array<{ id: string; term: string; aspect: string }> = [];
-    for (const category of ['BP', 'MF', 'CC'] as const) {
-      const items = (goData as Record<string, Array<{ id: string; term: string; gocategory?: string }>>)[category] || [];
-      for (const item of items) {
-        if (!seen.has(item.id)) {
-          seen.add(item.id);
-          terms.push({ id: item.id, term: item.term, aspect: category });
-        }
-      }
-    }
-    
-    return { go_enrichment: terms.slice(0, 20).map(t => ({ id: t.id, term: t.term })) };
+
+    const { BP, MF, CC } = dedupGoByCategory(
+      goData as Record<string, Array<{ id: string; term: string; gocategory?: string }>>
+    );
+
+    return {
+      go_enrichment: interleaveGoAspects(BP, MF, CC)
+        .slice(0, 20)
+        .map(t => ({ id: t.id, term: t.term })),
+    };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return { _error: `Ontology lookup failed (source: mygene): ${msg}. The data source may be temporarily unavailable.` } as any;
@@ -458,24 +496,17 @@ async function fetchGo(geneSymbol: string, signal?: AbortSignal): Promise<Array<
     const goData = response.hits?.[0]?.go;
     if (!goData) return [];
 
-    // Deduplicate on GO id while collecting (issue #135): MyGene repeats ids
-    // within a category and across categories (live: TP53 shows 46 duplicated
-    // ids among ~130 annotations), and duplicates displacing unique terms in
-    // the 50-row slice below is pure information loss. Same seen-set idiom as
-    // fetchOntology; a term annotated under two categories keeps its
-    // first-seen aspect (BP before MF before CC).
-    const seen = new Set<string>();
-    const terms: Array<{ id: string; term: string; aspect: string }> = [];
-    for (const category of ['BP', 'MF', 'CC'] as const) {
-      const items = (goData as Record<string, Array<{ id: string; term: string; gocategory?: string }>>)[category] || [];
-      for (const item of items) {
-        if (seen.has(item.id)) continue;
-        seen.add(item.id);
-        terms.push({ id: item.id, term: item.term, aspect: category });
-      }
-    }
+    // Dedup per category first (issue #135: MyGene repeats ids within and
+    // across categories — live: TP53 shows 46 duplicated ids among ~130
+    // annotations; a term under two categories keeps its first-seen aspect,
+    // BP before MF before CC), then interleave BP/MF/CC round-robin BEFORE
+    // the 50-row cap (issue #199): the old BP→MF→CC concat let TP53-scale BP
+    // lists structurally starve MF/CC of every capped row.
+    const { BP, MF, CC } = dedupGoByCategory(
+      goData as Record<string, Array<{ id: string; term: string; gocategory?: string }>>
+    );
 
-    return terms.slice(0, 50);
+    return interleaveGoAspects(BP, MF, CC).slice(0, 50);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return [{ _error: `GO term lookup failed (source: mygene): ${msg}. The data source may be temporarily unavailable.` } as any];
