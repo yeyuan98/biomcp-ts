@@ -78,15 +78,19 @@ exactly as they do locally in a bare environment.
 
 Since #164 the job is **two-tier on GitHub Actions**:
 
-1. **Gating step** — every integration suite *except* four known
+1. **Gating step** — every integration suite *except* five known
    GitHub-runner offenders, still with NO `continue-on-error`: any failure
    here fails the job exactly as before.
-2. **Best-effort known-offenders step** — ONLY the four pinned offender
+2. **Best-effort known-offenders step** — ONLY the five pinned offender
    files, run with `continue-on-error: true` (and `if: always()`), teed to
    `known-offenders.log`:
 
    - `src/__tests__/integration/tools/ensembl-tools.test.ts` — Ensembl REST
      (rest.ensembl.org) intermittently throttles shared GitHub runner IPs;
+   - `src/__tests__/integration/tools/chaining-parity-ensembl.test.ts` —
+     the #161 walker's Ensembl-dependent chains; their search leg is the
+     same Ensembl REST offender, which leaked into the gating tier once
+     (#192); the chains stay enforced in this non-gating tier;
    - `src/__tests__/integration/tools/article-tools.test.ts` — arXiv cases
      (`searchArxiv` TimeoutError from runner IPs);
    - `src/__tests__/integration/tools/gene-tools.test.ts` — `gene_articles`
@@ -98,7 +102,7 @@ Since #164 the job is **two-tier on GitHub Actions**:
    labeled non-gating, own `known-offenders-log` artifact uploaded on every
    run — but can never fail the job.
 
-The offender list is **pinned in `ci.yml`**: exactly those four paths, no
+The offender list is **pinned in `ci.yml`**: exactly those five paths, no
 others. ANY addition requires (1) a GitHub issue with triage evidence per
 the rubric below and (2) an explicit maintainer decision — a new flaky
 suite still gates and gets triaged like any other failure; per the

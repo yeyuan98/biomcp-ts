@@ -256,6 +256,22 @@ export const CHAIN_TABLE: ChainSpec[] = [
       { field: 'accession', getTool: 'genbank_genes', getArg: 'accession' },
     ],
   },
+];
+
+/**
+ * Ensembl-dependent chains (issue #161 walker, tier split): same walker,
+ * same enforcement, but their SEARCH leg is Ensembl REST — the #182 known
+ * GitHub-runner offender. Ensembl-side degradation was observed leaking
+ * into the GATING integration tier through these chains (run 39535999218:
+ * the region page carried no rs-variation row while the same window's
+ * ensembl-tools offender-tier test also failed). They run in their own
+ * file, chained-parity-ensembl.test.ts, which ci.yml routes through the
+ * non-gating known-offender tier on GH Actions; local runs stay
+ * authoritative. The offline coverage test enforces ADVERTISED_LINKS ⊆
+ * CHAIN_TABLE ∪ ENSEMBL_CHAIN_TABLE, so the ensembl docstring links stay
+ * covered by the split table.
+ */
+export const ENSEMBL_CHAIN_TABLE: ChainSpec[] = [
   {
     // Advertised: "for rich human gene annotation use gene_get instead" —
     // the resolved record's symbol IS gene_get's key. Pin: BRAF lookup.
@@ -268,8 +284,11 @@ export const CHAIN_TABLE: ChainSpec[] = [
     // Advertised: "chain IDs into gene_get / variant_get". Pin: the 20 kb
     // BRAF-spanning interval from the ensembl integration suite (full-span
     // variation below the 50 kb cap; genes include ENSG ids + symbols).
+    // limit 50: variation features must make the returned page — under
+    // thin/degraded responses the tighter page occasionally carried genes
+    // only (run 39535999218).
     sourceTool: 'ensembl_region',
-    args: { region: '7:140450000-140470000', features: ['gene', 'variation'], limit: 20 },
+    args: { region: '7:140450000-140470000', features: ['gene', 'variation'], limit: 50 },
     rows: 'features',
     links: [
       {
