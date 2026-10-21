@@ -56,6 +56,11 @@ npm run test:coverage    # Unit tests with coverage
 > NEGATIVE total run time — that number is cosmetic; production elapsed math
 > is clamped against clock regression (PR #172), and a mid-run jump now only
 > ever costs wall-clock, not correctness.
+>
+> **Rotating one-off local timeout flakes (isolation-green, CI-green):** do
+> not re-run the full suite to confirm and do not convert on first sight —
+> rerun the single file in isolation, log the test name in the flake-tail
+> tracker (#187), and apply its n≥2-per-test rule (post-#166).
 
 
 ## Directory Structure
