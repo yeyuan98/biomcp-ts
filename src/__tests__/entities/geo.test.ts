@@ -700,6 +700,34 @@ describe('downloadBufferWithTelemetry timeout diagnostics (#196)', () => {
     expect(message).toContain(`download it manually: ${SUPP_URL}`);
   });
 
+  test('pre-headers timeout reports the stalled/blocked message, not a bare TimeoutError', async () => {
+    const { downloadBufferWithTelemetry } = await loadHelper();
+    // fetch() itself rejects with the abort before any response headers
+    // arrive (AbortSignal.timeout fires during connect/TLS).
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          setTimeout(() => {
+            const err = new Error('The operation was aborted due to timeout');
+            err.name = 'TimeoutError';
+            reject(err);
+          }, 10);
+        }),
+    ) as any;
+
+    let caught: Error | undefined;
+    try {
+      await downloadBufferWithTelemetry(SUPP_URL, { timeoutMs: 50_000, maxBytes: 50 * 1024 * 1024 });
+    } catch (e) {
+      caught = e as Error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const message = caught!.message;
+    expect(message).toContain(`Download of ${SUPP_URL} timed out after 50 s: no data received`);
+    expect(message).toContain('the connection is stalled or blocked rather than slow');
+    expect(message).toContain(`download it manually: ${SUPP_URL}`);
+  });
+
   test('mid-stream byte-count guard aborts when Content-Length is absent or lying', async () => {
     const { downloadBufferWithTelemetry } = await loadHelper();
     // No Content-Length header; the stream actually delivers 1.2 MB against

@@ -166,8 +166,8 @@ function downloadTimeoutError(
   const totalDesc = totalBytes !== undefined ? formatBytes(totalBytes) : 'unknown-size';
   let estimate = '';
   if (totalBytes !== undefined && totalBytes > receivedBytes && rateKbPerSec > 0) {
-    const remainingMs = ((totalBytes - receivedBytes) / (rateKbPerSec * 1024)) * 1000;
-    estimate = `; at this rate the full file needs ~${formatDurationMs(remainingMs)}`;
+    const fullFileMs = (totalBytes / (rateKbPerSec * 1024)) * 1000;
+    estimate = `; at this rate the full file needs ~${formatDurationMs(fullFileMs)}`;
   }
   return new Error(
     `Download of ${url} timed out after ${seconds} s: received ${formatBytes(receivedBytes)} of ${totalDesc} ` +
@@ -183,7 +183,18 @@ export async function downloadBufferWithTelemetry(
   url: string,
   opts: { timeoutMs: number; maxBytes: number },
 ): Promise<Buffer> {
-  const response = await fetch(url, { signal: AbortSignal.timeout(opts.timeoutMs) });
+  const fetchStartedMs = monotonicNowMs();
+  let response: Response;
+  try {
+    response = await fetch(url, { signal: AbortSignal.timeout(opts.timeoutMs) });
+  } catch (e) {
+    if (isAbortLike(e)) {
+      // Pre-headers abort: zero bytes received — same honest message as a
+      // mid-stream stall, never a bare TimeoutError DOMException.
+      throw downloadTimeoutError(url, opts, 0, undefined, monotonicNowMs() - fetchStartedMs);
+    }
+    throw e;
+  }
   if (!response.ok) {
     throw new Error(`Failed to download ${url}: HTTP ${response.status} ${response.statusText}`);
   }
