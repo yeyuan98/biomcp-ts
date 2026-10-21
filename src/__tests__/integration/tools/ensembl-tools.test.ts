@@ -87,6 +87,20 @@ describe('ensembl tools (integration)', () => {
     expect(result.consequences.length).toBeGreaterThan(0);
   }, 60000);
 
+  // Issue #194: NM_004333.4 is superseded in the current Ensembl release, so
+  // the verbatim request 400s with "Could not get a Transcript object for
+  // 'NM_004333.4'" — the retry against the bare accession must succeed AND
+  // flag the coordinate reinterpretation in warnings.
+  it('ensembl_consequence retries a stale RefSeq version with the bare accession and warns', async () => {
+    const result = await retryOnRateLimit(() =>
+      harness.callTool('ensembl_consequence', { variant: 'NM_004333.4:c.1799T>A' })
+    );
+    expect(result.most_severe_consequence).toBe('missense_variant');
+    expect(Array.isArray(result.warnings)).toBe(true);
+    expect(result.warnings.length).toBeGreaterThan(0);
+    expect(result.warnings[0]).toContain('RefSeq version .4 not carried by the current Ensembl release');
+  }, 60000);
+
   // Regression guard for issue #102's underlying false negative: VEP works
   // for non-human species when the HGVS transcript belongs to that species
   // (NM_011640 = mouse Trp53). VEP computes these live (observed 7–20 s), so

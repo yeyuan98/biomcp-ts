@@ -40,6 +40,15 @@ const ENSEMBL_GENE_ID_RE = /^ENS[A-Z]{0,4}G\d+(\.\d+)?$/i;
 const VERSIONED_GENE_ID_RE = /^ENS[A-Z]{0,4}G\d+\.\d+$/i;
 const RSID_RE = /^rs\d+$/i;
 const HGVS_MINIMAL_RE = /^[^:]+:[cgnprm]\.\S+/i;
+// Versioned RefSeq mRNA/transcript accession with a variant part after the
+// colon, e.g. "NM_004333.4:c.1799T>A" → accession "NM_004333", version "4".
+// Ensembl's VEP indexes only the RefSeq versions of its CURRENT release
+// (issue #194): a stale-versioned accession 400s with
+// "Could not get a Transcript object for 'NM_004333.4'".
+const VERSIONED_REFSEQ_RE = /^(N[MR]_\d+)\.(\d+)(?=:)/i;
+// The upstream 400's signature for that case — matched against the thrown
+// error's message (rest.ts embeds the upstream body verbatim).
+const MISSING_TRANSCRIPT_VERSION_RE = /Could not get a Transcript object for '[^']+\.\d+'/;
 
 const IMPACT_RANK: Record<string, number> = {
   HIGH: 3,
@@ -140,6 +149,11 @@ export interface EnsemblConsequenceResult {
   effects_returned: number;
   consequences: EnsemblConsequenceEffect[];
   colocated_variants: EnsemblColocatedVariant[];
+  /** Present only when a stale RefSeq version forced the bare-accession
+   *  retry (issue #194): coordinates were re-interpreted against the served
+   *  transcript, so the protein change must be verified against the user's
+   *  source report. */
+  warnings?: string[];
 }
 
 export interface EnsemblRegionFeature {
@@ -541,6 +555,9 @@ export async function ensemblConsequence(
   if (!trimmed) throw new Error('variant is required');
 
   let result: RawVepResult;
+  // Set when the stale-RefSeq retry below succeeded — the mapped payload then
+  // carries warnings so the reinterpretation is never silent (issue #194).
+  let refseqRetryVersion: string | null = null;
   // NB: both VEP forms return an ARRAY of results (one per input variant).
   const unwrap = (response: unknown): RawVepResult => {
     const arr = Array.isArray(response) ? response : [response];
@@ -551,9 +568,27 @@ export async function ensemblConsequence(
     const conn = ensemblConn() as RestConnection;
     result = unwrap(await conn.post(`/vep/${encodeURIComponent(species)}/id`, { ids: [trimmed] }));
   } else if (HGVS_MINIMAL_RE.test(trimmed)) {
-    result = unwrap(
-      await ensemblConn().request(`/vep/${encodeURIComponent(species)}/hgvs/${encodeURIComponent(trimmed)}`)
-    );
+    const conn = ensemblConn();
+    const hgvsPath = (hgvs: string): string =>
+      `/vep/${encodeURIComponent(species)}/hgvs/${encodeURIComponent(hgvs)}`;
+    try {
+      result = unwrap(await conn.request(hgvsPath(trimmed)));
+    } catch (error) {
+      // Issue #194: Ensembl indexes only the RefSeq transcript versions of
+      // its current release. When the verbatim request fails precisely
+      // because the INPUT's versioned accession is not carried, retry ONCE
+      // with the bare accession (stripping only the transcript accession's
+      // version — never the variant part). VEP then re-interprets the c./p.
+      // coordinates against the served transcript, which can silently shift
+      // the result for coincidentally-compatible reference bases — hence the
+      // warnings field on success. Any other 400 propagates untouched.
+      const message = error instanceof Error ? error.message : String(error);
+      const versioned = VERSIONED_REFSEQ_RE.exec(trimmed);
+      if (!versioned || !MISSING_TRANSCRIPT_VERSION_RE.test(message)) throw error;
+      refseqRetryVersion = `.${versioned[2]}`;
+      const bareAccession = `${versioned[1]}${trimmed.slice(versioned[0].length)}`;
+      result = unwrap(await conn.request(hgvsPath(bareAccession)));
+    }
   } else {
     throw new Error(
       `'${trimmed}' is not supported — use HGVS notation (e.g. NM_004333:c.1799T>A) or a dbSNP rsID`
@@ -561,7 +596,19 @@ export async function ensemblConsequence(
   }
 
   const limit = Math.min(Math.max(options.limit ?? DEFAULT_CONSEQUENCE_LIMIT, 1), MAX_CONSEQUENCE_LIMIT);
-  return mapVepResult(trimmed, species, result, limit);
+  const mapped = mapVepResult(trimmed, species, result, limit);
+  if (refseqRetryVersion !== null) {
+    mapped.warnings = [
+      `RefSeq version ${refseqRetryVersion} not carried by the current Ensembl release; coordinates re-interpreted against the served transcript — verify the protein change against your source report`,
+    ];
+    // The highest-impact transcript after mapVepResult's impact sort — the
+    // record the most severe consequence was actually computed on.
+    const served = mapped.consequences[0]?.transcript_id;
+    if (served) {
+      mapped.warnings.push(`Most severe consequence served on transcript ${served}`);
+    }
+  }
+  return mapped;
 }
 
 function mapRegionFeature(f: Record<string, unknown>): EnsemblRegionFeature {
