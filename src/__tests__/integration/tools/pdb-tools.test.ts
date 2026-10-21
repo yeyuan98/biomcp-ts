@@ -28,7 +28,10 @@ describe('pdb search mode', () => {
     // Stable identity: the top-5 full-text hits for "crambin" are dominated
     // by titled crambin structures (e.g. 1EJG "CRAMBIN AT ULTRA-HIGH
     // RESOLUTION"; homologs like hellethionin may also rank).
-    expect(results.filter((r: any) => /crambin/i.test(String(r.summary.title || ''))).length).toBeGreaterThanOrEqual(1);
+    // summary is optional per the row contract (rows whose per-entry
+    // enrichment fetch failed ride without it, Promise.allSettled) — read
+    // it defensively instead of crashing on a legitimate partial result.
+    expect(results.filter((r: any) => /crambin/i.test(String(r.summary?.title ?? ''))).length).toBeGreaterThanOrEqual(1);
   }, 30000);
 
   it('returns empty for nonsense query', async () => {
