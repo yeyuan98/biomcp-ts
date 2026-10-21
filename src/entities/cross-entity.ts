@@ -217,9 +217,32 @@ function hgvsToShorthand(hgvs: string): string {
   );
 }
 
-export async function variantToTrials(variantId: string): Promise<Array<{ nct_id: string; title?: string; status?: string }>> {
+/** One trial row of a variantToTrials reply (ClinicalTrials.gov). */
+export interface VariantTrialRow {
+  nct_id: string;
+  title?: string;
+  status?: string;
+}
+
+/**
+ * variantToTrials reply envelope (issue #198): trial rows in `results`. A
+ * `warnings` entry is attached whenever BOTH MyVariant.info resolution legs
+ * (variantGet, then the variantSearch fallback) failed, regardless of hit
+ * count — the rows then come from searching the raw identifier, which must
+ * never masquerade as a clean negative ("no trials exist"): a raw string can
+ * also match accidentally. Mirrors the diseaseToDrugs envelope (issue #159);
+ * entities never import from server/tools, and `warnings` is attached by
+ * callers only when non-empty (see `listEnvelope`).
+ */
+export interface VariantTrialsResult {
+  results: VariantTrialRow[];
+  warnings?: string[];
+}
+
+export async function variantToTrials(variantId: string): Promise<VariantTrialsResult> {
   let searchQuery = variantId;
   let geneOnly = variantId;
+  const warnings: string[] = [];
 
   // Try variantGet first for rich gene/protein data, then fall back to variantSearch
   try {
@@ -235,7 +258,7 @@ export async function variantToTrials(variantId: string): Promise<Array<{ nct_id
         searchQuery = variant.gene;
       }
     }
-  } catch {
+  } catch (getFailure) {
     try {
       const results = await variantSearch({ query: variantId, limit: 1 });
       if (results.length > 0 && results[0].gene) {
@@ -248,8 +271,17 @@ export async function variantToTrials(variantId: string): Promise<Array<{ nct_id
           searchQuery = results[0].gene;
         }
       }
-    } catch {
-      // Use the raw variantId as last resort
+    } catch (searchFailure) {
+      // Resolution failed on both legs: the trials below come from the raw
+      // identifier. Warn REGARDLESS of hit count (#198) — a swallowed
+      // resolution failure used to be byte-identical to a genuine no-match,
+      // and a raw string that accidentally matches is just as misleading.
+      warnings.push(
+        `variant ID resolution via MyVariant.info failed ` +
+        `(variantGet: ${errorMessageWithCause(getFailure)}; ` +
+        `variantSearch fallback: ${errorMessageWithCause(searchFailure)}); ` +
+        `results come from searching the raw identifier — retry may resolve BRAF V600E-style naming`
+      );
     }
   }
 
@@ -260,11 +292,15 @@ export async function variantToTrials(variantId: string): Promise<Array<{ nct_id
     response = await trialSearch(geneOnly, { limit: 10 });
   }
 
-  return response.studies.map(t => ({
+  const results: VariantTrialRow[] = response.studies.map(t => ({
     nct_id: t.nct_id,
     title: t.title,
     status: t.status,
   }));
+  if (warnings.length > 0) {
+    return { results, warnings };
+  }
+  return { results };
 }
 
 export async function drugToGenes(drugName: string): Promise<Array<{ gene_symbol: string; name: string; source: string; action_type?: string }>> {

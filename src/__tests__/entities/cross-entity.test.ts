@@ -558,10 +558,12 @@ describe('variantToTrials', () => {
       });
     }) as any;
 
-    const results = await variantToTrials('rs113488022');
+    const outcome = await variantToTrials('rs113488022');
 
-    expect(results).toHaveLength(1);
-    expect(results[0].nct_id).toBe('NCT00000001');
+    expect(outcome.results).toHaveLength(1);
+    expect(outcome.results[0].nct_id).toBe('NCT00000001');
+    // Resolution succeeded — clean envelope, no warnings key at all.
+    expect('warnings' in outcome).toBe(false);
 
     // Verify the trial search used gene + protein change, not raw rsID
     const urls = (global.fetch as any).mock.calls.map((c: any[]) => c[0] as string);
@@ -601,30 +603,78 @@ describe('variantToTrials', () => {
       });
     }) as any;
 
-    const results = await variantToTrials('chr7:140453136');
+    const outcome = await variantToTrials('chr7:140453136');
 
-    expect(results).toHaveLength(1);
+    expect(outcome.results).toHaveLength(1);
+    expect('warnings' in outcome).toBe(false);
     const urls = (global.fetch as any).mock.calls.map((c: any[]) => c[0] as string);
     const trialUrl = urls.find((u: string) => parseMockUrl(u).hostname === 'clinicaltrials.gov');
     expect(trialUrl).toContain('BRAF');
   });
 
-  test('falls back to raw variantId when resolution fails', async () => {
-    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
+  test('resolution failure falls back to the raw variantId and warns — never a silent empty (#198)', async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((rawUrl: string) => {
+      const url = parseMockUrl(rawUrl);
+      // Both MyVariant.info legs (variantGet + variantSearch) hard-fail.
+      if (url.hostname === 'myvariant.info') {
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          statusText: 'Not Found',
+          headers: new Headers(),
+        });
+      }
+      // ClinicalTrials.gov returns empty for random strings
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ studies: [] }),
+      });
+    }) as any;
+
+    const outcome = await variantToTrials('unknown_variant_xyz');
+
+    // Both resolution legs failed, so the search ran on the raw identifier
+    expect(outcome.results).toHaveLength(0);
+    // ...and the failure is structurally visible regardless of hit count.
+    expect(Array.isArray(outcome.warnings)).toBe(true);
+    expect(outcome.warnings).toHaveLength(1);
+    expect(outcome.warnings![0]).toContain('variant ID resolution via MyVariant.info failed');
+    expect(outcome.warnings![0]).toContain('searching the raw identifier');
+    expect(global.fetch).toHaveBeenCalled();
+  });
+
+  test('resolution failure with raw-identifier matches still warns alongside results (#198)', async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((rawUrl: string) => {
+      const url = parseMockUrl(rawUrl);
+      if (url.hostname === 'myvariant.info') {
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          statusText: 'Not Found',
+          headers: new Headers(),
+        });
+      }
+      // The raw identifier accidentally matches a trial.
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve({
-          studies: [],
+          studies: [{
+            protocolSection: {
+              identificationModule: { nctId: 'NCT00000555', briefTitle: 'Accidental raw-id match' },
+              statusModule: { overallStatus: 'RECRUITING' },
+            },
+          }],
         }),
       });
     }) as any;
 
-    const results = await variantToTrials('unknown_variant_xyz');
+    const outcome = await variantToTrials('unknown_variant_xyz');
 
-    // Both variantGet and variantSearch fail, falls back to searching raw ID
-    // ClinicalTrials.gov returns empty for random strings
-    expect(results).toHaveLength(0);
-    expect(global.fetch).toHaveBeenCalled();
+    expect(outcome.results).toHaveLength(1);
+    expect(outcome.results[0].nct_id).toBe('NCT00000555');
+    // Hits do not launder the resolution failure — the warning rides along.
+    expect(outcome.warnings).toHaveLength(1);
+    expect(outcome.warnings![0]).toContain('retry may resolve');
   });
 
   test('converts HGVS three-letter to shorthand in trial search query', async () => {
@@ -654,9 +704,10 @@ describe('variantToTrials', () => {
       });
     }) as any;
 
-    const results = await variantToTrials('rs113488022');
+    const outcome = await variantToTrials('rs113488022');
 
-    expect(results).toHaveLength(1);
+    expect(outcome.results).toHaveLength(1);
+    expect('warnings' in outcome).toBe(false);
     const urls = (global.fetch as any).mock.calls.map((c: any[]) => c[0] as string);
     const trialUrl = urls.find((u: string) => parseMockUrl(u).hostname === 'clinicaltrials.gov');
     // Should use V600E shorthand, not Val600Glu
@@ -703,10 +754,11 @@ describe('variantToTrials', () => {
       });
     }) as any;
 
-    const results = await variantToTrials('rs12345');
+    const outcome = await variantToTrials('rs12345');
 
-    expect(results).toHaveLength(1);
-    expect(results[0].nct_id).toBe('NCT00000888');
+    expect(outcome.results).toHaveLength(1);
+    expect(outcome.results[0].nct_id).toBe('NCT00000888');
+    expect('warnings' in outcome).toBe(false);
     // Should have made at least 3 fetch calls: variantGet, trialSearch(gene+mutation), trialSearch(gene-only)
     expect(callCount).toBeGreaterThanOrEqual(3);
   });
@@ -741,8 +793,8 @@ describe('variantToTrials', () => {
       });
     }) as any;
 
-    const results = await variantToTrials('rs99999');
-    expect(results).toHaveLength(1);
+    const outcome = await variantToTrials('rs99999');
+    expect(outcome.results).toHaveLength(1);
     const urls = (global.fetch as any).mock.calls.map((c: any[]) => c[0] as string);
     const trialUrl = urls.find((u: string) => parseMockUrl(u).hostname === 'clinicaltrials.gov');
     // Arg123Ter -> R123*

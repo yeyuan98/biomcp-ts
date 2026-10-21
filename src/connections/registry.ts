@@ -17,6 +17,13 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     protocol: 'rest',
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
+    // variant_trials resolves ids through myvariant before the trials query;
+    // a transient blip used to surface as a silent raw-identifier search
+    // (#198) — one bounded retry smooths it.
+    retry: { attempts: 2, backoffMs: 500 },
+    // #107: budget 35s — one full 15s attempt + backoff always fits, two
+    // stacked 15s timeouts do not.
+    retryBudgetMs: 35000,
   },
   gtex: {
     sourceId: 'gtex',
@@ -318,6 +325,13 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     protocol: 'rest',
     handling: { timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
+    // Same rationale as myvariant above: variant_trials chains up to two
+    // searches here behind a resolution step; transient blips must not
+    // surface as a silent empty result (#198).
+    retry: { attempts: 2, backoffMs: 500 },
+    // #107: budget 35s — one full 15s attempt + backoff always fits, two
+    // stacked 15s timeouts do not.
+    retryBudgetMs: 35000,
   },
 
   // ==========================================

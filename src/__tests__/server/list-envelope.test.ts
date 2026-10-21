@@ -6,12 +6,12 @@ import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 /**
  * Standard list-tool envelope pins (issue #130): disease_search,
- * disease_drugs, disease_trials, and gene_articles reply with
- * { results, warnings?, errors? } — never a bare array — with the optional
- * channels emitted only when non-empty (article_search parity).
- * drug_search's { results, hint } shape is pinned in
- * entities/drug.test.ts (issue #83); geo_get's GDS guidance-as-data lives in
- * geo-tools.test.ts / entities/geo.test.ts.
+ * disease_drugs, disease_trials, gene_articles, and variant_trials reply
+ * with { results, warnings?, errors? } — never a bare array — with the
+ * optional channels emitted only when non-empty (article_search parity).
+ * drug_search's { results, hint } shape is pinned in entities/drug.test.ts
+ * (issue #83); geo_get's GDS guidance-as-data lives in geo-tools.test.ts /
+ * entities/geo.test.ts.
  */
 
 const PUBMED_EFETCH_XML = `<?xml version="1.0"?>
@@ -50,12 +50,15 @@ const okText = (payload: string, contentType = 'text/xml') => ({
 /** Sentinel rejection message with no network-failure signature: the
  * connection retry layer classifies it non-retryable, so no backoff sleeps. */
 const S2_OUTAGE = 'unit test sentinel: semantic scholar backend disabled';
+const MYVARIANT_DOWN = 'unit test sentinel: myvariant backend disabled';
 
 /**
  * Route every list-tool backend. `semanticScholarDown` rejects the Semantic
- * Scholar route so the federated fan-out records a per-backend error.
+ * Scholar route so the federated fan-out records a per-backend error;
+ * `myvariantDown` rejects MyVariant.info so variant_trials records a
+ * resolution warning (issue #198).
  */
-function mockListToolBackends(opts: { semanticScholarDown?: boolean; otDiseaseUnresolved?: boolean } = {}): void {
+function mockListToolBackends(opts: { semanticScholarDown?: boolean; otDiseaseUnresolved?: boolean; myvariantDown?: boolean } = {}): void {
   global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((input: any, init?: { body?: string }) => {
     const url = parseMockUrl(input);
     switch (url.hostname) {
@@ -85,6 +88,16 @@ function mockListToolBackends(opts: { semanticScholarDown?: boolean; otDiseaseUn
               },
             },
           ],
+        }));
+      case 'myvariant.info': // variant_trials resolution legs (issue #198)
+        if (opts.myvariantDown) {
+          return Promise.reject(new Error(MYVARIANT_DOWN));
+        }
+        return Promise.resolve(okJson({
+          _id: 'chr7:140453136',
+          dbsnp: { rsid: 'rs113488022' },
+          snpeff: { ann: [{ genename: 'BRAF', hgvs_p: 'p.Val600Glu' }] },
+          clinvar: {},
         }));
       case 'api.platform.opentargets.org': {
         // GraphQL POST body carries the query string — dispatch on it.
@@ -243,5 +256,36 @@ describe('list-tool envelopes (issue #130)', () => {
     expect(s2.message).toContain(S2_OUTAGE);
     // No _error marker rows inside results — errors never masquerade as items.
     expect(envelope.results.some((r: any) => r._error !== undefined)).toBe(false);
+  });
+
+  it('variant_trials wraps rows in { results } with no warnings on a clean resolution', async () => {
+    mockListToolBackends();
+
+    const envelope = await harness.callTool('variant_trials', { variant: 'rs113488022' });
+
+    expect(envelope.results).toEqual([
+      { nct_id: 'NCT01234567', title: 'Melanoma trial 1', status: 'RECRUITING' },
+      { nct_id: 'NCT02345678', title: 'Melanoma trial 2', status: 'COMPLETED' },
+    ]);
+    expect('warnings' in envelope).toBe(false);
+    expect('errors' in envelope).toBe(false);
+  });
+
+  it('variant_trials: a MyVariant.info outage rides in warnings[] with raw-identifier results (issue #198)', async () => {
+    // A swallowed resolution failure used to be byte-identical to a genuine
+    // no-match; now it is structurally visible regardless of hit count.
+    mockListToolBackends({ myvariantDown: true });
+
+    const envelope = await harness.callTool('variant_trials', { variant: 'rs113488022' });
+
+    // Results still flow (from searching the raw identifier)...
+    expect(envelope.results).toHaveLength(2);
+    // ...but the failure never masquerades as a clean negative.
+    expect(Array.isArray(envelope.warnings)).toBe(true);
+    expect(envelope.warnings).toHaveLength(1);
+    expect(envelope.warnings[0]).toContain('variant ID resolution via MyVariant.info failed');
+    expect(envelope.warnings[0]).toContain('searching the raw identifier');
+    expect(envelope.warnings[0]).toContain(MYVARIANT_DOWN);
+    expect('errors' in envelope).toBe(false);
   });
 });
