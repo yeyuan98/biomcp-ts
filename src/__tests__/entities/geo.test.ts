@@ -154,14 +154,24 @@ function okText(text: string, contentType = 'text/plain') {
   };
 }
 
+/** Real web stream body so downloadBufferWithTelemetry's reader loop runs. */
+function bufferStream(content: Buffer): ReadableStream<Uint8Array> {
+  const bytes = new Uint8Array(content.byteLength);
+  bytes.set(content);
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+}
+
 function okBinary(content: Buffer, contentLength?: number) {
-  const arrayBuffer = new ArrayBuffer(content.length);
-  new Uint8Array(arrayBuffer).set(content);
   return {
     ok: true,
     status: 200,
     statusText: 'OK',
-    arrayBuffer: () => Promise.resolve(arrayBuffer),
+    body: bufferStream(content),
     headers: new Headers({ 'content-length': String(contentLength ?? content.length) }),
   };
 }
@@ -534,12 +544,13 @@ describe('geoGet supplementary download', () => {
     const { geoGet } = await loadGeo();
     mockFetchRoutes({
       ...defaultRoutes(),
-      // Content-Length missing — only the post-read guard can catch the size.
+      // Content-Length missing — only the mid-stream reader guard can catch
+      // the size (real stream body exercises the chunk-counting loop).
       'https://ftp.ncbi.nlm.nih.gov/': () => ({
         ok: true,
         status: 200,
         statusText: 'OK',
-        arrayBuffer: () => Promise.resolve(new ArrayBuffer(2 * 1024 * 1024)),
+        body: bufferStream(Buffer.alloc(2 * 1024 * 1024)),
         headers: new Headers(),
       }),
     });
@@ -584,6 +595,141 @@ describe('geoGet supplementary download', () => {
     if (!('entry_type' in detail) || detail.entry_type !== 'series') throw new Error('expected series detail');
     expect(detail.download!.filename).toBe('GSE183947_fpkm_fi_le.csv.gz');
     expect(existsSync(detail.download!.path)).toBe(true);
+  });
+});
+
+// ============================================================
+// downloadBufferWithTelemetry (#196): measured-speed timeout messages
+// ============================================================
+describe('downloadBufferWithTelemetry timeout diagnostics (#196)', () => {
+  mockGlobalFetch();
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    connectionManager.closeAll();
+  });
+
+  const SUPP_URL = 'https://ftp.ncbi.nlm.nih.gov/geo/series/GSE183nnn/GSE183947/suppl/GSE183947_big.csv.gz';
+
+  async function loadHelper() {
+    return await import('../../connections/fetch-utils.js');
+  }
+
+  /** Emits `chunks` immediately, then never settles — until a short real
+   *  stall ends in an abort-shaped stream error, standing in for the
+   *  AbortSignal.timeout firing mid-download (its "after N s" comes from the
+   *  configured timeoutMs, so the interpolated budget is assertable without
+   *  waiting it out). */
+  function stalledThenAbortedStream(chunks: Buffer[], stallMs = 15): ReadableStream<Uint8Array> {
+    return new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) {
+          const bytes = new Uint8Array(chunk.byteLength);
+          bytes.set(chunk);
+          controller.enqueue(bytes);
+        }
+        setTimeout(() => {
+          const abortError = new Error('This operation was aborted');
+          abortError.name = 'AbortError';
+          controller.error(abortError);
+        }, stallMs);
+      },
+    });
+  }
+
+  function abortedDownload(chunks: Buffer[], headers: Headers) {
+    return {
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      body: stalledThenAbortedStream(chunks),
+      headers,
+    };
+  }
+
+  test('mid-stream timeout reports measured rate, full-file estimate, and manual-download advice', async () => {
+    const { downloadBufferWithTelemetry } = await loadHelper();
+    // 150 KB received of a 1 MB Content-Length at any measured rate.
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() =>
+      Promise.resolve(
+        abortedDownload(
+          [Buffer.alloc(150 * 1024, 1)],
+          new Headers({ 'content-length': String(1024 * 1024) }),
+        ),
+      ),
+    ) as any;
+
+    let caught: Error | undefined;
+    try {
+      await downloadBufferWithTelemetry(SUPP_URL, { timeoutMs: 50_000, maxBytes: 50 * 1024 * 1024 });
+    } catch (e) {
+      caught = e as Error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const message = caught!.message;
+    // The interpolated 50 s budget — never a hardcoded duration.
+    expect(message).toContain(`timed out after 50 s`);
+    expect(message).not.toContain('60 s');
+    expect(message).toMatch(/received 150\.0 KB of 1\.0 MB \(\d+ KB\/s\)/);
+    expect(message).toMatch(/at this rate the full file needs ~\d+/);
+    expect(message).toContain('the endpoint is slow (NCBI throttling is common), not necessarily down');
+    expect(message).toContain(`download it manually: ${SUPP_URL}`);
+  });
+
+  test('zero bytes received at timeout reports a stalled/blocked connection, not slowness', async () => {
+    const { downloadBufferWithTelemetry } = await loadHelper();
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() =>
+      Promise.resolve(
+        abortedDownload([], new Headers({ 'content-length': String(1024 * 1024) })),
+      ),
+    ) as any;
+
+    let caught: Error | undefined;
+    try {
+      await downloadBufferWithTelemetry(SUPP_URL, { timeoutMs: 50_000, maxBytes: 50 * 1024 * 1024 });
+    } catch (e) {
+      caught = e as Error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const message = caught!.message;
+    expect(message).toContain('timed out after 50 s: no data received');
+    expect(message).toContain('the connection is stalled or blocked rather than slow');
+    // No rate/estimate math is possible without bytes.
+    expect(message).not.toMatch(/KB\/s/);
+    expect(message).not.toMatch(/at this rate/);
+    expect(message).toContain(`download it manually: ${SUPP_URL}`);
+  });
+
+  test('mid-stream byte-count guard aborts when Content-Length is absent or lying', async () => {
+    const { downloadBufferWithTelemetry } = await loadHelper();
+    // No Content-Length header; the stream actually delivers 1.2 MB against
+    // a 1 MB cap — the reader loop itself must cut the download off.
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            for (let i = 0; i < 2; i++) {
+              const chunk = new Uint8Array(600 * 1024);
+              chunk.fill(7);
+              controller.enqueue(chunk);
+            }
+            controller.close();
+          },
+        }),
+        headers: new Headers(),
+      }),
+    ) as any;
+
+    await expect(
+      downloadBufferWithTelemetry(SUPP_URL, { timeoutMs: 50_000, maxBytes: 1024 * 1024 }),
+    ).rejects.toThrow(
+      `Supplementary file ${SUPP_URL} is ${2 * 600 * 1024} bytes, exceeding the ${1024 * 1024} byte cap. ` +
+      `NCBI serves GEO files at throttled speeds (commonly <150 KB/s), so multi-MB files may exceed the 50 s ` +
+      `download timeout even with a higher cap — prefer downloading manually: ${SUPP_URL}.`
+    );
   });
 });
 

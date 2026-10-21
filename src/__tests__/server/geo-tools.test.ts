@@ -66,14 +66,20 @@ function okText(text: string, contentType = 'text/plain') {
 }
 
 function okBinary(content: Buffer) {
-  const arrayBuffer = new ArrayBuffer(content.length);
-  new Uint8Array(arrayBuffer).set(content);
+  // Real web-stream body so downloadBufferWithTelemetry's reader loop runs.
+  const bytes = new Uint8Array(content.byteLength);
+  bytes.set(content);
   return {
     ok: true,
     status: 200,
     statusText: 'OK',
     headers: new Headers({ 'content-length': String(content.length) }),
-    arrayBuffer: () => Promise.resolve(arrayBuffer),
+    body: new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    }),
   };
 }
 
