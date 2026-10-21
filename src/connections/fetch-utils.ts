@@ -1,6 +1,7 @@
 // Side-effect import: proxy-aware global fetch for any code path that uses
 // fetchWithTimeout without going through connections/manager.js.
 import './proxy.js';
+import { monotonicNowMs } from './time.js';
 
 /**
  * Shared per-provider timeout for citation lookups layered on top of the
@@ -108,4 +109,144 @@ export async function fetchWithTimeout<T>(fn: (signal?: AbortSignal) => Promise<
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
+}
+
+/** Human-readable byte count for download diagnostics (1 decimal on KB/MB). */
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
+}
+
+/** Human-readable duration for download diagnostics. */
+function formatDurationMs(ms: number): string {
+  if (ms >= 60_000) return `${Math.round(ms / 60_000)} min`;
+  if (ms >= 1_000) return `${(ms / 1_000).toFixed(1)} s`;
+  return `${Math.round(ms)} ms`;
+}
+
+/**
+ * Abort/timeout-shaped rejection: AbortSignal.timeout aborts with a
+ * `TimeoutError` DOMException, fetch-initiated aborts with `AbortError`;
+ * stream/errors from stubs may carry either signature only in `message`
+ * (same heuristic as fetchWithTimeout above).
+ */
+function isAbortLike(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  return (
+    e.name === 'AbortError' ||
+    e.name === 'TimeoutError' ||
+    /\b(abort|aborted|timed out|timeout)\b/i.test(e.message)
+  );
+}
+
+function capExceededError(url: string, byteCount: number, opts: { timeoutMs: number; maxBytes: number }): Error {
+  return new Error(
+    `Supplementary file ${url} is ${byteCount} bytes, exceeding the ${opts.maxBytes} byte cap. ` +
+    `NCBI serves GEO files at throttled speeds (commonly <150 KB/s), so multi-MB files may exceed the ` +
+    `${opts.timeoutMs / 1000} s download timeout even with a higher cap — prefer downloading manually: ${url}.`
+  );
+}
+
+function downloadTimeoutError(
+  url: string,
+  opts: { timeoutMs: number },
+  receivedBytes: number,
+  totalBytes: number | undefined,
+  elapsedMs: number,
+): Error {
+  const seconds = opts.timeoutMs / 1000;
+  if (receivedBytes === 0) {
+    return new Error(
+      `Download of ${url} timed out after ${seconds} s: no data received — ` +
+      `the connection is stalled or blocked rather than slow; download it manually: ${url}`
+    );
+  }
+  const rateKbPerSec = elapsedMs > 0 ? receivedBytes / 1024 / (elapsedMs / 1000) : receivedBytes / 1024;
+  const totalDesc = totalBytes !== undefined ? formatBytes(totalBytes) : 'unknown-size';
+  let estimate = '';
+  if (totalBytes !== undefined && totalBytes > receivedBytes && rateKbPerSec > 0) {
+    const fullFileMs = (totalBytes / (rateKbPerSec * 1024)) * 1000;
+    estimate = `; at this rate the full file needs ~${formatDurationMs(fullFileMs)}`;
+  }
+  return new Error(
+    `Download of ${url} timed out after ${seconds} s: received ${formatBytes(receivedBytes)} of ${totalDesc} ` +
+    `(${Math.round(rateKbPerSec)} KB/s) — the endpoint is slow (NCBI throttling is common), not necessarily down` +
+    `${estimate}; download it manually: ${url}`
+  );
+}
+
+/**
+ * Buffered download with byte-count telemetry for timeout diagnostics.
+ */
+export async function downloadBufferWithTelemetry(
+  url: string,
+  opts: { timeoutMs: number; maxBytes: number },
+): Promise<Buffer> {
+  const fetchStartedMs = monotonicNowMs();
+  let response: Response;
+  try {
+    response = await fetch(url, { signal: AbortSignal.timeout(opts.timeoutMs) });
+  } catch (e) {
+    if (isAbortLike(e)) {
+      // Pre-headers abort: zero bytes received — same honest message as a
+      // mid-stream stall, never a bare TimeoutError DOMException.
+      throw downloadTimeoutError(url, opts, 0, undefined, monotonicNowMs() - fetchStartedMs);
+    }
+    throw e;
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to download ${url}: HTTP ${response.status} ${response.statusText}`);
+  }
+
+  const contentLengthHeader = response.headers.get('content-length');
+  const contentLength = contentLengthHeader === null ? Number.NaN : Number(contentLengthHeader);
+  const totalBytes = Number.isFinite(contentLength) ? contentLength : undefined;
+  if (totalBytes !== undefined && totalBytes > opts.maxBytes) {
+    throw capExceededError(url, totalBytes, opts);
+  }
+
+  if (response.body === null) {
+    // Nonstandard server or test stub without a web stream body: one-shot
+    // arrayBuffer with the plain timeout rewrap (nothing was received —
+    // arrayBuffer settles all-or-nothing).
+    const startedMs = monotonicNowMs();
+    try {
+      return Buffer.from(await response.arrayBuffer());
+    } catch (e) {
+      if (isAbortLike(e)) {
+        throw downloadTimeoutError(url, opts, 0, totalBytes, monotonicNowMs() - startedMs);
+      }
+      throw e;
+    }
+  }
+
+  const startedMs = monotonicNowMs();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let receivedBytes = 0;
+  let overCap = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value !== undefined) {
+        chunks.push(value);
+        receivedBytes += value.byteLength;
+      }
+      if (receivedBytes > opts.maxBytes) {
+        overCap = true;
+        break;
+      }
+    }
+  } catch (e) {
+    if (isAbortLike(e)) {
+      throw downloadTimeoutError(url, opts, receivedBytes, totalBytes, monotonicNowMs() - startedMs);
+    }
+    throw e;
+  } finally {
+    if (overCap) void reader.cancel().catch(() => undefined);
+  }
+  if (overCap) throw capExceededError(url, receivedBytes, opts);
+  return Buffer.concat(chunks, receivedBytes);
 }

@@ -1,6 +1,7 @@
 import { connectionManager } from '../connections/manager.js';
-// Side-effect import: proxy-aware global fetch for supplementary downloads.
-import '../connections/fetch-utils.js';
+// Proxy-aware global fetch + the buffered download helper for supplementary
+// files (importing the helper keeps the module's proxy side effect).
+import { downloadBufferWithTelemetry } from '../connections/fetch-utils.js';
 import { parseEutilsResponse, assertEutilsText, chunkUids, joinUidParam } from './eutils-utils.js';
 import { parseSoftRecord, getSoftValue, getSoftValues, type SoftRecord } from '../transform/soft.js';
 import { mkdtempSync, writeFileSync } from 'node:fs';
@@ -403,7 +404,12 @@ function pickDownloadableFile(files: string[]): string | undefined {
   return files.find(f => /\.(gz|csv|txt)$/i.test(f)) ?? files[0];
 }
 
-const DOWNLOAD_TIMEOUT_MS = 60_000;
+// 50 s, not the previous 60 s (#196): MCP clients default to a 60-second
+// request timeout and this timer starts only after the esearch/esummary/
+// SOFT prefetches, so the old 60-second abort always lost that race and the
+// improved message was never seen. 50 s plus a few seconds of prefetch
+// overhead lands the error inside the client's window (~52–57 s).
+const DOWNLOAD_TIMEOUT_MS = 50_000;
 const DOWNLOAD_HOST_ALLOWLIST = /^(www\.)?(ftp\.)?ncbi\.nlm\.nih\.gov$|^(www\.)?ncbi\.nlm\.nih\.gov$|\.ncbi\.nlm\.nih\.gov$/i;
 
 /** Supplementary URLs are submitter-controlled text — only NCBI hosts are
@@ -431,27 +437,15 @@ async function downloadSupplementaryFile(
   url: string,
   maxBytes: number
 ): Promise<GeoDownloadedFile> {
-  // GEO FTP URLs are served verbatim over HTTPS.
+  // GEO FTP URLs are served verbatim over HTTPS. Telemetry-rich download
+  // (measured rate, manual-download advice on timeout; byte-cap guard
+  // before and mid-stream) — see downloadBufferWithTelemetry (#196).
   const httpsUrl = url.replace(/^ftp:\/\//i, 'https://');
   assertDownloadableUrl(httpsUrl);
-  const response = await fetch(httpsUrl, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
-  if (!response.ok) {
-    throw new Error(`Failed to download ${httpsUrl}: HTTP ${response.status} ${response.statusText}`);
-  }
-
-  const contentLength = Number(response.headers.get('content-length'));
-  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-    throw new Error(
-      `Supplementary file ${httpsUrl} is ${contentLength} bytes, exceeding the ${maxBytes} byte cap. Raise maxBytes or download manually.`
-    );
-  }
-
-  const buffer = Buffer.from(await response.arrayBuffer());
-  if (buffer.byteLength > maxBytes) {
-    throw new Error(
-      `Supplementary file ${httpsUrl} is ${buffer.byteLength} bytes, exceeding the ${maxBytes} byte cap. Raise maxBytes or download manually.`
-    );
-  }
+  const buffer = await downloadBufferWithTelemetry(httpsUrl, {
+    timeoutMs: DOWNLOAD_TIMEOUT_MS,
+    maxBytes,
+  });
 
   const filename = sanitizeFilename(httpsUrl.split('/').pop() ?? 'geo_supplementary_file');
   const tmpDir = mkdtempSync(join(tmpdir(), 'geo_'));

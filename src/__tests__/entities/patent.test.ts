@@ -2705,6 +2705,224 @@ describe('patentGet orchestration (chains)', () => {
   });
 });
 
+describe('patentGet identity + provenance (issues #197/#200)', () => {
+  let originalFetch: typeof global.fetch;
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+    installFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    global.fetch = originalFetch;
+    delete process.env.EPO_OPS_CONSUMER_KEY;
+    delete process.env.EPO_OPS_CONSUMER_SECRET;
+    delete process.env.USPTO_API_KEY;
+  });
+
+  function gpHtml(servedNumber: string): string {
+    return (
+      '<meta name="DC.title" content="CRISPR base editing">' +
+      `<span itemprop="publicationNumber">${servedNumber}</span>` +
+      '<div class="abstract">An abstract.</div>' +
+      '<section itemprop="claims"><div num="1">1. A method.</div><div num="2">2. The method of claim 1.</div></section>'
+    );
+  }
+
+  function gpOnlyMock(html: string) {
+    return jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
+      const { hostname } = parseMockUrl(String(url));
+      if (hostname === 'patents.google.com') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'text/html' }),
+          text: () => Promise.resolve(html),
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${url}`));
+    });
+  }
+
+  // US path with Google Patents hard-blocked (503 + block signature) and no
+  // Wayback snapshot, so core and claims resolve via PPUBS only.
+  function ppubsOnlyMock(doc: Record<string, unknown>) {
+    return jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
+      const u = String(url);
+      const { hostname } = parseMockUrl(u);
+      if (hostname === 'archive.org' || hostname === 'web.archive.org') {
+        return Promise.resolve({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ archived_snapshots: {} })),
+        });
+      }
+      if (hostname === 'patents.google.com') {
+        return Promise.resolve({
+          ok: false,
+          status: 503,
+          headers: new Headers(),
+          text: () => Promise.resolve('Sorry... automated queries'),
+        });
+      }
+      if (u.includes('/api/users/me/session')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'x-access-token': 'tok-1', 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ userCase: { caseId: 1 } })),
+        });
+      }
+      if (u.includes('/api/searches/searchWithBeFamily')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({
+            patents: [{ guid: 'US-11027025-B2', type: 'USPAT' }],
+          })),
+        });
+      }
+      if (u.includes('/api/patents/highlight/')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({
+            guid: 'US-11027025-B2',
+            type: 'USPAT',
+            publicationReferenceDocumentNumber: '11027025',
+            inventionTitle: 'Compositions comprising synthetic polynucleotides',
+            ...doc,
+          })),
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${u}`));
+    });
+  }
+
+  function opsBiblioMock(biblio: unknown) {
+    return jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
+      const u = String(url);
+      if (u.includes('auth/accesstoken')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ access_token: 'tok', expires_in: 1199 })),
+        });
+      }
+      if (u.includes('/published-data/publication/epodoc/')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          text: () => Promise.resolve(JSON.stringify(biblio)),
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${u}`));
+    });
+  }
+
+  test('Google Patents serves A1 for requested B1: warning attached, record intact', async () => {
+    global.fetch = gpOnlyMock(gpHtml('EP3904939A1')) as any;
+    const { patentGet } = await import('../../entities/patent/detail/index.js');
+    const result = await advanceUntilSettled(patentGet('EP3904939B1'));
+    expect(result.source).toBe('google_patents');
+    expect(result.publication_number).toBe('EP3904939A1');
+    expect(result.title).toBe('CRISPR base editing');
+    expect(result._warnings).toEqual([
+      'requested EP3904939B1 (grant) but served EP3904939A1 (application) — different document in the same family; verify before citing',
+    ]);
+  });
+
+  test('same kind class (served B2 for requested B1) stays silent', async () => {
+    global.fetch = gpOnlyMock(gpHtml('EP3904939B2')) as any;
+    const { patentGet } = await import('../../entities/patent/detail/index.js');
+    const result = await advanceUntilSettled(patentGet('EP3904939B1'));
+    expect(result.publication_number).toBe('EP3904939B2');
+    expect(result.source).toBe('google_patents');
+    expect(result._warnings).toBeUndefined();
+  });
+
+  test('country mismatch between requested and served number warns', async () => {
+    global.fetch = gpOnlyMock(gpHtml('US2023012345A1')) as any;
+    const { patentGet } = await import('../../entities/patent/detail/index.js');
+    const result = await advanceUntilSettled(patentGet('EP3904939B1'));
+    expect(result.publication_number).toBe('US2023012345A1');
+    expect(result._warnings).toEqual([
+      'requested EP3904939B1 but served US2023012345A1 — different publication authority; verify before citing',
+    ]);
+  });
+
+  test('kind-stripped served number (no kind to compare) stays silent', async () => {
+    global.fetch = gpOnlyMock(gpHtml('EP3904939')) as any;
+    const { patentGet } = await import('../../entities/patent/detail/index.js');
+    const result = await advanceUntilSettled(patentGet('EP3904939'));
+    expect(result.publication_number).toBe('EP3904939');
+    expect(result._warnings).toBeUndefined();
+  });
+
+  test('OPS path: kind-class change between requested and served number warns', async () => {
+    process.env.EPO_OPS_CONSUMER_KEY = 'k';
+    process.env.EPO_OPS_CONSUMER_SECRET = 's';
+    global.fetch = opsBiblioMock({
+      'ops:world-patent-data': {
+        'exchange-documents': {
+          'exchange-document': {
+            '@country': 'EP', '@doc-number': '3904939', '@kind': 'A1',
+            'bibliographic-data': {
+              'invention-title': { '$': 'Title', '@lang': 'en' },
+              'publication-reference': {
+                'document-id': [{ '@document-id-type': 'docdb', country: { '$': 'EP' }, 'doc-number': { '$': '3904939' }, kind: { '$': 'A1' }, date: { '$': '20200101' } }],
+              },
+            },
+          },
+        },
+      },
+    }) as any;
+    const { patentGet } = await import('../../entities/patent/detail/index.js');
+    const result = await advanceUntilSettled(patentGet('EP3904939B1'));
+    expect(result.source).toBe('ops');
+    expect(result.publication_number).toBe('EP3904939A1');
+    expect(result.title).toBe('Title');
+    expect(result._warnings).toEqual([
+      'requested EP3904939B1 (grant) but served EP3904939A1 (application) — different document in the same family; verify before citing',
+    ]);
+    (await import('../../entities/patent/ops-client.js')).opsClient.close();
+  });
+
+  test('provenance: EP without OPS creds serves claims via Google Patents — flagged unofficial', async () => {
+    global.fetch = gpOnlyMock(gpHtml('EP3904939B1')) as any;
+    const { patentGet } = await import('../../entities/patent/detail/index.js');
+    const result = await advanceUntilSettled(patentGet('EP3904939B1', ['claims']));
+    expect(result.source).toBe('google_patents');
+    const claims = result.sections!.claims as any;
+    expect(claims.source).toBe('google_patents');
+    expect(claims.claims.length).toBeGreaterThan(0);
+    expect(result._warnings).toContain(
+      'claims sourced from Google Patents pages (unofficial mirror); configure EPO_OPS_CONSUMER_KEY/EPO_OPS_CONSUMER_SECRET for authoritative fulltext',
+    );
+    // No identity mismatch here, so the provenance note is the only warning.
+    expect(result._warnings).toHaveLength(1);
+  });
+
+  test('provenance: US claims via PPUBS — official, no unofficial-claims warning', async () => {
+    global.fetch = ppubsOnlyMock({
+      abstractHtml: '<p>The present invention.</p>',
+      claimsHtml: '<div num="1" class="claim">1. Claim one.</div>',
+    }) as any;
+    const { patentGet } = await import('../../entities/patent/detail/index.js');
+    const result = await advanceUntilSettled(patentGet('US11027025B2', ['claims']));
+    expect(result.source).toBe('ppubs');
+    const claims = result.sections!.claims as any;
+    expect(claims.source).toBe('ppubs');
+    expect(claims.claims.length).toBeGreaterThan(0);
+    expect(result._warnings).toBeUndefined();
+  });
+});
+
 describe('fetchGooglePatentDetail block-page detection', () => {
   let originalFetch: typeof global.fetch;
 

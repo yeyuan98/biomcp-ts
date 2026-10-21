@@ -121,10 +121,14 @@ describe('variant_oncokb', () => {
 });
 
 describe('variant_trials', () => {
-  it('returns trials for a variant', async () => {
+  it('returns trials for a variant in the list envelope', async () => {
+    // Issue #198: { results, warnings? } envelope — warnings appear only when
+    // MyVariant.info resolution failed (results then come from the raw id).
     const result = await retryOnRateLimit(() => harness.callTool('variant_trials', { variant: 'rs113488022' }));
-    expectCrossEntityTrialRows(result);
-    const realRows = (result as Array<Record<string, any>>).filter((r) => !r._error);
+    expect(result && typeof result === 'object' && Array.isArray((result as any).results)).toBe(true);
+    const envelope = result as { results: Array<Record<string, any>>; warnings?: string[] };
+    expectCrossEntityTrialRows(envelope.results);
+    const realRows = envelope.results.filter((r) => !r._error);
     expect(realRows.length).toBeGreaterThan(0);
   }, 60000);
 });

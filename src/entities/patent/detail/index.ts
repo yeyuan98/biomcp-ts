@@ -6,14 +6,54 @@ import type {
   PatentCitationsSection,
   PatentFamilySection,
   PatentResult,
+  PatentSource,
 } from '../types.js';
-import { isValidPublicationNumber, normalizePublicationNumber } from '../search/dedup.js';
+import {
+  isValidPublicationNumber,
+  kindToStatus,
+  kindlessPublicationNumber,
+  normalizePublicationNumber,
+} from '../search/dedup.js';
 
 export const PATENT_GET_SECTIONS = ['core', 'abstract', 'claims', 'citations', 'family', 'classifications', 'all'] as const;
 export type PatentGetSection = typeof PATENT_GET_SECTIONS[number];
 
 const SECTION_TIMEOUT_MS = 8000;
 const CLAIMS_SECTION_TIMEOUT_MS = 15000;
+
+const CLAIMS_UNOFFICIAL_WARNING =
+  'claims sourced from Google Patents pages (unofficial mirror); configure EPO_OPS_CONSUMER_KEY/EPO_OPS_CONSUMER_SECRET for authoritative fulltext';
+
+/**
+ * Kind-class-aware served-vs-requested identity check (issues #197/#200):
+ * Google Patents redirects and OPS kindless lookups can land on a DIFFERENT
+ * document of the same family (e.g. requested EP3904939B1, served
+ * EP3904939A1 — same disclosure, different legal status: the exact citation
+ * hazard). Compare country code and kind CLASS ({A1,A2,…} application vs
+ * {B1,B2,…} grant via kindToStatus) rather than the exact kind code —
+ * B1↔B2 is the same text re-issued and must not over-warn. Returns warnings
+ * to attach to the record; empty when identity holds or either side carries
+ * no kind code to compare.
+ */
+function identityWarnings(requested: string, served: string | undefined): string[] {
+  if (!served) return [];
+  const req = normalizePublicationNumber(requested);
+  const srv = normalizePublicationNumber(served);
+  if (req === srv) return [];
+  if (req.slice(0, 2) !== srv.slice(0, 2)) {
+    return [`requested ${req} but served ${srv} — different publication authority; verify before citing`];
+  }
+  const reqKind = req.slice(kindlessPublicationNumber(req).length);
+  const srvKind = srv.slice(kindlessPublicationNumber(srv).length);
+  if (!reqKind || !srvKind) return [];
+  const reqClass = kindToStatus(reqKind);
+  const srvClass = kindToStatus(srvKind);
+  if (reqClass === srvClass) return [];
+  const classWord = (status: string) => (status === 'granted' ? 'grant' : status);
+  return [
+    `requested ${req} (${classWord(reqClass)}) but served ${srv} (${classWord(srvClass)}) — different document in the same family; verify before citing`,
+  ];
+}
 
 function isUsNumber(pn: string): boolean {
   return /^US/i.test(pn);
@@ -38,13 +78,20 @@ function sectionChains(publicationNumber: string): Record<string, Array<() => Pr
     if (isKindStripped(biblio.publication_number)) {
       biblio.publication_number = normalizePublicationNumber(publicationNumber);
     }
+    biblio.source = 'ops';
+    // OPS is queried kindless, so the served document can be a different
+    // kind than requested (e.g. its A1 when B1 was asked for).
+    const warnings = identityWarnings(publicationNumber, biblio.publication_number);
+    if (warnings.length > 0) biblio._warnings = warnings;
     return biblio;
   };
   const gpDetail = async () => {
     const { fetchGooglePatentDetail } = await import('./google-patents.js');
     const parsed = await fetchGooglePatentDetail(publicationNumber);
+    const warnings = identityWarnings(publicationNumber, parsed.publication_number);
     const result: PatentResult = {
       publication_number: parsed.publication_number || normalizePublicationNumber(publicationNumber),
+      source: 'google_patents',
       title: parsed.title,
       abstract: parsed.abstract,
       publication_date: parsed.publication_date,
@@ -54,12 +101,15 @@ function sectionChains(publicationNumber: string): Record<string, Array<() => Pr
       inventors: parsed.inventors && parsed.inventors.length > 0 ? parsed.inventors : undefined,
       legal_status: parsed.legal_status,
       cpc: parsed.cpc.length > 0 ? parsed.cpc : undefined,
+      _warnings: warnings.length > 0 ? warnings : undefined,
     };
     return result;
   };
   const ppubsCore = async () => {
     const { fetchPpubsCore } = await import('./ppubs.js');
-    return fetchPpubsCore(publicationNumber);
+    const core = await fetchPpubsCore(publicationNumber);
+    core.source = 'ppubs';
+    return core;
   };
 
   // core / abstract
@@ -244,7 +294,10 @@ async function runChain(steps: Array<() => Promise<unknown>>, timeoutMs: number)
 /**
  * Fetch a patent by publication number with optional sections. The core
  * record uses the same priority chain; failures degrade per section without
- * failing the whole call.
+ * failing the whole call. The returned record carries a top-level `source`
+ * (which backend produced the core) and, when the served document differs
+ * from the requested one in kind class or country, or claims came from
+ * unofficial scraping, a top-level `_warnings` list (see identityWarnings).
  */
 export async function patentGet(
   publicationNumber: string,
@@ -304,6 +357,21 @@ export async function patentGet(
         result.sections![section] = { error: `Section '${section}' fetch failed: ${reason}` };
       }
     });
+
+    // Provenance + merged honesty warnings (issues #197/#200): keep the
+    // core record's identity warnings at the top level, flag claims that
+    // fell back to unofficial Google Patents scraping, and merge any
+    // section-level `_warn` string (e.g. claims truncation) into the same
+    // list instead of replacing it.
+    const claims = result.sections?.claims as
+      | { source?: PatentSource; _warn?: string; error?: string }
+      | undefined;
+    if (claims && !claims.error) {
+      const merged = [...(result._warnings || [])];
+      if (claims.source === 'google_patents') merged.push(CLAIMS_UNOFFICIAL_WARNING);
+      if (claims._warn) merged.push(claims._warn);
+      if (merged.length > 0) result._warnings = merged;
+    }
   }
 
   return result;

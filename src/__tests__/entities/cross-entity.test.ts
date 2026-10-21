@@ -433,9 +433,11 @@ describe('cross-entity', () => {
 
   test('discover() falls back to the first non-empty candidate when no exact match exists', async () => {
     // Multi-word query: no disease candidate equals "lung cancer" verbatim,
-    // so the backend's first hit must still win (no regression vs. old
-    // first-hit behavior). The mychem hit list starts with a nameless hit
-    // that must be skipped in favor of the next non-empty candidate.
+    // so the best non-locus hit must win. "lung cancer susceptibility 1" is
+    // the backend's first hit but matches the susceptibility-locus pattern,
+    // so it is demoted below "lung adenocarcinoma" (issue #201). The mychem
+    // hit list starts with a nameless hit that must be skipped in favor of
+    // the next non-empty candidate.
     global.fetch = mockFetchRouter([
       {
         host: 'mydisease.info',
@@ -472,14 +474,170 @@ describe('cross-entity', () => {
     expect(results).toHaveLength(2);
     const disease = results.find(r => r.entity_type === 'disease');
     expect(disease).toBeDefined();
-    expect(disease!.identifier).toBe('MONDO:0012159');
-    expect(disease!.name).toBe('lung cancer susceptibility 1');
+    expect(disease!.identifier).toBe('MONDO:0005061');
+    expect(disease!.name).toBe('lung adenocarcinoma');
     expect(disease!.matched_on).toBe('first');
     // Empty first mychem hit skipped; next non-empty candidate used.
     const drug = results.find(r => r.entity_type === 'drug');
     expect(drug).toBeDefined();
     expect(drug!.name).toBe('Gefitinib');
     expect(drug!.matched_on).toBe('first');
+  });
+
+  test('discover() still emits a susceptibility-locus-only arm (demotion never deletes)', async () => {
+    global.fetch = mockFetchRouter([
+      {
+        host: 'mydisease.info',
+        reply: () => Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            hits: [
+              { _id: 'MONDO:0012159', mondo: { label: 'lung cancer susceptibility 1', id: 'MONDO:0012159' } },
+              { _id: 'MONDO:0012160', mondo: { label: 'lung cancer susceptibility 2', id: 'MONDO:0012160' } },
+            ],
+          }),
+        }),
+      },
+      {
+        host: ['mygene.info', 'myvariant.info', 'mychem.info'],
+        reply: () => Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ hits: [] }),
+        }),
+      },
+    ]) as any;
+
+    const results = await discover('lung cancer');
+
+    expect(results).toHaveLength(1);
+    expect(results[0].entity_type).toBe('disease');
+    expect(results[0].identifier).toBe('MONDO:0012159');
+    expect(results[0].name).toBe('lung cancer susceptibility 1');
+    expect(results[0].matched_on).toBe('first');
+  });
+
+  test('discover() promotes an exact label match from rank 12 (outside the old 5-candidate window)', async () => {
+    // mydisease ranks 11 non-exact hits (loci and subtypes) above the
+    // canonical concept MONDO:0008903 "lung cancer" at rank 12 — the exact
+    // issue-#201 repro shape. The widened window must reach it and the exact
+    // rule must promote it over every earlier candidate.
+    const noise = [
+      'lung cancer susceptibility 1', 'lung cancer susceptibility 2', 'lung cancer susceptibility 3',
+      'lung adenocarcinoma', 'lung squamous cell carcinoma', 'non-small cell lung cancer',
+      'small cell lung cancer', 'lung carcinoid tumor', 'pulmonary carcinoid tumor',
+      'lung benign neoplasm', 'malignant lung tumor',
+    ].map((label, i) => ({ _id: `MONDO:00${i}`, mondo: { label, id: `MONDO:00${i}` } }));
+    global.fetch = mockFetchRouter([
+      {
+        host: 'mydisease.info',
+        reply: () => Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            hits: [
+              ...noise,
+              { _id: 'MONDO:0008903', mondo: { label: 'lung cancer', id: 'MONDO:0008903' } },
+            ],
+          }),
+        }),
+      },
+      {
+        host: ['mygene.info', 'myvariant.info', 'mychem.info'],
+        reply: () => Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ hits: [] }),
+        }),
+      },
+    ]) as any;
+
+    const results = await discover('lung cancer');
+
+    expect(results).toHaveLength(1);
+    expect(results[0].entity_type).toBe('disease');
+    expect(results[0].identifier).toBe('MONDO:0008903');
+    expect(results[0].name).toBe('lung cancer');
+    expect(results[0].matched_on).toBe('exact');
+  });
+
+  test('discover() locus pattern anchors the trailing number token (issue #201: "long QT syndrome 1" ≠ "long QT syndrome 11")', async () => {
+    // "long QT syndrome 11" is a different numbered subtype, NOT a
+    // susceptibility locus of query "long QT syndrome 1" — the trailing
+    // number must be its own token anchored at end. It must therefore rank
+    // as a normal candidate ahead of the true locus label
+    // "long QT syndrome 1 susceptibility 2", which is demoted.
+    global.fetch = mockFetchRouter([
+      {
+        host: 'mydisease.info',
+        reply: () => Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            hits: [
+              { _id: 'MONDO:0008855', mondo: { label: 'long QT syndrome 11', id: 'MONDO:0008855' } },
+              { _id: 'MONDO:0008856', mondo: { label: 'long QT syndrome 1 susceptibility 2', id: 'MONDO:0008856' } },
+            ],
+          }),
+        }),
+      },
+      {
+        host: ['mygene.info', 'myvariant.info', 'mychem.info'],
+        reply: () => Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ hits: [] }),
+        }),
+      },
+    ]) as any;
+
+    const results = await discover('long QT syndrome 1');
+
+    expect(results).toHaveLength(1);
+    expect(results[0].name).toBe('long QT syndrome 11');
+    expect(results[0].matched_on).toBe('first');
+  });
+
+  test('discover() ranks an exact disease match above a non-exact gene hit across arms', async () => {
+    // Issue #201 symptom: the gene arm's first hit (LNCR1) used to own the
+    // top slot while the disease arm's canonical concept sat below. With no
+    // exact gene match, the exact disease pick must surface first; the gene
+    // record is demoted, not deleted.
+    global.fetch = mockFetchRouter([
+      {
+        host: 'mygene.info',
+        reply: () => Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            hits: [{ symbol: 'LNCR1', name: 'LNC lung cancer associated RNA 1' }],
+          }),
+        }),
+      },
+      {
+        host: 'mydisease.info',
+        reply: () => Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            hits: [
+              { _id: 'MONDO:0012159', mondo: { label: 'lung cancer susceptibility 1', id: 'MONDO:0012159' } },
+              { _id: 'MONDO:0008903', mondo: { label: 'lung cancer', id: 'MONDO:0008903' } },
+            ],
+          }),
+        }),
+      },
+      {
+        host: ['myvariant.info', 'mychem.info'],
+        reply: () => Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ hits: [] }),
+        }),
+      },
+    ]) as any;
+
+    const results = await discover('lung cancer');
+
+    expect(results).toHaveLength(2);
+    expect(results[0].entity_type).toBe('disease');
+    expect(results[0].identifier).toBe('MONDO:0008903');
+    expect(results[0].matched_on).toBe('exact');
+    expect(results[1].entity_type).toBe('gene');
+    expect(results[1].identifier).toBe('LNCR1');
+    expect(results[1].matched_on).toBe('first');
   });
 
   test('discover() emits no record for a backend whose hits are all empty', async () => {
@@ -558,10 +716,12 @@ describe('variantToTrials', () => {
       });
     }) as any;
 
-    const results = await variantToTrials('rs113488022');
+    const outcome = await variantToTrials('rs113488022');
 
-    expect(results).toHaveLength(1);
-    expect(results[0].nct_id).toBe('NCT00000001');
+    expect(outcome.results).toHaveLength(1);
+    expect(outcome.results[0].nct_id).toBe('NCT00000001');
+    // Resolution succeeded — clean envelope, no warnings key at all.
+    expect('warnings' in outcome).toBe(false);
 
     // Verify the trial search used gene + protein change, not raw rsID
     const urls = (global.fetch as any).mock.calls.map((c: any[]) => c[0] as string);
@@ -601,30 +761,78 @@ describe('variantToTrials', () => {
       });
     }) as any;
 
-    const results = await variantToTrials('chr7:140453136');
+    const outcome = await variantToTrials('chr7:140453136');
 
-    expect(results).toHaveLength(1);
+    expect(outcome.results).toHaveLength(1);
+    expect('warnings' in outcome).toBe(false);
     const urls = (global.fetch as any).mock.calls.map((c: any[]) => c[0] as string);
     const trialUrl = urls.find((u: string) => parseMockUrl(u).hostname === 'clinicaltrials.gov');
     expect(trialUrl).toContain('BRAF');
   });
 
-  test('falls back to raw variantId when resolution fails', async () => {
-    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
+  test('resolution failure falls back to the raw variantId and warns — never a silent empty (#198)', async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((rawUrl: string) => {
+      const url = parseMockUrl(rawUrl);
+      // Both MyVariant.info legs (variantGet + variantSearch) hard-fail.
+      if (url.hostname === 'myvariant.info') {
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          statusText: 'Not Found',
+          headers: new Headers(),
+        });
+      }
+      // ClinicalTrials.gov returns empty for random strings
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ studies: [] }),
+      });
+    }) as any;
+
+    const outcome = await variantToTrials('unknown_variant_xyz');
+
+    // Both resolution legs failed, so the search ran on the raw identifier
+    expect(outcome.results).toHaveLength(0);
+    // ...and the failure is structurally visible regardless of hit count.
+    expect(Array.isArray(outcome.warnings)).toBe(true);
+    expect(outcome.warnings).toHaveLength(1);
+    expect(outcome.warnings![0]).toContain('variant ID resolution via MyVariant.info failed');
+    expect(outcome.warnings![0]).toContain('searching the raw identifier');
+    expect(global.fetch).toHaveBeenCalled();
+  });
+
+  test('resolution failure with raw-identifier matches still warns alongside results (#198)', async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((rawUrl: string) => {
+      const url = parseMockUrl(rawUrl);
+      if (url.hostname === 'myvariant.info') {
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          statusText: 'Not Found',
+          headers: new Headers(),
+        });
+      }
+      // The raw identifier accidentally matches a trial.
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve({
-          studies: [],
+          studies: [{
+            protocolSection: {
+              identificationModule: { nctId: 'NCT00000555', briefTitle: 'Accidental raw-id match' },
+              statusModule: { overallStatus: 'RECRUITING' },
+            },
+          }],
         }),
       });
     }) as any;
 
-    const results = await variantToTrials('unknown_variant_xyz');
+    const outcome = await variantToTrials('unknown_variant_xyz');
 
-    // Both variantGet and variantSearch fail, falls back to searching raw ID
-    // ClinicalTrials.gov returns empty for random strings
-    expect(results).toHaveLength(0);
-    expect(global.fetch).toHaveBeenCalled();
+    expect(outcome.results).toHaveLength(1);
+    expect(outcome.results[0].nct_id).toBe('NCT00000555');
+    // Hits do not launder the resolution failure — the warning rides along.
+    expect(outcome.warnings).toHaveLength(1);
+    expect(outcome.warnings![0]).toContain('retry may resolve');
   });
 
   test('converts HGVS three-letter to shorthand in trial search query', async () => {
@@ -654,9 +862,10 @@ describe('variantToTrials', () => {
       });
     }) as any;
 
-    const results = await variantToTrials('rs113488022');
+    const outcome = await variantToTrials('rs113488022');
 
-    expect(results).toHaveLength(1);
+    expect(outcome.results).toHaveLength(1);
+    expect('warnings' in outcome).toBe(false);
     const urls = (global.fetch as any).mock.calls.map((c: any[]) => c[0] as string);
     const trialUrl = urls.find((u: string) => parseMockUrl(u).hostname === 'clinicaltrials.gov');
     // Should use V600E shorthand, not Val600Glu
@@ -703,10 +912,11 @@ describe('variantToTrials', () => {
       });
     }) as any;
 
-    const results = await variantToTrials('rs12345');
+    const outcome = await variantToTrials('rs12345');
 
-    expect(results).toHaveLength(1);
-    expect(results[0].nct_id).toBe('NCT00000888');
+    expect(outcome.results).toHaveLength(1);
+    expect(outcome.results[0].nct_id).toBe('NCT00000888');
+    expect('warnings' in outcome).toBe(false);
     // Should have made at least 3 fetch calls: variantGet, trialSearch(gene+mutation), trialSearch(gene-only)
     expect(callCount).toBeGreaterThanOrEqual(3);
   });
@@ -741,8 +951,8 @@ describe('variantToTrials', () => {
       });
     }) as any;
 
-    const results = await variantToTrials('rs99999');
-    expect(results).toHaveLength(1);
+    const outcome = await variantToTrials('rs99999');
+    expect(outcome.results).toHaveLength(1);
     const urls = (global.fetch as any).mock.calls.map((c: any[]) => c[0] as string);
     const trialUrl = urls.find((u: string) => parseMockUrl(u).hostname === 'clinicaltrials.gov');
     // Arg123Ter -> R123*

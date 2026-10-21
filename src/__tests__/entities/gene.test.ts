@@ -1035,6 +1035,92 @@ describe('geneGet abort/timeout handling', () => {
 });
 
 // ============================================================
+// geneGet section timeout budget (issue #195)
+// ============================================================
+describe('geneGet section timeout budget (issue #195)', () => {
+  mockGlobalFetch();
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    connectionManager.closeAll();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  const mygeneLookup = {
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    headers: new Headers({ 'content-type': 'application/json' }),
+    json: () => Promise.resolve({ hits: [tp53TumorSuppressorHit] }),
+  };
+
+  // NIH Reporter routinely answers in 5-10 s — inside the registry's raised
+  // 20 s handling.timeoutMs, past the old flat 8 s section cap.
+  test('funding section succeeds past 8 s by honoring the nih_reporter registry budget', async () => {
+    jest.useFakeTimers();
+    let callIndex = 0;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
+      callIndex++;
+      if (callIndex === 1) return Promise.resolve(mygeneLookup);
+      return new Promise(resolve => setTimeout(() => resolve({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({
+          results: [{
+            project_num: 'R01CA999999',
+            project_title: 'TP53 dynamics',
+            agency_code: 'NCI',
+            award_amount: 123456,
+          }],
+        }),
+      }), 9500));
+    }) as any;
+
+    const pending = geneGet('TP53', ['funding']);
+    // Fire the 9.5 s NIH response — before the 20 s section budget.
+    await jest.advanceTimersByTimeAsync(9500);
+    const result = await pending;
+
+    const funding = result.sections!.funding as { grants?: Array<{ nih_id: string }>; _error?: string };
+    expect(funding._error).toBeUndefined();
+    expect(funding.grants?.[0]?.nih_id).toBe('R01CA999999');
+  });
+
+  // hpa is a raw proteinatlas.org fetch with no registry source — it must
+  // stay bounded by the 8 s SECTION_TIMEOUT_MS fallback.
+  test('a section without a registry source stays bounded at the 8 s fallback', async () => {
+    jest.useFakeTimers();
+    let callIndex = 0;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
+      callIndex++;
+      if (callIndex === 1) return Promise.resolve(mygeneLookup);
+      return new Promise(resolve => setTimeout(() => resolve({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve([]),
+      }), 9000));
+    }) as any;
+
+    const pending = geneGet('TP53', ['hpa']);
+    // Advance past the 8 s fallback deadline (response still pending).
+    await jest.advanceTimersByTimeAsync(8100);
+    const result = await pending;
+
+    const hpa = result.sections!.hpa as { _error?: string };
+    expect(hpa._error).toContain('timed out after 8000ms');
+    // Settle the dangling 9 s mock response so no timer leaks the test.
+    await jest.advanceTimersByTimeAsync(1000);
+  });
+});
+
+// ============================================================
 // geneGet with genomic_pos transformation
 // ============================================================
 describe('geneGet genomic_pos handling', () => {
@@ -1478,14 +1564,86 @@ describe('geneGet with GO section', () => {
     expect(goTerms.some(t => t.aspect === 'CC')).toBe(true);
   });
 
+  // Regression for GitHub issue #199: mygene serves BP/MF/CC as orthogonal
+  // facets, but the old BP→MF→CC concat + 50-row cap structurally starved
+  // MF/CC for well-annotated genes (live: TP53's BP list alone exceeds the
+  // cap). The three aspects are now interleaved round-robin BEFORE the cap,
+  // so every prefix of the result is balanced.
+  test('geneGet() GO section interleaves aspects round-robin so MF/CC are not starved at TP53 scale', async () => {
+    const goIds = (base: number, n: number, label: string) =>
+      Array.from({ length: n }, (_, i) => ({
+        id: `GO:${String(base + i)}`,
+        term: `${label} term ${i}`,
+      }));
+    // 60 BP / 30 MF / 15 CC — TP53-scale annotation counts (issue #199).
+    let callIndex = 0;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
+      callIndex++;
+      if (callIndex === 1) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ hits: [tp53TumorSuppressorHit] }),
+          headers: new Headers({ 'content-type': 'application/json' }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          hits: [{
+            go: {
+              BP: goIds(2000000, 60, 'BP'),
+              MF: goIds(3000000, 30, 'MF'),
+              CC: goIds(4000000, 15, 'CC'),
+            },
+          }],
+        }),
+        headers: new Headers({ 'content-type': 'application/json' }),
+      });
+    }) as any;
+
+    const result = await geneGet('TP53', ['go']);
+
+    const goTerms = result.sections!.go as Array<{ id: string; term: string; aspect: string }>;
+    // Internal cap still applied.
+    expect(goTerms).toHaveLength(50);
+    // No duplicates survived to the capped result.
+    expect(new Set(goTerms.map(t => t.id)).size).toBe(50);
+
+    const aspectCounts = (n: number): Record<string, number> => {
+      const counts: Record<string, number> = { BP: 0, MF: 0, CC: 0 };
+      for (const t of goTerms.slice(0, n)) counts[t.aspect]++;
+      return counts;
+    };
+    // Prefix 10 (a consumer showing 10 rows): every aspect is represented.
+    const at10 = aspectCounts(10);
+    expect(at10.BP).toBeGreaterThanOrEqual(2);
+    expect(at10.MF).toBeGreaterThanOrEqual(2);
+    expect(at10.CC).toBeGreaterThanOrEqual(2);
+    // Prefix 30: exactly balanced (10 per aspect; tolerance ±1 in the spec,
+    // deterministic exact here because every list has ≥10 entries).
+    const at30 = aspectCounts(30);
+    expect(at30.BP).toBe(10);
+    expect(at30.MF).toBe(10);
+    expect(at30.CC).toBe(10);
+    // At the 50-row internal cap MF and CC are still present despite BP
+    // being 4x their size — the old order would have been 50 BP rows.
+    const atCap = aspectCounts(50);
+    expect(atCap.BP).toBe(18);
+    expect(atCap.MF).toBe(17);
+    expect(atCap.CC).toBe(15);
+    // The interleave itself: BP[0], MF[0], CC[0] lead the result.
+    expect(goTerms.slice(0, 3).map(t => t.aspect)).toEqual(['BP', 'MF', 'CC']);
+  });
+
   // Regression for GitHub issue #135 (part 4): MyGene repeats GO ids within
   // and across categories (live: TP53 shows 46 duplicated ids among ~130
   // annotations), and the old collect-then-slice let duplicates displace
   // unique terms from the 50-row cap. Dedup happens on GO id BEFORE the
-  // slice now (same seen-set idiom as the ontology section).
+  // slice now (same seen-set idiom as the ontology section). Scaled past the
+  // cap (57 unique ids > 50 rows) so the slice is genuinely exercised.
   test('geneGet() GO section dedupes repeated term ids so no unique term is displaced from the 50-row cap', async () => {
     const dup = { id: 'GO:0000122', term: 'negative regulation of transcription by RNA polymerase II' };
-    const bpUniques = Array.from({ length: 47 }, (_, i) => ({
+    const bpUniques = Array.from({ length: 55 }, (_, i) => ({
       id: `GO:${String(1000000 + i)}`,
       term: `BP unique term ${i}`,
     }));
@@ -1501,8 +1659,9 @@ describe('geneGet with GO section', () => {
           headers: new Headers({ 'content-type': 'application/json' }),
         });
       }
-      // 51 raw items (dup listed twice), 50 unique ids. Without the dedup,
-      // slice(0, 50) would keep the duplicate and DROP the trailing CC term.
+      // 58 raw items (dup listed twice), 57 unique ids — more than the
+      // 50-row cap, so without the dedup the duplicate would occupy a capped
+      // slot and displace a unique term.
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve({

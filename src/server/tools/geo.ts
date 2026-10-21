@@ -42,10 +42,10 @@ A series detail includes summary, organisms, platform_ids, a sample preview, sup
 
 GDS accessions (curated DataSets, not served by SOFT) return structured guidance as data — { accession, guidance, see_also: { series: "GSE…", sample: "GSM…" } } — pointing at the underlying series/sample records; this is a successful result, not an error. Malformed accessions still fail at schema validation.
 
-download=true additionally saves the first supplementary file (.gz/.csv/.txt, subject to max_bytes) to a local temp path and returns its path, size, and source URL.`,
+download=true additionally saves a supplementary file to a local temp path and returns its path, size, and source URL — the pick prefers .gz/.csv/.txt, else the first listed supplementary file (subject to max_bytes).`,
       inputSchema: {
         accession: z.string().regex(/^(GSE|GSM|GPL|GDS)\d+$/i, 'GEO accession like GSE183947, GSM5574685, GPL11154').describe('GEO accession (GSE series, GSM sample, or GPL platform; GDS curated DataSets return structured guidance pointing at the underlying GSE/GSM)'),
-        download: z.boolean().optional().describe('Download the first supplementary file (.gz) to a local temp path'),
+        download: z.boolean().optional().describe('Download a supplementary file to a local temp path (prefers .gz/.csv/.txt, else the first listed)'),
         max_bytes: z.number().int().min(1_000_000).optional().describe('Size cap in bytes for the downloaded supplementary file (default 52428800 = 50 MB)'),
       },
       // download=true writes to disk — pdb precedent.

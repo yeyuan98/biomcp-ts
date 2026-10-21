@@ -21,6 +21,15 @@ export function normalizePublicationNumber(input: string): string {
 
 const PUBLICATION_NUMBER_RE = /^[A-Z]{2}(RE|PP|H)?\d{5,}[A-Z]?\d{0,2}$/;
 
+/**
+ * Strip the trailing kind code (letter + optional digit): US6261804B1 →
+ * US6261804. Shared identity primitive (page-identity checks, dedup,
+ * seminal mining).
+ */
+export function kindlessPublicationNumber(pub: string): string {
+  return pub.toUpperCase().replace(/([A-Z]\d?)$/, '');
+}
+
 export function isValidPublicationNumber(input: string): boolean {
   return PUBLICATION_NUMBER_RE.test(normalizePublicationNumber(input));
 }

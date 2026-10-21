@@ -2,13 +2,14 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { variantSearch, variantGet, fetchOncoKbAnnotation, getVariantSearchFilters } from '../../entities/variant.js';
 import { variantToTrials } from '../../entities/cross-entity.js';
-import { optionalNonEmptyString, remapSectionKeysToRequested, requiredString, sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra } from './utils.js';
+import { optionalNonEmptyString, listEnvelope, remapSectionKeysToRequested, requiredString, sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra } from './utils.js';
 
-// Deadline rationale (#107 phase 2): myvariant core lookup + parallel
-// section wave (frequency/clinical/predictions, each with an 8s section
-// deadline over 15s-per-attempt connections) — 40s covers the budget
-// ceilings with headroom while bounding signal-ignoring stragglers.
+// Deadline rationale (#107 phase 2, #198): variant resolution over myvariant
+// (15s per attempt x2 with the registry retry + backoff) plus up to two
+// ClinicalTrials.gov searches — 45s matches the trial_get budget and bounds
+// the observed ~160s chain spikes while leaving retry ceilings headroom.
 const VARIANT_GET_TIMEOUT_MS = 40000;
+const VARIANT_TRIALS_TIMEOUT_MS = 45000;
 
 const VARIANT_GET_SECTIONS = ['core', 'frequency', 'predictions', 'clinical', 'alphagenome_scores', 'all'] as const;
 const VARIANT_SEARCH_FILTERS = getVariantSearchFilters();
@@ -169,16 +170,22 @@ Do NOT use compound free-text like "BRAF V600E" — use separate gene and hgvsp 
   server.registerTool(
     'variant_trials',
     {
-      description: 'Find clinical trials for a variant',
+      description: 'Find clinical trials for a variant. Response is an envelope: { results, warnings? } — when MyVariant.info ID resolution fails, a warning rides alongside the results (which then come from searching the raw identifier) so a backend failure never masquerades as "no trials exist"; retry may resolve BRAF V600E-style naming (issue #198)',
       inputSchema: {
         variant: requiredString('Variant ID').describe('Variant ID (rsID, HGVS, or variant ID)'),
       },
       annotations: { readOnlyHint: true }
     },
-    async ({ variant }) => {
+    async ({ variant }, extra: CancellationCapableExtra) => {
       try {
-        const results = await variantToTrials(variant);
-        return { content: [{ type: 'text', text: JSON.stringify(results) }] };
+        const { results, warnings } = await withToolTimeout(
+          () => variantToTrials(variant),
+          VARIANT_TRIALS_TIMEOUT_MS,
+          { signal: extra?.signal },
+        );
+        // List-tool envelope (#130/#198): resolution failures ride in
+        // warnings[] instead of masquerading as a clean negative.
+        return { content: [{ type: 'text', text: JSON.stringify(listEnvelope(results, warnings)) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
       }

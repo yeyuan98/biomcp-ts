@@ -217,9 +217,32 @@ function hgvsToShorthand(hgvs: string): string {
   );
 }
 
-export async function variantToTrials(variantId: string): Promise<Array<{ nct_id: string; title?: string; status?: string }>> {
+/** One trial row of a variantToTrials reply (ClinicalTrials.gov). */
+export interface VariantTrialRow {
+  nct_id: string;
+  title?: string;
+  status?: string;
+}
+
+/**
+ * variantToTrials reply envelope (issue #198): trial rows in `results`. A
+ * `warnings` entry is attached whenever BOTH MyVariant.info resolution legs
+ * (variantGet, then the variantSearch fallback) failed, regardless of hit
+ * count — the rows then come from searching the raw identifier, which must
+ * never masquerade as a clean negative ("no trials exist"): a raw string can
+ * also match accidentally. Mirrors the diseaseToDrugs envelope (issue #159);
+ * entities never import from server/tools, and `warnings` is attached by
+ * callers only when non-empty (see `listEnvelope`).
+ */
+export interface VariantTrialsResult {
+  results: VariantTrialRow[];
+  warnings?: string[];
+}
+
+export async function variantToTrials(variantId: string): Promise<VariantTrialsResult> {
   let searchQuery = variantId;
   let geneOnly = variantId;
+  const warnings: string[] = [];
 
   // Try variantGet first for rich gene/protein data, then fall back to variantSearch
   try {
@@ -235,7 +258,7 @@ export async function variantToTrials(variantId: string): Promise<Array<{ nct_id
         searchQuery = variant.gene;
       }
     }
-  } catch {
+  } catch (getFailure) {
     try {
       const results = await variantSearch({ query: variantId, limit: 1 });
       if (results.length > 0 && results[0].gene) {
@@ -248,8 +271,17 @@ export async function variantToTrials(variantId: string): Promise<Array<{ nct_id
           searchQuery = results[0].gene;
         }
       }
-    } catch {
-      // Use the raw variantId as last resort
+    } catch (searchFailure) {
+      // Resolution failed on both legs: the trials below come from the raw
+      // identifier. Warn REGARDLESS of hit count (#198) — a swallowed
+      // resolution failure used to be byte-identical to a genuine no-match,
+      // and a raw string that accidentally matches is just as misleading.
+      warnings.push(
+        `variant ID resolution via MyVariant.info failed ` +
+        `(variantGet: ${errorMessageWithCause(getFailure)}; ` +
+        `variantSearch fallback: ${errorMessageWithCause(searchFailure)}); ` +
+        `results come from searching the raw identifier — retry may resolve BRAF V600E-style naming`
+      );
     }
   }
 
@@ -260,11 +292,15 @@ export async function variantToTrials(variantId: string): Promise<Array<{ nct_id
     response = await trialSearch(geneOnly, { limit: 10 });
   }
 
-  return response.studies.map(t => ({
+  const results: VariantTrialRow[] = response.studies.map(t => ({
     nct_id: t.nct_id,
     title: t.title,
     status: t.status,
   }));
+  if (warnings.length > 0) {
+    return { results, warnings };
+  }
+  return { results };
 }
 
 export async function drugToGenes(drugName: string): Promise<Array<{ gene_symbol: string; name: string; source: string; action_type?: string }>> {
@@ -662,13 +698,19 @@ export interface DiscoverResult {
  * Why a discover record was selected from its backend's candidates:
  * - 'exact': the record's symbol/name/label equals the query verbatim
  *   (case-insensitive, whitespace-trimmed).
- * - 'first': no exact match existed, so the backend's first candidate with a
- *   non-empty name or identifier was used (the pre-ranking default).
+ * - 'first': no exact match existed, so the backend's first non-locus
+ *   candidate with a non-empty name or identifier was used (locus-pattern
+ *   labels are only used when nothing else in the arm is emittable).
  */
 export type DiscoverMatchRule = 'exact' | 'first';
 
-/** How many candidates discover asks each backend for (best-of-N selection). */
-const DISCOVER_CANDIDATE_LIMIT = 5;
+/**
+ * How many candidates discover asks each backend for (best-of-N selection).
+ * Wide enough to reach canonical concepts the backends rank below a flood of
+ * susceptibility loci (mydisease lists "lung cancer" at rank 12, "breast
+ * cancer" at rank 19 — both outside the former 5-candidate window).
+ */
+const DISCOVER_CANDIDATE_LIMIT = 25;
 
 /** Name-ish fields of a candidate compared against the query, plus its identifier. */
 interface CandidateAccessors<T> {
@@ -681,13 +723,31 @@ function normalizeForMatch(value: string | undefined): string {
 }
 
 /**
+ * Build the susceptibility-locus pattern for a query: the label is the query
+ * verbatim, then optionally a single space + "susceptibility", then a single
+ * space + a trailing number token anchored at end — matching backend labels
+ * like "lung cancer susceptibility 1" or "lung cancer 2". The trailing
+ * number must be its own token, so query "long QT syndrome 1" does NOT
+ * classify label "long QT syndrome 11" as a locus of the query.
+ */
+function buildLocusPattern(query: string): RegExp | null {
+  const collapsed = query.trim().replace(/\s+/g, ' ');
+  if (!collapsed) return null;
+  const escaped = collapsed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${escaped}(?: susceptibility)? \\d+$`, 'i');
+}
+
+/**
  * Pick the best candidate for a free-text query from a backend's hit list.
+ * Ranking within the arm (canonical concepts outrank susceptibility loci):
  * - 'exact': the first candidate whose name/symbol/label equals the query
  *   (case-insensitive, whitespace-trimmed) wins, even when substring matches
- *   rank higher in the backend's default order.
- * - 'first': the backend's first candidate with a non-empty name OR identifier
- *   (candidates empty on BOTH fields are skipped — discover never emits
- *   empty records).
+ *   or loci rank higher in the backend's default order.
+ * - otherwise the backend's first NON-locus candidate with a non-empty name
+ *   or identifier (backend order is its relevance ranking).
+ * - candidates whose label matches the susceptibility-locus pattern rank
+ *   last within the arm (demotion, never deletion — a locus is still picked
+ *   when it is all the backend returned).
  * Returns null when every candidate is empty (or the list is empty).
  */
 function pickBestMatch<T>(
@@ -696,7 +756,9 @@ function pickBestMatch<T>(
   accessors: CandidateAccessors<T>
 ): { candidate: T; rule: DiscoverMatchRule } | null {
   const wanted = normalizeForMatch(query);
+  const locusLabel = buildLocusPattern(query);
   let fallback: { candidate: T; rule: DiscoverMatchRule } | null = null;
+  let locusFallback: { candidate: T; rule: DiscoverMatchRule } | null = null;
 
   for (const candidate of candidates.slice(0, DISCOVER_CANDIDATE_LIMIT)) {
     const identifier = accessors.identifier(candidate) || '';
@@ -704,15 +766,18 @@ function pickBestMatch<T>(
     if (names.every(n => n.trim() === '') && identifier.trim() === '') {
       continue; // neither a name nor an identifier — not emittable
     }
-    if (!fallback) {
-      fallback = { candidate, rule: 'first' };
-    }
     if (wanted !== '' && names.some(n => normalizeForMatch(n) === wanted)) {
       return { candidate, rule: 'exact' };
     }
+    const isLocus = locusLabel !== null && names.some(n => locusLabel.test((n || '').trim()));
+    if (isLocus) {
+      if (!locusFallback) locusFallback = { candidate, rule: 'first' };
+    } else if (!fallback) {
+      fallback = { candidate, rule: 'first' };
+    }
   }
 
-  return fallback;
+  return fallback || locusFallback;
 }
 
 export async function discover(query: string): Promise<DiscoverResult[]> {
@@ -788,6 +853,18 @@ export async function discover(query: string): Promise<DiscoverResult[]> {
       });
     }
   }
+
+  // Cross-arm ordering (canonical concepts first): arms whose pick is an
+  // EXACT label match surface before all other arms (arm order as tiebreak
+  // among exact matches); the remaining arms keep the default
+  // gene→variant→drug→disease order. Demotion only — every arm's pick stays
+  // in the list.
+  results.splice(
+    0,
+    results.length,
+    ...results.filter(r => r.matched_on === 'exact'),
+    ...results.filter(r => r.matched_on !== 'exact'),
+  );
 
   if (results.length === 0) {
     try {

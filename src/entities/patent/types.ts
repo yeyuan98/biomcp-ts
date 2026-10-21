@@ -109,6 +109,8 @@ export interface PatentClassificationsSection {
 
 export interface PatentResult {
   publication_number: string;
+  /** Backend that produced the core record (provenance, issues #197/#200). */
+  source?: PatentSource;
   title?: string;
   abstract?: string;
   publication_date?: string;
@@ -122,5 +124,12 @@ export interface PatentResult {
   ipc?: string[];
   family_id?: string;
   family_members?: string[];
+  /**
+   * Honesty warnings, merged at the top level: served-vs-requested identity
+   * mismatches (different document in the family / different authority) and
+   * unofficial-claims provenance, plus any section-level `_warn` strings.
+   * Undefined when there is nothing to warn about (issues #197/#200).
+   */
+  _warnings?: string[];
   sections?: Record<string, unknown>;
 }
