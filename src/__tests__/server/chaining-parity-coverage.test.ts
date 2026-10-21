@@ -4,12 +4,14 @@ import {
   ADVERTISED_LINKS,
   INCIDENTAL_MENTIONS,
   CHAIN_TABLE,
+  ENSEMBL_CHAIN_TABLE,
 } from '../integration/tools/chains.js';
 
 /**
  * Doc/coverage parity for search→get chains (issue #161) — the OFFLINE half.
  * Its live counterpart is src/__tests__/integration/tools/chaining-parity.test.ts;
- * both import the shared chain table from ../integration/tools/chains.ts.
+ * both import the shared chain tables from ../integration/tools/chains.ts (core +
+ * Ensembl-tier; the Ensembl-dependent chains run non-gating on GH Actions per #182).
  *
  * The rule: when a tool DESCRIPTION mentions another get-tool, that mention
  * must be classified — either as an advertised chain (ADVERTISED_LINKS, which
@@ -58,7 +60,7 @@ describe('chaining-parity doc/coverage parity (#161)', () => {
         if (!selfRef && !advertised && !incidental) {
           violations.push(
             `'${tool.name}' description mentions '${token}' — classify it: add ${tool.name}→${token} ` +
-              `to ADVERTISED_LINKS in src/__tests__/integration/tools/chains.ts (plus a CHAIN_TABLE ` +
+              `to ADVERTISED_LINKS in src/__tests__/integration/tools/chains.ts (plus a walker-table ` +
               `entry so the live walker covers it), or add it to INCIDENTAL_MENTIONS with a reason.`,
           );
         }
@@ -70,10 +72,10 @@ describe('chaining-parity doc/coverage parity (#161)', () => {
   it('every ADVERTISED_LINKS chain has a matching walker table entry', () => {
     const violations: string[] = [];
     for (const [sourceTool, targets] of Object.entries(ADVERTISED_LINKS)) {
-      const entry = CHAIN_TABLE.find((c) => c.sourceTool === sourceTool);
+      const entry = [...CHAIN_TABLE, ...ENSEMBL_CHAIN_TABLE].find((c) => c.sourceTool === sourceTool);
       if (!entry) {
         violations.push(
-          `ADVERTISED_LINKS has ${sourceTool}→${targets.join('/')} but no CHAIN_TABLE entry ` +
+          `ADVERTISED_LINKS has ${sourceTool}→${targets.join('/')} but no walker-table entry ` +
               `walks ${sourceTool} — add one to chains.ts (deterministic pinned query).`,
         );
         continue;
@@ -82,7 +84,7 @@ describe('chaining-parity doc/coverage parity (#161)', () => {
       for (const target of targets) {
         if (!walked.includes(target)) {
           violations.push(
-            `${sourceTool} advertises ${target} but its CHAIN_TABLE entry only walks ${walked.join('/')} — add the link.`,
+            `${sourceTool} advertises ${target} but its walker-table entry only walks ${walked.join('/')} — add the link.`,
           );
         }
       }
@@ -154,16 +156,16 @@ describe('chaining-parity doc/coverage parity (#161)', () => {
         }
       }
     }
-    for (const entry of CHAIN_TABLE) {
+    for (const entry of [...CHAIN_TABLE, ...ENSEMBL_CHAIN_TABLE]) {
       if (!registered.has(entry.sourceTool)) {
-        violations.push(`CHAIN_TABLE references unknown source tool '${entry.sourceTool}'`);
+        violations.push(`walker table references unknown source tool '${entry.sourceTool}'`);
       }
       for (const link of entry.links) {
         if (!registered.has(link.getTool)) {
-          violations.push(`CHAIN_TABLE ${entry.sourceTool} references unknown get-tool '${link.getTool}'`);
+          violations.push(`walker table ${entry.sourceTool} references unknown get-tool '${link.getTool}'`);
         }
         if (!link.getArg.trim()) {
-          violations.push(`CHAIN_TABLE ${entry.sourceTool}→${link.getTool} has an empty getArg`);
+          violations.push(`walker table ${entry.sourceTool}→${link.getTool} has an empty getArg`);
         }
       }
     }

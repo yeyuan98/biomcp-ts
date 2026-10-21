@@ -102,9 +102,12 @@ jobs:
       # list shows a red ✗ named `integration`.
       #
       # === KNOWN OFFENDERS — pinned exclusion list (issues #164, #182) ===
-      # Exactly these four paths, NO others:
+      # Exactly these five paths, NO others:
       #   - src/__tests__/integration/tools/ensembl-tools.test.ts
-      #     (Ensembl REST throttles shared GitHub runner IPs)
+      #     (Ensembl REST throttles shared GitHub runner IPs; also covers the
+      #     Ensembl-dependent chaining-parity chains in
+      #     chaining-parity-ensembl.test.ts — #192: their search leg is the
+      #     same offender, so they follow its tier while staying enforced)
       #   - src/__tests__/integration/tools/article-tools.test.ts
       #     (arXiv cases: searchArxiv TimeoutError from runner IPs)
       #   - src/__tests__/integration/tools/gene-tools.test.ts
@@ -129,10 +132,11 @@ jobs:
               src/__tests__/integration/tools/article-tools.test.ts \
               src/__tests__/integration/tools/gene-tools.test.ts \
               src/__tests__/integration/tools/drug-tools.test.ts \
+              src/__tests__/integration/tools/chaining-parity-ensembl.test.ts \
             2>&1 | tee integration.log
 
-      # Best-effort run of ONLY the four known offenders (pinned list above).
-      # continue-on-error ON PURPOSE: runner-IP flakes in exactly these four
+      # Best-effort run of ONLY the five known offenders (pinned list above).
+      # continue-on-error ON PURPOSE: runner-IP flakes in exactly these five
       # files must not fail the advisory job. `if: always()` so they still
       # run — and stay visible in the log/summary/artifact — even when the
       # gating step failed; their status is orthogonal to it.
@@ -148,6 +152,7 @@ jobs:
               src/__tests__/integration/tools/article-tools.test.ts \
               src/__tests__/integration/tools/gene-tools.test.ts \
               src/__tests__/integration/tools/drug-tools.test.ts \
+              src/__tests__/integration/tools/chaining-parity-ensembl.test.ts \
             2>&1 | tee known-offenders.log
 
       # Runs on failure AND success: the all-green verdict is worth recording
