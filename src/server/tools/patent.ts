@@ -23,7 +23,7 @@ export function registerPatentTools(server: McpServer): void {
     {
       description:
         'Search patents worldwide (US, EP, WO, JP, and 100+ authorities). ' +
-        'Quote exact multi-word concepts (e.g. "mRNA display") to avoid off-topic matches. ' +
+        'Quote exact multi-word concepts (e.g. "flow cytometry") to avoid off-topic matches. ' +
         'Backend characters: ppubs = USPTO Public Search full-text conceptual search (US only, keyless, relevance-ranked; default US backend) | ' +
         'ops = EPO OPS worldwide bibliographic search over titles/abstracts (needs EPO_OPS_CONSUMER_KEY/EPO_OPS_CONSUMER_SECRET) | ' +
         'uspto_odp = US application metadata, bibliographic only but inventor/CPC/continuity-rich (needs USPTO_API_KEY) | ' +
@@ -34,8 +34,8 @@ export function registerPatentTools(server: McpServer): void {
         'Foundational prior art is auto-discovered via co-citation mining of the top results and returned in seminal_prior_art ' +
         '(surfaces seminal documents whose own vocabulary predates the query concept).',
       inputSchema: {
-        query: z.string().trim().min(1, 'Query must be a non-empty string after trimming').describe('Free-text query; quote exact multi-word concepts like "mRNA display" for precise matching'),
-        assignee: z.string().optional().describe('Filter by assignee/applicant organization, e.g. "Moderna"'),
+        query: z.string().trim().min(1, 'Query must be a non-empty string after trimming').describe('Free-text query; quote exact multi-word concepts like "flow cytometry" for precise matching'),
+        assignee: z.string().optional().describe('Filter by assignee/applicant organization, e.g. "Novartis"'),
         inventor: z.string().optional().describe('Filter by inventor name'),
         cpc: z.string().optional().describe('Filter by CPC classification symbol (full symbol, e.g. "C12N15/11")'),
         status: z.enum(['granted', 'application']).optional().describe('Filter by grant status'),
@@ -72,7 +72,7 @@ export function registerPatentTools(server: McpServer): void {
     {
       description:
         'Get patent details by publication number (e.g. "US11027025B2", "EP3904939B1", "US20260240819A1"). ' +
-        'Sections: abstract, claims (US fulltext via USPTO Public Search; EP/WO via EPO OPS), ' +
+        'Sections: abstract, claims (US fulltext via USPTO Public Search; EP/WO via EPO OPS when configured, otherwise Google Patents pages — see per-section source fields), ' +
         'citations (backward + forward), family, classifications.',
       inputSchema: {
         patent_id: patentIdParam().describe('Publication number, e.g. "US11027025B2"'),

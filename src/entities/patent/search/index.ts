@@ -33,7 +33,7 @@ const MINING_SAFETY_MARGIN_MS = 5_000;
 const MINING_MIN_BUDGET_MS = 8_000;
 
 const EMPTY_HINT =
-  'No patents matched. Try quoting an exact concept phrase (e.g. "mRNA display"), broadening terms, ' +
+  'No patents matched. Try quoting an exact concept phrase (e.g. "flow cytometry"), broadening terms, ' +
   'or use source "ppubs" for US full-text search.';
 
 const WINDOW_HINT =
@@ -275,7 +275,7 @@ export async function patentSearch(
       if (!/"[^"]+"/.test(query) && query.trim().split(/\s+/).length > 1) {
         seminal_note = [
           seminal_note,
-          'for more precise mining, quote an exact concept phrase (e.g. "mRNA display")',
+          'for more precise mining, quote an exact concept phrase (e.g. "flow cytometry")',
         ].filter(Boolean).join('; ');
       }
       if (seminal_note) response.seminal_note = seminal_note;

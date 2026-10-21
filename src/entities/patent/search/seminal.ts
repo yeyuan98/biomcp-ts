@@ -1,6 +1,6 @@
 import { ppubsClient } from '../ppubs-client.js';
 import { hasOpsCredentials, opsClient } from '../ops-client.js';
-import { kindToStatus } from './dedup.js';
+import { kindToStatus, kindlessPublicationNumber } from './dedup.js';
 import { monotonicNowMs } from '../../../connections/time.js';
 import type { PatentSearchResult, PatentSeminalEntry } from '../types.js';
 
@@ -192,11 +192,6 @@ function pickGrantedUsMember(familyMembers: string[]): string | undefined {
   const kindOf = (pub: string) => pub.match(/([A-Z]\d?)$/)?.[1] || '';
   const granted = usMembers.filter(m => kindToStatus(kindOf(m)) === 'granted');
   return granted[0] || usMembers[0];
-}
-
-function kindlessPublicationNumber(pub: string): string {
-  // strip trailing kind code (letter + optional digit): US6261804B1 → US6261804
-  return pub.toUpperCase().replace(/([A-Z]\d?)$/, '');
 }
 
 /**
