@@ -28,6 +28,23 @@ describe('discover', () => {
     expect(entityTypes).toContain('disease');
   }, 60000);
 
+  it('ranks the canonical disease concept above LNCR1 for "lung cancer"', async () => {
+    // Issue #201: mygene's top hit LNCR1 used to own the first slot while
+    // the canonical disease concept (MONDO:0008903 "lung cancer", ranked
+    // ~12th by mydisease) never surfaced. Exact matches across arms now come
+    // first, so the disease row must be ordered above the LNCR1 gene row.
+    const results = await retryOnRateLimit(() => harness.callTool('discover', { query: 'lung cancer' }));
+    expectDiscoverRows(results);
+    const rows = results as Array<Record<string, any>>;
+    const diseaseIdx = rows.findIndex((r) => r.entity_type === 'disease');
+    const lncrIdx = rows.findIndex(
+      (r) => r.entity_type === 'gene' && (r.identifier === 'LNCR1' || r.name === 'LNCR1'),
+    );
+    expect(diseaseIdx).toBeGreaterThanOrEqual(0);
+    expect(lncrIdx).toBeGreaterThanOrEqual(0);
+    expect(diseaseIdx).toBeLessThan(lncrIdx);
+  }, 60000);
+
   it('finds entities for "imatinib"', async () => {
     const results = await retryOnRateLimit(() => harness.callTool('discover', { query: 'imatinib' }));
     expectDiscoverRows(results);
