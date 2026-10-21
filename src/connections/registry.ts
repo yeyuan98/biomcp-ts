@@ -334,11 +334,13 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   // ==========================================
   // FUNDING & RESEARCH - REST (1 source)
   // ==========================================
+  // NIH Reporter project search routinely takes 5-10 s (issue #195); the
+  // gene_get funding section sizes its deadline from this budget.
   nih_reporter: {
     sourceId: 'nih_reporter',
     baseUrl: 'https://api.reporter.nih.gov/v2',
     protocol: 'rest',
-    handling: { timeoutMs: 15000 },
+    handling: { timeoutMs: 20000 },
     rateLimit: { intervalMs: 1000 },
   },
   
@@ -457,7 +459,11 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     sourceId: 'opentargets',
     baseUrl: 'https://api.platform.opentargets.org/api/v4/graphql',
     protocol: 'graphql',
-    handling: { timeoutMs: 15000 },
+    // Issue #195: gene_get diseases/druggability sections run sequential
+    // roundtrips here; 20 s budgets them. Requires outbound HTTPS
+    // reachability — proxy environments must route
+    // api.platform.opentargets.org.
+    handling: { timeoutMs: 20000 },
     rateLimit: { intervalMs: 500 },
   },
 };

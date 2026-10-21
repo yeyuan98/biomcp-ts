@@ -1035,6 +1035,92 @@ describe('geneGet abort/timeout handling', () => {
 });
 
 // ============================================================
+// geneGet section timeout budget (issue #195)
+// ============================================================
+describe('geneGet section timeout budget (issue #195)', () => {
+  mockGlobalFetch();
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    connectionManager.closeAll();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  const mygeneLookup = {
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    headers: new Headers({ 'content-type': 'application/json' }),
+    json: () => Promise.resolve({ hits: [tp53TumorSuppressorHit] }),
+  };
+
+  // NIH Reporter routinely answers in 5-10 s — inside the registry's raised
+  // 20 s handling.timeoutMs, past the old flat 8 s section cap.
+  test('funding section succeeds past 8 s by honoring the nih_reporter registry budget', async () => {
+    jest.useFakeTimers();
+    let callIndex = 0;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
+      callIndex++;
+      if (callIndex === 1) return Promise.resolve(mygeneLookup);
+      return new Promise(resolve => setTimeout(() => resolve({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({
+          results: [{
+            project_num: 'R01CA999999',
+            project_title: 'TP53 dynamics',
+            agency_code: 'NCI',
+            award_amount: 123456,
+          }],
+        }),
+      }), 9500));
+    }) as any;
+
+    const pending = geneGet('TP53', ['funding']);
+    // Fire the 9.5 s NIH response — before the 20 s section budget.
+    await jest.advanceTimersByTimeAsync(9500);
+    const result = await pending;
+
+    const funding = result.sections!.funding as { grants?: Array<{ nih_id: string }>; _error?: string };
+    expect(funding._error).toBeUndefined();
+    expect(funding.grants?.[0]?.nih_id).toBe('R01CA999999');
+  });
+
+  // hpa is a raw proteinatlas.org fetch with no registry source — it must
+  // stay bounded by the 8 s SECTION_TIMEOUT_MS fallback.
+  test('a section without a registry source stays bounded at the 8 s fallback', async () => {
+    jest.useFakeTimers();
+    let callIndex = 0;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(() => {
+      callIndex++;
+      if (callIndex === 1) return Promise.resolve(mygeneLookup);
+      return new Promise(resolve => setTimeout(() => resolve({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve([]),
+      }), 9000));
+    }) as any;
+
+    const pending = geneGet('TP53', ['hpa']);
+    // Advance past the 8 s fallback deadline (response still pending).
+    await jest.advanceTimersByTimeAsync(8100);
+    const result = await pending;
+
+    const hpa = result.sections!.hpa as { _error?: string };
+    expect(hpa._error).toContain('timed out after 8000ms');
+    // Settle the dangling 9 s mock response so no timer leaks the test.
+    await jest.advanceTimersByTimeAsync(1000);
+  });
+});
+
+// ============================================================
 // geneGet with genomic_pos transformation
 // ============================================================
 describe('geneGet genomic_pos handling', () => {

@@ -3,13 +3,48 @@ import { connectionManager } from '../connections/manager.js';
 import { RestConnection } from '../connections/rest.js';
 import { fetchWithTimeout } from '../connections/fetch-utils.js';
 import { withRetry, isRetryableError } from '../connections/retry.js';
+import { getSourceConfig } from '../connections/registry.js';
 import { transformMyGeneHit } from '../transform/gene.js';
 import { stripHtml } from './html-utils.js';
 import { fetchDisgenetGdaSummary } from './disgenet.js';
 import { otDiseasesForGene } from './opentargets.js';
 import { gtexMedianExpression } from './gtex.js';
 
+/** Fallback section budget (issue #195) — used only when a section has no
+ *  registry source, or its source configures no handling.timeoutMs. */
 const SECTION_TIMEOUT_MS = 8000;
+
+// Registry source(s) backing each gene_get section — the section wrapper
+// sizes its per-section deadline from each source's handling.timeoutMs
+// (max when several) instead of the old flat 8 s, which routinely killed
+// NIH Reporter funding lookups that the registry itself budgets for 15+ s.
+// Sections absent here (hpa = raw proteinatlas.org fetch outside the
+// registry; clingen = static text) use the SECTION_TIMEOUT_MS fallback.
+const SECTION_SOURCES: Record<string, string[]> = {
+  pathways: ['reactome'],
+  protein: ['uniprot'],
+  ontology: ['mygene'],
+  go: ['mygene'],
+  interactions: ['string'],
+  civic: ['civic'],
+  expression: ['gtex'],
+  druggability: ['dgidb', 'opentargets'],
+  constraint: ['gnomad'],
+  disgenet: ['disgenet'],
+  diseases: ['opentargets'],
+  funding: ['nih_reporter'],
+};
+
+function sectionTimeoutMs(section: string): number {
+  const sources = SECTION_SOURCES[section];
+  if (!sources || sources.length === 0) return SECTION_TIMEOUT_MS;
+  let budget = SECTION_TIMEOUT_MS;
+  for (const source of sources) {
+    const configured = getSourceConfig(source).handling?.timeoutMs;
+    if (configured && configured > budget) budget = configured;
+  }
+  return budget;
+}
 
 // Client-side chromosome filtering pages the UNFILTERED upstream ranking
 // (issue #98): a page of 100 relevance-ranked hits can yield few or zero
@@ -321,7 +356,7 @@ export async function geneGet(
             case 'funding': return { section: 'funding', data: await withRetry(() => fetchFunding(lookupSymbol, combinedSignal), retryOpts) };
             default: return { section, data: null };
           }
-        }, SECTION_TIMEOUT_MS);
+        }, sectionTimeoutMs(section));
       });
 
       const settledResults = await Promise.allSettled(sectionPromises);
