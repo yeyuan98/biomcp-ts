@@ -20,7 +20,10 @@ describe('gtex tools (integration)', () => {
       harness.callTool('gtex_expression', { gene: 'TP53', limit: 5 })
     );
     expect(result.gene_symbol).toBe('TP53');
-    expect(result.dataset).toBe('gtex_v10');
+    // The entity derives the latest gtex_vN from live dataset metadata
+    // (GTEx shipped v11 on 2026-10-21; the tool adapted automatically) —
+    // assert the pattern, not the release.
+    expect(result.dataset).toMatch(/^gtex_v\d+$/);
     expect(result.unit).toBe('TPM');
     expect(Array.isArray(result.tissues)).toBe(true);
     expect(result.tissues.length).toBeGreaterThan(0);
@@ -82,23 +85,35 @@ describe('gtex tools (integration)', () => {
     );
     expect(result.gene_symbol).toBe('TP53');
     expect(result.tissue).toBe('Whole_Blood');
-    // Verified against live GTEx v10: TP53 has zero significant cis-eQTLs in
-    // Whole_Blood — the empty list is the correct scientific answer (#106).
+    // Verified against live GTEx v10 AND v11: TP53 has zero significant
+    // cis-eQTLs in Whole_Blood — the empty list is the correct scientific
+    // answer (#106). The note's tissue roster shifts between releases, so
+    // assert the shape, not specific tissues.
     expect(Array.isArray(result.associations)).toBe(true);
     expect(result.associations).toHaveLength(0);
     // ...and the diagnostic note points at the tissues that DO have them.
     expect(typeof result.note).toBe('string');
-    expect(result.note).toContain('TP53 has no significant cis-eQTLs in Whole_Blood in GTEx v10');
+    expect(result.note).toMatch(/TP53 has no significant cis-eQTLs in Whole_Blood in GTEx v\d+/);
     expect(result.note).toMatch(/but has \d+ in other tissues: /);
-    expect(result.note).toContain('Kidney_Cortex');
   }, 60000);
 
-  it('gtex_eqtl TP53 in Kidney_Cortex returns non-empty associations', async () => {
+  it('gtex_eqtl returns non-empty associations for a tissue the diagnostic note reports', async () => {
+    // A fixed tissue pick broke when GTEx v11 shipped (TP53/Kidney_Cortex
+    // had zero significant cis-eQTLs in v11 after 8 in v10 — release-
+    // dependent data). Derive the tissue instead: the Whole_Blood note
+    // lists tissues that DO have associations, by construction.
+    const empty = await retryOnRateLimit(() =>
+      harness.callTool('gtex_eqtl', { gene: 'TP53', tissue: 'Whole_Blood' })
+    );
+    const match = String(empty.note ?? '').match(/other tissues: ([A-Za-z_]+)/);
+    expect(match).not.toBeNull();
+    const tissue = match![1];
+
     const result = await retryOnRateLimit(() =>
-      harness.callTool('gtex_eqtl', { gene: 'TP53', tissue: 'Kidney_Cortex', limit: 5 })
+      harness.callTool('gtex_eqtl', { gene: 'TP53', tissue, limit: 5 })
     );
     expect(result.gene_symbol).toBe('TP53');
-    expect(result.tissue).toBe('Kidney_Cortex');
+    expect(result.tissue).toBe(tissue);
     expect(Array.isArray(result.associations)).toBe(true);
     expect(result.associations.length).toBeGreaterThan(0);
     expect(result.note).toBeUndefined();
