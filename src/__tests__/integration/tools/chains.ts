@@ -119,7 +119,7 @@ export const INCIDENTAL_MENTIONS: Record<string, Array<{ token: string; reason: 
     {
       token: 'gene_get',
       reason:
-        'TODO-extensible: description claims entrezgene ids are "usable directly with gene_get", but gene_get resolves HGNC symbols (q=symbol:"…"), not entrez ids — walking this needs an id→symbol bridge (e.g. gene_search on the numeric id, or teaching gene_get numeric input) before it can be a green chain entry',
+        'settled (#180): the description now states the bridge honestly — genbank_genes rows carry numeric entrez gene ids while gene_get is keyed by HGNC symbol (q=symbol:"…"), so no row field feeds gene_get verbatim; the id must be resolved to its symbol first (gene_search rows carry both symbol and entrez_id), which makes this an incidental mention rather than an advertised link',
     },
   ],
 };
@@ -129,9 +129,6 @@ export const INCIDENTAL_MENTIONS: Record<string, Array<{ token: string; reason: 
  * structural-but-unadvertised chains the issue lists explicitly
  * (article/variant/patent/drug/disease/trial) so the walker generalizes the
  * hand-written per-case pins.
- *
- * TODO-extensible (advertised but not walked — see INCIDENTAL_MENTIONS):
- *   - genbank_genes → gene_get (entrez-id vs symbol key mismatch, above).
  */
 export const CHAIN_TABLE: ChainSpec[] = [
   {

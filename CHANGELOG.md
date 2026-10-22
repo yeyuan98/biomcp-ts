@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`genbank_genes` no longer claims its entrez ids feed `gene_get` directly — the `gene_search` id→symbol bridge is now stated** (`src/server/tools/genbank.ts`, `src/server/README.md`, `src/__tests__/integration/tools/chains.ts`; tests in `src/__tests__/server/genbank-tools.test.ts`) — fixes #180. Docs-only honesty fix, no behavior change. The tool description said the returned gene_ids are "usable directly with MyGene-backed gene tools (gene_get, gene_search)", but `gene_get` resolves HGNC gene symbols (`q=symbol:"…"`; its alias resolution matches alias strings, never numeric entrez ids), so a numeric id must be resolved to a symbol first. The description now keeps gene_ids described as NCBI Gene (entrezgene) IDs, states that `gene_get` takes an HGNC symbol rather than a numeric entrez id, and points at `gene_search` — whose result rows carry both `symbol` and `entrez_id` — as the id→symbol bridge; the runtime `note` in the reply carries the same honest wording (and its unit-test pin follows). The genbank_genes→gene_get walker classification is settled as an incidental mention with a settled justification: the row field is a numeric entrez id and cannot be fed verbatim to the symbol-keyed `gene_get`, so it stays an incidental mention rather than an advertised link (the TODO-extensible marker is gone).
+
 ## [1.6.0-alpha.7] - 2026-10-21
 
 Post-review release polish over 1.6.0-alpha.6: the independent implementation review's minor findings for the #196 geo telemetry (a pre-headers abort escaped as a bare TimeoutError; the full-file estimate divided remaining rather than total bytes), the README tool-table rows mirroring the #200 claims-provenance qualifier, and the CI-exposed correction of the #201 discover integration test to pin the ordering contract rather than LNCR1's presence.

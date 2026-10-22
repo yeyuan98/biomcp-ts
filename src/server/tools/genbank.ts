@@ -150,7 +150,7 @@ Whole-record fetches are capped at 2,000,000 bp — larger records require a seq
     {
       description: `Map a GenBank/RefSeq nucleotide accession to its NCBI Gene IDs (elink nuccore→gene).
 
-The returned gene_ids are entrezgene IDs usable directly with MyGene-backed gene tools (gene_get, gene_search). Useful bridge from a sequence record to gene-level annotation.`,
+The returned gene_ids are NCBI Gene (entrezgene) IDs. gene_get takes an HGNC gene symbol, NOT a numeric entrez id, so an id must first be resolved to its symbol — gene_search result rows carry both symbol and entrez_id, so the id→symbol bridge exists via gene_search. Useful bridge from a sequence record to gene-level annotation.`,
       inputSchema: {
         accession: genbankAccessionParam().describe('GenBank/RefSeq accession, versioned or bare — e.g. NG_017013.2, NC_000023.11'),
       },
@@ -164,7 +164,7 @@ The returned gene_ids are entrezgene IDs usable directly with MyGene-backed gene
             type: 'text',
             text: JSON.stringify({
               gene_ids: geneIds,
-              note: 'NCBI Gene IDs — usable as entrezgene IDs with MyGene tools',
+              note: 'NCBI Gene IDs (entrezgene) — resolve to an HGNC symbol via gene_search before gene_get',
             }),
           }],
         };
