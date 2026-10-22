@@ -186,7 +186,7 @@ describe('genbank tools', () => {
 
     expect(result).toEqual({
       gene_ids: [7157, 29087],
-      note: 'NCBI Gene IDs — usable as entrezgene IDs with MyGene tools',
+      note: 'NCBI Gene IDs (entrezgene) — resolve to an HGNC symbol via gene_search before gene_get',
     });
   });
 
