@@ -83,7 +83,7 @@ export class OpsClient {
   private readonly rateLimiter = new TokenBucketRateLimiter({ intervalMs: 1000 });
 
   async getToken(): Promise<string> {
-    if (this.tokenState && Date.now() < this.tokenState.expiresAt) {
+    if (this.tokenState && monotonicNowMs() < this.tokenState.expiresAt) {
       return this.tokenState.token;
     }
     if (!this.tokenPromise) {
@@ -131,7 +131,8 @@ export class OpsClient {
       throw new Error('EPO OPS authentication returned no access_token.');
     }
     const ttlMs = Math.max(60_000, (parsed.expires_in || 1199) * 1000 - 120_000);
-    this.tokenState = { token: parsed.access_token, expiresAt: Date.now() + Math.min(ttlMs, TOKEN_TTL_MS) };
+    // expiresAt is a monotonic deadline (in-memory TTL — never Date.now()), per src/connections/time.ts.
+    this.tokenState = { token: parsed.access_token, expiresAt: monotonicNowMs() + Math.min(ttlMs, TOKEN_TTL_MS) };
     return parsed.access_token;
   }
 
@@ -188,6 +189,13 @@ export class OpsClient {
           : `EPO OPS quota rejection: ${reason} (retry will not help until the quota window resets)`;
         recordOpsFailure(message);
         throw new HttpConnectionError(message, data.status, false);
+      }
+      // Stale bearer (e.g. a backward wall-clock jump kept the cached token past
+      // its real server-side expiry) — drop it; the next iteration's getToken()
+      // refreshes single-flight.
+      if (data.status === 401 && attempt === 0) {
+        this.tokenState = null;
+        continue;
       }
       return data;
     }

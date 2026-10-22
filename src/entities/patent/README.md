@@ -156,6 +156,8 @@ source code. Kept here so future maintainers don't re-verify from scratch.
 - **Auth**: `POST /auth/accesstoken`, Basic key:secret, form body
   `grant_type=client_credentials` → `{access_token, expires_in: 1199}`.
   Anonymous access is denied entirely (403 `AnonymousQuotaPerDay`).
+  The cached token's TTL is a monotonic deadline (wall-clock-jump immune, #166);
+  a 401 drops it and triggers exactly one refresh+retry (ppubs precedent, #185).
 - **Search**: `GET /rest-services/published-data/search/biblio?q=<CQL>&Range=1-N`
   (GET only; POST → 415). Bare `/search` returns only publication references;
   `/search/biblio` returns full biblio per record. CQL operators verified:
