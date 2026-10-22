@@ -1584,6 +1584,155 @@ describe('OpsClient', () => {
     await expect(client.getToken()).rejects.toThrow(/EPO_OPS_CONSUMER_KEY/);
     client.close();
   });
+
+  // #186: mock helpers for the 401-recovery / monotonic-TTL tests below. The
+  // accesstoken endpoint counts calls and mints a fresh token each time; the
+  // rest-services responses are shaped per test via `restResponses(nth)`.
+  function opsTokenTracker(): { calls: () => number; mockToken: (url: any) => Promise<any> | undefined } {
+    let tokenCalls = 0;
+    return {
+      calls: () => tokenCalls,
+      mockToken: (url: any) => {
+        if (!String(url).includes('/auth/accesstoken')) return undefined;
+        tokenCalls++;
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ access_token: `tok-${tokenCalls}`, expires_in: 1199 })),
+        });
+      },
+    };
+  }
+
+  test('401 → drop token → refresh once → retry with the new bearer', async () => {
+    const { OpsClient } = await import('../../entities/patent/ops-client.js');
+    const client = new OpsClient();
+    const tracker = opsTokenTracker();
+    const bearerByRestCall: string[] = [];
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any, init?: any) => {
+      const token = tracker.mockToken(url);
+      if (token) return token;
+      bearerByRestCall.push(init?.headers?.Authorization);
+      if (bearerByRestCall.length === 1) {
+        return Promise.resolve({
+          ok: false,
+          status: 401,
+          headers: new Headers(),
+          text: () => Promise.resolve('token expired'),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        text: () => Promise.resolve('{"ok":true}'),
+      });
+    }) as any;
+
+    const resp = await advanceUntilSettled(client.get('/published-data/search?q=x'));
+    expect(resp.status).toBe(200);
+    expect(resp.body).toBe('{"ok":true}');
+    expect(tracker.calls()).toBe(2); // initial fetch + exactly one refresh
+    expect(bearerByRestCall).toEqual(['Bearer tok-1', 'Bearer tok-2']);
+    client.close();
+  });
+
+  test('persistent 401 returns the 401 response without a refresh storm', async () => {
+    const { OpsClient } = await import('../../entities/patent/ops-client.js');
+    const client = new OpsClient();
+    const tracker = opsTokenTracker();
+    let restCalls = 0;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
+      const token = tracker.mockToken(url);
+      if (token) return token;
+      restCalls++;
+      return Promise.resolve({
+        ok: false,
+        status: 401,
+        headers: new Headers(),
+        text: () => Promise.resolve('unauthorized'),
+      });
+    }) as any;
+
+    const resp = await advanceUntilSettled(client.get('/published-data/search?q=x'));
+    // Second 401 is returned to the caller unchanged (genuine credential
+    // failure) — the existing caller contract is preserved.
+    expect(resp.status).toBe(401);
+    expect(restCalls).toBe(2);
+    expect(tracker.calls()).toBe(2); // one refresh attempt, then stop — no storm
+    client.close();
+  });
+
+  test('concurrent 401s share one single-flight refresh', async () => {
+    const { OpsClient } = await import('../../entities/patent/ops-client.js');
+    const client = new OpsClient();
+    const tracker = opsTokenTracker();
+    let restCalls = 0;
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
+      const token = tracker.mockToken(url);
+      if (token) return token;
+      restCalls++;
+      if (restCalls === 1) {
+        return Promise.resolve({
+          ok: false,
+          status: 401,
+          headers: new Headers(),
+          text: () => Promise.resolve('token expired'),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        text: () => Promise.resolve('{"ok":true}'),
+      });
+    }) as any;
+
+    const [a, b] = await advanceUntilSettled(Promise.all([
+      client.get('/published-data/search?q=x'),
+      client.get('/published-data/search?q=y'),
+    ]));
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    // One initial single-flight fetch (shared by both gets) + one 401-triggered
+    // refresh shared by the retries via the cache — never one per caller.
+    expect(tracker.calls()).toBe(2);
+    client.close();
+  });
+
+  test('token TTL is monotonic: backward wall-clock jump does not extend cache life', async () => {
+    const { OpsClient } = await import('../../entities/patent/ops-client.js');
+    const client = new OpsClient();
+    const tracker = opsTokenTracker();
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
+      const token = tracker.mockToken(url);
+      if (token) return token;
+      return Promise.resolve({ ok: true, status: 200, headers: new Headers(), text: () => Promise.resolve('{}') });
+    }) as any;
+
+    // expires_in 1199 → ttl ≈ 17.98 min (under the 18-min TOKEN_TTL_MS cap).
+    const t1 = await client.getToken();
+    expect(tracker.calls()).toBe(1);
+
+    // Wall clock jumps back 30 min (#166 WSL2): fake timers virtualize
+    // performance.now; setSystemTime moves only the virtual Date (verified —
+    // same split as the drug.test.ts WHO PQ memo test), so the monotonic
+    // deadline is untouched and the jump alone must not expire the cache…
+    jest.setSystemTime(Date.now() - 30 * 60_000);
+    const cached = await client.getToken();
+    expect(cached).toBe(t1);
+    expect(tracker.calls()).toBe(1);
+
+    // …but once monotonic time passes the ~18-min TTL the token MUST expire —
+    // a wall-clock deadline would still read ~48 min of remaining life after
+    // the backward jump and keep serving the stale token (#186).
+    await jest.advanceTimersByTimeAsync(19 * 60_000);
+    const t2 = await client.getToken();
+    expect(t2).toBe('tok-2');
+    expect(tracker.calls()).toBe(2);
+    client.close();
+  });
 });
 
 describe('PpubsClient', () => {
