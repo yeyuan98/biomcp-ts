@@ -3,6 +3,22 @@ import { EuropePMCRecord, splitAuthors, cleanArticleTitle, epmcSearchWindow } fr
 import { backendErrorRow } from './backend-error.js';
 import { rewriteJournalPhrase } from './journal-titles.js';
 
+/** EPMC journalIssn parse rules from the live audit (n=300 lite rows):
+ * multi-value rows join ISSNs with ';' and always end in a trailing '; ';
+ * ~8% of rows carry a lowercase-x check digit that MUST be accepted and
+ * uppercased. '(Print)' qualifiers were never observed — not stripped. */
+const EPMC_ISSN_PATTERN = /^\d{4}-\d{3}[\dXx]$/;
+
+function parseJournalIssn(journalIssn?: string): string | undefined {
+  const trimmed = journalIssn?.trim();
+  if (!trimmed) return undefined;
+  for (const token of trimmed.split(';')) {
+    const candidate = token.trim();
+    if (candidate && EPMC_ISSN_PATTERN.test(candidate)) return candidate.toUpperCase();
+  }
+  return undefined;
+}
+
 export function transformEuropePMC(a: EuropePMCRecord): Article {
   return {
     pmid: a.pmid,
@@ -11,6 +27,7 @@ export function transformEuropePMC(a: EuropePMCRecord): Article {
     title: cleanArticleTitle(a.title),
     authors: splitAuthors(a.authorString),
     journal: a.journalTitle,
+    journal_issn: parseJournalIssn(a.journalIssn),
     volume: a.journalVolume ?? undefined,
     issue: a.issue ?? undefined,
     pages: a.pageInfo ?? undefined,

@@ -90,6 +90,7 @@ async function enrichPmids(pmids: string[]): Promise<Map<string, CitationRecord>
         title: article.title,
         authors: article.authors,
         journal: article.journal,
+        journal_issn: article.journal_issn,
         volume: article.volume,
         issue: article.issue,
         pages: article.pages,

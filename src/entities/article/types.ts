@@ -55,6 +55,8 @@ export interface Article {
   abstract?: string;
   authors?: string[];
   journal?: string;
+  /** Journal ISSN (linking ISSN preferred; normalized with uppercase check digit, e.g. '0028-0836') */
+  journal_issn?: string;
   volume?: string;
   issue?: string;
   pages?: string;

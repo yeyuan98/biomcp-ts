@@ -26,6 +26,8 @@ export interface CitationRecord {
   authors?: string[];
   /** Journal name */
   journal?: string;
+  /** Journal ISSN (e.g. '0028-0836') */
+  journal_issn?: string;
   /** Journal volume */
   volume?: string;
   /** Journal issue */

@@ -871,7 +871,7 @@ describe('citation module', () => {
 <MedlineCitation Status="MEDLINE" Owner="NLM">
 <PMID Version="1">111</PMID>
 <Article PubModel="Electronic">
-<Journal><Title>Nature</Title><ISOAbbreviation>Nature</ISOAbbreviation>
+<Journal><ISSN IssnType="Electronic">1476-4687</ISSN><Title>Nature</Title><ISOAbbreviation>Nature</ISOAbbreviation>
 <JournalIssue><Volume>614</Volume><Issue>7947</Issue>
 <PubDate><Year>2023</Year><Month>Feb</Month></PubDate></JournalIssue></Journal>
 <ArticleTitle>Citing Article</ArticleTitle>
@@ -879,6 +879,7 @@ describe('citation module', () => {
 <Pagination><MedlinePgn>104-11</MedlinePgn></Pagination>
 <AuthorList><Author><LastName>Smith</LastName><ForeName>John</ForeName></Author></AuthorList>
 </Article>
+<MedlineJournalInfo><ISSNLinking>0028-0836</ISSNLinking></MedlineJournalInfo>
 </MedlineCitation>
 <PubmedData>
 <ArticleIdList>
@@ -903,6 +904,7 @@ describe('citation module', () => {
       expect(result[0].title).toBe('Citing Article');
       expect(result[0].authors).toEqual(['Smith John']);
       expect(result[0].journal).toBe('Nature');
+      expect(result[0].journal_issn).toBe('0028-0836');
       expect(result[0].volume).toBe('614');
       expect(result[0].issue).toBe('7947');
       expect(result[0].pages).toBe('104-11');

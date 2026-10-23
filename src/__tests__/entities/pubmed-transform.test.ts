@@ -224,6 +224,84 @@ describe('parsePubMedXml', () => {
     expect(results[0].journal).toBe('Full Journal Name');
   });
 
+  test('extracts journal_issn from ISSNLinking, preferring it over the Article ISSN', () => {
+    // Linking ISSN (98.9% of live records; equals OpenAlex issn_l) wins over
+    // the Journal-level Electronic ISSN.
+    const xml = `<?xml version="1.0"?>
+<PubmedArticleSet>
+<PubmedArticle>
+<MedlineCitation><PMID Version="1">111</PMID>
+<MedlineJournalInfo><Country>England</Country><MedlineTA>Nature</MedlineTA><ISSNLinking>0028-0836</ISSNLinking></MedlineJournalInfo>
+<Article>
+<Journal><ISSN IssnType="Electronic">1476-4687</ISSN><Title>Nature</Title><ISOAbbreviation>Nature</ISOAbbreviation></Journal>
+<ArticleTitle>ISSNLinking wins</ArticleTitle>
+</Article>
+</MedlineCitation>
+<PubmedData><ArticleIdList><ArticleId IdType="pubmed">111</ArticleId></ArticleIdList></PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>`;
+    const results = parsePubMedXml(xml);
+    expect(results[0].journal_issn).toBe('0028-0836');
+    expect(results[0].journal).toBe('Nature');
+  });
+
+  test('falls back to the single Article-level Electronic ISSN without ISSNLinking', () => {
+    const xml = `<?xml version="1.0"?>
+<PubmedArticleSet>
+<PubmedArticle>
+<MedlineCitation><PMID Version="1">222</PMID>
+<Article>
+<Journal><ISSN IssnType="Electronic">2042-7158</ISSN><Title>Pharmacoepidemiol Drug Saf</Title><ISOAbbreviation>Pharmacoepidemiol Drug Saf</ISOAbbreviation></Journal>
+<ArticleTitle>Electronic-only ISSN</ArticleTitle>
+</Article>
+</MedlineCitation>
+<PubmedData><ArticleIdList><ArticleId IdType="pubmed">222</ArticleId></ArticleIdList></PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>`;
+    const results = parsePubMedXml(xml);
+    expect(results[0].journal_issn).toBe('2042-7158');
+  });
+
+  test('prefers the Print ISSN when Print and Electronic both appear', () => {
+    // DTD-permitted pair (never observed live): both <ISSN> elements must
+    // materialize as an array and Print must be chosen.
+    const xml = `<?xml version="1.0"?>
+<PubmedArticleSet>
+<PubmedArticle>
+<MedlineCitation><PMID Version="1">333</PMID>
+<Article>
+<Journal>
+<ISSN IssnType="Print">0022-3573</ISSN>
+<ISSN IssnType="Electronic">2042-7158</ISSN>
+<Title>Pharm J</Title><ISOAbbreviation>Pharm J</ISOAbbreviation>
+</Journal>
+<ArticleTitle>Print plus Electronic</ArticleTitle>
+</Article>
+</MedlineCitation>
+<PubmedData><ArticleIdList><ArticleId IdType="pubmed">333</ArticleId></ArticleIdList></PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>`;
+    const results = parsePubMedXml(xml);
+    expect(results[0].journal_issn).toBe('0022-3573');
+  });
+
+  test('leaves journal_issn undefined when no ISSN exists anywhere', () => {
+    const xml = `<?xml version="1.0"?>
+<PubmedArticleSet>
+<PubmedArticle>
+<MedlineCitation><PMID Version="1">444</PMID>
+<Article>
+<Journal><Title>J No Issn</Title><ISOAbbreviation>J No Issn</ISOAbbreviation></Journal>
+<ArticleTitle>No ISSN anywhere</ArticleTitle>
+</Article>
+</MedlineCitation>
+<PubmedData><ArticleIdList><ArticleId IdType="pubmed">444</ArticleId></ArticleIdList></PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>`;
+    const results = parsePubMedXml(xml);
+    expect(results[0].journal_issn).toBeUndefined();
+  });
+
   test('extracts publication date from Year/Month/Day', () => {
     const results = parsePubMedXml(SINGLE_ARTICLE_XML);
     expect(results[0].publication_date).toBe('2018 Sep 21');
