@@ -39,7 +39,7 @@ Section-based tools (e.g. `gene_diseases`) call `geneGet(symbol, ['disgenet', 'd
 | `gene_search` | `query: string`, `chromosome?: string`, `limit?: number (1-50, default 10)`, `offset?: number (default 0)` | Search for genes by symbol, name, or keyword | readOnly, openWorld |
 | `gene_get` | `symbol: string`, `sections?: ("pathways" \| "ontology" \| "diseases" \| "protein" \| "go" \| "interactions" \| "clinical_evidence" \| "expression" \| "protein_atlas" \| "druggability" \| "dosage_sensitivity" \| "constraint" \| "disease_associations" \| "funding" \| "all")[]`, `limit?: number (1-100, default 20)`, `smart?: boolean (default false — auto-resolve gene aliases, e.g. "HER2" → "ERBB2")` | Get detailed gene information by symbol | readOnly, openWorld |
 | `gene_diseases` | `symbol: string`, `limit?: number (1-50, default 10)` | Get diseases associated with a gene. Requires `DISGENET_API_KEY`; falls back to OpenTargets | readOnly, openWorld |
-| `gene_drugs` | `symbol: string` | Find drugs targeting a gene | readOnly |
+| `gene_drugs` | `symbol: string` | Find drugs targeting a gene (envelope `{ results, warnings?, errors? }` — OpenTargets failures and unresolved genes ride in `errors[]`) | readOnly |
 | `gene_trials` | `symbol: string` | Find clinical trials for a gene | readOnly |
 | `gene_articles` | `symbol: string` | Find articles about a gene (federated; envelope `{ results, warnings?, errors? }` — per-backend failures ride in `errors`, never as items inside `results`) | readOnly |
 | `gene_enrich` | `genes: string[]` | Pathway enrichment analysis for a gene list | readOnly |

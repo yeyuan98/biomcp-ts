@@ -110,9 +110,13 @@ export function expectPatentGetResult(data: unknown): asserts data is Record<str
 
 /**
  * Cross-entity drug rows (gene_drugs / disease_drugs): every row must be a
- * real drug row (non-empty drug_name + source strings) or an explicit
- * `_error` row — never a shapeless object. The array itself may legitimately
- * be empty (e.g. a gene that is not a direct drug target in OpenTargets);
+ * real drug row (non-empty drug_name + source strings) — never a shapeless
+ * object. The `_error`-row tolerance is vestigial post-#179: PR #175 left it
+ * in place for the then-unconverted geneToDrugs, whose inline failure rows
+ * could still reach these assertions; with #179 both gene_drugs and
+ * disease_drugs ride failures in the envelope `errors[]` channel, so an
+ * `_error` row here is historical only. The array itself may legitimately be
+ * empty (e.g. a gene that is not a direct drug target in OpenTargets);
  * callers assert non-emptiness only where real data is guaranteed.
  */
 export function expectCrossEntityDrugRows(data: unknown): void {

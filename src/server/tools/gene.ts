@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { geneSearch, geneGet } from '../../entities/gene.js';
 import { geneToDrugs, geneToTrials, geneEnrichment } from '../../entities/cross-entity.js';
 import { searchArticles } from '../../entities/article/index.js';
-import { applyLimit, remapSectionKeysToRequested, requiredString, sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra } from './utils.js';
+import { applyLimit, listEnvelope, remapSectionKeysToRequested, requiredString, sliceArraysRecursive, withToolTimeout, type CancellationCapableExtra } from './utils.js';
 
 // Deadline rationale (#107 phase 2): geneGet already enforces its own 30s
 // overall abort internally (threaded into every section fetch), so the tool
@@ -157,7 +157,7 @@ export function registerGeneTools(server: McpServer): void {
   server.registerTool(
     'gene_drugs',
     {
-      description: 'Find drugs targeting a gene. Results are ranked by max clinical phase, then trial-report count, with salt forms collapsed',
+      description: 'Find drugs targeting a gene. Results are ranked by max clinical phase, then trial-report count, with salt forms collapsed. Response is an envelope: { results, warnings?, errors? } — OpenTargets failures and unresolved genes ride in errors[] as { source, message, retryable? } instead of inline items (issues #130, #179)',
       inputSchema: {
         symbol: requiredString('Gene symbol').describe('HGNC gene symbol (e.g., "BRAF", "TP53")'),
       },
@@ -165,8 +165,9 @@ export function registerGeneTools(server: McpServer): void {
     },
     async ({ symbol }) => {
       try {
-        const results = await geneToDrugs(symbol);
-        return { content: [{ type: 'text', text: JSON.stringify(results) }] };
+        const { results, errors } = await geneToDrugs(symbol);
+        // List-tool envelope (#130): partial failures ride in errors[] (#179).
+        return { content: [{ type: 'text', text: JSON.stringify(listEnvelope(results, undefined, errors)) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: String(error) }], isError: true };
       }

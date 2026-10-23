@@ -6,12 +6,12 @@ import { mockGlobalFetch } from '../helpers/mock-fetch.js';
 
 /**
  * Standard list-tool envelope pins (issue #130): disease_search,
- * disease_drugs, disease_trials, gene_articles, and variant_trials reply
- * with { results, warnings?, errors? } — never a bare array — with the
- * optional channels emitted only when non-empty (article_search parity).
- * drug_search's { results, hint } shape is pinned in entities/drug.test.ts
- * (issue #83); geo_get's GDS guidance-as-data lives in geo-tools.test.ts /
- * entities/geo.test.ts.
+ * disease_drugs, disease_trials, gene_articles, gene_drugs, and
+ * variant_trials reply with { results, warnings?, errors? } — never a bare
+ * array — with the optional channels emitted only when non-empty
+ * (article_search parity). drug_search's { results, hint } shape is pinned
+ * in entities/drug.test.ts (issue #83); geo_get's GDS guidance-as-data
+ * lives in geo-tools.test.ts / entities/geo.test.ts.
  */
 
 const PUBMED_EFETCH_XML = `<?xml version="1.0"?>
@@ -56,9 +56,11 @@ const MYVARIANT_DOWN = 'unit test sentinel: myvariant backend disabled';
  * Route every list-tool backend. `semanticScholarDown` rejects the Semantic
  * Scholar route so the federated fan-out records a per-backend error;
  * `myvariantDown` rejects MyVariant.info so variant_trials records a
- * resolution warning (issue #198).
+ * resolution warning (issue #198); `otDiseaseUnresolved` / `otGeneUnresolved`
+ * empty the OpenTargets search hits so disease_drugs / gene_drugs record a
+ * resolution failure in errors[] (issues #159 / #179).
  */
-function mockListToolBackends(opts: { semanticScholarDown?: boolean; otDiseaseUnresolved?: boolean; myvariantDown?: boolean } = {}): void {
+function mockListToolBackends(opts: { semanticScholarDown?: boolean; otDiseaseUnresolved?: boolean; otGeneUnresolved?: boolean; myvariantDown?: boolean } = {}): void {
   global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((input: any, init?: { body?: string }) => {
     const url = parseMockUrl(input);
     switch (url.hostname) {
@@ -102,6 +104,24 @@ function mockListToolBackends(opts: { semanticScholarDown?: boolean; otDiseaseUn
       case 'api.platform.opentargets.org': {
         // GraphQL POST body carries the query string — dispatch on it.
         const body = String(init?.body ?? '');
+        // gene_drugs second leg: target(ensemblId: …) drugAndClinicalCandidates.
+        if (body.includes('target(')) {
+          return Promise.resolve(okJson({
+            data: {
+              target: {
+                drugAndClinicalCandidates: {
+                  rows: [
+                    {
+                      maxClinicalStage: 'PHASE_4',
+                      clinicalReports: [{ id: 'NCT4' }],
+                      drug: { id: 'CHEMBL4253', name: 'osimertinib', drugType: 'Small molecule' },
+                    },
+                  ],
+                },
+              },
+            },
+          }));
+        }
         if (body.includes('drugAndClinicalCandidates')) {
           return Promise.resolve(okJson({
             data: {
@@ -124,6 +144,17 @@ function mockListToolBackends(opts: { semanticScholarDown?: boolean; otDiseaseUn
                 },
               },
             },
+          }));
+        }
+        // gene_drugs first leg: entityNames: ["target"] symbol resolution —
+        // the only remaining OT body carrying the word "target" (the drug
+        // legs already matched above; the disease search never mentions it).
+        if (body.includes('target')) {
+          if (opts.otGeneUnresolved) {
+            return Promise.resolve(okJson({ data: { search: { hits: [] } } }));
+          }
+          return Promise.resolve(okJson({
+            data: { search: { hits: [{ id: 'ENSG00000146648', name: 'EGFR', entity: 'target' }] } },
           }));
         }
         if (opts.otDiseaseUnresolved) {
@@ -213,6 +244,33 @@ describe('list-tool envelopes (issue #130)', () => {
     expect(envelope.errors[0].message).toContain('No OpenTargets entry found');
     // No _error marker rows inside results — errors never masquerade as items.
     expect(envelope.results.some((r: any) => r._error !== undefined)).toBe(false);
+  });
+
+  it('gene_drugs wraps ranked rows in { results } with no warnings/errors keys (issue #179)', async () => {
+    mockListToolBackends();
+
+    const envelope = await harness.callTool('gene_drugs', { symbol: 'EGFR' });
+
+    expect(Array.isArray(envelope.results)).toBe(true);
+    expect(envelope.results).toEqual([
+      { drug_name: 'osimertinib', source: 'opentargets', action_type: 'Small molecule', phase: 'PHASE_4', report_count: 1 },
+    ]);
+    expect('warnings' in envelope).toBe(false);
+    expect('errors' in envelope).toBe(false);
+  });
+
+  it('gene_drugs: an unresolved gene rides in errors[] with empty results (issue #179)', async () => {
+    mockListToolBackends({ otGeneUnresolved: true });
+
+    const envelope = await harness.callTool('gene_drugs', { symbol: 'EGFR' });
+
+    expect(envelope.results).toEqual([]);
+    expect(Array.isArray(envelope.errors)).toBe(true);
+    expect(envelope.errors).toHaveLength(1);
+    expect(envelope.errors[0].source).toBe('gene');
+    expect(envelope.errors[0].message).toContain('No OpenTargets entry found');
+    // No _error marker rows inside results — errors never masquerade as items.
+    expect(envelope.results.some((r: any) => '_error' in r)).toBe(false);
   });
 
   it('disease_trials wraps trial rows in { results }', async () => {

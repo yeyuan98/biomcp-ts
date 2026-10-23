@@ -1006,17 +1006,19 @@ describe('geneToDrugs', () => {
       });
     }) as any;
 
-    const results = await geneToDrugs('BRAF');
+    const res = await geneToDrugs('BRAF');
 
-    expect(results).toHaveLength(2);
-    expect(results[0]).toEqual({
+    expect(res.results).toHaveLength(2);
+    expect(res.results[0]).toEqual({
       drug_name: 'Vemurafenib',
       source: 'opentargets',
       action_type: 'Small molecule',
       phase: 'Phase 3',
       report_count: 0,
     });
-    expect(results[1].drug_name).toBe('Dabrafenib');
+    expect(res.results[1].drug_name).toBe('Dabrafenib');
+    // Clean happy path: no errors channel at all.
+    expect(res.errors).toBeUndefined();
   });
 
   test('ranks drugs by clinical stage and report count (observed OT enum format)', async () => {
@@ -1053,7 +1055,7 @@ describe('geneToDrugs', () => {
       });
     }) as any;
 
-    const results = await geneToDrugs('BRAF');
+    const { results } = await geneToDrugs('BRAF');
 
     expect(results.map(r => r.drug_name)).toEqual(['VEMURAFENIB', 'QS-21', 'ALUMINUM HYDROXIDE']);
     expect(results[0].phase).toBe('PHASE_4');
@@ -1093,14 +1095,14 @@ describe('geneToDrugs', () => {
       });
     }) as any;
 
-    const results = await geneToDrugs('BRAF');
+    const { results } = await geneToDrugs('BRAF');
 
     // Salt form and base form collapse; the higher-staged row survives.
     expect(results.map(r => r.drug_name)).toEqual(['DABRAFENIB MESYLATE', 'TRAMETINIB']);
     expect(results[0].phase).toBe('PHASE_3');
   });
 
-  test('returns error when gene not found', async () => {
+  test('returns errors entry when gene not found', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
@@ -1108,20 +1110,27 @@ describe('geneToDrugs', () => {
       }),
     }) as any;
 
-    const results = await geneToDrugs('NONEXISTENTGENE');
+    const res = await geneToDrugs('NONEXISTENTGENE');
 
-    expect(results).toHaveLength(1);
-    expect((results[0] as any)._error).toContain('No OpenTargets entry found');
+    expect(res.results).toEqual([]);
+    expect(res.errors).toHaveLength(1);
+    expect(res.errors![0].source).toBe('gene');
+    expect(res.errors![0].message).toContain('No OpenTargets entry found');
+    // Deterministic not-found: no retryable flag.
+    expect(res.errors![0].retryable).toBeUndefined();
   });
 
-  test('returns error on API failure', async () => {
+  test('returns errors entry on hard upstream failure', async () => {
     global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(new Error('Network error')) as any;
 
-    const results = await geneToDrugs('BRAF');
+    const res = await geneToDrugs('BRAF');
 
-    expect(results).toHaveLength(1);
-    expect((results[0] as any)._error).toContain('Drug lookup for gene failed');
-    expect((results[0] as any)._error).toContain('Network error');
+    expect(res.results).toEqual([]);
+    expect(res.errors).toHaveLength(1);
+    expect(res.errors![0].source).toBe('opentargets');
+    expect(res.errors![0].message).toContain('Drug lookup for gene failed');
+    expect(res.errors![0].message).toContain('Network error');
+    expect(res.errors![0].retryable).toBe(true);
   });
 });
 

@@ -538,7 +538,7 @@ Orchestrates queries that span multiple entity types. All pivot functions delega
 ### Pivot Functions
 
 ```ts
-geneToDrugs(geneSymbol: string): Promise<Array<{ drug_name: string; source: string; action_type?: string }>>
+geneToDrugs(geneSymbol: string): Promise<{ results: Array<{ drug_name: string; source: string; action_type?: string; phase?: string; report_count?: number }>; errors?: Array<{ source: string; message: string; retryable?: boolean }> }>
 geneToTrials(geneSymbol: string): Promise<Array<{ nct_id: string; title?: string; status?: string }>>
 geneToPathways(geneSymbol: string): Promise<Array<{ pathway_id: string; name: string; source: string }>>
 variantToTrials(variantId: string): Promise<Array<{ nct_id: string; title?: string; status?: string }>>
@@ -554,7 +554,7 @@ diseaseToTrials(diseaseQuery: string): Promise<Array<{ nct_id: string; title?: s
 
 | Function | Primary Source | Auth |
 |----------|---------------|------|
-| `geneToDrugs` | OpenTargets (GraphQL) | None |
+| `geneToDrugs` | OpenTargets (GraphQL: target resolution + `drugAndClinicalCandidates`) | None |
 | `geneToTrials` | ClinicalTrials.gov (via `trialSearch`) | None |
 | `geneToPathways` | Reactome | None |
 | `variantToTrials` | ClinicalTrials.gov (via `trialSearch`) | None |
@@ -570,6 +570,10 @@ diseaseToTrials(diseaseQuery: string): Promise<Array<{ nct_id: string; title?: s
 When the input matches `^(DOID|MONDO|OMIM|OMOPS|ORPHA):`, the function first resolves it via MyDisease to get a human-readable label. If the MONDO-based OpenTargets search fails, it tries an EFO ID probe (`MONDO:` → `MONDO_`).
 
 Failure paths return `{ results: [], errors: [{ source, message, retryable? }] }` — an unresolved query is tagged `source: 'disease'`, an upstream OpenTargets outage `source: 'opentargets'` with `retryable: true` — never inline `_error` rows inside `results` (issue #159).
+
+#### `geneToDrugs` Failure Envelope
+
+Mirrors the #159/#175 `diseaseToDrugs` contract (issue #179): failure paths return `{ results: [], errors: [{ source, message, retryable? }] }` — an unresolved gene symbol is tagged `source: 'gene'`, an upstream OpenTargets outage `source: 'opentargets'` with `retryable: true` — never inline `_error` rows inside `results`.
 
 ### Search All
 
