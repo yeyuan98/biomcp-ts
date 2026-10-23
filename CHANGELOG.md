@@ -5,9 +5,9 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.6.0-alpha.9] - 2026-10-23
 
-Journal-quality metrics campaign: a new `journal_metrics` tool backed by OpenAlex `/sources` (2-year mean citedness — the open-access impact-factor alternative), `journal_issn` harvesting on article records so any article chains into its journal's metrics, and a documentation count truing pass.
+Journal-quality metrics campaign (the final 1.6.0 alpha): a new `journal_metrics` tool backed by OpenAlex `/sources` (2-year mean citedness — the open-access impact-factor alternative), `journal_issn` harvesting on article records so any article chains into its journal's metrics, and a documentation count truing pass.
 
 ### Added
 
