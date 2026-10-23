@@ -32,6 +32,7 @@ const FREE_TEXT_SEARCH_TOOLS = [
   'genbank_search',
   'sra_search',
   'discover',
+  'journal_metrics',
 ] as const;
 
 type ToolName = (typeof FREE_TEXT_SEARCH_TOOLS)[number];
@@ -48,6 +49,7 @@ const VALID_QUERIES: Record<ToolName, string> = {
   genbank_search: 'TP53[Gene Name]',
   sra_search: 'RNA-SEQ',
   discover: 'BRAF V600E',
+  journal_metrics: 'Nature',
 };
 
 /**

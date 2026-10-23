@@ -77,6 +77,10 @@ jest.mock('../../entities/article/index.js', () => mockLoudModule('entities/arti
   Article: undefined,
 }));
 
+jest.mock('../../entities/journal/index.js', () => mockLoudModule('entities/journal', {
+  lookupJournalMetrics: jest.fn(),
+}));
+
 jest.mock('../../entities/patent/index.js', () => mockLoudModule('entities/patent', {
   patentSearch: jest.fn(),
   patentGet: jest.fn(),
@@ -163,6 +167,7 @@ import { registerVariantTools } from '../../server/tools/variant.js';
 import { registerDiseaseTools } from '../../server/tools/disease.js';
 import { registerTrialTools } from '../../server/tools/trial.js';
 import { registerArticleTools } from '../../server/tools/article.js';
+import { registerJournalTools } from '../../server/tools/journal.js';
 import { registerUtilityTools } from '../../server/tools/utility.js';
 import { registerPdbTools } from '../../server/tools/pdb.js';
 import { registerPatentTools } from '../../server/tools/patent.js';
@@ -208,6 +213,12 @@ describe('Tool registration', () => {
     expect(mockRegisterTool).toHaveBeenCalledTimes(3);
   });
 
+  it('registerJournalTools calls registerTool 1 time with journal_metrics', () => {
+    registerJournalTools(mockServer);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(1);
+    expect(mockRegisterTool.mock.calls[0][0]).toBe('journal_metrics');
+  });
+
   it('registerUtilityTools calls registerTool 2 times', () => {
     registerUtilityTools(mockServer);
     expect(mockRegisterTool).toHaveBeenCalledTimes(2);
@@ -249,13 +260,14 @@ describe('Tool registration', () => {
     expect(mockRegisterTool.mock.calls[0][0]).toBe('biomcp_configure');
   });
 
-  it('total registerTool calls across all registrations = 42', () => {
+  it('total registerTool calls across all registrations = 43', () => {
     registerGeneTools(mockServer);
     registerDrugTools(mockServer);
     registerVariantTools(mockServer);
     registerDiseaseTools(mockServer);
     registerTrialTools(mockServer);
     registerArticleTools(mockServer);
+    registerJournalTools(mockServer);
     registerUtilityTools(mockServer);
     registerPdbTools(mockServer);
     registerPatentTools(mockServer);
@@ -265,7 +277,7 @@ describe('Tool registration', () => {
     registerGtexTools(mockServer);
     registerEnsemblTools(mockServer);
     registerConfigureTool(mockServer);
-    expect(mockRegisterTool).toHaveBeenCalledTimes(42);
+    expect(mockRegisterTool).toHaveBeenCalledTimes(43);
   });
 
   it('no duplicate tool names across all registrations', () => {
@@ -275,6 +287,7 @@ describe('Tool registration', () => {
     registerDiseaseTools(mockServer);
     registerTrialTools(mockServer);
     registerArticleTools(mockServer);
+    registerJournalTools(mockServer);
     registerUtilityTools(mockServer);
     registerPdbTools(mockServer);
     registerPatentTools(mockServer);
@@ -297,6 +310,7 @@ describe('Tool registration', () => {
     registerDiseaseTools(mockServer);
     registerTrialTools(mockServer);
     registerArticleTools(mockServer);
+    registerJournalTools(mockServer);
     registerUtilityTools(mockServer);
     registerPdbTools(mockServer);
     registerPatentTools(mockServer);
@@ -314,6 +328,7 @@ describe('Tool registration', () => {
       'drug_search', 'drug_get', 'drug_trials',
       'disease_search', 'disease_get', 'disease_drugs', 'disease_trials',
       'article_search', 'article_get', 'preprint_fulltext',
+      'journal_metrics',
       'trial_search', 'trial_get',
       'discover', 'batch_get',
       'pdb',

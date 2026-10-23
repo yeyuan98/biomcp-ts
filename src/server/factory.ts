@@ -4,6 +4,7 @@ import { registerVariantTools } from './tools/variant.js';
 import { registerDrugTools } from './tools/drug.js';
 import { registerDiseaseTools } from './tools/disease.js';
 import { registerArticleTools } from './tools/article.js';
+import { registerJournalTools } from './tools/journal.js';
 import { registerTrialTools } from './tools/trial.js';
 import { registerUtilityTools } from './tools/utility.js';
 import { registerPdbTools } from './tools/pdb.js';
@@ -47,6 +48,7 @@ export function createBioMcpServer(options?: CreateBioMcpServerOptions): McpServ
   registerDrugTools(server);
   registerDiseaseTools(server);
   registerArticleTools(server);
+  registerJournalTools(server);
   registerTrialTools(server);
   registerUtilityTools(server);
   registerPdbTools(server);
