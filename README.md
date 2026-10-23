@@ -38,7 +38,7 @@ Full tool schemas (params, enums, defaults) live in [src/server/README.md](src/s
 | `gene_search` | Search genes by symbol, name, or keyword with chromosome filter |
 | `gene_get` | Get detailed gene info by HGNC symbol with optional sections (core, pathways, protein, ontology, go, interactions, expression, protein_atlas, constraint, druggability, dosage_sensitivity, clinical_evidence, disease_associations, diseases, funding). Set `smart=true` to auto-resolve gene aliases (e.g., "HER2" → "ERBB2") |
 | `gene_diseases` | Get diseases associated with a gene (DisGeNET / OpenTargets) |
-| `gene_drugs` | Find drugs targeting a gene (OpenTargets) |
+| `gene_drugs` | Find drugs targeting a gene (OpenTargets; envelope `{ results, warnings?, errors? }` — OpenTargets failures and unresolved genes ride in `errors[]`, never as inline rows) |
 | `gene_trials` | Find clinical trials for a gene |
 | `gene_articles` | Find articles about a gene (federated across PubMed, EuropePMC, Semantic Scholar, arXiv, PubTator, LitSense; envelope `{ results, warnings?, errors? }` — per-backend failures ride in `errors`) |
 | `gene_enrich` | Pathway enrichment analysis for a gene list (Reactome) |

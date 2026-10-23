@@ -76,8 +76,9 @@ describe('disease_get', () => {
 
 describe('disease_drugs', () => {
   it('returns drugs for breast cancer via OpenTargets', async () => {
-    // Envelope (issue #130): { results } — partial failures still ride as
-    // inline _error items within results (unchanged this PR).
+    // Envelope (issue #130): { results, warnings?, errors? } — partial
+    // failures ride in errors[] (issue #159); the sibling gene_drugs tool
+    // was converted to the same contract in #179.
     const envelope = await retryOnRateLimit(() => harness.callTool('disease_drugs', { disease_id: 'MONDO:0007254' }));
     expectCrossEntityDrugRows(envelope.results);
     // Breast cancer is a heavily drugged indication — real rows must exist.

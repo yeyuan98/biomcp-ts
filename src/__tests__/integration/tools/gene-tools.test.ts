@@ -179,17 +179,20 @@ describe('disease_get gene_associations OpenTargets fallback (issue #84)', () =>
 
 describe('gene_drugs', () => {
   it('returns drugs for EGFR with real OpenTargets rows', async () => {
-    const result = await retryOnRateLimit(() => harness.callTool('gene_drugs', { symbol: 'EGFR' }));
-    expectCrossEntityDrugRows(result);
+    // gene_drugs replies are envelopes (issues #130/#179): { results,
+    // warnings?, errors? } — failures ride in errors[], never as rows
+    // inside results.
+    const envelope = await retryOnRateLimit(() => harness.callTool('gene_drugs', { symbol: 'EGFR' }));
+    expectCrossEntityDrugRows(envelope.results);
     // EGFR is a heavily drugged kinase target — real rows must exist.
-    const realRows = (result as Array<Record<string, any>>).filter((r) => !r._error);
+    const realRows = envelope.results as Array<Record<string, any>>;
     expect(realRows.length).toBeGreaterThan(0);
     expect(realRows[0].source).toBe('opentargets');
   }, 60000);
 
   it('returns shape-valid (possibly empty) drugs for BRCA1', async () => {
-    const result = await retryOnRateLimit(() => harness.callTool('gene_drugs', { symbol: 'BRCA1' }));
-    expectCrossEntityDrugRows(result);
+    const envelope = await retryOnRateLimit(() => harness.callTool('gene_drugs', { symbol: 'BRCA1' }));
+    expectCrossEntityDrugRows(envelope.results);
     // Zero rows is a valid live answer: BRCA1 is not a direct drug target in
     // OpenTargets (PARP inhibitors target PARP1/2, not BRCA1 itself).
   }, 60000);

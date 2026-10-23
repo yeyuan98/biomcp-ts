@@ -102,24 +102,65 @@ function rankOtDrugRows(rows: OtDrugCandidateRow[]): OtDrugCandidateRow[] {
   return [...byKey.values()];
 }
 
-export async function geneToDrugs(geneSymbol: string): Promise<Array<{ drug_name: string; source: string; action_type?: string; phase?: string; report_count?: number }>> {
+/** One ranked drug row of a geneToDrugs reply (OpenTargets). */
+export interface GeneDrugRow {
+  drug_name: string;
+  source: string;
+  action_type?: string;
+  phase?: string;
+  report_count?: number;
+}
+
+/**
+ * Out-of-band failure in the geneToDrugs reply envelope (issue #179):
+ * mirrors the tool layer's ListEnvelopeError shape (entities never import
+ * from server/tools) and the #175 diseaseToDrugs precedent. Messages keep
+ * the wording of the legacy inline `_error` rows verbatim. `retryable` is
+ * set only on the catch-all upstream failure (the current message's "or try
+ * again later" treats transport errors as transient); the not-found path is
+ * deterministic and omits it.
+ */
+export interface GeneDrugsError {
+  source: string;
+  message: string;
+  retryable?: boolean;
+}
+
+/**
+ * geneToDrugs reply envelope (issue #179): real drug rows in `results`;
+ * failures ride in `errors` instead of masquerading as inline `_error`
+ * items inside `results`. `errors` is attached by callers only when
+ * non-empty (see `listEnvelope`).
+ */
+export interface GeneDrugsResult {
+  results: GeneDrugRow[];
+  errors?: GeneDrugsError[];
+}
+
+export async function geneToDrugs(geneSymbol: string): Promise<GeneDrugsResult> {
   try {
     const conn = connectionManager.getConnection('opentargets');
-    
+
     const searchQuery = `query($symbol: String!) {
       search(queryString: $symbol, entityNames: ["target"], page: {index: 0, size: 1}) {
         hits { id name entity }
       }
     }`;
-    
+
     const searchRaw = await conn.request(searchQuery, { symbol: geneSymbol }, { rootField: 'search' }) as any;
     const searchData = JSON.parse(JSON.stringify(searchRaw));
     const targetId = searchData?.data?.search?.hits?.[0]?.id;
-    
+
     if (!targetId) {
-      return [{ _error: `No OpenTargets entry found for gene '${geneSymbol}'. Verify the gene symbol using gene_search.` } as any];
+      return {
+        results: [],
+        errors: [{
+          source: 'gene',
+          message: `No OpenTargets entry found for gene '${geneSymbol}'. Verify the gene symbol using gene_search.`,
+        }],
+      };
     }
-    
+
     const drugQuery = `query($ensemblId: String!) {
       target(ensemblId: $ensemblId) {
         drugAndClinicalCandidates {
@@ -132,16 +173,25 @@ export async function geneToDrugs(geneSymbol: string): Promise<Array<{ drug_name
     const drugData = JSON.parse(JSON.stringify(drugRaw));
     const rows: OtDrugCandidateRow[] = drugData?.data?.target?.drugAndClinicalCandidates?.rows || [];
 
-    return rankOtDrugRows(rows).slice(0, 20).map((r) => ({
-      drug_name: r.drug?.name || 'unknown',
-      source: 'opentargets',
-      action_type: r.drug?.drugType,
-      phase: r.maxClinicalStage || undefined,
-      report_count: (r.clinicalReports || []).length,
-    }));
+    return {
+      results: rankOtDrugRows(rows).slice(0, 20).map((r) => ({
+        drug_name: r.drug?.name || 'unknown',
+        source: 'opentargets',
+        action_type: r.drug?.drugType,
+        phase: r.maxClinicalStage || undefined,
+        report_count: (r.clinicalReports || []).length,
+      })),
+    };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    return [{ _error: `Drug lookup for gene failed (source: opentargets): ${msg}. Try gene_search first to verify the gene symbol, or try again later.` } as any];
+    return {
+      results: [],
+      errors: [{
+        source: 'opentargets',
+        message: `Drug lookup for gene failed (source: opentargets): ${msg}. Try gene_search first to verify the gene symbol, or try again later.`,
+        retryable: true,
+      }],
+    };
   }
 }
 
