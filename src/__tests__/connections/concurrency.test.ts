@@ -28,6 +28,13 @@ function deferred<T = void>() {
 /** Drain the microtask queue (a setImmediate tick runs after all microtasks). */
 const flushMicrotasks = (): Promise<void> => new Promise(resolve => setImmediate(resolve));
 
+/** Microtask-only drain: unlike flushMicrotasks it never schedules a
+ * setImmediate, so it is safe while jest fake timers have setImmediate
+ * captured (frozen until the clock advances). */
+async function drainMicrotasks(ticks = 100): Promise<void> {
+  for (let i = 0; i < ticks; i++) await Promise.resolve();
+}
+
 const okResponse = () => ({ ok: true, json: () => Promise.resolve({ data: 'ok' }) });
 const rateLimitedResponse = () => ({
   ok: false,
@@ -159,31 +166,76 @@ describe('registry concurrency plumbing (connections layer, #107)', () => {
   });
 
   it('acquires the semaphore per attempt: a retried request re-queues behind its rival', async () => {
-    const fetched: string[] = [];
-    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(async (url: string) => {
-      fetched.push(url);
-      // First attempt of /a gets a retryable 429; everything else succeeds.
-      if (url.endsWith('/a') && fetched.filter(u => u.endsWith('/a')).length === 1) {
-        return rateLimitedResponse();
-      }
-      return okResponse();
-    }) as any;
+    // Flake-tail conversion (#187 rule 2; two dated hits: 2026-10-19,
+    // 2026-10-20). The original raced /a's REAL ~1ms retry-backoff
+    // setTimeout (baseDelayMs 1, jitter on) against a setImmediate
+    // flushMicrotasks to get /b dispatched first — scheduler jitter on a
+    // loaded box could flip the order. Fake timers (the repo convention,
+    // patent.test.ts) freeze that backoff until /b provably HOLDS the slot
+    // (a deferred-held fetch), then fire it and pin that /a's retry
+    // re-queues instead of fetching. Fake timers are per-test and restored
+    // in finally: sibling tests rely on the real setImmediate inside
+    // flushMicrotasks. The per-instance TokenBucketRateLimiter starts full
+    // (see the NOTE at the top of this file) and intervalMs is 1, so the
+    // single clock advance below also covers its refill — no other
+    // clock-refill dependence.
+    jest.useFakeTimers();
+    try {
+      const fetched: string[] = [];
+      const bFetch = deferred<void>();
+      global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(async (url: string) => {
+        fetched.push(url);
+        // First attempt of /a gets a retryable 429; /b parks on the
+        // deferred so it visibly OWNS the semaphore slot; all else succeeds.
+        if (url.endsWith('/a') && fetched.filter(u => u.endsWith('/a')).length === 1) {
+          return rateLimitedResponse();
+        }
+        if (url.endsWith('/b')) {
+          await bFetch.promise;
+        }
+        return okResponse();
+      }) as any;
 
-    const first = new RestConnection(restOptions('sem_retry_rerelease', {
-      concurrency: 1,
-      retry: { attempts: 2, backoffMs: 1 },
-    })).request('/a');
-    await flushMicrotasks(); // /a's first attempt failed; its slot is already free
-    const second = new RestConnection(restOptions('sem_retry_rerelease', {
-      concurrency: 1,
-      retry: { attempts: 2, backoffMs: 1 },
-    })).request('/b');
-    await Promise.all([first, second]);
+      const first = new RestConnection(restOptions('sem_retry_rerelease', {
+        concurrency: 1,
+        retry: { attempts: 2, backoffMs: 1 },
+      })).request('/a');
 
-    // Per-attempt acquisition: /b's fetch interleaves BETWEEN /a's attempts
-    // (order a, b, a). If the slot were held across the whole withRetry
-    // call, the order would be a, a, b.
-    expect(fetched.map(urlTag)).toEqual(['a', 'b', 'a']);
+      // Microtasks only — the clock has NOT moved: /a's attempt 1 fetched,
+      // got the 429, released the slot, and its backoff setTimeout is
+      // pending but frozen.
+      await drainMicrotasks();
+      expect(fetched.map(urlTag)).toEqual(['a']);
+
+      // /b starts while the backoff is still frozen and takes the free slot.
+      const second = new RestConnection(restOptions('sem_retry_rerelease', {
+        concurrency: 1,
+        retry: { attempts: 2, backoffMs: 1 },
+      })).request('/b');
+      await drainMicrotasks();
+      expect(fetched.map(urlTag)).toEqual(['a', 'b']); // /b holds the slot
+
+      // Fire /a's backoff (>= 1ms + 15% jitter, and >= the 1ms limiter
+      // interval). /a's retry comes back for the slot, finds /b in it, and
+      // re-queues at the back of the FIFO — it must NOT fetch yet. This is
+      // the strengthened pin: actual waiter re-entry, not just dispatch
+      // order (a slot held across withRetry would show the same ['a','b']
+      // here, but only per-attempt acquisition lets /b in at all).
+      await jest.advanceTimersByTimeAsync(2);
+      await drainMicrotasks();
+      expect(fetched.map(urlTag)).toEqual(['a', 'b']);
+
+      // /b completes and releases the slot; only then does /a's retry run.
+      bFetch.resolve();
+      await Promise.all([first, second]);
+
+      // Per-attempt acquisition: /b's fetch interleaves BETWEEN /a's attempts
+      // (order a, b, a). If the slot were held across the whole withRetry
+      // call, the order would be a, a, b.
+      expect(fetched.map(urlTag)).toEqual(['a', 'b', 'a']);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('passes registry retryBudgetMs into the retry loop (gives up once the budget is blown)', async () => {
