@@ -5,7 +5,9 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.6.0-alpha.8] - 2026-10-23
+
+Open-issue honesty and robustness campaign over 1.6.0-alpha.7: `gene_drugs` moves to the standard list envelope so partial OpenTargets failures and unresolved genes ride in `errors[]` instead of masquerading as drug rows (BREAKING — the last user-shipping inline-`_error` list site, #179/#130), `genbank_genes` documentation states the gene_search id→symbol bridge instead of overpromising direct `gene_get` use (#180), EPO OPS OAuth survives backward wall-clock jumps via a monotonic token TTL plus one 401-triggered refresh/retry (#186), and the two pre-qualified #187 flaky tests are determinized (seeded LRU createdAt ordering — correcting the tracker's utimes misdiagnosis — and a frozen-timer semaphore re-queue pin).
 
 ### Changed
 
