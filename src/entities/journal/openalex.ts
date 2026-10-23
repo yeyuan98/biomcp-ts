@@ -130,7 +130,7 @@ function transformSource(raw: unknown): JournalMetrics {
 
   const stats = rec.summary_stats as Record<string, unknown> | null | undefined;
   let summaryStats: JournalMetrics['summary_stats'];
-  if (stats && typeof stats === 'object') {
+  if (stats && typeof stats === 'object' && (stats['2yr_mean_citedness'] !== undefined || stats.h_index !== undefined || stats.i10_index !== undefined)) {
     summaryStats = {
       two_year_mean_citedness: asNumber(stats['2yr_mean_citedness']) ?? 0,
       h_index: asNumber(stats.h_index) ?? 0,
@@ -166,10 +166,13 @@ function transformSource(raw: unknown): JournalMetrics {
   return out;
 }
 
-/** Zombie-record ranking: higher 2yr mean citedness wins (0 for missing);
- * on a tie (including both-zero), higher works_count wins. */
-function zombieRank(r: JournalMetrics): number {
-  return (r.summary_stats?.two_year_mean_citedness ?? 0) * 1e12 + (r.works_count ?? 0);
+/** Zombie-record comparator: higher 2yr mean citedness (0 for missing)
+ * first; ties — including both-zero — break on higher works_count. */
+function zombieBetter(a: JournalMetrics, b: JournalMetrics): number {
+  const citedA = a.summary_stats?.two_year_mean_citedness ?? 0;
+  const citedB = b.summary_stats?.two_year_mean_citedness ?? 0;
+  if (citedA !== citedB) return citedB - citedA;
+  return (b.works_count ?? 0) - (a.works_count ?? 0);
 }
 
 /** Collapse same-display_name groups (casefolded) to the best record,
@@ -191,7 +194,7 @@ function suppressZombieDuplicates(results: JournalMetrics[], warnings: string[])
       kept.push(group[0]);
       continue;
     }
-    const sorted = [...group].sort((a, b) => zombieRank(b) - zombieRank(a));
+    const sorted = [...group].sort(zombieBetter);
     const best = sorted[0];
     kept.push(best);
     warnings.push(
@@ -223,7 +226,10 @@ function mapOpenAlexError(error: unknown): JournalMetricsError {
   const message = error instanceof Error ? error.message : String(error);
   const status = httpErrorStatus(error);
   if (status === 429) {
-    if (/budget|daily|usd|\$/i.test(message)) {
+    // Spend-signalling tokens only: this repo's own retry layer appends
+    // "retry budget exhausted" to budget-capped errors, which must stay
+    // classified as the retryable per-second case.
+    if (/\$|usd|daily budget/i.test(message)) {
       return {
         source: 'openalex',
         message:

@@ -9,7 +9,7 @@ ESM-only MCP server exposing 42 biomedical tools to LLMs. Federates queries acro
 │  LLM  ──stdio──▶  server/index.ts  (McpServer bootstrap)   │
 │                          │                                   │
 │                   server/tools/*.ts                         │
-│                   (15 modules, 43 tools)                     │
+│                   (16 modules, 43 tools)                     │
 │                          │                                   │
 │              ┌───────────┼───────────┐                      │
 │              ▼           ▼           ▼                      │
@@ -46,7 +46,7 @@ Four layers, strict downward dependency. No upward references.
 Entry point. Converts MCP tool calls into entity-layer invocations. All tools are read-only except `pdb` (writes downloaded structure files to disk) and `geo_get` with `download: true` (writes supplementary files to disk). For the complete tool registry, input schemas, error codes, and validation details, see [server/README.md](server/README.md).
 
 - `server/index.ts` — creates `McpServer` on `StdioServerTransport`, imports and calls all 15 `register*Tools(server)` functions.
-- `server/tools/` — 15 registration modules, one `register*Tools(server)` per domain; handlers try/catch and delegate to the entity layer; Zod input schemas.
+- `server/tools/` — 16 registration modules (15 domain `register*Tools(server)` functions plus `registerConfigureTool` for the `biomcp_configure` meta tool); handlers try/catch and delegate to the entity layer; Zod input schemas.
 - `server/errors.ts` — `BioMCPError` typing, `formatError` classification, `withErrorHandling`, `{ _error }` section helpers.
 
 ## Layer 2 — `entities/` Business Logic Layer
