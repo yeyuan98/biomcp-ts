@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { createMcpTestHarness } from '../../helpers/mcp-harness.js';
 import { retryOnRateLimit } from '../../helpers/retry.js';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
+import { resetJournalTitleMap } from '../../../entities/article/search/journal-titles.js';
 
 // Per-test caps: journal_metrics is a single OpenAlex roundtrip (30 s tool
 // budget, 15 s registry timeout × retry headroom), and the chain test adds
@@ -13,6 +15,8 @@ import { join } from 'node:path';
 let harness: Awaited<ReturnType<typeof createMcpTestHarness>>;
 let savedCacheDir: string | undefined;
 let cacheRoot: string;
+let savedTitlesPath: string | undefined;
+let titlesDir: string;
 
 beforeAll(async () => {
   harness = await createMcpTestHarness();
@@ -21,6 +25,29 @@ beforeAll(async () => {
   savedCacheDir = process.env.BIOMCP_CACHE_DIR;
   cacheRoot = mkdtempSync(join(tmpdir(), 'biomcp-jmint-'));
   process.env.BIOMCP_CACHE_DIR = cacheRoot;
+
+  // The abbreviation-expansion test below must own its NLM fixture: the CI
+  // integration job installs and runs jest only (ci.yml has no build step
+  // there), so the bundled dist/assets/journal-titles.tsv.gz is absent and
+  // the loader silently disables expansion (empty map, no warning) — OpenAlex
+  // returns 0 hits for the raw abbreviation. The env override has absolute
+  // precedence and a set-but-missing path disables the feature, so the local
+  // dist asset can never leak in either. This MUST run before any test, not
+  // inside the expansion test itself: the abbreviation map is a lazy
+  // per-process singleton and this jest harness runs in-process in file
+  // order — the 'methods in molecular biology' search would otherwise warm
+  // the map empty first.
+  savedTitlesPath = process.env.BIOMCP_JOURNAL_TITLES_PATH;
+  titlesDir = mkdtempSync(join(tmpdir(), 'biomcp-jtitles-'));
+  const titlesFixture = join(titlesDir, 'journal-titles.tsv.gz');
+  writeFileSync(
+    titlesFixture,
+    gzipSync(
+      Buffer.from('new england journal of medicine\tN Engl J Med\nnature\tNature\n', 'utf8'),
+    ),
+  );
+  process.env.BIOMCP_JOURNAL_TITLES_PATH = titlesFixture;
+  resetJournalTitleMap();
 }, 30000);
 
 afterAll(async () => {
@@ -28,6 +55,10 @@ afterAll(async () => {
   if (savedCacheDir === undefined) delete process.env.BIOMCP_CACHE_DIR;
   else process.env.BIOMCP_CACHE_DIR = savedCacheDir;
   rmSync(cacheRoot, { recursive: true, force: true });
+  if (savedTitlesPath === undefined) delete process.env.BIOMCP_JOURNAL_TITLES_PATH;
+  else process.env.BIOMCP_JOURNAL_TITLES_PATH = savedTitlesPath;
+  resetJournalTitleMap();
+  rmSync(titlesDir, { recursive: true, force: true });
 });
 
 // journal_metrics never throws for upstream failures — they ride in the
@@ -74,10 +105,11 @@ describe('journal_metrics', () => {
     expect(first.display_name).toMatch(/molecular biology/i);
   }, 60000);
 
-  // NLM abbreviation → full-title expansion happens via the bundled
-  // dist/assets/journal-titles.tsv.gz asset (built by scripts/build/
-  // fetch-journal-list.ts). Without a build the map is empty and this
-  // legitimately fails — CI builds before integration.
+  // NLM abbreviation → full-title expansion happens via the journal-titles
+  // asset (built into dist/assets/ by scripts/build/fetch-journal-list.ts).
+  // The CI integration job installs and runs jest only — no build step — so
+  // the file-level beforeAll points BIOMCP_JOURNAL_TITLES_PATH at this
+  // suite's own two-entry fixture rather than assuming the bundled asset.
   it('expands NLM abbreviations via the bundled list', async () => {
     const response = await retryOnRateLimit(() => callJournalMetrics({ query: 'N Engl J Med' }));
     const results = response.results;
@@ -85,14 +117,13 @@ describe('journal_metrics', () => {
     expect(results.length).toBeGreaterThan(0);
     expect(results[0].display_name).toBe('New England Journal of Medicine');
     expect(results[0].summary_stats.two_year_mean_citedness).toBeGreaterThan(5);
-    // The expansion disclosure warning depends on the built asset being
-    // present (absent asset = feature silently disabled) — shape-check it
-    // when present, but never hard-assert the text.
-    if (Array.isArray(response.warnings)) {
-      for (const w of response.warnings) {
-        expect(typeof w).toBe('string');
-      }
-    }
+    // Expansion is deterministic under the fixture, so the disclosure
+    // warning is now asserted exactly. The map stores the NORMALIZED title
+    // key, so the expanded search term is lowercase — matching the warning
+    // construction in src/entities/journal/openalex.ts.
+    expect(response.warnings).toContain(
+      "Journal abbreviation expanded: 'N Engl J Med' → 'new england journal of medicine' (NLM).",
+    );
   }, 60000);
 
   // The article → journal chain: article records carry journal_issn
