@@ -1,6 +1,6 @@
 {
   "name": "biomcp",
-  "version": "1.6.0-alpha.8",
+  "version": "1.6.0-alpha.9",
   "description": "BioMCP-TS — TypeScript biomedical MCP server (genes, variants, trials, literature, patents, R analysis)",
   "keywords": [
     "mcp",
@@ -69,7 +69,7 @@
     "tsx": "^4.7.0",
     "typescript": "^5.3.0",
     "webr": "^0.6.0",
-    "zod": "^3.25.0"
+    "zod": "^4.6.7"
   },
   "engines": {
     "node": ">=22.13.0"

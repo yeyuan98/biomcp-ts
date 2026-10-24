@@ -39,6 +39,7 @@ Optional. Without them the affected tools still work using keyless fallbacks or 
 | `ONCOKB_TOKEN` | `variant_oncokb` | **Required for this tool** — OncoKB precision-oncology annotations ([request access](https://www.oncokb.org/account/register)) |
 | `DISGENET_API_KEY` | DisGeNET sources | **Required for DisGeNET associations** — disease-gene association data |
 | `CROSSREF_EMAIL` | Crossref | Puts requests in the Crossref polite pool (faster, more reliable metadata) |
+| `OPENALEX_API_KEY` | OpenAlex | Moves `journal_metrics` lookups off the shared keyless $0.10/day pool onto a per-key $1/day budget (free key at openalex.org) |
 | `EPO_OPS_CONSUMER_KEY` + `EPO_OPS_CONSUMER_SECRET` | Patent search/detail | Enables the EPO OPS backend (worldwide patents incl. EP/WO claims). Both must be set together |
 | `USPTO_API_KEY` | USPTO ODP patent backend | Enables USPTO Open Data Portal application search |
 

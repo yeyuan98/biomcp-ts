@@ -1,6 +1,6 @@
 # BioMCP TypeScript — Source Architecture
 
-ESM-only MCP server exposing 40 biomedical tools to LLMs. Federates queries across 50+ upstream APIs. Requires Node.js >= 20.18.1 (`engines` in package.json), targets ES2022. Single runtime dependency: `undici` (proxy-aware global fetch). `@modelcontextprotocol/sdk`, `zod`, and `fast-xml-parser` are devDependencies bundled into `dist/bundle.js` at build time.
+ESM-only MCP server exposing 42 biomedical tools to LLMs. Federates queries across 50+ upstream APIs. Requires Node.js >= 20.18.1 (`engines` in package.json), targets ES2022. Single runtime dependency: `undici` (proxy-aware global fetch). `@modelcontextprotocol/sdk`, `zod`, and `fast-xml-parser` are devDependencies bundled into `dist/bundle.js` at build time.
 
 ## Architecture
 
@@ -9,7 +9,7 @@ ESM-only MCP server exposing 40 biomedical tools to LLMs. Federates queries acro
 │  LLM  ──stdio──▶  server/index.ts  (McpServer bootstrap)   │
 │                          │                                   │
 │                   server/tools/*.ts                         │
-│                   (14 modules, 40 tools)                     │
+│                   (16 modules, 43 tools)                     │
 │                          │                                   │
 │              ┌───────────┼───────────┐                      │
 │              ▼           ▼           ▼                      │
@@ -45,8 +45,8 @@ Four layers, strict downward dependency. No upward references.
 
 Entry point. Converts MCP tool calls into entity-layer invocations. All tools are read-only except `pdb` (writes downloaded structure files to disk) and `geo_get` with `download: true` (writes supplementary files to disk). For the complete tool registry, input schemas, error codes, and validation details, see [server/README.md](server/README.md).
 
-- `server/index.ts` — creates `McpServer` on `StdioServerTransport`, imports and calls all 14 `register*Tools(server)` functions.
-- `server/tools/` — 14 registration modules, one `register*Tools(server)` per domain; handlers try/catch and delegate to the entity layer; Zod input schemas.
+- `server/index.ts` — creates `McpServer` on `StdioServerTransport`, imports and calls all 15 `register*Tools(server)` functions.
+- `server/tools/` — 16 registration modules (15 domain `register*Tools(server)` functions plus `registerConfigureTool` for the `biomcp_configure` meta tool); handlers try/catch and delegate to the entity layer; Zod input schemas.
 - `server/errors.ts` — `BioMCPError` typing, `formatError` classification, `withErrorHandling`, `{ _error }` section helpers.
 
 ## Layer 2 — `entities/` Business Logic Layer

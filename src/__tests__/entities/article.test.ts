@@ -572,6 +572,7 @@ describe('article', () => {
       title: 'Europe PMC Article',
       authorString: 'Smith J, Doe A',
       journalTitle: 'Nature',
+      journalIssn: '0022-3573; 2042-7158; ',
       journalVolume: '12',
       issue: '3',
       pageInfo: '456-62',
@@ -586,12 +587,37 @@ describe('article', () => {
     expect(result.title).toBe('Europe PMC Article');
     expect(result.authors).toEqual(['Smith J', 'Doe A']);
     expect(result.journal).toBe('Nature');
+    // multi-value journalIssn: first ';'-separated token wins (live rows
+    // always carry the trailing '; ')
+    expect(result.journal_issn).toBe('0022-3573');
     expect(result.volume).toBe('12');
     expect(result.issue).toBe('3');
     expect(result.pages).toBe('456-62');
     expect(result.cited_by).toBe(42);
     expect(result.is_open_access).toBe(true);
     expect(result.source).toBe('europepmc');
+  });
+
+  test('transformEuropePMC journalIssn: lowercase-x check digit is uppercased; PPR-style rows have none', () => {
+    // ~8% of live lite rows carry a lowercase-x check digit — must be
+    // accepted by the pattern and normalized to uppercase.
+    const resultLowerX = transformEuropePMC({
+      pmid: '12345',
+      title: 'Lowercase x ISSN',
+      authorString: 'Smith J',
+      journalTitle: 'Front Cell Infect Microbiol',
+      journalIssn: '1939-327x',
+    });
+    expect(resultLowerX.journal_issn).toBe('1939-327X');
+
+    // PPR-style preprint rows carry no journalIssn at all.
+    const resultPpr = transformEuropePMC({
+      pmid: '12345',
+      title: 'Preprint row',
+      authorString: 'Zhang W',
+      journalTitle: 'bioRxiv',
+    });
+    expect(resultPpr.journal_issn).toBeUndefined();
   });
 
   test('transformEuropePMC normalizes raw and escaped markup in titles', () => {

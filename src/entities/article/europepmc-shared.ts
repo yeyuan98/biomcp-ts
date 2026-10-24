@@ -12,6 +12,8 @@ export interface EuropePMCRecord {
   title?: string;
   authorString?: string;
   journalTitle?: string;
+  /** All of a journal's ISSNs ';'-joined (trailing '; ' on multi-value rows) */
+  journalIssn?: string;
   journalVolume?: string | null;
   issue?: string | null;
   pageInfo?: string | null;

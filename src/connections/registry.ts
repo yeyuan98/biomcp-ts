@@ -143,7 +143,7 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
   },
 
   // ==========================================
-  // LITERATURE - REST (10 sources)
+  // LITERATURE - REST (11 sources)
   // ==========================================
   // Shared NCBI E-utilities connection: serves PubMed (article_*), GEO
   // (db=gds), SRA (db=sra), GenBank (db=nuccore) and BioSample lookups.
@@ -314,6 +314,30 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     retry: { attempts: 2, backoffMs: 3500 },
     // #107: budget 35s — safety net above the ~26.5s worst case so the
     // article_search tool cap still wins.
+    retryBudgetMs: 35000,
+  },
+  // OpenAlex scholarly sources API (https://api.openalex.org): institutions
+  // and journals for journal_metrics lookups. Keyless use shares a global
+  // $0.10/day budget; a free api_key (openalex.org, Settings → API) raises
+  // it to $1/day.
+  openalex: {
+    sourceId: 'openalex',
+    baseUrl: 'https://api.openalex.org',
+    protocol: 'rest',
+    handling: { timeoutMs: 15000 },
+    auth: {
+      envVar: 'OPENALEX_API_KEY',
+      required: false,
+      delivery: { type: 'query-param', name: 'api_key' },
+    },
+    rateLimit: {
+      intervalMs: 1000,
+      conditional: true,
+      fallbackRateLimitMs: 1000,
+      keyedRateLimitMs: 200,
+    },
+    retry: { attempts: 3, backoffMs: 500 },
+    // #107: budget 35s — retry-stacking source, cap at ~2× the 15s timeout.
     retryBudgetMs: 35000,
   },
   // ==========================================

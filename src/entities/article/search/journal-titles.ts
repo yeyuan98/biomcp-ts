@@ -38,6 +38,7 @@ const ASSET_PATH_ENV_VAR = 'BIOMCP_JOURNAL_TITLES_PATH';
 const MAX_WINDOW_WORDS = 8;
 
 let cachedMap: ReadonlyMap<string, string> | undefined;
+let cachedAbbreviationMap: ReadonlyMap<string, string> | undefined;
 
 /**
  * Normalize a journal phrase for matching — MUST stay in lockstep with the
@@ -103,10 +104,36 @@ export function getJournalTitleMap(): ReadonlyMap<string, string> {
   return map;
 }
 
+/**
+ * Lazy singleton for the INVERSE map (normalized MedAbbr → normalized full
+ * title) used by journal_metrics abbreviation expansion: a query like
+ * "N Engl J Med" resolves back to "new england journal of medicine" so the
+ * OpenAlex name search can run against the full title (far more precise than
+ * searching the abbreviation). Entries with an EMPTY abbreviation are
+ * skipped (an empty key would expand every empty-ish lookup); keys are
+ * normalized with the same normalizeJournalPhrase so lookups stay symmetric
+ * with the build-time normalization.
+ */
+export function getJournalAbbreviationMap(): ReadonlyMap<string, string> {
+  if (cachedAbbreviationMap !== undefined) return cachedAbbreviationMap;
+  const inverted = new Map<string, string>();
+  for (const [title, abbr] of getJournalTitleMap()) {
+    if (!abbr) continue; // skip empty-string abbreviations
+    const key = normalizeJournalPhrase(abbr);
+    if (!key) continue;
+    inverted.set(key, title);
+  }
+  cachedAbbreviationMap = inverted;
+  return inverted;
+}
+
 /** Drop the cached map so the next `getJournalTitleMap()` re-resolves the
- * asset path (env override changes in tests, or a fresh build). */
+ * asset path (env override changes in tests, or a fresh build). Clears BOTH
+ * singletons — the title map and the abbreviation (inverse) map derived
+ * from it. */
 export function resetJournalTitleMap(): void {
   cachedMap = undefined;
+  cachedAbbreviationMap = undefined;
 }
 
 export interface JournalPhraseRewrite {

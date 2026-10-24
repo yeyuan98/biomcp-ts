@@ -1,6 +1,6 @@
 # Entities Layer
 
-The business logic layer for biomcp-ts. Each entity module (gene, variant, drug, disease, article, trial, pdb, patent, geo, sra, genbank, gtex, ensembl) implements a consistent **search / get / sections** pattern:
+The business logic layer for biomcp-ts. Each entity module (gene, variant, drug, disease, article, journal, trial, pdb, patent, geo, sra, genbank, gtex, ensembl) implements a consistent **search / get / sections** pattern:
 
 1. **`search`** — queries a primary data source with filters, returns lightweight result arrays
 2. **`get`** — fetches a single entity by identifier, optionally enriching with parallel section fetches
@@ -173,7 +173,7 @@ article/
 ├── types.ts              # Article, ArticleSearchOptions, ArticleResult, ArticleGetOptions
 ├── europepmc-shared.ts   # Shared EuropePMC helpers
 ├── semantic-scholar-queue.ts  # Global single-flight queue for ALL Semantic Scholar traffic
-├── search/               # Search backends (7 sources: 6 in the default federation + preprint_only opt-in)
+├── search/               # Search backends (7 sources: 6 in the default federation + preprint_only opt-in) + bundled NLM journal-title map
 │   ├── index.ts          # articleSearch() orchestrator + federatedSearch (20s per-backend throw timeout)
 │   ├── dedup.ts          # deduplicateAndRank()
 │   ├── backend-error.ts  # backendErrorRow() — shared `_error`-row catch envelope for all backends
@@ -183,7 +183,8 @@ article/
 │   ├── pubtator.ts       # searchPubTator(), transformPubTator()
 │   ├── litsense.ts       # searchLitSense(), transformLitSense()
 │   ├── preprint.ts       # searchPreprints(), transformPreprint() (bioRxiv+medRxiv via Europe PMC PPR index; resultType=core; NOT in default federation)
-│   └── arxiv.ts          # searchArxiv() (Atom Query API on export.arxiv.org)
+│   ├── arxiv.ts          # searchArxiv() (Atom Query API on export.arxiv.org)
+│   └── journal-titles.ts # NLM title ↔ MedAbbr map from dist/assets/journal-titles.tsv.gz (build-time asset; trailing-journal-name query rewriting + journal_metrics abbreviation expansion; silently disabled when the asset is absent)
 ├── detail/               # Article get + sections
 │   ├── index.ts          # articleGet() orchestrator (sections run via Promise.allSettled; preprint DOIs branch early)
 │   ├── id-resolution.ts  # parseArticleId(), resolveToPmid(), resolveDoiToPmid(), isPreprintDoi()
@@ -284,6 +285,42 @@ Citation records are deduplicated by PMID (primary), then DOI, then PMCID; for d
 - **PubMed XML Preprocessing**: `preprocessPubMedXml` normalizes inline subscript (`<sub>`, `<inf>`) and superscript (`<sup>`) markup to parenthesized text (e.g., `Ca(V)`, `Ca(2+) influx`) and strips formatting tags (`<i>`, `<b>`, etc.) before fast-xml-parser ingestion, avoiding token inversion and retaining full abstract content without dropped words
 - **Legacy Author Fallback**: `extractAuthors` preserves full given names (`LastName ForeName`) from MEDLINE records and falls back to `Initials` (`LastName Initials`) when `ForeName` is absent in legacy pre-2002 citations
 - **Europe PMC Title Sanitization**: `cleanArticleTitle` in `europepmc-shared.ts` normalizes both raw and entity-escaped markup across Europe PMC search and citation entries
+
+---
+
+## Journal (`journal/`)
+
+**Purpose:** backs the `journal_metrics` tool — journal quality metrics from OpenAlex `/sources`, the open-access alternative to the Clarivate impact factor (2-year mean citedness, h-index, i10-index, OA flags, quality-list tiers).
+
+### Files
+
+| File | Role |
+|------|------|
+| `journal/types.ts` | `JournalMetrics`, `JournalMetricsCount`, `JournalMetricsError`, `JournalMetricsResult` (list-envelope shape) |
+| `journal/openalex.ts` | `lookupJournalMetrics()` — OpenAlex `/sources` client, transform, zombie-duplicate collapse, 24h response cache |
+| `journal/index.ts` | Barrel re-exports |
+
+### Exported Functions
+
+```ts
+lookupJournalMetrics(query: string, options?: JournalMetricsOptions): Promise<JournalMetricsResult>
+clearJournalMetricsCache(): void
+```
+
+### Behavior
+
+- Three query modes: ISSN (regex-detected → exact `filter=issn:` lookup, one hit), NLM abbreviation (expanded to the full title via the bundled NLM list, disclosed in `warnings`), any other name (`search=` ranked search, `limit` rows)
+- Zombie-record hygiene: same-display_name groups (OpenAlex duplicate ingestion) collapse to the best record — highest 2yr mean citedness, then works_count — with a disclosure warning naming the suppressed `openalex_id`s
+- Responses cached 24h keyed by the exact request path (metrics move at most daily); `clearJournalMetricsCache()` drops the cache
+- Upstream failures ride in the envelope `errors[]` channel (never throw): the keyless daily-budget 429 is terminal (`retryable: false`) with a pointer at `OPENALEX_API_KEY`; per-second throttles and network errors stay retryable
+
+### Source / Auth
+
+| Source | Connection | Auth | Notes |
+|--------|-----------|------|-------|
+| OpenAlex `/sources` | `openalex` | `OPENALEX_API_KEY` optional (query-param) | Keyless use shares a global $0.10/day IP budget (a free key raises it to $1/day); conditional rate limits 200 ms keyed / 1000 ms fallback; 24h response cache |
+
+Unit tests: `__tests__/entities/journal.test.ts` (query routing, transform, zombie collapse, error classification, cache — mocked through the real `openalex` connection).
 
 ---
 

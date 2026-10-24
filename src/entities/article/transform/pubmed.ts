@@ -36,7 +36,7 @@ export function preprocessPubMedXml(xml: string): string {
 export function parsePubMedXml(xmlString: string): Article[] {
   const preprocessed = preprocessPubMedXml(xmlString);
   const parser = createXmlParser([
-    'PubmedArticle', 'Author', 'AbstractText', 'MeshHeading', 'PublicationType', 'ArticleId', 'Chemical', 'Keyword',
+    'PubmedArticle', 'Author', 'AbstractText', 'MeshHeading', 'PublicationType', 'ArticleId', 'Chemical', 'Keyword', 'ISSN',
   ]);
 
   let parsed: any;
@@ -53,6 +53,11 @@ export function parsePubMedXml(xmlString: string): Article[] {
   return articles.map(extractArticle);
 }
 
+interface IssnNode {
+  '#text'?: string;
+  '@_IssnType'?: string;
+}
+
 interface PubmedArticle {
   MedlineCitation?: {
     PMID?: { '#text': string };
@@ -60,6 +65,7 @@ interface PubmedArticle {
       Journal?: {
         Title?: string;
         ISOAbbreviation?: string;
+        ISSN?: IssnNode[] | IssnNode;
         JournalIssue?: {
           Volume?: string;
           Issue?: string;
@@ -103,6 +109,9 @@ interface PubmedArticle {
     KeywordList?: {
       Keyword?: Array<{ '#text': string }>;
     };
+    MedlineJournalInfo?: {
+      ISSNLinking?: string;
+    };
   };
   PubmedData?: {
     ArticleIdList?: {
@@ -137,6 +146,7 @@ function extractArticle(raw: PubmedArticle): Article {
     abstract: extractAbstract(article),
     authors: extractAuthors(article),
     journal: article.Journal?.ISOAbbreviation || article.Journal?.Title,
+    journal_issn: extractJournalIssn(medline, article),
     volume: article.Journal?.JournalIssue?.Volume,
     issue: article.Journal?.JournalIssue?.Issue,
     pages: extractPages(article),
@@ -147,6 +157,31 @@ function extractArticle(raw: PubmedArticle): Article {
     keywords: extractKeywords(medline),
     chemicals: extractChemicals(medline),
   };
+}
+
+/** ISSN shape from the live audit (n=175 efetch records): ISSNLinking is
+ * present in 98.9% of records and equals OpenAlex's issn_l, so it wins over
+ * the Article-level Journal/ISSN nodes; PubMed always emits an uppercase X
+ * check digit (uppercased anyway, harmless). A Print+Electronic pair of
+ * <ISSN> elements is DTD-permitted though never observed live — prefer
+ * Print, then Electronic. */
+const ISSN_PATTERN = /^\d{4}-\d{3}[\dX]$/;
+
+function extractJournalIssn(medline: any, article: any): string | undefined {
+  const linking = medline?.MedlineJournalInfo?.ISSNLinking?.trim();
+  if (linking) {
+    const normalized = linking.toUpperCase();
+    if (ISSN_PATTERN.test(normalized)) return normalized;
+  }
+  const issns = asArray(article?.Journal?.ISSN);
+  for (const issnType of ['Print', 'Electronic']) {
+    for (const node of issns) {
+      if (node?.['@_IssnType'] !== issnType) continue;
+      const value = String(node['#text'] ?? '').trim().toUpperCase();
+      if (ISSN_PATTERN.test(value)) return value;
+    }
+  }
+  return undefined;
 }
 
 function extractArticleIds(pubmedData: any): { doi?: string; pmcid?: string } {
