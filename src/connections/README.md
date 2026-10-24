@@ -196,7 +196,7 @@ function withTimeout<T>(
 > EPO OPS (OAuth2 client-credentials) and USPTO PPUBS (session-token
 > handshake) live in `src/entities/patent/` as dedicated clients.
 
-### REST (33 sources)
+### REST (34 sources)
 
 | Category | Source IDs |
 |---|---|
@@ -204,7 +204,7 @@ function withTimeout<T>(
 | Proteins & Pathways | `uniprot`, `reactome`, `reactome_analysis` |
 | Drugs & Pharmacology | `mychem`, `openfda` |
 | Diseases | `mydisease`, `monarch` |
-| Literature | `eutils`, `pubtator`, `europepmc`, `semantic_scholar`, `litsense`, `ncbi_idconv`, `crossref`, `opencitations`, `biorxiv`, `arxiv` |
+| Literature | `eutils`, `pubtator`, `europepmc`, `semantic_scholar`, `litsense`, `ncbi_idconv`, `crossref`, `opencitations`, `biorxiv`, `arxiv`, `openalex` |
 | Clinical Trials | `clinicaltrials` |
 | Ontologies & Analysis | `ols4` |
 | Funding & Research | `nih_reporter` |
@@ -228,7 +228,7 @@ function withTimeout<T>(
 - Key present + `keyedRateLimitMs` set → uses `keyedRateLimitMs`
 - No key → uses `fallbackRateLimitMs` (falls back to `intervalMs` if unset)
 
-Sources with conditional rate limits: `eutils`, `pubtator`, `semantic_scholar`.
+Sources with conditional rate limits: `eutils`, `pubtator`, `semantic_scholar`, `openalex`.
 
 ## Error Enrichment
 

@@ -19,7 +19,7 @@ npm run test:coverage    # Unit tests with coverage
 ```
 
 > **Integration timing:** the keyless API suites (trial, gtex, ensembl, sra,
-> genbank, gene, disease, drug, variant, utility, article, pdb) finish in
+> genbank, gene, disease, drug, variant, utility, article, journal, pdb) finish in
 > roughly 1–2 minutes total. The gated suites are slow when their environment
 > is present: `biowasm-engine`/`biowasm-tools` and `ranalysis` download and
 > boot real wasm/R runtimes (per-test cap of 240 s) and `patent` searches are
@@ -102,26 +102,33 @@ src/__tests__/
     drug.test.ts
     gene.test.ts
     id-resolution.test.ts
+    journal.test.ts
+    journal-titles.test.ts
     patent.test.ts
     pdb.test.ts
     pubmed-transform.test.ts
     trial.test.ts
     variant.test.ts
   integration/
-    tools/               # 18 files — real API calls via the MCP harness
+    tools/               # 23 files — real API calls via the MCP harness
       article-tools.test.ts
       biowasm-engine.integration.test.ts
       biowasm-tools.integration.test.ts
+      chaining-parity.test.ts
+      chaining-parity-ensembl.test.ts
       db-tools.test.ts
       disease-tools.test.ts
+      docstring-examples.test.ts
       drug-tools.test.ts
       ensembl-tools.test.ts
       genbank-tools.test.ts
       gene-tools.test.ts
       geo-tools.test.ts
       gtex-tools.test.ts
+      journal-tools.test.ts
       patent-tools.test.ts
       pdb-tools.test.ts
+      preprint-fulltext-tools.test.ts
       ranalysis-tools.integration.test.ts
       sra-tools.test.ts
       trial-tools.test.ts
@@ -157,8 +164,8 @@ src/__tests__/
 
 Counts below are refresh-when-touched — update them when you add suites to the touched area.
 
-- **Unit:** 88 suites / 1621 tests (`npm test`)
-- **Integration:** 19 files / 207 declared tests (`npm run test:integration`)
+- **Unit:** 99 suites / 1996 tests (`npm test`)
+- **Integration:** 24 files / 235 declared tests (`npm run test:integration`)
 
 ## Integration Suite Gating
 

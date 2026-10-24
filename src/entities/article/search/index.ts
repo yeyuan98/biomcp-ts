@@ -80,6 +80,7 @@ async function enrichLitSenseRows(results: Article[], warnings: string[]): Promi
       if (row.title === undefined && meta.title !== undefined) row.title = meta.title;
       if (row.abstract === undefined && meta.abstract !== undefined) row.abstract = meta.abstract;
       if (row.journal === undefined && meta.journal !== undefined) row.journal = meta.journal;
+      if (row.journal_issn === undefined && meta.journal_issn !== undefined) row.journal_issn = meta.journal_issn;
       if (row.doi === undefined && meta.doi !== undefined) row.doi = meta.doi;
       if (row.publication_date === undefined && meta.publication_date !== undefined) row.publication_date = meta.publication_date;
       if ((row.authors === undefined || row.authors.length === 0) && meta.authors !== undefined) row.authors = meta.authors;

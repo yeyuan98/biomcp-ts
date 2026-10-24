@@ -7,6 +7,7 @@ import { registerVariantTools } from '../../server/tools/variant.js';
 import { registerDrugTools } from '../../server/tools/drug.js';
 import { registerDiseaseTools } from '../../server/tools/disease.js';
 import { registerArticleTools } from '../../server/tools/article.js';
+import { registerJournalTools } from '../../server/tools/journal.js';
 import { registerTrialTools } from '../../server/tools/trial.js';
 import { registerUtilityTools } from '../../server/tools/utility.js';
 import { registerPdbTools } from '../../server/tools/pdb.js';
@@ -133,6 +134,7 @@ export async function createMcpTestHarness(): Promise<McpTestHarness> {
   registerDrugTools(server);
   registerDiseaseTools(server);
   registerArticleTools(server);
+  registerJournalTools(server);
   registerTrialTools(server);
   registerUtilityTools(server);
   registerPdbTools(server);

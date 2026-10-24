@@ -1,6 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
   LIMITS,
   DEFAULT_PROJECTION_FIELDS,
@@ -64,8 +63,15 @@ describe('biowasm shared schemas', () => {
     expect(sourceSchema.safeParse('{"content":"x","extra":1}').success).toBe(false);
   });
 
-  it('emits the exact same JSON schema as the bare union (ZodEffects renders transparently)', () => {
-    const opts = { strictUnions: true, pipeStrategy: 'input' } as const;
+  it('emits the exact same JSON schema as the bare union (ZodPipe renders transparently)', () => {
+    // Mirrors the SDK's zod 4 compat path verbatim
+    // (node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-json-schema-compat.js
+    // routes v4 schemas to zod/v4-mini toJSONSchema with target 'draft-7' and
+    // io 'input' — its defaults when no target/pipeStrategy is passed). The
+    // old zodToJsonSchema options (strictUnions/pipeStrategy) have no v4
+    // equivalent: v4 unions always emit strict anyOf variants and io replaces
+    // pipeStrategy.
+    const opts = { target: 'draft-7', io: 'input' } as const;
     const bare = z
       .union([
         z.object({
@@ -81,8 +87,12 @@ describe('biowasm shared schemas', () => {
       .describe(
         'Data source: inline content, prior artifact, or allowlisted host file (variants are strict — mixed-key objects are rejected, no silent stripping)',
       );
-    const emitted = zodToJsonSchema(sourceSchema, opts);
-    expect(JSON.stringify(emitted)).toBe(JSON.stringify(zodToJsonSchema(bare, opts)));
+    const emitted = z.toJSONSchema(sourceSchema, opts);
+    // zod 4's native emitter serializes the preprocess-wrapped and bare unions
+    // with IDENTICAL content but different key order (the wrapped form emits
+    // description before anyOf), so equality is structural (toEqual), not a
+    // JSON.stringify byte comparison as under zod-to-json-schema.
+    expect(emitted).toEqual(z.toJSONSchema(bare, opts));
     const json = emitted as { anyOf?: Array<Record<string, unknown>>; description?: string };
     expect(json.anyOf).toHaveLength(3);
     for (const variant of json.anyOf ?? []) expect(variant.additionalProperties).toBe(false);
