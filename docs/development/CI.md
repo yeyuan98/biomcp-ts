@@ -30,7 +30,10 @@ Gates in order, each failing the build on error:
 2. `make typecheck` — both `src/` and `scripts/` tsconfigs
 3. `npm test` — the 1300+ mocked unit tests (integration tests are excluded
    via the npm script; they run in the separate `integration` job)
-4. `npm run build` — `tsc` + the two esbuild bundles
+4. `npm run build` — `tsc` + the two esbuild bundles. The `prebuild` hook
+   performs the live NLM journal-list download (network-dependent, given
+   3 attempts with backoff on transient failures; a persistent failure fails this
+   step) — an outage of ftp.ncbi.nlm.nih.gov blocks merge
 5. `npm audit --audit-level=low` — **full** audit, not `--omit=dev`
 6. stdio MCP handshake smoke — sends one NDJSON `initialize` request to
    `dist/bundle.js` and requires a `serverInfo` response

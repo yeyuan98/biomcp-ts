@@ -28,6 +28,10 @@ After `make build`, `npx .` runs the bundled MCP server locally — the recommen
 
 Driver packages are kept **external** (`undici`, optional peer `mysql2`, builtin `node:sqlite`) so they resolve from the consumer's environment at runtime.
 
+### Prebuild: NLM journal-list download
+
+Every `npm run build` (hence `make build` and `prepack`) first re-downloads the live NLM journal-title list (`J_Entrez.gz` from ftp.ncbi.nlm.nih.gov — **network required**) via the `prebuild` hook ([scripts/build/fetch-journal-list.ts](../scripts/build/fetch-journal-list.ts)). Transient download failures (timeouts, resets, DNS, HTTP 5xx/429, truncated or corrupt gzip) get 3 attempts with 2 s / 8 s delays and a 300 s per-attempt timeout; persistent failures (HTTP 4xx, format drift, exhausted retries) fail the build loudly rather than shipping a stale or hollow asset. Note: `BIOMCP_JOURNAL_TITLES_PATH` is a runtime test seam for the asset loader — it does not affect this build-time download.
+
 ## Tests
 
 ```bash

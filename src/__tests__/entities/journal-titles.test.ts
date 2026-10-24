@@ -13,6 +13,7 @@ import {
   parseJournalEntrezRecords,
   buildJournalTitleMap,
   journalTitleMapToTsv,
+  downloadJournalList,
 } from '../../../scripts/build/fetch-journal-list.js';
 
 // Small injected map — the pure functions never need the bundled asset.
@@ -197,5 +198,131 @@ describe('J_Entrez parser (scripts/build/fetch-journal-list.ts)', () => {
       // keys must already be in normalized form for runtime lookups
       expect(key).toBe(normalizeJournalPhrase(key));
     }
+  });
+});
+
+describe('downloadJournalList retry policy (scripts/build/fetch-journal-list.ts)', () => {
+  // Pure dependency injection: injected fetchImpl/delayImpl record every
+  // call — NO global.fetch mocking and NO fake timers (jest cannot drive
+  // AbortSignal.timeout, which the real path uses per attempt).
+  const GZ_OK = gzipSync(Buffer.from('JournalTitle: Nature genetics\nMedAbbr: Nat Genet\n', 'utf8'));
+
+  /** Injected delay recording every requested sleep (ms). */
+  const recordingDelay = (delays: number[]) => async (ms: number): Promise<void> => {
+    delays.push(ms);
+  };
+
+  /** Await `p`, returning the rejection instead of throwing it. */
+  const captureError = async (p: Promise<unknown>): Promise<Error> => {
+    try {
+      await p;
+    } catch (error) {
+      return error as Error;
+    }
+    throw new Error('expected downloadJournalList to reject, but it resolved');
+  };
+
+  test('retries a transient network error and succeeds on the second attempt', async () => {
+    const calls: number[] = [];
+    const delays: number[] = [];
+    const transient = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ETIMEDOUT' } });
+    const fetchImpl = (async () => {
+      calls.push(1);
+      if (calls.length === 1) throw transient;
+      return new Response(GZ_OK, { status: 200 });
+    }) as typeof fetch;
+
+    const text = await downloadJournalList({ fetchImpl, delayImpl: recordingDelay(delays) });
+
+    expect(calls).toHaveLength(2);
+    expect(delays).toEqual([2000]);
+    expect(text.length).toBeGreaterThan(0);
+    expect(text).toContain('Nature genetics');
+  });
+
+  test('does not retry an HTTP 404', async () => {
+    const calls: number[] = [];
+    const delays: number[] = [];
+    const fetchImpl = (async () => {
+      calls.push(1);
+      return new Response('not found', { status: 404 });
+    }) as typeof fetch;
+
+    const error = await captureError(downloadJournalList({ fetchImpl, delayImpl: recordingDelay(delays) }));
+
+    expect(calls).toHaveLength(1);
+    expect(delays).toEqual([]);
+    expect(error.message).toContain('404');
+    expect(error.message).toContain('not retryable');
+    expect(error.message).toContain('the file may have moved');
+  });
+
+  test('exhausts retries on repeated timeouts', async () => {
+    const calls: number[] = [];
+    const delays: number[] = [];
+    const fetchImpl = (async () => {
+      calls.push(1);
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    }) as typeof fetch;
+
+    const error = await captureError(downloadJournalList({ fetchImpl, delayImpl: recordingDelay(delays) }));
+
+    expect(calls).toHaveLength(3);
+    expect(delays).toEqual([2000, 8000]);
+    expect(error.message).toContain('TimeoutError');
+    expect(error.message).toContain('attempt 3/3');
+  });
+
+  test('retries a truncated body read', async () => {
+    const calls: number[] = [];
+    const delays: number[] = [];
+    const truncated = Object.assign(new TypeError('terminated'), { cause: { code: 'UND_ERR_SOCKET' } });
+    // A 200 whose body read rejects mid-stream — stubbed; no real Response
+    // can be made to fail arrayBuffer().
+    const truncatedResponse = {
+      ok: true,
+      status: 200,
+      arrayBuffer: () => Promise.reject(truncated),
+    } as unknown as Response;
+    const fetchImpl = (async () => {
+      calls.push(1);
+      return calls.length === 1 ? truncatedResponse : new Response(GZ_OK, { status: 200 });
+    }) as typeof fetch;
+
+    const text = await downloadJournalList({ fetchImpl, delayImpl: recordingDelay(delays) });
+
+    expect(calls).toHaveLength(2);
+    expect(delays).toEqual([2000]);
+    expect(text).toContain('Nature genetics');
+  });
+
+  test('retries invalid gzip', async () => {
+    const calls: number[] = [];
+    const delays: number[] = [];
+    const fetchImpl = (async () => {
+      calls.push(1);
+      return calls.length === 1
+        ? new Response(Buffer.from('not-gzip')) // 200 OK, garbage payload
+        : new Response(gzipSync(Buffer.from('JournalTitle: The Lancet\nMedAbbr: Lancet\n', 'utf8')));
+    }) as typeof fetch;
+
+    const text = await downloadJournalList({ fetchImpl, delayImpl: recordingDelay(delays) });
+
+    expect(calls).toHaveLength(2);
+    expect(delays).toEqual([2000]);
+    expect(text).toContain('The Lancet');
+  });
+
+  test('terminal error threads the cause', async () => {
+    const original = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+    const fetchImpl = (async () => {
+      throw original;
+    }) as typeof fetch;
+
+    const error = await captureError(
+      downloadJournalList({ fetchImpl, delayImpl: async () => undefined })
+    );
+
+    expect((error as { cause?: unknown }).cause).toBe(original);
   });
 });
