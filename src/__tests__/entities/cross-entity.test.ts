@@ -2231,6 +2231,59 @@ describe('errorMessageWithCause / networkCauseCode', () => {
     expect(networkCauseCode(new Error('plain'))).toBeUndefined();
     expect(networkCauseCode(null)).toBeUndefined();
   });
+
+  test('unwraps the undici depth-2 chain — HttpConnectionError → TypeError → ConnectTimeoutError', () => {
+    // The chain the 2026-10 Happy Eyeballs fix targets: the connection layer
+    // wraps the raw fetch rejection, so the code sits on cause.cause, one
+    // level deeper than the old single-level unwrap looked.
+    const connectTimeout = Object.assign(new Error('Connect Timeout Error'), {
+      name: 'ConnectTimeoutError',
+      code: 'UND_ERR_CONNECT_TIMEOUT',
+    });
+    const fetchFailed = Object.assign(new TypeError('fetch failed'), { cause: connectTimeout });
+    const wrapped = Object.assign(new HttpConnectionError('Request failed'), { cause: fetchFailed });
+    expect(networkCauseCode(wrapped)).toBe('UND_ERR_CONNECT_TIMEOUT');
+    expect(errorMessageWithCause(wrapped)).toBe('Request failed (UND_ERR_CONNECT_TIMEOUT)');
+  });
+
+  test('returns the first code met walking the chain and stops at empty codes', () => {
+    const inner = Object.assign(new Error('deep'), { code: 'ECONNRESET' });
+    const outer = Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('no code here'), { cause: inner }),
+    });
+    expect(networkCauseCode(outer)).toBe('ECONNRESET');
+    // errno is honored as a fallback carrier when code is absent
+    const errnoOnly = Object.assign(new Error('x'), { cause: { errno: 'ENETUNREACH' } });
+    expect(networkCauseCode(errnoOnly)).toBe('ENETUNREACH');
+  });
+
+  test('survives cyclic cause chains (bounded walk)', () => {
+    const a: Error & { cause?: unknown } = new Error('a');
+    const b: Error & { cause?: unknown } = new Error('b');
+    a.cause = b;
+    b.cause = a;
+    expect(networkCauseCode(a)).toBeUndefined();
+  });
+
+  test('ignores empty-string codes and bound the walk depth at 4', () => {
+    const emptyCode = Object.assign(new Error('x'), { code: '' });
+    expect(networkCauseCode(emptyCode)).toBeUndefined();
+    // code on a 4th-level node is in range; a 5th-level one is beyond the bound
+    const inRange = Object.assign(new Error('l0'), {
+      cause: Object.assign(new Error('l1'), {
+        cause: Object.assign(new Error('l2'), { cause: Object.assign(new Error('l3'), { code: 'EDepth' }) }),
+      }),
+    });
+    expect(networkCauseCode(inRange)).toBe('EDepth');
+    const tooDeep = Object.assign(new Error('l0'), {
+      cause: Object.assign(new Error('l1'), {
+        cause: Object.assign(new Error('l2'), {
+          cause: Object.assign(new Error('l3'), { cause: Object.assign(new Error('l4'), { code: 'EBeyond' }) }),
+        }),
+      }),
+    });
+    expect(networkCauseCode(tooDeep)).toBeUndefined();
+  });
 });
 
 // ============================================================

@@ -2,7 +2,8 @@ import { IConnection, ConnectionOptions } from './base.js';
 import { RestConnection } from './rest.js';
 import { GraphQLConnection } from './graphql.js';
 import { getSourceConfig } from './registry.js';
-// Side-effect import: proxy-aware global fetch (no-op without proxy env).
+// Side-effect import: always-installed global fetch dispatcher — proxy-aware
+// when proxy env is set, Happy-Eyeballs-tuned direct Agent otherwise (proxy.ts).
 import './proxy.js';
 
 export class ConnectionManager {
