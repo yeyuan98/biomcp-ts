@@ -2030,7 +2030,9 @@ describe('geneEnrichment additional tests', () => {
   test('token follow-up failure fails the whole call loudly (no entity-count fallback)', async () => {
     // The projection succeeded, but genes_overlap is part of the contract:
     // falling back to entities.found would silently restore > unique-genes
-    // numbers, so the follow-up error must surface instead.
+    // numbers, so the follow-up error must surface instead. The 503 is the
+    // persistent default (not Once) because #211 adds one retry on
+    // retryable 5xx — the retried attempt must see the same failure.
     global.fetch = jest.fn<(...args: any[]) => any>()
       .mockResolvedValueOnce({
         ok: true,
@@ -2041,7 +2043,7 @@ describe('geneEnrichment additional tests', () => {
           ],
         }),
       })
-      .mockResolvedValueOnce({
+      .mockResolvedValue({
         ok: false,
         status: 503,
         statusText: 'Service Unavailable',
@@ -2074,7 +2076,9 @@ describe('geneEnrichment additional tests', () => {
 
     const results = await geneEnrichment(['BRCA1', 'TP53', 'ATM']);
 
-    expect(enrichError(results)).toContain('Request timed out');
+    // #211: service-slowness message with the seconds DERIVED from the
+    // reactome_analysis registry timeoutMs (25 s), not the old hardcoded 15s.
+    expect(enrichError(results)).toContain('Request timed out after 25s');
   });
 
   test('handles HTTP error response', async () => {
@@ -2116,6 +2120,58 @@ describe('geneEnrichment additional tests', () => {
     expect(err).toContain('HTTPS_PROXY');
     expect(err).toContain('Network error');
     expect(err).not.toContain('Ensure at least 3 valid gene symbols');
+  });
+
+  // Issue #211: the reactome_analysis registry entry (attempts 2, backoff
+  // 1 s, budget 52 s) retries a transient transport failure once.
+  test('a transient transport failure on the projection POST is retried once and the call still succeeds', async () => {
+    const transportBlip = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+    global.fetch = jest.fn<(...args: any[]) => any>()
+      .mockRejectedValueOnce(transportBlip)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          summary: { token: 'TOK' },
+          pathways: [
+            { stId: 'R-HSA-1', name: 'P', entities: { pValue: 0.01, found: 2, total: 10 } },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve([
+          { pathway: 'R-HSA-1', entities: [{ id: 'BRCA1' }, { id: 'TP53' }] },
+        ]),
+      }) as any;
+
+    const result = (await geneEnrichment(['BRCA1', 'TP53', 'ATM'])) as GeneEnrichmentResult;
+
+    expect(result.pathways).toHaveLength(1);
+    expect(result.pathways[0].genes_overlap).toBe(2);
+    // The projection POST ran TWICE (failed once, retried once) before the
+    // token follow-up — three fetches, an envelope, not an _error row.
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    const urls: string[] = (global.fetch as any).mock.calls.map((c: any[]) => String(c[0]));
+    expect(urls.filter(u => u.includes('/identifiers/projection'))).toHaveLength(2);
+    expect(urls[2]).toContain('/token/TOK/found/all');
+  });
+
+  // Issue #211 (+ #212's deep networkCauseCode unwrap): UND_ERR_CONNECT_TIMEOUT
+  // in the cause chain means we never REACHED the service — connectivity
+  // guidance, not the "timed out after Ns" service-slowness apology.
+  test('UND_ERR_CONNECT_TIMEOUT in the cause chain produces the network message, not the timeout message', async () => {
+    global.fetch = jest.fn<(...args: any[]) => any>().mockRejectedValue(
+      Object.assign(new TypeError('fetch failed'), {
+        cause: Object.assign(new Error('Connect Timeout Error'), { code: 'UND_ERR_CONNECT_TIMEOUT' }),
+      })
+    ) as any;
+
+    const err = enrichError(await geneEnrichment(['BRCA1', 'TP53', 'ATM']));
+
+    expect(err).toContain('UND_ERR_CONNECT_TIMEOUT');
+    expect(err).toContain('Network error');
+    expect(err).toContain('HTTPS_PROXY');
+    expect(err).not.toContain('Request timed out');
   });
 });
 

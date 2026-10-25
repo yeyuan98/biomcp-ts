@@ -86,19 +86,33 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     handling: { streaming: true, timeoutMs: 15000 },
     rateLimit: { intervalMs: 100 },
   },
+  // #211: same measured origin latency as reactome_analysis below
+  // (8–22 s live) — 25 s budget instead of the borderline 15 s. Deliberately
+  // NO retry here: gene.ts fetchPathways threads an external abort signal
+  // into conn.request, and withRetry does not observe external signals — a
+  // client-cancelled request would keep retrying in the background.
   reactome: {
     sourceId: 'reactome',
     baseUrl: 'https://reactome.org/ContentService',
     protocol: 'rest',
-    handling: { timeoutMs: 15000 },
+    handling: { timeoutMs: 25000 },
     rateLimit: { intervalMs: 100 },
   },
+  // Reactome AnalysisService is genuinely slow: measured 8–22 s per call
+  // live (2026-10-24, #211), so the former 15 s timeout aborted
+  // borderline-valid analysis POSTs mid-flight (gene_enrich failed 3/3,
+  // stacked on the transport race #212 fixed). 25 s + one bounded retry.
   reactome_analysis: {
     sourceId: 'reactome_analysis',
     baseUrl: 'https://reactome.org/AnalysisService',
     protocol: 'rest',
-    handling: { timeoutMs: 15000 },
+    handling: { timeoutMs: 25000 },
     rateLimit: { intervalMs: 100 },
+    retry: { attempts: 2, backoffMs: 1000 },
+    // #211: budget 52s so both 25s attempts + 1s backoff fit (51s worst
+    // case, with headroom), but never a third stack — staying under the
+    // documented 60 s MCP client request cap.
+    retryBudgetMs: 52000,
   },
 
   // ==========================================

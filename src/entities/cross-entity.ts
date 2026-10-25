@@ -1,5 +1,6 @@
 import { connectionManager } from '../connections/manager.js';
 import { RestConnection } from '../connections/rest.js';
+import { getSourceConfig } from '../connections/registry.js';
 import { fetchWithTimeout } from '../connections/fetch-utils.js';
 import { stripHtml } from './html-utils.js';
 import { geneSearch, GeneSearchResult } from './gene.js';
@@ -658,13 +659,25 @@ export async function geneEnrichment(
     // (ETIMEDOUT, ECONNREFUSED, ...) in error.cause — surface it (see
     // src/entities/errors.ts) before classifying the failure.
     const msg = errorMessageWithCause(error);
-    if (msg.includes('abort') || msg.includes('timeout')) {
-      return [{ _error: `Gene enrichment analysis failed (source: reactome): Request timed out after 15s. The Reactome AnalysisService may be temporarily unavailable. Try again later.` } as any];
+    const causeCode = networkCauseCode(error);
+    // Connect-phase failure (issue #211): a CONNECT_TIMEOUT-class code
+    // (undici's UND_ERR_CONNECT_TIMEOUT, deep-unwrapped since #212) or
+    // connect-timeout message means we never REACHED the service — that is
+    // a connectivity problem, not service slowness, so it must skip the
+    // timeout branch below (ConnectTimeoutError's "Connect Timeout Error"
+    // message would otherwise match /timeout/i).
+    const connectTimeout = !!causeCode?.includes('CONNECT_TIMEOUT') || /connect.timeout/i.test(msg);
+    if (/abort|timeout/i.test(msg) && !connectTimeout) {
+      // Service slowness: the seconds figure is DERIVED from the
+      // reactome_analysis registry budget (25 s since #211) — never a
+      // hardcoded number that drifts from the config.
+      const timeoutSeconds = Math.round((getSourceConfig('reactome_analysis').handling?.timeoutMs ?? 15000) / 1000);
+      return [{ _error: `Gene enrichment analysis failed (source: reactome): Request timed out after ${timeoutSeconds}s. The Reactome AnalysisService may be temporarily unavailable. Try again later.` } as any];
     }
     // Network-level failure (issue #62): transport errors reaching this
     // catch are connectivity problems, not bad gene input — never blame the
     // user's symbols. Detected via cause code or a network message signature.
-    if (networkCauseCode(error) || /fetch failed|network|ECONN|ETIMEDOUT/i.test(msg)) {
+    if (connectTimeout || causeCode || /fetch failed|network|ECONN|ETIMEDOUT/i.test(msg)) {
       return [{ _error: `Gene enrichment analysis failed (source: reactome): ${msg}. Network error reaching reactome.org — the service was not the problem; check connectivity (biomcp honors HTTPS_PROXY/HTTP_PROXY/NO_PROXY if you route through a proxy) and try again.` } as any];
     }
     return [{ _error: `Gene enrichment analysis failed (source: reactome): ${msg}. Ensure at least 3 valid gene symbols are provided, or try again later.` } as any];
