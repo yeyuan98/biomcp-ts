@@ -119,7 +119,11 @@ export const PREPRINT_FULLTEXT_TOOL_BUDGET_MS = 120_000;
 const DOWNLOAD_INTERVAL_MS = 3000;
 const DOWNLOAD_ATTEMPT_TIMEOUT_MS = 30_000;
 /** One attempt + ONE bounded retry on transient errors only — a 429/403
- * verdict is final (retrying a rate limit would hammer the host). */
+ * verdict is final (retrying a rate limit would hammer the host; live
+ * 2026-10 verification: 3 www-host requests/minute already trip a
+ * Cloudflare 1015 429 with retry-after 8s). The #210 connect-phase
+ * failures that looked retry-worthy were fixed at the dispatcher layer
+ * (#212), so the attempt count deliberately stays at 2. */
 const DOWNLOAD_ATTEMPTS = 2;
 const RETRY_BACKOFF_MS = 1000;
 /** Hard cooldown floor after any rate-limit verdict; Retry-After wins

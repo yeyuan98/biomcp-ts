@@ -39,7 +39,7 @@ describe('preprint-fulltext-cache', () => {
     authors: ['Yonekura, S.', 'Kanazawa, H.'],
     license: 'cc by-nc-nd',
     license_url: 'https://creativecommons.org/licenses/by-nc-nd/4.0/',
-    jatsxml_url: `https://www.biorxiv.org/content/${doi}v${version}.source.xml`,
+    jatsxml_url: `https://www.biorxiv.org/content/early/2025/03/10/${doi}.source.xml`,
     hasReferences: true,
     sections: [section('Introduction', 'We study cells.'), section('Methods', 'First we did things.\n\n- step one\n- step two')],
     ...overrides,
