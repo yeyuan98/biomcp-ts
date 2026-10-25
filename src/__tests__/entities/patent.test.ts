@@ -2,6 +2,7 @@ import { jest } from '@jest/globals';
 import { HttpConnectionError } from '../../connections/errors.js';
 import { parseMockUrl, mockFetchRouter } from '../helpers/mock-url.js';
 import { withClockJumps } from '../helpers/clock-jumps.js';
+import { PATENT_GET_BUDGETS_MS } from '../../entities/patent/detail/budgets.js';
 
 const REQUIRED_TEMPLATE_KEY = 'showDocPerFamilyPref';
 
@@ -2851,6 +2852,278 @@ describe('patentGet orchestration (chains)', () => {
     expect(citations.backward[0].publication_number).toBe('US5034506');
     const claims = result.sections!.claims as any;
     expect(claims.claims.length).toBeGreaterThan(0);
+  });
+});
+
+describe('patent_get budget table invariants (#209)', () => {
+  // Pure arithmetic over the exported deadline-slicing table — no timers,
+  // no network. The invariants are the fix for the pre-#209 incoherence
+  // where inner request budgets summed HIGHER than the chain step racing
+  // them and worst-case chains exceeded the 120s tool budget.
+  const BUDGETS = PATENT_GET_BUDGETS_MS;
+
+  test('every step budget covers the sum of that source step\'s inner budgets', () => {
+    for (const [source, budget] of Object.entries(BUDGETS.steps)) {
+      const innerSum = Object.values(budget.inner).reduce((sum, ms) => sum + ms, 0);
+      expect(innerSum).toBeLessThanOrEqual(budget.step);
+    }
+  });
+
+  test('core slice + sections slice + serialization margin fits the 120s tool budget', () => {
+    expect(BUDGETS.tool).toBe(120_000);
+    expect(
+      BUDGETS.coreSlice + BUDGETS.sectionsSlice + BUDGETS.serializationMargin,
+    ).toBeLessThanOrEqual(BUDGETS.tool);
+  });
+
+  test('every inner budget is positive and never exceeds its step budget', () => {
+    for (const budget of Object.values(BUDGETS.steps)) {
+      expect(budget.step).toBeGreaterThan(0);
+      for (const inner of Object.values(budget.inner)) {
+        expect(inner).toBeGreaterThan(0);
+        expect(inner).toBeLessThanOrEqual(budget.step);
+      }
+    }
+  });
+});
+
+describe('patent_get deadline aborts (issue #209)', () => {
+  let originalFetch: typeof global.fetch;
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+    installFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    global.fetch = originalFetch;
+    delete process.env.EPO_OPS_CONSUMER_KEY;
+    delete process.env.EPO_OPS_CONSUMER_SECRET;
+    delete process.env.USPTO_API_KEY;
+  });
+
+  // A Google Patents live fetch that hangs until its (composed) abort
+  // signal fires, recording the abort reason it observed — proving the
+  // step/phase/tool deadline actually reached the underlying fetch.
+  // `gpHangsAfter`: gp calls before this index fail fast with a 503 block
+  // page (so the CORE chain can fall through to PPUBS inside its slice);
+  // the call at this index and later hang.
+  function hangingGpPpubsMock(opts: {
+    core: Record<string, unknown>;
+    gpHangsAfter?: number;
+    abortRecord?: { aborted: boolean; reason: string };
+  }) {
+    let gpCalls = 0;
+    return jest.fn<(...args: any[]) => any>().mockImplementation((url: any, init?: any) => {
+      const u = String(url);
+      const { hostname } = parseMockUrl(u);
+      if (hostname === 'archive.org' || hostname === 'web.archive.org') {
+        return Promise.resolve({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ archived_snapshots: {} })),
+        });
+      }
+      if (hostname === 'patents.google.com') {
+        const hangs = gpCalls++ >= (opts.gpHangsAfter ?? 0);
+        if (!hangs) {
+          return Promise.resolve({
+            ok: false,
+            status: 503,
+            statusText: 'Service Unavailable',
+            headers: new Headers(),
+            text: () => Promise.resolve('Sorry... automated queries'),
+          });
+        }
+        return new Promise<never>((_resolve, reject) => {
+          const sig = init?.signal as AbortSignal | undefined;
+          const recordAbort = (): void => {
+            const reason = sig!.reason;
+            opts.abortRecord!.aborted = true;
+            opts.abortRecord!.reason = reason instanceof Error
+              ? reason.message
+              : reason !== undefined ? String(reason) : 'aborted';
+            reject(new Error('fetch aborted by deadline signal'));
+          };
+          if (!sig) return; // hang forever
+          if (sig.aborted) {
+            recordAbort();
+            return;
+          }
+          sig.addEventListener('abort', recordAbort, { once: true });
+        });
+      }
+      if (u.includes('/api/users/me/session')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'x-access-token': 'tok-1', 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ userCase: { caseId: 1 } })),
+        });
+      }
+      if (u.includes('/api/searches/searchWithBeFamily')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({
+            patents: [{ guid: 'US-11027025-B2', type: 'USPAT' }],
+          })),
+        });
+      }
+      if (u.includes('/api/patents/highlight/')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({
+            guid: 'US-11027025-B2',
+            type: 'USPAT',
+            publicationReferenceDocumentNumber: '11027025',
+            inventionTitle: 'Compositions comprising synthetic polynucleotides',
+            ...opts.core,
+          })),
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${u}`));
+    });
+  }
+
+  test('step-budget expiry aborts the hanging fetch, fails over, and enumerates every source', async () => {
+    const abortRecord = { aborted: false, reason: '' };
+    // citations chain (no OPS creds): google_patents hangs past its 45s
+    // step budget (sections slice is 72s, so failover still has room) →
+    // step timer aborts the fetch → PPUBS doc has no usRef data → both
+    // sources are enumerated in the inline { error }.
+    global.fetch = hangingGpPpubsMock({
+      gpHangsAfter: 1,
+      abortRecord,
+      core: { usRefPatentNumber: [], foreignRefPatentNumber: [] },
+    }) as any;
+    const { patentGet } = await import('../../entities/patent/detail/index.js');
+    const result = await advanceUntilSettled(patentGet('US11027025B2', ['citations']));
+
+    // The underlying fetch observed the abort signal (real abort, not an
+    // abandoned Promise.race).
+    expect(abortRecord.aborted).toBe(true);
+    // Failover proceeded to the next source after the step-budget expiry.
+    const citations = result.sections!.citations as { error?: string };
+    expect(citations.error).toContain('All sources failed');
+    expect(citations.error).toContain('google_patents:');
+    expect(citations.error).toMatch(/timed out after 45000ms/);
+    expect(citations.error).toContain('ppubs:');
+    expect(citations.error).toContain('No citation data via PPUBS');
+    // The same failure surfaces out of band in the top-level _warnings
+    // (pdb collectSectionWarnings precedent), while the inline { error }
+    // entry keeps its pinned shape.
+    expect(result._warnings).toEqual([
+      expect.stringContaining(`Section 'citations' unavailable: All sources failed. google_patents:`),
+    ]);
+  });
+
+  test('core-slice expiry aborts the in-flight step and fails the tool-level call', async () => {
+    const abortRecord = { aborted: false, reason: '' };
+    // EP number without OPS credentials: core chain is google_patents
+    // only; its 45s step budget cannot be distinguished from the 45s core
+    // slice here, but the slice fires first (set earlier) — the failure
+    // names the phase deadline and the aborted source.
+    global.fetch = hangingGpPpubsMock({ gpHangsAfter: 0, abortRecord, core: {} }) as any;
+    const { patentGet } = await import('../../entities/patent/detail/index.js');
+    await expect(advanceUntilSettled(patentGet('EP3904939B1'))).rejects.toThrow(
+      /could not be fetched: All sources failed\. google_patents: patent_get core deadline \(45000ms\) exceeded/,
+    );
+    expect(abortRecord.aborted).toBe(true);
+    expect(abortRecord.reason).toContain('patent_get core deadline (45000ms) exceeded');
+  });
+
+  test('tool-level signal abort propagates through the phase slice to the in-flight fetch', async () => {
+    const abortRecord = { aborted: false, reason: '' };
+    global.fetch = hangingGpPpubsMock({ gpHangsAfter: 0, abortRecord, core: {} }) as any;
+    const { patentGet } = await import('../../entities/patent/detail/index.js');
+    const controller = new AbortController();
+    const pending = patentGet('EP3904939B1', undefined, controller.signal);
+    // Let the chain reach its (hanging) in-flight fetch, then abort the
+    // tool-level signal — the composition must reach the fetch.
+    await jest.advanceTimersByTimeAsync(10_000);
+    controller.abort(new Error('tool deadline simulated'));
+    await expect(advanceUntilSettled(pending)).rejects.toThrow(
+      /All sources failed\. google_patents: tool deadline simulated/,
+    );
+    expect(abortRecord.aborted).toBe(true);
+    expect(abortRecord.reason).toBe('tool deadline simulated');
+  });
+
+  test('US claims falling back to Google Patents get the PPUBS retry advice, not the EPO-keys advice', async () => {
+    // US claims chain: PPUBS document has no claimsHtml → OPS absent →
+    // Google Patents serves claims markup. OPS has no US fulltext, so the
+    // warning must point at PPUBS (the authoritative US source).
+    const gpClaimsHtml =
+      '<meta name="DC.title" content="US claims">' +
+      '<span itemprop="publicationNumber">US11027025B2</span>' +
+      '<section itemprop="claims"><div num="1">1. A method.</div><div num="2">2. The method of claim 1.</div></section>';
+    global.fetch = jest.fn<(...args: any[]) => any>().mockImplementation((url: any) => {
+      const u = String(url);
+      const { hostname } = parseMockUrl(u);
+      if (hostname === 'archive.org' || hostname === 'web.archive.org') {
+        return Promise.resolve({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ archived_snapshots: {} })),
+        });
+      }
+      if (hostname === 'patents.google.com') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'text/html' }),
+          text: () => Promise.resolve(gpClaimsHtml),
+        });
+      }
+      if (u.includes('/api/users/me/session')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'x-access-token': 'tok-1', 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({ userCase: { caseId: 1 } })),
+        });
+      }
+      if (u.includes('/api/searches/searchWithBeFamily')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({
+            patents: [{ guid: 'US-11027025-B2', type: 'USPAT' }],
+          })),
+        });
+      }
+      if (u.includes('/api/patents/highlight/')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: () => Promise.resolve(JSON.stringify({
+            guid: 'US-11027025-B2',
+            type: 'USPAT',
+            publicationReferenceDocumentNumber: '11027025',
+            inventionTitle: 'Compositions comprising synthetic polynucleotides',
+            // no claimsHtml → PPUBS claims step fails
+          })),
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${u}`));
+    }) as any;
+
+    const { patentGet } = await import('../../entities/patent/detail/index.js');
+    const result = await advanceUntilSettled(patentGet('US11027025B2', ['claims']));
+    const claims = result.sections!.claims as any;
+    expect(claims.source).toBe('google_patents');
+    expect(claims.claims.length).toBeGreaterThan(0);
+    expect(result._warnings).toEqual([
+      'US claims fell back to Google Patents (unofficial rendering); USPTO Public Search (PPUBS) is the authoritative US source — retry later if PPUBS was slow or unreachable',
+    ]);
+    expect(result._warnings?.[0]).not.toContain('EPO_OPS_CONSUMER_KEY');
   });
 });
 

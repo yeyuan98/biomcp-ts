@@ -1,5 +1,13 @@
 import { gunzipSync } from 'node:zlib';
 import { fetchWithTimeout } from '../../../connections/fetch-utils.js';
+import { PATENT_GET_BUDGETS_MS } from './budgets.js';
+
+// Inner budgets of the google_patents chain step (issue #209): the
+// availability probe is a tiny JSON call (6s), original-bytes playback of
+// an archived patent page measured well under 18s — the old 15s/60s
+// defaults let the two legs alone outrun the whole chain step.
+const WAYBACK_PROBE_MS = PATENT_GET_BUDGETS_MS.steps.google_patents.inner.waybackProbe;
+const WAYBACK_PLAYBACK_MS = PATENT_GET_BUDGETS_MS.steps.google_patents.inner.waybackPlayback;
 
 interface WaybackAvailability {
   archived_snapshots?: {
@@ -18,7 +26,8 @@ interface WaybackAvailability {
  */
 export async function findWaybackSnapshot(
   targetUrl: string,
-  timeoutMs = 15000
+  timeoutMs = WAYBACK_PROBE_MS,
+  signal?: AbortSignal,
 ): Promise<{ idUrl: string; timestamp: string } | null> {
   const { data, error } = await fetchWithTimeout(async (signal) => {
     const resp = await fetch(
@@ -26,7 +35,7 @@ export async function findWaybackSnapshot(
       { headers: { Accept: 'application/json', 'User-Agent': 'biomcp-patent/1.0' }, signal },
     );
     return resp.text();
-  }, timeoutMs);
+  }, timeoutMs, { signal });
 
   if (error || !data) return null;
 
@@ -58,7 +67,8 @@ export async function findWaybackSnapshot(
  */
 export async function fetchWaybackOriginal(
   idUrl: string,
-  timeoutMs = 60000
+  timeoutMs = WAYBACK_PLAYBACK_MS,
+  signal?: AbortSignal,
 ): Promise<string | null> {
   const { data, error } = await fetchWithTimeout(async (signal) => {
     const resp = await fetch(idUrl, {
@@ -74,7 +84,7 @@ export async function fetchWaybackOriginal(
       return gunzipSync(Buffer.from(buf)).toString('utf-8');
     }
     return new TextDecoder('utf-8').decode(buf);
-  }, timeoutMs);
+  }, timeoutMs, { signal });
 
   if (error || !data) return null;
   return data;

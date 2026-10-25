@@ -83,8 +83,47 @@ export function withTimeout<T>(
   });
 }
 
-export async function fetchWithTimeout<T>(fn: (signal?: AbortSignal) => Promise<T>, timeoutMs: number): Promise<{ data?: T; error?: string }> {
+/**
+ * Sleep that bails when `signal` aborts (ppubs 429 retry waits, OPS
+ * throttle backoffs): an abandoned call must not wake up after its chain
+ * was aborted and fire another request into the shared rate limiter
+ * (issue #209 — the exact in-process poisoning the abort plumbing fixes).
+ * Rejects with a bare `aborted` Error so callers can surface it.
+ */
+export function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('aborted'));
+      return;
+    }
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(new Error('aborted'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+export async function fetchWithTimeout<T>(
+  fn: (signal?: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  opts: { signal?: AbortSignal } = {},
+): Promise<{ data?: T; error?: string }> {
   const controller = new AbortController();
+  // External abort source (a chain step/phase/tool deadline, issue #209):
+  // composed with the internal deadline so whichever fires first aborts
+  // the underlying fetch. Without a signal the behavior below is exactly
+  // the pre-existing one.
+  const external = opts.signal;
+  const onExternalAbort = (): void => controller.abort(external!.reason);
+  if (external) {
+    if (external.aborted) controller.abort(external.reason);
+    else external.addEventListener('abort', onExternalAbort, { once: true });
+  }
   let timedOut = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   // Race the deadline itself: fn may ignore the signal entirely (older call
@@ -102,12 +141,16 @@ export async function fetchWithTimeout<T>(fn: (signal?: AbortSignal) => Promise<
     return { data };
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
+    if (!timedOut && external?.aborted) {
+      return { error: `Section fetch aborted before completion: ${error}` };
+    }
     if (timedOut || error.includes('Timeout') || error.includes('timeout') || error.includes('abort') || error.includes('ABORT')) {
       return { error: `Section fetch timed out after ${timeoutMs}ms. The upstream data source may be slow or unreachable. Try again or use a different section.` };
     }
     return { error: `Section fetch failed: ${error}` };
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+    if (external) external.removeEventListener('abort', onExternalAbort);
   }
 }
 

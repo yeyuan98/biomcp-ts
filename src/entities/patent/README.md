@@ -28,6 +28,7 @@ patent/
 │   └── dedup.ts        Publication-number normalization + federated dedup
 └── detail/
     ├── index.ts        patentGet() per-section priority chains
+    ├── budgets.ts      Deadline-slicing budget table (issue #209)
     ├── ops.ts          biblio/abstract/claims/citations/family
     ├── odp.ts          application-file-wrapper core
     ├── ppubs.ts        claims HTML / usRef citations / family
@@ -131,9 +132,36 @@ worldwide backend remains, one `_note` explains the US-only coverage
 instead of silently dropping it.
 
 `patentGet` sections run per-section priority chains with auth-aware silent
-skip and fall-through. Each **source step** is raced against a timeout of
-`SECTION_TIMEOUT_MS` × 3 = 24 s (8 s base; claims chains:
-`CLAIMS_SECTION_TIMEOUT_MS` × 2 = 30 s):
+skip and fall-through, under a **deadline-slicing** model (issue #209; the
+single source of truth is `detail/budgets.ts`):
+
+- The **tool deadline** (120 s, `withToolTimeout` in `server/tools/patent.ts`,
+  function form so the deadline produces an abortable chain) is sliced into
+  a **core slice** (45 s) and a **sections slice** (72 s) plus a 3 s
+  serialization margin — 45 + 72 + 3 = 120 s, so worst-case chains can
+  never overrun the tool budget. Each slice is an `AbortController` + JS
+  `setTimeout` composed with the tool signal via `AbortSignal.any`
+  (never `AbortSignal.timeout()` — native timers are invisible to the
+  Jest fake-timer suite).
+- Every chain source runs under its own **per-step failover budget**
+  (`AbortController` + `setTimeout`, composed with the phase slice):
+  google_patents 45 s, ppubs 40 s, ops 25 s, uspto_odp 20 s. On expiry the
+  race settles first with the failover error, THEN the step aborts — the
+  abandoned fetch actually stops instead of lingering on the shared
+  1 req/s PPUBS token bucket (the pre-#209 `Promise.race` never aborted
+  the loser, which poisoned subsequent PPUBS calls in-process).
+- Inner request budgets sit beneath each step and sum to ≤ the step
+  budget (asserted arithmetically in `patent.test.ts`): gp live 20 s +
+  Wayback probe 6 s + playback 18 s; PPUBS session 8 s + guid search 10 s
+  + document 22 s (measured live 2026-10-24: session ~3 s, search ~1 s,
+  document ~13 s); OPS token 8 s + request 15 s; ODP searches capped at
+  20 s via signal composition. patent_search keeps its legacy 30 s
+  PPUBS search budget — the seminal phase's adaptive deadline governs
+  there; only the detail chain consumes the table values.
+- Known limitation: `rateLimiter.acquire()` takes no signal, so a PPUBS/OPS
+  call aborted while queued for a token may still execute afterwards (and
+  consume a bucket slot). The abort still frees the chain step for
+  failover and the tool deadline still returns on time.
 
 | Section | Chain |
 |---|---|
@@ -143,6 +171,19 @@ skip and fall-through. Each **source step** is raced against a timeout of
 | `citations` | OPS backward refs + `ct=` forward search → GP/Wayback rows → PPUBS `usRef*`/`foreignRef*` (US) |
 | `family` | OPS INPADOC family → GP/Wayback `docdbFamily` → PPUBS (US) |
 | `classifications` | OPS IPC+CPC → GP/Wayback → ODP/PPUBS (US) |
+
+When every source for a section fails, the section keeps its inline
+`{ error }` entry whose message enumerates each attempted source
+(`All sources failed. <source>: <error>; …`), and one short entry per
+failed section is also aggregated into the top-level `_warnings`
+(`Section '<name>' unavailable: …`, pdb `collectSectionWarnings`
+precedent) so callers that never walk `sections` still see what failed.
+A core-chain failure still throws the tool-level error (no identity →
+nothing to return), now with all sources enumerated. Claims that fell
+back to unofficial Google Patents scraping are flagged per number type:
+US numbers get a retry-PPUBS note (OPS has no US fulltext — EPO-keys
+advice would be a dead end); EP/WO numbers get the configure-EPO-OPS
+note.
 
 Claims are capped at ~100 KB with a `_warn` field (pdb-download precedent).
 

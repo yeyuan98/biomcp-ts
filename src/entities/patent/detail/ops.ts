@@ -39,8 +39,8 @@ function isoDate(yyyymmdd: string | undefined): string | undefined {
   return `${yyyymmdd.slice(0, 4)}-${yyyymmdd.slice(4, 6)}-${yyyymmdd.slice(6, 8)}`;
 }
 
-async function getJson(path: string): Promise<BadgerFish> {
-  const resp = await opsClient.get(path);
+async function getJson(path: string, signal?: AbortSignal): Promise<BadgerFish> {
+  const resp = await opsClient.get(path, undefined, { signal });
   if (resp.status !== 200) {
     throw new Error(`EPO OPS request failed (HTTP ${resp.status}): ${path} — ${resp.body.slice(0, 150)}`);
   }
@@ -58,12 +58,12 @@ function exchangeDocumentOf(parsed: BadgerFish): BadgerFish {
   return (asArray(doc as BadgerFish[])[0] || {}) as BadgerFish;
 }
 
-export async function fetchOpsBiblio(publicationNumber: string): Promise<PatentResult> {
+export async function fetchOpsBiblio(publicationNumber: string, signal?: AbortSignal): Promise<PatentResult> {
   if (!hasOpsCredentials()) {
     throw new Error('EPO OPS credentials not configured. Set EPO_OPS_CONSUMER_KEY and EPO_OPS_CONSUMER_SECRET.');
   }
   const pn = stripKindCode(publicationNumber);
-  const parsed = await getJson(`/published-data/publication/epodoc/${pn}/biblio`);
+  const parsed = await getJson(`/published-data/publication/epodoc/${pn}/biblio`, signal);
   const doc = exchangeDocumentOf(parsed);
   const bib = (doc['bibliographic-data'] || {}) as BadgerFish;
 
@@ -138,11 +138,11 @@ export async function fetchOpsBiblio(publicationNumber: string): Promise<PatentR
   };
 }
 
-export async function fetchOpsAbstract(publicationNumber: string): Promise<string | undefined> {
+export async function fetchOpsAbstract(publicationNumber: string, signal?: AbortSignal): Promise<string | undefined> {
   if (!hasOpsCredentials()) {
     throw new Error('EPO OPS credentials not configured. Set EPO_OPS_CONSUMER_KEY and EPO_OPS_CONSUMER_SECRET.');
   }
-  const parsed = await getJson(`/published-data/publication/epodoc/${stripKindCode(publicationNumber)}/abstract`);
+  const parsed = await getJson(`/published-data/publication/epodoc/${stripKindCode(publicationNumber)}/abstract`, signal);
   const doc = exchangeDocumentOf(parsed);
   const abstracts = asArray(doc['abstract'] as BadgerFish[]);
   const chosen = pickEnglish(abstracts);
@@ -161,12 +161,12 @@ function flattenClaimText(node: BadgerFish): string[] {
   return out;
 }
 
-export async function fetchOpsClaims(publicationNumber: string): Promise<PatentClaimsSection> {
+export async function fetchOpsClaims(publicationNumber: string, signal?: AbortSignal): Promise<PatentClaimsSection> {
   if (!hasOpsCredentials()) {
     throw new Error('EPO OPS credentials not configured. Set EPO_OPS_CONSUMER_KEY and EPO_OPS_CONSUMER_SECRET.');
   }
   const pn = stripKindCode(publicationNumber);
-  const parsed = await getJson(`/published-data/publication/epodoc/${pn}/claims`);
+  const parsed = await getJson(`/published-data/publication/epodoc/${pn}/claims`, signal);
   const world = (parsed['ops:world-patent-data'] || {}) as BadgerFish;
   const ftxt = (world['ftxt:fulltext-documents'] || {}) as BadgerFish;
   const fdoc = (ftxt['ftxt:fulltext-document'] || {}) as BadgerFish;
@@ -197,14 +197,14 @@ export async function fetchOpsClaims(publicationNumber: string): Promise<PatentC
   return { claims: out, number_of_claims: texts.length, source: 'ops', _warn: warn };
 }
 
-export async function fetchOpsCitations(publicationNumber: string): Promise<PatentCitationsSection> {
+export async function fetchOpsCitations(publicationNumber: string, signal?: AbortSignal): Promise<PatentCitationsSection> {
   if (!hasOpsCredentials()) {
     throw new Error('EPO OPS credentials not configured. Set EPO_OPS_CONSUMER_KEY and EPO_OPS_CONSUMER_SECRET.');
   }
   const pn = stripKindCode(publicationNumber);
 
   // Backward references come from the biblio record.
-  const biblio = await getJson(`/published-data/publication/epodoc/${pn}/biblio`);
+  const biblio = await getJson(`/published-data/publication/epodoc/${pn}/biblio`, signal);
   const doc = exchangeDocumentOf(biblio);
   const bib = (doc['bibliographic-data'] || {}) as BadgerFish;
   const refsContainer = (bib['references-cited'] || {}) as BadgerFish;
@@ -236,7 +236,7 @@ export async function fetchOpsCitations(publicationNumber: string): Promise<Pate
   // Forward citations via CQL ct= search.
   const forward: PatentCitationEntry[] = [];
   try {
-    const searchResp = await opsClient.get(`/published-data/search?q=${encodeURIComponent(`ct=${pn}`)}&Range=1-100`);
+    const searchResp = await opsClient.get(`/published-data/search?q=${encodeURIComponent(`ct=${pn}`)}&Range=1-100`, undefined, { signal });
     if (searchResp.status === 200) {
       const parsedSearch = JSON.parse(searchResp.body) as BadgerFish;
       const world = (parsedSearch['ops:world-patent-data'] || {}) as BadgerFish;
@@ -256,11 +256,11 @@ export async function fetchOpsCitations(publicationNumber: string): Promise<Pate
   return { backward, forward, non_patent_literature: npl.length > 0 ? npl : undefined, source: 'ops' };
 }
 
-export async function fetchOpsFamily(publicationNumber: string): Promise<PatentFamilySection> {
+export async function fetchOpsFamily(publicationNumber: string, signal?: AbortSignal): Promise<PatentFamilySection> {
   if (!hasOpsCredentials()) {
     throw new Error('EPO OPS credentials not configured. Set EPO_OPS_CONSUMER_KEY and EPO_OPS_CONSUMER_SECRET.');
   }
-  const parsed = await getJson(`/family/publication/epodoc/${stripKindCode(publicationNumber)}`);
+  const parsed = await getJson(`/family/publication/epodoc/${stripKindCode(publicationNumber)}`, signal);
   const world = (parsed['ops:world-patent-data'] || {}) as BadgerFish;
   const family = (world['ops:patent-family'] || {}) as BadgerFish;
   const members = asArray(family['ops:family-member'] as BadgerFish[]);
@@ -278,8 +278,8 @@ export async function fetchOpsFamily(publicationNumber: string): Promise<PatentF
   return { family_members: Array.from(new Set(pubs)), source: 'ops' };
 }
 
-export async function fetchOpsClassifications(publicationNumber: string): Promise<PatentClassificationsSection> {
-  const biblio = await fetchOpsBiblio(publicationNumber);
+export async function fetchOpsClassifications(publicationNumber: string, signal?: AbortSignal): Promise<PatentClassificationsSection> {
+  const biblio = await fetchOpsBiblio(publicationNumber, signal);
   return {
     cpc: biblio.cpc || [],
     ipc: biblio.ipc || [],

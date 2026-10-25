@@ -24,7 +24,7 @@ interface OdpWrapper {
   grantDocumentMetaData?: unknown;
 }
 
-export async function fetchOdpCore(publicationNumber: string): Promise<PatentResult> {
+export async function fetchOdpCore(publicationNumber: string, signal?: AbortSignal): Promise<PatentResult> {
   if (!hasOdpKey()) {
     throw new Error('USPTO Open Data Portal key not configured. Set USPTO_API_KEY.');
   }
@@ -34,20 +34,24 @@ export async function fetchOdpCore(publicationNumber: string): Promise<PatentRes
 
   // Granted patents are reachable by patentNumber; applications by their
   // earliest publication number; both fall back to a validated text search.
+  // The whole lookup sequence runs under the uspto_odp chain-step budget
+  // (20s, issue #209): `signal` composes into every POST via RestConnection,
+  // so a step abort stops the sequence mid-attempt instead of running all
+  // three to their individual registry timeouts.
   let wrapper: OdpWrapper | undefined;
   const attempts: Array<() => Promise<{ patentFileWrapperDataBag?: OdpWrapper[] }>> = [
     () => conn.post('/api/v1/patent/applications/search', {
       q: `applicationMetaData.patentNumber:"${bare}"`,
       pagination: { offset: 0, limit: 1 },
-    }) as Promise<{ patentFileWrapperDataBag?: OdpWrapper[] }>,
+    }, { signal }) as Promise<{ patentFileWrapperDataBag?: OdpWrapper[] }>,
     () => conn.post('/api/v1/patent/applications/search', {
       q: `applicationMetaData.earliestPublicationNumber:"${bare}"`,
       pagination: { offset: 0, limit: 1 },
-    }) as Promise<{ patentFileWrapperDataBag?: OdpWrapper[] }>,
+    }, { signal }) as Promise<{ patentFileWrapperDataBag?: OdpWrapper[] }>,
     () => conn.post('/api/v1/patent/applications/search', {
       q: `(${bare})`,
       pagination: { offset: 0, limit: 1 },
-    }) as Promise<{ patentFileWrapperDataBag?: OdpWrapper[] }>,
+    }, { signal }) as Promise<{ patentFileWrapperDataBag?: OdpWrapper[] }>,
   ];
 
   for (const attempt of attempts) {
