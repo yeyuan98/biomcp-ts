@@ -35,9 +35,10 @@
  * `globalThis[Symbol.for('undici.globalDispatcher.1')]` assignment, which
  * Node's built-in fetch would bypass (it needs the Dispatcher1Wrapper that
  * setGlobalDispatcher installs). Side effect of that wrapper: it forces
- * `allowH2: false`, so built-in fetch is now HTTP/1-only in ALL
- * environments (previously only in proxy envs) — acceptable, no biomcp-ts
- * upstream requires HTTP/2.
+ * `allowH2: false`, pinning built-in fetch to HTTP/1 in all environments —
+ * explicitly what undici's default already was (`allowH2` defaults to
+ * false), so the pin is now guaranteed rather than incidental; no
+ * biomcp-ts upstream requires HTTP/2.
  *
  * Self-initializes exactly once at module scope (ESM single evaluation).
  * Imported for its side effect by connections/manager.ts, so the server,
