@@ -55,7 +55,13 @@ const JATS_DOC = `<?xml version="1.0" encoding="UTF-8"?>
 </article>`;
 
 const DOI = '10.1101/2025.03.05.641768';
-const JATS_URL = (v: number | string) => `https://www.biorxiv.org/content/${DOI}v${v}.source.xml`;
+// api.biorxiv.org /details now returns per-version DATED jatsxml URLs
+// (verified live 2026-10-24: v1 → /content/early/2025/03/10/…, v3 →
+// /content/early/2026/10/01/…) instead of the legacy
+// /content/<doi>v<n>.source.xml form. Production consumes record.jatsxml
+// verbatim, so this helper only keeps the fixture truthful to the API.
+const JATS_URL = (v: number | string) =>
+  `https://www.biorxiv.org/content/early/${Number(v) === 1 ? '2025/03/10' : '2026/10/01'}/${DOI}.source.xml`;
 
 describe('preprint-fulltext', () => {
   mockGlobalFetch();
@@ -255,7 +261,7 @@ describe('preprint-fulltext', () => {
   test('during cooldown, the newest cached version is served with a disclosure', async () => {
     // v1 downloads fine; v2 trips the cooldown
     global.fetch = standardRouter({
-      jats: (url: URL) => url.pathname.endsWith('v1.source.xml')
+      jats: (url: URL) => url.pathname.startsWith('/content/early/2025/03/10/')
         ? Promise.resolve(xmlResponse(JATS_DOC))
         : Promise.resolve(xmlResponse('error code: 1015', 429)),
     }) as any;
