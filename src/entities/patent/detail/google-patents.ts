@@ -1,10 +1,16 @@
 import { connectionManager } from '../../../connections/manager.js';
-import { fetchWithTimeout } from '../../../connections/fetch-utils.js';
 import { monotonicNowMs } from '../../../connections/time.js';
 import { parseGooglePatentHtml, type ParsedGooglePatent } from './parse.js';
 import { findWaybackSnapshot, fetchWaybackOriginal } from './wayback.js';
+import { PATENT_GET_BUDGETS_MS } from './budgets.js';
 
 const BLOCK_SIGNATURES = ['Sorry...', 'automated queries'];
+
+// Inner budgets of the google_patents chain step (issue #209). The live
+// leg's own cap is the `google_patents` registry handling.timeoutMs, which
+// mirrors steps.google_patents.inner.live (20s).
+const WAYBACK_PROBE_MS = PATENT_GET_BUDGETS_MS.steps.google_patents.inner.waybackProbe;
+const WAYBACK_PLAYBACK_MS = PATENT_GET_BUDGETS_MS.steps.google_patents.inner.waybackPlayback;
 
 let liveBlockedUntil = 0;
 
@@ -22,8 +28,12 @@ function looksLikeBlockPage(html: string): boolean {
  * Order: live fetch → on block/signature miss → Wayback snapshot (original
  * bytes, gzip-sniffed). Google Patents is unofficial and hard-IP-blocks
  * aggressive clients (verified), so the fallback is mandatory.
+ *
+ * `signal` (a patent_get chain-step/phase deadline, issue #209) aborts both
+ * the live fetch (via RestConnection's request options) and the Wayback
+ * legs, so an abandoned step stops consuming its connection slot.
  */
-export async function fetchGooglePatentDetail(publicationNumber: string): Promise<ParsedGooglePatent> {
+export async function fetchGooglePatentDetail(publicationNumber: string, signal?: AbortSignal): Promise<ParsedGooglePatent> {
   // normalizePublicationNumber also strips "/" — latent 404 bug fixed:
   // slash-form PCT numbers ("WO1998/056915") previously produced
   // /patent/WO1998/056915/en, which 404s (Google uses WO1998056915A1).
@@ -33,7 +43,7 @@ export async function fetchGooglePatentDetail(publicationNumber: string): Promis
 
   if (!isGooglePatentsDetailBlocked()) {
     try {
-      const html = await fetchLiveDetail(targetUrl);
+      const html = await fetchLiveDetail(targetUrl, signal);
       if (html) {
         if (looksLikeBlockPage(html)) {
           liveBlockedUntil = monotonicNowMs() + 30 * 60 * 1000;
@@ -49,9 +59,9 @@ export async function fetchGooglePatentDetail(publicationNumber: string): Promis
     }
   }
 
-  const snapshot = await findWaybackSnapshot(targetUrl);
+  const snapshot = await findWaybackSnapshot(targetUrl, WAYBACK_PROBE_MS, signal);
   if (snapshot) {
-    const html = await fetchWaybackOriginal(snapshot.idUrl);
+    const html = await fetchWaybackOriginal(snapshot.idUrl, WAYBACK_PLAYBACK_MS, signal);
     if (html && !looksLikeBlockPage(html)) {
       const parsed = parseGooglePatentHtml(html);
       if (parsed.title || parsed.publication_number || parsed.abstract) {
@@ -66,11 +76,11 @@ export async function fetchGooglePatentDetail(publicationNumber: string): Promis
   );
 }
 
-async function fetchLiveDetail(targetUrl: string): Promise<string | null> {
+async function fetchLiveDetail(targetUrl: string, signal?: AbortSignal): Promise<string | null> {
   const conn = connectionManager.getConnection('google_patents');
   try {
     const path = new URL(targetUrl).pathname + new URL(targetUrl).search;
-    const text = await conn.request(path) as string;
+    const text = await conn.request(path, undefined, { signal }) as string;
     return typeof text === 'string' ? text : null;
   } catch {
     return null;

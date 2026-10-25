@@ -1,11 +1,25 @@
 import { TokenBucketRateLimiter } from '../../connections/rate-limiter.js';
-import { fetchWithTimeout } from '../../connections/fetch-utils.js';
+import { fetchWithTimeout, sleepWithAbort } from '../../connections/fetch-utils.js';
 import { monotonicNowMs } from '../../connections/time.js';
+import { PATENT_GET_BUDGETS_MS } from './detail/budgets.js';
 
 const PPUBS_BASE = 'https://ppubs.uspto.gov';
 const REFERER = `${PPUBS_BASE}/pubwebapp/`;
 const USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const SESSION_TTL_MS = 25 * 60 * 1000;
+
+// Inner request budgets from the patent_get deadline-slicing table (issue
+// #209): session handshake ~3s and guid search ~1s measured live
+// (2026-10-24) → 8s/10s; document fetch measured ~13s → 22s headroom.
+// Together they fit the 40s PPUBS chain-step failover budget exactly.
+// patent_search keeps the wider legacy SEARCH_TIMEOUT_MS default: its 60s
+// tool budget and the seminal phase's own adaptive deadline (which its
+// deadline notes name) govern that side; the detail chain passes the
+// tighter table budget explicitly.
+const PPUBS_SESSION_MS = PATENT_GET_BUDGETS_MS.steps.ppubs.inner.session;
+const PPUBS_SEARCH_MS = PATENT_GET_BUDGETS_MS.steps.ppubs.inner.search;
+const PPUBS_DOCUMENT_MS = PATENT_GET_BUDGETS_MS.steps.ppubs.inner.document;
+const PPUBS_SEARCH_TIMEOUT_MS = 30000;
 
 export interface PpubsSession {
   token: string;
@@ -73,18 +87,18 @@ export class PpubsClient {
   private sessionPromise: Promise<PpubsSession> | null = null;
   private readonly rateLimiter = new TokenBucketRateLimiter({ intervalMs: 1000 });
 
-  async getSession(): Promise<PpubsSession> {
+  async getSession(signal?: AbortSignal): Promise<PpubsSession> {
     if (this.session && monotonicNowMs() < this.session.expiresAt) {
       return this.session;
     }
     if (!this.sessionPromise) {
-      this.sessionPromise = this.establishSession()
+      this.sessionPromise = this.establishSession(signal)
         .finally(() => { this.sessionPromise = null; });
     }
     return this.sessionPromise;
   }
 
-  private async establishSession(): Promise<PpubsSession> {
+  private async establishSession(signal?: AbortSignal): Promise<PpubsSession> {
     const { data, error } = await fetchWithTimeout(async (signal) => {
       const resp = await fetch(`${PPUBS_BASE}/api/users/me/session`, {
         method: 'POST',
@@ -100,7 +114,7 @@ export class PpubsClient {
       const headers: Record<string, string> = {};
       resp.headers.forEach((v, k) => { headers[k] = v; });
       return { status: resp.status, headers, text: await resp.text() };
-    }, 15000);
+    }, PPUBS_SESSION_MS, { signal });
 
     if (error || !data || data.status !== 200) {
       const detail = error || (data ? `HTTP ${data.status}` : 'unknown');
@@ -125,10 +139,15 @@ export class PpubsClient {
   private async rawRequest(
     method: 'GET' | 'POST',
     path: string,
-    init: { body?: string; sessionRetried?: boolean; rateRetried?: boolean }
+    init: { body?: string; sessionRetried?: boolean; rateRetried?: boolean; timeoutMs: number; signal?: AbortSignal }
   ): Promise<PpubsResponse> {
+    // Known limitation (issue #209): rateLimiter.acquire() takes no signal,
+    // so a call aborted while queued for a token still executes afterwards
+    // (and still consumes a slot in the shared 1 req/s bucket). The abort
+    // still frees the chain step for failover and the tool deadline still
+    // returns; only the abandoned HTTP request itself is unavoidable.
     await this.rateLimiter.acquire();
-    const session = await this.getSession();
+    const session = await this.getSession(init.signal);
 
     const { data, error } = await fetchWithTimeout(async (signal) => {
       const resp = await fetch(`${PPUBS_BASE}${path}`, {
@@ -145,7 +164,7 @@ export class PpubsClient {
       const headers: Record<string, string> = {};
       resp.headers.forEach((v, k) => { headers[k] = v; });
       return { status: resp.status, headers, body: await resp.text() };
-    }, 30000);
+    }, init.timeoutMs, { signal: init.signal });
 
     if (error) {
       throw new Error(`USPTO Public Search request failed: ${error}`);
@@ -157,7 +176,7 @@ export class PpubsClient {
     // Session expiry (observed as both 401 and 403) → refresh once and retry.
     if ((data.status === 401 || data.status === 403) && !init.sessionRetried) {
       this.session = null;
-      const fresh = await this.getSession();
+      const fresh = await this.getSession(init.signal);
       let body = init.body;
       if (body) {
         try {
@@ -170,13 +189,15 @@ export class PpubsClient {
           // Non-JSON body: retry with it unchanged rather than dropping it.
         }
       }
-      return this.rawRequest(method, path, { body, sessionRetried: true, rateRetried: init.rateRetried });
+      return this.rawRequest(method, path, { body, sessionRetried: true, rateRetried: init.rateRetried, timeoutMs: init.timeoutMs, signal: init.signal });
     }
 
     if (data.status === 429 && !init.rateRetried) {
       const waitMs = Number(data.headers['x-rate-limit-retry-after-seconds'] || '5') * 1000;
-      await new Promise(r => setTimeout(r, Math.min(waitMs, 30000)));
-      return this.rawRequest(method, path, { body: init.body, sessionRetried: init.sessionRetried, rateRetried: true });
+      // Abortable wait: an abandoned call must not wake up past its chain
+      // deadline and fire another request into the shared rate limiter.
+      await sleepWithAbort(Math.min(waitMs, 30000), init.signal);
+      return this.rawRequest(method, path, { body: init.body, sessionRetried: init.sessionRetried, rateRetried: true, timeoutMs: init.timeoutMs, signal: init.signal });
     }
 
     return data;
@@ -187,9 +208,14 @@ export class PpubsClient {
    * (pfizer).as.`). `databases` defaults to applications + grants + OCR.
    * `sort` is a required upstream body key — verified values are
    * `'score desc'` (relevance) and `'date_publ desc'` (recency; default).
+   * `timeoutMs` defaults to the patent_search-side 30s; the patent_get
+   * detail chain passes the tighter table budget (PPUBS_SEARCH_MS).
    */
-  async search(q: string, options: { start?: number; pageCount?: number; databases?: string[]; sort?: string } = {}): Promise<PpubsResponse> {
-    const session = await this.getSession();
+  async search(
+    q: string,
+    options: { start?: number; pageCount?: number; databases?: string[]; sort?: string; timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<PpubsResponse> {
+    const session = await this.getSession(options.signal);
     const body = searchBody(
       session.caseId,
       q,
@@ -198,15 +224,19 @@ export class PpubsClient {
       options.databases ?? ['US-PGPUB', 'USPAT', 'USOCR'],
       options.sort ?? 'date_publ desc',
     );
-    return this.rawRequest('POST', '/api/searches/searchWithBeFamily', { body: JSON.stringify(body) });
+    return this.rawRequest('POST', '/api/searches/searchWithBeFamily', {
+      body: JSON.stringify(body),
+      timeoutMs: options.timeoutMs ?? PPUBS_SEARCH_TIMEOUT_MS,
+      signal: options.signal,
+    });
   }
 
   /** Fetch the full document record for a search-result guid. */
-  async getDocument(guid: string, sourceType: string): Promise<PpubsResponse> {
+  async getDocument(guid: string, sourceType: string, signal?: AbortSignal): Promise<PpubsResponse> {
     return this.rawRequest(
       'GET',
       `/api/patents/highlight/${encodeURIComponent(guid)}?queryId=1&source=${encodeURIComponent(sourceType)}&includeSections=true&uniqueId=`,
-      {},
+      { timeoutMs: PPUBS_DOCUMENT_MS, signal },
     );
   }
 

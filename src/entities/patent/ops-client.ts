@@ -1,10 +1,17 @@
 import { TokenBucketRateLimiter } from '../../connections/rate-limiter.js';
-import { fetchWithTimeout } from '../../connections/fetch-utils.js';
+import { fetchWithTimeout, sleepWithAbort } from '../../connections/fetch-utils.js';
 import { HttpConnectionError } from '../../connections/errors.js';
 import { monotonicNowMs } from '../../connections/time.js';
+import { PATENT_GET_BUDGETS_MS } from './detail/budgets.js';
 
 const OPS_BASE = 'https://ops.epo.org/3.2';
 const TOKEN_TTL_MS = 18 * 60 * 1000;
+
+// Inner request budgets from the patent_get deadline-slicing table (issue
+// #209): OAuth token handshake 8s + one REST get 15s = 23s under the 25s
+// OPS chain-step failover budget.
+const OPS_TOKEN_MS = PATENT_GET_BUDGETS_MS.steps.ops.inner.token;
+const OPS_REQUEST_MS = PATENT_GET_BUDGETS_MS.steps.ops.inner.request;
 
 const OPS_BACKOFF_MS = 15 * 60 * 1000;
 const OPS_CONSECUTIVE_FAILURES = 2;
@@ -82,18 +89,18 @@ export class OpsClient {
   private tokenPromise: Promise<string> | null = null;
   private readonly rateLimiter = new TokenBucketRateLimiter({ intervalMs: 1000 });
 
-  async getToken(): Promise<string> {
+  async getToken(signal?: AbortSignal): Promise<string> {
     if (this.tokenState && monotonicNowMs() < this.tokenState.expiresAt) {
       return this.tokenState.token;
     }
     if (!this.tokenPromise) {
-      this.tokenPromise = this.fetchToken()
+      this.tokenPromise = this.fetchToken(signal)
         .finally(() => { this.tokenPromise = null; });
     }
     return this.tokenPromise;
   }
 
-  private async fetchToken(): Promise<string> {
+  private async fetchToken(signal?: AbortSignal): Promise<string> {
     const key = process.env.EPO_OPS_CONSUMER_KEY || '';
     const secret = process.env.EPO_OPS_CONSUMER_SECRET || '';
     const basic = Buffer.from(`${key}:${secret}`).toString('base64');
@@ -111,7 +118,7 @@ export class OpsClient {
         status: resp.status,
         text: await resp.text(),
       };
-    }, 15000);
+    }, OPS_TOKEN_MS, { signal });
 
     if (error || !data || data.status !== 200) {
       const detail = error || (data ? `HTTP ${data.status}: ${data.text.slice(0, 200)}` : 'unknown');
@@ -142,13 +149,18 @@ export class OpsClient {
    * Transient rate limits (reason containing "RateLimit", or 429) are
    * retried once after a backoff; quota-class rejections are not retried —
    * they record an auto-mode failure and throw. Returns raw text.
+   *
+   * Known limitation (issue #209): rateLimiter.acquire() takes no signal,
+   * so a call aborted while queued for a token still executes afterwards.
+   * The abort still frees the chain step for failover and the tool
+   * deadline still returns.
    */
-  async get(path: string, timeoutMs = 20000): Promise<OpsResponse> {
+  async get(path: string, timeoutMs = OPS_REQUEST_MS, opts: { signal?: AbortSignal } = {}): Promise<OpsResponse> {
     let lastError: string | null = null;
 
     for (let attempt = 0; attempt < 2; attempt++) {
       await this.rateLimiter.acquire();
-      const token = await this.getToken();
+      const token = await this.getToken(opts.signal);
       const { data, error } = await fetchWithTimeout(async (signal) => {
         const resp = await fetch(`${OPS_BASE}/rest-services${path}`, {
           headers: {
@@ -164,7 +176,7 @@ export class OpsClient {
           headers,
           body: await resp.text(),
         };
-      }, timeoutMs);
+      }, timeoutMs, { signal: opts.signal });
 
       if (error) {
         lastError = `EPO OPS request failed: ${error}`;
@@ -181,7 +193,9 @@ export class OpsClient {
         const reason = rejection || 'rate limit exceeded';
         const transient = data.status === 429 || /RateLimit/i.test(reason);
         if (transient && attempt === 0) {
-          await new Promise(r => setTimeout(r, 2000));
+          // Abortable backoff: an abandoned call must not wake up past its
+          // chain deadline and fire another request into the rate limiter.
+          await sleepWithAbort(2000, opts.signal);
           continue;
         }
         const message = transient

@@ -1,8 +1,13 @@
 import { ppubsClient } from '../ppubs-client.js';
 import { stripHtml } from '../../html-utils.js';
 import type { PatentClaimsSection, PatentResult } from '../types.js';
+import { PATENT_GET_BUDGETS_MS } from './budgets.js';
 
 const CLAIMS_CAP_BYTES = 100_000;
+// The guid-resolution search is a 1-page `("<number>").pn.` lookup
+// (measured ~1s live) — the tight table budget, not the patent_search-side
+// 30s default, keeps the PPUBS chain step inside its 40s failover budget.
+const PPUBS_GUID_SEARCH_MS = PATENT_GET_BUDGETS_MS.steps.ppubs.inner.search;
 
 interface PpubsDocumentRecord {
   guid?: string;
@@ -34,10 +39,11 @@ interface PpubsDocumentRecord {
  * `("<number>").pn.` search.
  */
 export async function resolvePpubsGuid(
-  publicationNumber: string
+  publicationNumber: string,
+  signal?: AbortSignal,
 ): Promise<{ guid: string; sourceType: string } | null> {
   const number = publicationNumber.toUpperCase().replace(/^US/, '').replace(/[A-Z]\d?$/, '');
-  const resp = await ppubsClient.search(`("${number}").pn.`, { pageCount: 1 });
+  const resp = await ppubsClient.search(`("${number}").pn.`, { pageCount: 1, timeoutMs: PPUBS_GUID_SEARCH_MS, signal });
   if (resp.status !== 200) return null;
   let parsed: { patents?: PpubsDocumentRecord[] };
   try {
@@ -50,12 +56,12 @@ export async function resolvePpubsGuid(
   return { guid: hit.guid, sourceType: hit.type || 'USPAT' };
 }
 
-async function fetchPpubsDocument(publicationNumber: string): Promise<PpubsDocumentRecord> {
-  const resolved = await resolvePpubsGuid(publicationNumber);
+async function fetchPpubsDocument(publicationNumber: string, signal?: AbortSignal): Promise<PpubsDocumentRecord> {
+  const resolved = await resolvePpubsGuid(publicationNumber, signal);
   if (!resolved) {
     throw new Error(`Patent '${publicationNumber}' not found in USPTO Public Search (PPUBS covers US publications only).`);
   }
-  const resp = await ppubsClient.getDocument(resolved.guid, resolved.sourceType);
+  const resp = await ppubsClient.getDocument(resolved.guid, resolved.sourceType, signal);
   if (resp.status !== 200) {
     throw new Error(`USPTO Public Search document fetch failed: HTTP ${resp.status}`);
   }
@@ -66,8 +72,8 @@ async function fetchPpubsDocument(publicationNumber: string): Promise<PpubsDocum
   }
 }
 
-export async function fetchPpubsCore(publicationNumber: string): Promise<PatentResult> {
-  const doc = await fetchPpubsDocument(publicationNumber);
+export async function fetchPpubsCore(publicationNumber: string, signal?: AbortSignal): Promise<PatentResult> {
+  const doc = await fetchPpubsDocument(publicationNumber, signal);
   const number = (doc.publicationReferenceDocumentNumber || publicationNumber).replace(/^US/, '');
   const kind = doc.guid?.split('-').pop() || '';
   const org = doc.assigneeName?.filter(Boolean) || doc.applicantName?.filter(Boolean) || [];
@@ -161,8 +167,8 @@ function splitClaimsHtml(claimsHtml: string): { claims: string[]; method: 'num' 
   return { claims: blob ? [blob] : [], method: 'blob' };
 }
 
-export async function fetchPpubsClaims(publicationNumber: string): Promise<PatentClaimsSection> {
-  const doc = await fetchPpubsDocument(publicationNumber);
+export async function fetchPpubsClaims(publicationNumber: string, signal?: AbortSignal): Promise<PatentClaimsSection> {
+  const doc = await fetchPpubsDocument(publicationNumber, signal);
   if (!doc.claimsHtml) {
     throw new Error(`No claims text available via USPTO Public Search for ${publicationNumber}.`);
   }
@@ -207,8 +213,8 @@ export async function fetchPpubsClaims(publicationNumber: string): Promise<Paten
   };
 }
 
-export async function fetchPpubsCitations(publicationNumber: string) {
-  const doc = await fetchPpubsDocument(publicationNumber);
+export async function fetchPpubsCitations(publicationNumber: string, signal?: AbortSignal) {
+  const doc = await fetchPpubsDocument(publicationNumber, signal);
   const backward: Array<{ publication_number?: string; publication_date?: string; assignee?: string }> = [];
 
   const usNums = doc.usRefPatentNumber || [];

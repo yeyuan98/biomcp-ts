@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { patentSearch, patentGet, PATENT_GET_SECTIONS, PATENT_SEARCH_TOOL_BUDGET_MS } from '../../entities/patent/index.js';
-import { applyLimit, patentIdParam, withToolTimeout } from './utils.js';
+import { applyLimit, patentIdParam, withToolTimeout, type CancellationCapableExtra } from './utils.js';
 
 // Derived from the entity-exported budget so the seminal mining phase can
 // size itself against the real tool timeout (see search/index.ts).
@@ -73,7 +73,9 @@ export function registerPatentTools(server: McpServer): void {
       description:
         'Get patent details by publication number (e.g. "US11027025B2", "EP3904939B1", "US20260240819A1"). ' +
         'Sections: abstract, claims (US fulltext via USPTO Public Search; EP/WO via EPO OPS when configured, otherwise Google Patents pages — see per-section source fields), ' +
-        'citations (backward + forward), family, classifications.',
+        'citations (backward + forward), family, classifications. ' +
+        'US claims may fall back to an unofficial Google Patents rendering when PPUBS is slow or unreachable — flagged in _warnings. ' +
+        'Section failures are reported per section (inline error entry plus a _warnings note), never by failing the whole call.',
       inputSchema: {
         patent_id: patentIdParam().describe('Publication number, e.g. "US11027025B2"'),
         sections: z.array(z.enum(PATENT_GET_SECTIONS)).optional().describe('Sections to include (default: core only)'),
@@ -81,9 +83,17 @@ export function registerPatentTools(server: McpServer): void {
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async ({ patent_id, sections, limit }) => {
+    async ({ patent_id, sections, limit }, extra: CancellationCapableExtra) => {
       try {
-        const result = await withToolTimeout(patentGet(patent_id, sections), GET_TIMEOUT_MS);
+        // Function form so the 120s deadline produces an abortable chain
+        // (gene_get precedent): patentGet slices the deadline into core and
+        // sections phases whose expiry aborts in-flight fetches instead of
+        // merely abandoning the race (issue #209).
+        const result = await withToolTimeout(
+          (signal) => patentGet(patent_id, sections, signal),
+          GET_TIMEOUT_MS,
+          { signal: extra?.signal },
+        );
         const requestedSections = (sections ?? []).includes('all')
           ? PATENT_ALL_SECTIONS
           : (sections ?? []);

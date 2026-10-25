@@ -463,7 +463,10 @@ export const SOURCE_REGISTRY: Record<string, ConnectionOptions> = {
     baseUrl: 'https://patents.google.com',
     protocol: 'rest',
     handling: {
-      timeoutMs: 30000,
+      // Mirrors the google_patents chain-step inner budget in
+      // src/entities/patent/detail/budgets.ts (issue #209): block pages
+      // return fast, and a hang should not hold a patent_get step for 30s.
+      timeoutMs: 20000,
       headers: {
         'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
       },
