@@ -95,13 +95,14 @@ Activates the `analysis_bam_summary` / `analysis_bam_view_region` / `analysis_bc
 
 ## Proxy
 
-Honored by every upstream request via proxy-aware global fetch (undici).
+Honored by every upstream request via the always-installed proxy-aware global fetch dispatcher (undici).
 
 | Variable | Purpose |
 |----------|---------|
 | `HTTPS_PROXY` / `https_proxy` | Proxy for HTTPS requests |
 | `HTTP_PROXY` / `http_proxy` | Proxy for HTTP requests |
 | `NO_PROXY` / `no_proxy` | Comma-separated hosts to bypass the proxy |
+| `BIOMCP_CONNECT_ATTEMPT_TIMEOUT_MS` | Per-attempt TCP connect timeout (ms) for the global fetch dispatcher's Happy Eyeballs IPv6/IPv4 racing — default `2000`, clamped to 250–10000, invalid values fall back to the default. Direct traffic only: with a proxy set, the origin connect is the proxy's job |
 
 ## Test-only
 
