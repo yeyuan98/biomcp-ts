@@ -1,4 +1,5 @@
 import { opsClient, hasOpsCredentials } from '../ops-client.js';
+import { PATENT_GET_BUDGETS_MS } from './budgets.js';
 import type {
   PatentCitationEntry,
   PatentClaimsSection,
@@ -40,7 +41,7 @@ function isoDate(yyyymmdd: string | undefined): string | undefined {
 }
 
 async function getJson(path: string, signal?: AbortSignal): Promise<BadgerFish> {
-  const resp = await opsClient.get(path, undefined, { signal });
+  const resp = await opsClient.get(path, PATENT_GET_BUDGETS_MS.steps.ops.inner.request, { signal });
   if (resp.status !== 200) {
     throw new Error(`EPO OPS request failed (HTTP ${resp.status}): ${path} — ${resp.body.slice(0, 150)}`);
   }
@@ -236,7 +237,7 @@ export async function fetchOpsCitations(publicationNumber: string, signal?: Abor
   // Forward citations via CQL ct= search.
   const forward: PatentCitationEntry[] = [];
   try {
-    const searchResp = await opsClient.get(`/published-data/search?q=${encodeURIComponent(`ct=${pn}`)}&Range=1-100`, undefined, { signal });
+    const searchResp = await opsClient.get(`/published-data/search?q=${encodeURIComponent(`ct=${pn}`)}&Range=1-100`, PATENT_GET_BUDGETS_MS.steps.ops.inner.request, { signal });
     if (searchResp.status === 200) {
       const parsedSearch = JSON.parse(searchResp.body) as BadgerFish;
       const world = (parsedSearch['ops:world-patent-data'] || {}) as BadgerFish;

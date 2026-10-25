@@ -35,7 +35,9 @@
  *     hang deserves the full budget) + Wayback probe 6s + playback 18s
  *     = 44s under a 45s step.
  *   - ppubs: session 8s (warm-cold handshake) + guid search 10s + document
- *     22s (13s measured → ~1.7× headroom for big claims payloads) = 40s.
+ *     22s (13s measured → ~1.7× headroom for big claims payloads) = 40s
+ *     under a 45s step — the 5s slack absorbs the shared 1 req/s token
+ *     bucket queueing concurrent section chains.
  *     (patent_search keeps its own legacy 30s search-side budget — its 60s
  *     tool budget and the seminal phase's adaptive deadline govern there;
  *     only the patent_get detail chain consumes the table values.)
@@ -66,7 +68,7 @@ export const PATENT_GET_BUDGETS_MS = {
       inner: { live: 20_000, waybackProbe: 6_000, waybackPlayback: 18_000 },
     },
     ppubs: {
-      step: 40_000,
+      step: 45_000,
       inner: { session: 8_000, search: 10_000, document: 22_000 },
     },
     ops: {

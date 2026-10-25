@@ -11,7 +11,11 @@ const TOKEN_TTL_MS = 18 * 60 * 1000;
 // #209): OAuth token handshake 8s + one REST get 15s = 23s under the 25s
 // OPS chain-step failover budget.
 const OPS_TOKEN_MS = PATENT_GET_BUDGETS_MS.steps.ops.inner.token;
-const OPS_REQUEST_MS = PATENT_GET_BUDGETS_MS.steps.ops.inner.request;
+// Default per-request budget for the patent_search side (legacy 20s —
+// pre-#215 behavior; search/ops.ts and search/seminal.ts rely on it).
+// The patent_get detail chain passes the tighter table value
+// (steps.ops.inner.request) explicitly at its call sites.
+const OPS_REQUEST_DEFAULT_MS = 20_000;
 
 const OPS_BACKOFF_MS = 15 * 60 * 1000;
 const OPS_CONSECUTIVE_FAILURES = 2;
@@ -155,7 +159,7 @@ export class OpsClient {
    * The abort still frees the chain step for failover and the tool
    * deadline still returns.
    */
-  async get(path: string, timeoutMs = OPS_REQUEST_MS, opts: { signal?: AbortSignal } = {}): Promise<OpsResponse> {
+  async get(path: string, timeoutMs = OPS_REQUEST_DEFAULT_MS, opts: { signal?: AbortSignal } = {}): Promise<OpsResponse> {
     let lastError: string | null = null;
 
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -180,6 +184,9 @@ export class OpsClient {
 
       if (error) {
         lastError = `EPO OPS request failed: ${error}`;
+        // An aborted call must not burn its one retry (a second
+        // rate-limiter wait + immediately-aborted fetch) — surface now.
+        if (opts.signal?.aborted) throw new Error(lastError);
         continue;
       }
       if (!data) {

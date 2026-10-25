@@ -145,7 +145,7 @@ single source of truth is `detail/budgets.ts`):
   Jest fake-timer suite).
 - Every chain source runs under its own **per-step failover budget**
   (`AbortController` + `setTimeout`, composed with the phase slice):
-  google_patents 45 s, ppubs 40 s, ops 25 s, uspto_odp 20 s. On expiry the
+  google_patents 45 s, ppubs 45 s, ops 25 s, uspto_odp 20 s. On expiry the
   race settles first with the failover error, THEN the step aborts — the
   abandoned fetch actually stops instead of lingering on the shared
   1 req/s PPUBS token bucket (the pre-#209 `Promise.race` never aborted
