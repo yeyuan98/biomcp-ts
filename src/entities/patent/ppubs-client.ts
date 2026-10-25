@@ -11,13 +11,12 @@ const SESSION_TTL_MS = 25 * 60 * 1000;
 // Inner request budgets from the patent_get deadline-slicing table (issue
 // #209): session handshake ~3s and guid search ~1s measured live
 // (2026-10-24) → 8s/10s; document fetch measured ~13s → 22s headroom.
-// Together they fit the 40s PPUBS chain-step failover budget exactly.
+// Together they fit inside the 45s PPUBS chain-step failover budget.
 // patent_search keeps the wider legacy SEARCH_TIMEOUT_MS default: its 60s
 // tool budget and the seminal phase's own adaptive deadline (which its
 // deadline notes name) govern that side; the detail chain passes the
 // tighter table budget explicitly.
 const PPUBS_SESSION_MS = PATENT_GET_BUDGETS_MS.steps.ppubs.inner.session;
-const PPUBS_SEARCH_MS = PATENT_GET_BUDGETS_MS.steps.ppubs.inner.search;
 const PPUBS_DOCUMENT_MS = PATENT_GET_BUDGETS_MS.steps.ppubs.inner.document;
 const PPUBS_SEARCH_TIMEOUT_MS = 30000;
 
@@ -209,7 +208,8 @@ export class PpubsClient {
    * `sort` is a required upstream body key — verified values are
    * `'score desc'` (relevance) and `'date_publ desc'` (recency; default).
    * `timeoutMs` defaults to the patent_search-side 30s; the patent_get
-   * detail chain passes the tighter table budget (PPUBS_SEARCH_MS).
+   * detail chain passes the tighter table budget
+   * (PATENT_GET_BUDGETS_MS.steps.ppubs.inner.search).
    */
   async search(
     q: string,

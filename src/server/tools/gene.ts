@@ -12,11 +12,14 @@ import { applyLimit, listEnvelope, remapSectionKeysToRequested, requiredString, 
 const GENE_GET_TIMEOUT_MS = 40000;
 
 // Deadline rationale (#211): gene_enrich makes TWO sequential Reactome
-// AnalysisService POSTs measured at 8–22 s each (25 s registry budget, one
-// 1 s-backoff retry, 52 s per-POST budget) — 90 s bounds the full
-// worst-case chain including a retry on each POST while still terminating
-// signal-ignoring stragglers.
-const GENE_ENRICH_TIMEOUT_MS = 90000;
+// AnalysisService POSTs measured at 8–22 s each. Each POST carries a 25 s
+// timeout + one 1 s-backoff retry inside a 52 s budget (worst case per
+// POST ≈ 51.2 s including retry-jitter) — so the full worst-case chain is
+// ≈ 103 s, and the deadline must sit ABOVE it to avoid firing mid-retry
+// on a call that would still have succeeded. geneEnrichment takes no
+// signal, so the deadline cannot cancel in-flight POSTs — but the retry
+// budget bounds any straggler to ≈ 103 s on its own.
+const GENE_ENRICH_TIMEOUT_MS = 105000;
 
 const GENE_SECTIONS = [
   'core', 'pathways', 'ontology', 'diseases', 'protein',
@@ -227,7 +230,7 @@ export function registerGeneTools(server: McpServer): void {
   server.registerTool(
     'gene_enrich',
     {
-      description: 'Perform pathway enrichment analysis for a gene list (Reactome over-representation). Requires at least 3 genes; the list is deduplicated (case-insensitive) before submission. Each pathway reports genes_overlap — the count of unique SUBMITTED genes Reactome matched there, resolved with one follow-up token lookup (Reactome\'s entity-level match count can exceed the gene count when one gene maps to multiple entities, e.g. a UniProt entry plus Ensembl gene/transcript). The reply also reports how many pathways Reactome found in total alongside the returned page. Typical completion is 15–45 s (the Reactome analysis takes 8–22 s per step across two sequential steps), with a worst case around 90 s including one retry; requires reachability of reactome.org, and clients whose request timeout is 60 s may need to raise it for large result follow-ups.',
+      description: 'Perform pathway enrichment analysis for a gene list (Reactome over-representation). Requires at least 3 genes; the list is deduplicated (case-insensitive) before submission. Each pathway reports genes_overlap — the count of unique SUBMITTED genes Reactome matched there, resolved with one follow-up token lookup (Reactome\'s entity-level match count can exceed the gene count when one gene maps to multiple entities, e.g. a UniProt entry plus Ensembl gene/transcript). The reply also reports how many pathways Reactome found in total alongside the returned page. Typical completion is 15–45 s (the Reactome analysis takes 8–22 s per step across two sequential steps), with a worst case around 105 s including one retry per step; requires reachability of reactome.org, and clients whose request timeout is 60 s may need to raise it for large result follow-ups.',
       inputSchema: {
         genes: z.array(z.string()).min(3, 'Gene enrichment requires at least 3 genes').describe('List of HGNC gene symbols (minimum 3; duplicates and case variants are collapsed before submission)'),
         limit: z.number().int().min(1).max(100).default(30).describe('Maximum pathways to return (1-100; Reactome reports up to ~100)'),
