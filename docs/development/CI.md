@@ -86,7 +86,11 @@ Since #164 the job is **two-tier on GitHub Actions**:
    here fails the job exactly as before.
 2. **Best-effort known-offenders step** — ONLY the five pinned offender
    files, run with `continue-on-error: true` (and `if: always()`), teed to
-   `known-offenders.log`:
+   `known-offenders.log`. Since #222 this step is **pull_request-only**
+   (push-to-main runs skip it) and **wall-clock-timeboxed** (a
+   `timeout --kill-after=15 450` wrapper plus a step-level
+   `timeout-minutes` backstop; a `TIMEBOX EXCEEDED` sentinel line marks a
+   truncated log and the summarizer renders it as partial):
 
    - `src/__tests__/integration/tools/ensembl-tools.test.ts` — Ensembl REST
      (rest.ensembl.org) intermittently throttles shared GitHub runner IPs;
@@ -103,7 +107,7 @@ Since #164 the job is **two-tier on GitHub Actions**:
 
    Their intermittent flakes stay visible — own step-summary section
    labeled non-gating, own `known-offenders-log` artifact uploaded on every
-   run — but can never fail the job.
+   PR run — but can never fail the job.
 
 The offender list is **pinned in `ci.yml`**: exactly those five paths, no
 others. ANY addition requires (1) a GitHub issue with triage evidence per
@@ -113,12 +117,19 @@ suite still gates and gets triaged like any other failure; per the
 rather than burning reruns. Timeout
 increases are off the table (maintainer decision, 2026-10-18): they are
 already generous; the failures are runner-side network conditions.
+Separately, the #222 wall-clock timebox + PR-only scheduling bound this
+tier's cost (a 2026-10-26 Ensembl throttling window burned 290 s in it on
+identical code and stretched the job 3m30s → 8m38s) — a different axis
+from the per-test timeout freeze, which stays in force.
 
 **Local runs are unchanged and authoritative:** `npm run
 test:integration` / `make test-integration` still runs every suite —
 offenders included — and fails on any failure. The split exists only
 inside the GitHub Actions job, because GitHub-hosted runner IP ranges are
-the environmental variable; your machine is not.
+the environmental variable; your machine is not. For a faster pre-release
+loop, `make test-integration-gating` runs the same subset as CI's gating
+step (the five offenders excluded); it is a convenience, never a
+substitute for the authoritative full run.
 
 What the two checks mean on a PR:
 

@@ -7,17 +7,19 @@
 #   audit → smoke. Also what makes dependabot auto-merge safe (see
 #   docs/development/CI.md).
 # - `integration` — the advisory tier, two steps since issue #164:
-#   1. the GATING step runs every live-API suite EXCEPT two known
-#      GitHub-runner offenders, still with NO continue-on-error, so a
-#      failure renders as a red ✗ named `integration` in the checks list
-#      (visible, impossible to miss) but the check is NOT required, so it
-#      never blocks merge. Failures must be triaged per the rubric in
-#      docs/development/CI.md.
-#   2. the BEST-EFFORT step runs ONLY the two offenders (Ensembl REST +
-#      arXiv — shared runner IPs get throttled by those upstreams) with
+#   1. the GATING step runs every live-API suite EXCEPT the five pinned
+#      known GitHub-runner offenders (list in the step below), still with
+#      NO continue-on-error, so a failure renders as a red ✗ named
+#      `integration` in the checks list (visible, impossible to miss) but
+#      the check is NOT required, so it never blocks merge. Failures must
+#      be triaged per the rubric in docs/development/CI.md.
+#   2. the BEST-EFFORT step runs ONLY those five offenders with
 #      continue-on-error: their intermittent flakes stay visible (own log
 #      artifact + a step-summary section labeled non-gating) but can never
-#      fail the job.
+#      fail the job. Since #222 it runs on pull_request ONLY (skipped on
+#      push to main) and is wall-clock-timeboxed — one 2026-10-26 Ensembl
+#      throttling window burned 290 s in this tier on identical code and
+#      stretched the job 3m30s → 8m38s on every push.
 #   Local runs are unaffected and authoritative: `make test-integration`
 #   runs and fails on every suite, offenders included.
 #
@@ -78,7 +80,7 @@ jobs:
   # MUST be triaged before merging.
   #
   # Two-tier contract (issue #164): the gating step runs every suite EXCEPT
-  # the two known GitHub-runner offenders below; those two run separately,
+  # the five known GitHub-runner offenders below; those five run separately,
   # best-effort and non-gating. LOCAL RUNS ARE UNCHANGED AND AUTHORITATIVE —
   # `npm run test:integration` / `make test-integration` still runs and fails
   # on every suite; the split exists only on GitHub-hosted runners.
@@ -122,6 +124,9 @@ jobs:
       # evidence per the rubric in docs/development/CI.md and (2) an explicit
       # maintainer decision — a new flaky suite still gates and gets triaged
       # like any other failure. Keep this list from growing into a blind spot.
+      # The #222 wall-clock timebox and PR-only scheduling below bound this
+      # tier's cost; they are a different axis from the 2026-10-18 per-test
+      # timeout freeze, which stays in force.
       - name: Integration tests (gating — known offenders excluded)
         shell: bash # explicit bash => -eo pipefail; the set below is belt-and-braces
         run: |
@@ -140,13 +145,27 @@ jobs:
       # files must not fail the advisory job. `if: always()` so they still
       # run — and stay visible in the log/summary/artifact — even when the
       # gating step failed; their status is orthogonal to it.
-      - name: Integration tests (known offenders — non-gating, best-effort)
-        if: always()
+      #
+      # Since #222: PR-only (push-to-main skips this tier — the 2026-10-26
+      # Ensembl window burned 290 s here on every push, stretching the job
+      # 3m30s → 8m38s) and wall-clock-timeboxed. The `timeout
+      # --kill-after=15 450` wrapper bounds the jest run (450 s is
+      # evidence-preserving: above the observed healthy ~85 s and above the
+      # 386 s incident worst case, so a single-suite burn still completes
+      # WITH its timeout diagnostics; multi-offender incidents get bounded).
+      # The sentinel line marks a truncated log for the summarizer.
+      # timeout-minutes is the hard backstop that kills the whole step tree —
+      # the wrapper alone cannot reach detached descendants holding the tee
+      # pipe. `set +e`/PIPESTATUS keep the timebox rc out of the -e trap.
+      - name: Integration tests (known offenders — non-gating, best-effort; PRs only, timeboxed)
+        if: always() && github.event_name == 'pull_request'
         continue-on-error: true
+        timeout-minutes: 8
         shell: bash
         run: |
           set -o pipefail # keep jest's real exit code visible in the log/summary even though this step cannot fail the job
-          npm run test:integration -- \
+          set +e # the timebox rc must reach the sentinel logic, not abort the script
+          timeout --kill-after=15 450 npm run test:integration -- \
             --runTestsByPath \
               src/__tests__/integration/tools/ensembl-tools.test.ts \
               src/__tests__/integration/tools/article-tools.test.ts \
@@ -154,6 +173,12 @@ jobs:
               src/__tests__/integration/tools/drug-tools.test.ts \
               src/__tests__/integration/tools/chaining-parity-ensembl.test.ts \
             2>&1 | tee known-offenders.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+            echo "KNOWN-OFFENDERS TIMEBOX EXCEEDED (timeout rc=$rc) — this log is PARTIAL (truncated at the 450 s wall-clock cap)" | tee -a known-offenders.log
+          fi
+          exit "$rc"
 
       # Runs on failure AND success: the all-green verdict is worth recording
       # too. Appends the verdict + failed-test table + triage rubric for the
@@ -163,10 +188,13 @@ jobs:
         if: always()
         run: |
           node --import tsx scripts/ci/integration-summary.ts integration.log
-          node --import tsx scripts/ci/integration-summary.ts known-offenders.log \
-            --title "Known-offender tier (non-gating)" \
-            --artifact known-offenders-log \
-            --non-gating
+          # PR-only tier (#222): no known-offenders.log exists on push runs.
+          if [ -f known-offenders.log ]; then
+            node --import tsx scripts/ci/integration-summary.ts known-offenders.log \
+              --title "Known-offender tier (non-gating)" \
+              --artifact known-offenders-log \
+              --non-gating
+          fi
 
       # Full raw jest output for reviewers (retained per repo artifact policy).
       - name: Upload integration log (on failure)
@@ -176,10 +204,12 @@ jobs:
           name: integration-log
           path: integration.log
 
-      # Known-offender log uploads on every run, green included — issue #164
-      # wants their status visible, not only on failure.
-      - name: Upload known-offenders log (always)
-        if: always()
+      # Known-offender log uploads on every PR run, green included — issue
+      # #164 wants their status visible, not only on failure. PR-only since
+      # #222 (the tier no longer runs on push to main, so no log exists
+      # there — and upload-artifact fails on a missing path).
+      - name: Upload known-offenders log (PR runs, always)
+        if: always() && github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: known-offenders-log
