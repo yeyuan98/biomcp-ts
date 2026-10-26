@@ -89,9 +89,17 @@ reused across runs unless `--force`).
 ## Publishing
 
 ```bash
-make publish        # clean + build + unit tests, then npm publish
+make publish        # npm ci -> clean -> build -> unit tests -> npm publish
 make publish-alpha  # same, tagged alpha
 ```
+
+`make publish` starts with the `npm-ci` gate — a lockfile-exact `npm ci`
+(RELEASE.md step 9) — and the chain is serialized via `.NOTPARALLEL`: a
+`node_modules` older than the current lockfile — e.g. a checkout that was
+only `git pull`ed on another machine — otherwise fails the unit gate with a
+single cryptic error (issue #222: `z.toJSONSchema is not a
+function` from a zod-3-era tree; the schemas suite now names the resolved
+zod version).
 
 Version lives in `package.json`; notable changes go to [CHANGELOG.md](../CHANGELOG.md) under `[Unreleased]`.
 

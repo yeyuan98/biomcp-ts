@@ -16,7 +16,9 @@
  * Parses the jest output (plain, or timestamp-prefixed raw GitHub job-log
  * form) and appends a summary to $GITHUB_STEP_SUMMARY: verdict header,
  * failed-suite / failed-test table, verbatim totals, and the tier-specific
- * trailer.
+ * trailer. A `… TIMEBOX EXCEEDED …` sentinel line (emitted by the workflow's
+ * `timeout` wrapper, #222) overrides the verdict header — a truncated log
+ * must never read as "no failures detected".
  *
  * Robustness contract: a missing, empty, or unparseable log must still
  * produce a summary that says so — this script never throws and never
@@ -70,6 +72,7 @@ interface Parsed {
   testTotals: string; // verbatim `Tests:` line ('' if absent)
   failedCount: number; // from the Tests: line; -1 when absent
   passedCount: number; // from the Tests: line; -1 when absent
+  timeboxed: boolean; // `… TIMEBOX EXCEEDED …` sentinel: log is partial (#222)
 }
 
 function parse(raw: string): Parsed {
@@ -81,9 +84,18 @@ function parse(raw: string): Parsed {
   let testTotals = '';
   let failedCount = -1;
   let passedCount = -1;
+  let timeboxed = false;
 
   for (const rawLine of raw.split(/\r?\n/)) {
     const line = clean(rawLine);
+
+    // The workflow's `timeout` wrapper appends this AFTER truncation — a
+    // log carrying it has no final totals block and may have no FAIL lines
+    // yet, which must not render as "no failures detected".
+    if (line.includes('TIMEBOX EXCEEDED')) {
+      timeboxed = true;
+      continue;
+    }
 
     const fail = line.match(FAIL_LINE);
     if (fail) {
@@ -119,7 +131,7 @@ function parse(raw: string): Parsed {
       }
     }
   }
-  return { failSuites, failures, suiteTotals, testTotals, failedCount, passedCount };
+  return { failSuites, failures, suiteTotals, testTotals, failedCount, passedCount, timeboxed };
 }
 
 /** Which CI tier a summary describes (two-tier contract, issue #164). */
@@ -146,9 +158,11 @@ function buildSummary(logPath: string, tier: TierOpts): string {
   const parsed = parse(readFileSync(logPath, 'utf8'));
   const failSuffix = tier.nonGating ? ' — non-gating, no triage required' : ' — triage before merging';
 
-  // Verdict header: prefer the `Tests:` totals line; fall back to FAIL lines.
-  const header =
-    parsed.failedCount > 0
+  // Verdict header: a timebox sentinel outranks everything — the log is
+  // partial, so both the "❌ N failed" and "✅ …green" readings would lie.
+  const header = parsed.timeboxed
+    ? `## ${tier.title}: ⏱️ timebox exceeded — log is PARTIAL`
+    : parsed.failedCount > 0
       ? `## ${tier.title}: ❌ ${parsed.failedCount} failed${failSuffix}`
       : parsed.failedCount === 0
         ? `## ${tier.title}: ✅ ${parsed.passedCount >= 0 ? `${parsed.passedCount} passed / ` : ''}all green`
@@ -156,6 +170,13 @@ function buildSummary(logPath: string, tier: TierOpts): string {
           ? `## ${tier.title}: ❌ ${parsed.failSuites.length} suite${parsed.failSuites.length === 1 ? '' : 's'} failed${failSuffix}`
           : `## ${tier.title}: ✅ no failures detected`;
   out.push(header, '');
+
+  if (parsed.timeboxed) {
+    out.push('The wall-clock cap (`timeout` wrapper, #222) fired before jest',
+      'finished — the log is truncated at that point. Suites listed below',
+      'failed within the captured window; absence from this log does NOT',
+      'mean a suite passed. Inspect the raw artifact.', '');
+  }
 
   if (parsed.failSuites.length > 0 || parsed.failures.length > 0) {
     out.push('| Suite | Failed test |', '| --- | --- |');
@@ -170,10 +191,10 @@ function buildSummary(logPath: string, tier: TierOpts): string {
       out.push('```', parsed.suiteTotals && `Test Suites: ${parsed.suiteTotals}`,
         parsed.testTotals && `Tests:       ${parsed.testTotals}`, '```', '');
     }
-  } else if (parsed.failedCount === 0) {
+  } else if (parsed.failedCount === 0 && !parsed.timeboxed) {
     if (tier.nonGating) {
-      out.push('Both known-offender suites (ensembl-tools, article-tools) passed this',
-        'run — the runner IPs got through to Ensembl/arXiv this time.', '');
+      out.push('All five known-offender suites (pinned in ci.yml) passed this',
+        'run — the runner IPs got through to their upstreams this time.', '');
     } else {
       out.push('All integration suites that ran passed. Env-gated suites (db, biowasm/', 'ranalysis mirror, depmap) self-skip in CI as expected.', '');
     }
@@ -183,15 +204,16 @@ function buildSummary(logPath: string, tier: TierOpts): string {
 
   out.push('---', '');
   if (tier.nonGating) {
-    out.push('**Known GitHub-runner offenders (issue #164):** these two suites',
-      '(`ensembl-tools` — Ensembl REST; `article-tools` arXiv cases) fail',
+    out.push('**Known GitHub-runner offenders (issue #164):** the five suites',
+      'pinned in ci.yml (Ensembl REST, arXiv, and the #182 additions) fail',
       'intermittently from GitHub-hosted runner IPs — upstream throttling of',
       'shared runner ranges, not code, and per-run-varying subsets that pass',
       'on rerun. This tier runs best-effort with `continue-on-error`: a red',
       'result here does **not** fail the `integration` job and needs no',
       'per-failure triage.',
       '',
-      `The raw log is uploaded as the \`${tier.artifact}\` artifact on every run.`,
+      `The raw log is uploaded as the \`${tier.artifact}\` artifact on every`,
+      'PR run (#222: this tier is PR-only and wall-clock-timeboxed).',
       'Local runs remain authoritative for these suites: `make test-integration`',
       'runs them and fails on any failure (local WSL2 clock skew can cause',
       'spurious token-bucket / TLS failures — resync before trusting a local red).');

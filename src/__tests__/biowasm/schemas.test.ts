@@ -1,4 +1,6 @@
 import { describe, it, expect } from '@jest/globals';
+import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import {
   LIMITS,
@@ -64,6 +66,23 @@ describe('biowasm shared schemas', () => {
   });
 
   it('emits the exact same JSON schema as the bare union (ZodPipe renders transparently)', () => {
+    // Self-diagnosis for stale installs: z.toJSONSchema is the ONLY zod-4-only
+    // API in the tree, so a node_modules predating the alpha.9 zod ^3→^4
+    // upgrade fails here alone (src compiles against either major). Name the
+    // resolved version instead of surfacing a bare TypeError (issue #222).
+    if (typeof z.toJSONSchema !== 'function') {
+      let resolved = 'unknown';
+      try {
+        resolved = JSON.parse(
+          readFileSync(createRequire(import.meta.url).resolve('zod/package.json'), 'utf8'),
+        ).version;
+      } catch {
+        // resolution itself failed; report 'unknown'
+      }
+      throw new Error(
+        `Stale node_modules: resolved zod@${resolved}, but this suite needs zod ^4 (z.toJSONSchema). Run \`npm ci\` per docs/RELEASE.md step 9.`,
+      );
+    }
     // Mirrors the SDK's zod 4 compat path verbatim
     // (node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-json-schema-compat.js
     // routes v4 schemas to zod/v4-mini toJSONSchema with target 'draft-7' and
